@@ -4,7 +4,7 @@
   <a href="README.md">English</a> | 中文
 </div>
 
-> Spring Boot 自动配置库，为 Spring AI 应用一键注入 RAG 知识库、MCP 工具调用和 Skill 技能库，开箱即用的聊天 UI
+> Spring Boot 自动配置库，为 Spring AI 应用一键注入 RAG 知识库、MCP 工具调用和 Skill 技能库，开箱即用的聊天 UI。
 
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.wb04307201/spring-ai-loom-agent-spring-boot-starter?style=flat-square)
 [![star](https://gitee.com/wb04307201/spring-ai-chat/badge/star.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-chat)
