@@ -20,11 +20,25 @@
       ],
       "command": "uvx"
     },
+    "@tokenizin-agency/mcp-npx-fetch": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@tokenizin/mcp-npx-fetch"
+      ]
+    },
     "sequential-thinking": {
       "command": "npx.cmd",
       "args": [
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "context7": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
       ]
     },
     "amap-maps": {
