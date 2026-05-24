@@ -38,6 +38,9 @@ build/
 
 *.log
 /.playwright-mcp/
+/mcp/
 /.claude/
 /.local/
 /spring-ai-loom-agent-test/.local/
+/spring-ai-loom-agent-test/mcp/
+/spring-ai-loom-agent-test/.playwright-mcp/
