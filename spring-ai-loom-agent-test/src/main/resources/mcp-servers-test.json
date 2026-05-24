@@ -1,24 +1,11 @@
 {
   "mcpServers": {
-    "time": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-time",
-        "--local-timezone=Asia/Shanghai"
-      ]
-    },
     "bing-search": {
       "args": [
         "-y",
         "bing-cn-mcp"
       ],
       "command": "npx.cmd"
-    },
-    "fetch": {
-      "args": [
-        "mcp-server-fetch"
-      ],
-      "command": "uvx"
     },
     "@tokenizin-agency/mcp-npx-fetch": {
       "command": "npx.cmd",
@@ -73,14 +60,6 @@
     "chrome-devtools": {
       "args": [
         "chrome-devtools-mcp@latest"
-      ],
-      "command": "npx.cmd"
-    },
-    "filesystem": {
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "./.local/temp"
       ],
       "command": "npx.cmd"
     },
