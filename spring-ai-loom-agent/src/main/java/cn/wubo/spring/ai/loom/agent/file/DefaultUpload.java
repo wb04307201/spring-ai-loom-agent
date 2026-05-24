@@ -88,7 +88,6 @@ public class DefaultUpload implements IUpload {
             Path filePath = saveFile(is, fileName, username, fileId);
             FileRecord fileRecord = new FileRecord(
                     fileId,
-                    username,
                     null,
                     fileName,
                     filePath.toFile().length(),
@@ -97,7 +96,7 @@ public class DefaultUpload implements IUpload {
                     "conversation",
                     resolveMimeType(fileName, mimeType)
             );
-            file.insert(fileRecord);
+            file.insert(fileRecord,username);
             return fileId;
         } catch (IOException e) {
             throw new LoomAgentRuntimeException(e);
@@ -112,7 +111,6 @@ public class DefaultUpload implements IUpload {
             Path filePath = saveFile(is, fileName, username, fileId);
             FileRecord fileRecord = new FileRecord(
                     fileId,
-                    username,
                     knowledgeId,
                     fileName,
                     filePath.toFile().length(),
@@ -121,9 +119,9 @@ public class DefaultUpload implements IUpload {
                     "knowledge",
                     resolveMimeType(fileName, mimeType)
             );
-            file.insert(fileRecord);
+            file.insert(fileRecord,username);
 
-            Resource resource = file.getResourceById(fileId);
+            Resource resource = file.getResourceById(fileId,username);
             List<Document> documents = documentRead.read(resource, knowledgeId);
             vectorStore.add(documents);
 
@@ -141,7 +139,8 @@ public class DefaultUpload implements IUpload {
 
     @Override
     public int delete(String fileId) {
-        FileRecord fileRecord = file.getById(fileId);
+        String username = UserContextHolder.getCurrentUser();
+        FileRecord fileRecord = file.getById(fileId,username);
         if (StringUtils.hasText(fileRecord.knowledgeId())){
             List<FileDocumentRecord> fileDocumentRecords = fileDocument.getListByFileId(fileId);
             vectorStore.delete(fileDocumentRecords.stream().map(FileDocumentRecord::documentId).toList());
@@ -152,26 +151,16 @@ public class DefaultUpload implements IUpload {
         } catch (IOException e) {
             throw new LoomAgentRuntimeException(e);
         }
-        return file.delete(fileId);
+        return file.delete(fileId, username);
     }
 
     @Override
     public int deleteAllKnowledge(String knowledgeId) {
-        List<FileRecord> fileRecords = file.list(knowledgeId);
+        List<FileRecord> fileRecords = file.list(knowledgeId, UserContextHolder.getCurrentUser());
         for (FileRecord fileRecord : fileRecords) {
             delete(fileRecord.id());
         }
         return knowledge.delete(knowledgeId);
     }
 
-    @Override
-    public byte[] download(String fileId) {
-        FileRecord fileRecord = file.getById(fileId);
-        Path path = Path.of(fileRecord.path());
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException e) {
-            throw new LoomAgentRuntimeException(e);
-        }
-    }
 }

@@ -1067,12 +1067,32 @@ textarea::placeholder {
 .skills-sidebar-header {
     padding: 24px;
     border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .skills-sidebar-header h3 {
     font-size: 18px;
     font-weight: 600;
     color: var(--text-primary);
+    margin: 0;
+}
+
+.skill-add-btn {
+    padding: 6px 14px;
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.skill-add-btn:hover {
+    opacity: 0.85;
+    transform: translateY(-1px);
 }
 
 .skills-list {
@@ -1107,6 +1127,25 @@ textarea::placeholder {
     font-weight: 600;
     font-size: 14px;
     color: var(--text-primary);
+}
+
+.skill-item-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.skill-source-tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--bg-tertiary, #f3f4f6);
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    margin-top: 6px;
 }
 
 .skills-detail-panel {

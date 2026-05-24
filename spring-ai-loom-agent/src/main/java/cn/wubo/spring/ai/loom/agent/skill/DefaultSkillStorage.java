@@ -1,71 +1,116 @@
 package cn.wubo.spring.ai.loom.agent.skill;
 
+import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
-import cn.wubo.spring.ai.loom.agent.model.SkillDocument;
+import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class DefaultSkillStorage implements ISkillStorage {
 
-    private final List<SkillDocument> skills;
+    private final JdbcTemplate jdbcTemplate;
+    List<SkillRecord> skills = new ArrayList<>();
 
-    public DefaultSkillStorage(List<LoomAgentProperties.SkillProperty> skills) {
-        this.skills = skills.stream().map(skill -> new SkillDocument(skill, "embed")).collect(Collectors.toList());
-    }
-
-    @Override
-    public List<SkillDocument> list() {
-        return skills;
-    }
-
-    @Override
-    public void save(LoomAgentProperties.SkillProperty skill) {
-        int index = -1;
-        SkillDocument skillDocument = new SkillDocument(skill, "user");
-        for (int i = 0; i < skills.size(); i++) {
-            if (skills.get(i).getName().equals(skillDocument.getName())) {
-                index = i;
-                break;
-            }
-        }
-
-        if (index != -1) {
-            // 名称存在，替换
-            skills.set(index, skillDocument);
-            log.info("技能已更新: {}", skill.getName());
-        } else {
-            if ("embed".equals(skillDocument.getSource())) {
-                // 嵌入技能已存在
-                throw new IllegalArgumentException("嵌入技能已存在: " + skill.getName());
-            } else {
-                // 名称不存在，添加
-                skills.add(skillDocument);
-                log.info("技能已添加: {}", skill.getName());
-            }
+    public DefaultSkillStorage(JdbcTemplate jdbcTemplate, List<LoomAgentProperties.SkillProperty>  skills) {
+        this.jdbcTemplate = jdbcTemplate;
+        for (LoomAgentProperties.SkillProperty skill : skills) {
+            this.skills.add(new SkillRecord(
+                    skill.getName(),
+                    skill.getDescription(),
+                    skill.isLoad(),
+                    skill.getContent(),
+                    "embed"
+            ));
         }
     }
 
+    private SkillRecord mapSkillRecord(ResultSet rs, int rowNum) throws SQLException {
+        return new SkillRecord(
+                rs.getString("name"),
+                rs.getString("description"),
+                rs.getBoolean("load"),
+                rs.getString("content"),
+                "db"
+        );
+    }
+
+
     @Override
-    public SkillDocument get(String name) {
-        Optional<SkillDocument> skillDocumentOptional = skills.stream().filter(skill -> skill.getName().equals(name)).findAny();
-        if (skillDocumentOptional.isPresent()) {
-            return skillDocumentOptional.get();
-        } else {
-            throw new IllegalArgumentException("技能不存在: " + name);
-        }
+    public List<SkillRecord> list(String username){
+        List<SkillRecord> dbList = jdbcTemplate.query(
+                "SELECT * FROM skill WHERE username = ?",
+                this::mapSkillRecord,
+                username
+        );
+        dbList.addAll(skills);
+        return dbList;
     }
 
     @Override
-    public void remove(String name) {
-        boolean removed = skills.removeIf(skill -> skill.getName().equals(name));
-        if (removed) {
-            log.info("技能已删除: {}", name);
-        } else {
-            throw new IllegalArgumentException("技能不存在: " + name);
+    public int save(SkillRecord skill,String username) {
+        List<SkillRecord> embedList = skills.stream().filter(e -> e.name().equals(skill.name())).toList();
+        if (!embedList.isEmpty()){
+            throw new LoomAgentRuntimeException("内嵌技能不允许修改");
         }
+        List<SkillRecord> dbList = jdbcTemplate.query(
+                "SELECT * FROM skill WHERE username = ?",
+                this::mapSkillRecord,
+                username
+        );
+        if (dbList.isEmpty()){
+            return jdbcTemplate.update(
+                    "INSERT INTO skill (name, description, load, content, username) VALUES (?, ?, ?, ?, ?) ",
+                    skill.name(),
+                    skill.description(),
+                    skill.load(),
+                    skill.content(),
+                    username
+            );
+        }else {
+            return jdbcTemplate.update(
+                    "UPDATE skill SET description = ?, load = ?, content = ? WHERE name = ? AND username = ?",
+                    skill.description(),
+                    skill.load(),
+                    skill.content(),
+                    skill.name(),
+                    username
+            );
+        }
+    }
+
+
+    @Override
+    public SkillRecord get(String name, String username) {
+        List<SkillRecord> embedList = skills.stream().filter(e -> e.name().equals(name)).toList();
+        if (!embedList.isEmpty()){
+            return  embedList.get(0);
+        }
+        List<SkillRecord> dbList = jdbcTemplate.query(
+                "SELECT * FROM skill WHERE name = ? AND username = ?",
+                this::mapSkillRecord,
+                name,
+                username
+        );
+        return dbList.get(0);
+
+    }
+
+    @Override
+    public int remove(String name, String username) {
+        List<SkillRecord> embedList = skills.stream().filter(e -> e.name().equals(name)).toList();
+        if (!embedList.isEmpty()){
+            throw new LoomAgentRuntimeException("内嵌技能不允许删除");
+        }
+        return jdbcTemplate.update(
+                "DELETE FROM skill WHERE name = ? AND username = ?",
+                name,
+                username
+        );
     }
 }

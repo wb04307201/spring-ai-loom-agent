@@ -28,29 +28,6 @@
         "@upstash/context7-mcp@latest"
       ]
     },
-    "amap-maps": {
-      "command": "npx.cmd",
-      "args": [
-        "-y",
-        "@amap/amap-maps-mcp-server"
-      ],
-      "env": {
-      }
-    },
-    "12306-mcp": {
-      "args": [
-        "-y",
-        "12306-mcp"
-      ],
-      "command": "npx.cmd"
-    },
-    "mcp-server-chart": {
-      "args": [
-        "-y",
-        "@antv/mcp-server-chart"
-      ],
-      "command": "npx.cmd"
-    },
     "playwright": {
       "command": "npx.cmd",
       "args": [
@@ -64,20 +41,13 @@
       "command": "npx.cmd"
     },
     "memory": {
-      "command": "npx.cmd",
+      "command": "cmd",
       "args": [
+        "/c",
+        "npx",
         "-y",
         "@modelcontextprotocol/server-memory"
-      ],
-      "env": {
-        "MEMORY_FILE_PATH": ".local/memory/memory.json"
-      }
-    },
-    "cn-weather-mcp": {
-      "args": [
-        "io.github.wb04307201:cn-weather-mcp:1.0.1"
-      ],
-      "command": "jbang.cmd"
+      ]
     },
     "http-client-mcp": {
       "args": [

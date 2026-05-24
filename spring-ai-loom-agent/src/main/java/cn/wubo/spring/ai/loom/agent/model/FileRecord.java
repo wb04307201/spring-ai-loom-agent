@@ -4,7 +4,6 @@ import java.time.LocalDateTime;
 
 public record FileRecord(
         String id,
-        String username,
         String knowledgeId,
         String fileName,
         long size,

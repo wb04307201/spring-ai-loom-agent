@@ -1,17 +1,16 @@
 package cn.wubo.spring.ai.loom.agent.skill;
 
-import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
-import cn.wubo.spring.ai.loom.agent.model.SkillDocument;
+import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 
 import java.util.List;
 
 public interface ISkillStorage {
 
-    List<SkillDocument> list();
+    List<SkillRecord> list(String username);
 
-    void save(LoomAgentProperties.SkillProperty skill);
+    int save(SkillRecord skill,String username);
 
-    SkillDocument get(String name);
+    SkillRecord get(String name, String username);
 
-    void remove(String name);
+    int remove(String name, String username);
 }

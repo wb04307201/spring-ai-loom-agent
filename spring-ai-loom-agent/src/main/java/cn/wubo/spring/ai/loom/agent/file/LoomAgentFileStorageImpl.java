@@ -3,7 +3,7 @@ package cn.wubo.spring.ai.loom.agent.file;
 import cn.wubo.file.view.storage.IFileStorage;
 import cn.wubo.file.view.storage.dto.FileStorageInfo;
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
-import cn.wubo.spring.ai.loom.agent.model.FileRecord;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -14,10 +14,10 @@ import java.util.List;
 @Service
 public class LoomAgentFileStorageImpl implements IFileStorage {
 
-    private final IFile file;
+    private final JdbcTemplate jdbcTemplate;
 
-    public LoomAgentFileStorageImpl(IFile file) {
-        this.file = file;
+    public LoomAgentFileStorageImpl(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
@@ -27,11 +27,22 @@ public class LoomAgentFileStorageImpl implements IFileStorage {
 
     @Override
     public FileStorageInfo findById(String id) {
-        FileRecord fileRecord = file.getById(id);
-        if (fileRecord != null) {
-            return new FileStorageInfo(fileRecord.id(), fileRecord.fileName(), fileRecord.size(), fileRecord.mimeType(), fileRecord.path(), "1");
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT id, file_name, size, mime_type, path FROM file_info WHERE id = ?",
+                    (rs, rowNum) -> new FileStorageInfo(
+                            rs.getString("id"),
+                            rs.getString("file_name"),
+                            rs.getLong("size"),
+                            rs.getString("mime_type"),
+                            rs.getString("path"),
+                            "1"
+                    ),
+                    id
+            );
+        } catch (Exception e) {
+            throw new LoomAgentRuntimeException("文件不存在");
         }
-        throw new LoomAgentRuntimeException("文件不存在");
     }
 
     @Override

@@ -22,7 +22,6 @@
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
-    - MCP client per-session tool filtering support
 
 ## Quick Start: Add a Chat Interface
 
@@ -32,7 +31,7 @@
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.21</version>
+  <version>1.1.22</version>
 </dependency>
 ```
 
@@ -88,8 +87,8 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 2. **Documents**: Text content extracted via Apache Tika, injected as System Prompt into the conversation context
 3. **Mixed scenarios**: Images and documents can be uploaded together; the model synthesizes visual information and document text
 
-### File Download
-Uploaded files can be downloaded via the MCP tool `downloadFileUrl` to get a download link, or directly via REST API `GET /spring/ai/loom/file/download/{fileId}`.
+### File Download and Preview
+Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`.
 
 ## Replace the Default RAG Implementation
 

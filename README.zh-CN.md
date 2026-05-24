@@ -29,7 +29,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.21</version>
+    <version>1.1.22</version>
 </dependency>
 ```
 
@@ -79,8 +79,8 @@ PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
 2. **文档**: 通过 Apache Tika 提取文本内容，作为 System Prompt 注入对话上下文
 3. **混合场景**: 可同时上传图片和文档，模型会综合图片视觉信息与文档文本内容进行回答
 
-### 文件下载
-上传的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可通过 REST API `GET /spring/ai/loom/file/download/{fileId}` 直接下载。
+### 文件下载和预览
+上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。
 
 ## 更换其它RAG以替换默认实现
 下面以qdrant向量数据库为例，添加依赖和配置：

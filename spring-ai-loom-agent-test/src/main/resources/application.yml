@@ -74,65 +74,37 @@ spring:
             The user query is outside your knowledge base.
             Politely inform the user that you can't answer it.
         mcps:
-          - name: spring-ai-mcp-client - time
-            title: 时间
-            description:
-              一个提供时间和时区转换功能的模型上下文协议服务。该服务使大型语言模型能够获取当前时间信息，并使用IANA时区名称进行时区转换，同时具备自动检测系统时区的功能。
-            tools:
-              - name: get_current_time
-                description: 获取指定时区的当前时间
-              - name: convert_time
-                description: 在不同时区之间转换时间
           - name: spring-ai-mcp-client - bing-search
             title: 必应搜索
-            description:
-              一个集成了微软必应搜索API的模型上下文协议服务，允许人工智能助手进行网络、新闻和图片搜索。
-            default-selected:  true
-          - name: spring-ai-mcp-client - fetch
+            description: 一个集成了微软必应搜索API的模型上下文协议服务
+            default-selected: true
+          - name: spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch
             title: 网页内容抓取
-            description:
-              该服务器使大型语言模型能够检索和处理网页内容，将HTML转换为markdown格式，以便于更轻松地使用。
-            default-selected:  true
+            description: 一个强大的MCP服务器,可以轻松地将网页内容抓取并转换为各种格式(HTML、JSON、Markdown、纯文本)
+            default-selected: true
+            tools:
+              - name: fetch_html
+                description: 获取网页内容，并以 HTML 格式返回
+              - name: fetch_markdown
+                description: 取网页内容，并以 Markdown 格式返回
+              - name: fetch_txt
+                description: 取网页内容，并以纯文本格式返回（不含 HTML）
+              - name: fetch_json
+                description: 从指定 URL 获取 JSON 文件
           - name: spring-ai-mcp-client - sequential-thinking
             title: 顺序思维
-            description:
-              一种MCP服务器实现，它通过结构化的思维过程提供了一种动态且反射性的解决问题的工具。
+            description: 一种MCP服务器实现，提供动态且反射性的解决问题的工具
             tools:
               - name: sequentialthinking
-                description: 本工具通过可适应与演进的灵活思维流程，协助对问题进行深入分析。随着理解的不断加深，每一步思维均可在先前的见解之上进行构建、质疑或修正。
-          - name: spring-ai-mcp-client - amap-maps
-            title: 高德地图
-            description:
-              高德地图是一个支持任何MCP协议客户端的服务，允许用户轻松利用高德地图MCP服务器获取各种基于位置的服务。
-          - name: spring-ai-mcp-client - 12306-mcp
-            title: 12306购票搜索
-            description:
-              12306购票搜索服务，允许大模型利用接口搜索12306购票信息。
-          - name: spring-ai-mcp-client - mcp-server-chart
-            title: 图表
-            description:
-              这是一个基于 TypeScript 的 MCP 服务器，提供图表生成功能。它允许您通过 MCP 工具创建各种类型的图表。
-          - name: spring-ai-mcp-client - playwright
-            title: Playwright
-            description:
-              一种模型上下文协议服务器，它使大型语言模型能够通过结构化的可访问性快照与网页交互，而无需使用视觉模型或截图。
-          - name: spring-ai-mcp-client - chrome-devtools
-            title: Chrome DevTools
-            description:
-              作为 MCP 服务，让 AI 编码助手（如 Gemini、Claude）能够控制和检查 Chrome 浏览器，实现自动化操作、调试和性能分析。
-          - name: spring-ai-mcp-client - filesystem
-            title: 文件系统
-            description:
-              用于文件系统操作的模型上下文协议（MCP）的 Node.js 服务。
+                description: 本工具通过可适应与演进的灵活思维流程，协助对问题进行深入分析
           - name: spring-ai-mcp-client - memory
             title: 记忆
-            description:
-              一个使用本地知识图谱实现持久化记忆的基础方案。这使得 Claude 能够在不同对话之间记住关于用户的信息。
+            description: 使用本地知识图谱实现持久化记忆
             tools:
               - name: create_entities
                 description: 在知识图谱中创建多个新实体
               - name: create_relations
-                description: 在知识图谱的实体之间创建多个新关系。关系应使用主动语态
+                description: 在知识图谱的实体之间创建多个新关系
               - name: add_observations
                 description: 向知识图谱中现有实体添加新的观察信息
               - name: delete_entities
@@ -149,56 +121,25 @@ spring:
                 description: 通过名称打开知识图谱中的特定节点
           - name: spring-ai-mcp-client - cn-weather-mcp
             title: 中国天气
-            description:
-              一个自研中国城市实时天气服务。提供城市代码搜索与实时天气查询，允许大模型获取中国城市实时天气数据，并生成相应的天气预报。
+            description: 自研中国城市实时天气服务
           - name: spring-ai-mcp-client - http-client-mcp
             title: HTTP 客户端
-            description:
-              HTTP客户端 MCP 服务 - 提供通用HTTP请求功能（GET/POST/PUT/DELETE）
+            description: HTTP客户端MCP服务，提供通用HTTP请求功能
         skills:
-          - name: 参数测试
-            content: classpath:skills/params.st
-            default-preload: false
-            params:
-              - name: param1
-                label: 打招呼
-                type: select
-                options:
-                  - label: 你好
-                    value: 你好
-                  - label: Hello
-                    value: Hello
-                default-value: 你好
-                required:  true
-              - name: prama2
-                label: 问题
-                type: text
-                required: true
-                placeholder: 你想询问的主题
-                default-value: 地球是平的
-              - name: param3
-                label: 参数3
-                type: text_area
-                placeholder: 补充内容，可以不输入
           - name: 网络月度事件报告
-            description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告，适用于企业情报监控、行业趋势追踪等场景
-            tools:
-              - spring-ai-mcp-client - time
-              - spring-ai-mcp-client - sequential-thinking
-              - spring-ai-mcp-client - bing-search
-            content: classpath:skills/month-evrnt.st
-            params:
-              - name: param1
-                label: 主题
-                type: text
-                required: true
-                default-value: 党
-          - name: http-client
-            tools:
-              - spring-ai-mcp-client - http-client-mcp
-            content: classpath:skills/http.st
-            default-preload: false
-
+            description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告
+            content: |
+              通过网络搜索获取{param}当前年每月的重要的事件，通过深度分析生成洞察报告，要求：
+              - 使用 @get_current_time 获取当前时间
+              - 使用 @sequentialthinking 来规划所有的步骤，思考和分支
+              - 可以使用 @bing_search 按照当前年逐月进行一汽的重要的事件搜索，每一轮Thinking之前都先搜索验证
+              - 可以用 @crawl_webpage 来查看搜索到的网页详情
+              - 思考轮数不低于5轮，且需要有发散脑暴意识，需要有思考分支
+              - 每一轮需要根据查询的信息结果，反思自己的决策是否正确
+              - 进行事件关联分析与结论形成 网络月度事件报告
+              - 使用 @writeFile保存为html文件，并使用 @viewFileUrl返回预览地址
+              
+              > {param}为事件主题
   servlet:
     multipart:
       max-file-size: 10MB
@@ -214,3 +155,4 @@ logging:
     org:
       springframework:
         ai: DEBUG
+server:

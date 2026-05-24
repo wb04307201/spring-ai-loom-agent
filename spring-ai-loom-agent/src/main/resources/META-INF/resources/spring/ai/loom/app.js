@@ -16,8 +16,11 @@ const API = {
     deleteConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     stream: '/spring/ai/loom/stream',
     listMcps: '/spring/ai/chat/loom/mcp',
-    listSkills: '/spring/ai/chat/skill',
-    getSkill: (name) => `/spring/ai/chat/skill/${name}`,
+    listSkills: '/spring/ai/loom/skill',
+    getSkill: (name) => `/spring/ai/loom/skill/${name}`,
+    createSkill: '/spring/ai/loom/skill',
+    updateSkill: '/spring/ai/loom/skill',
+    deleteSkill: (name) => `/spring/ai/loom/skill/${name}`,
     listKnowledge: '/spring/ai/loom/knowledge',
     createKnowledge: '/spring/ai/loom/knowledge',
     deleteKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
@@ -155,6 +158,29 @@ const api = {
     async listSkills() {
         const r = await apiFetch(API.listSkills, {headers: getAuthHeader()});
         return r.ok ? r.json() : [];
+    },
+    async createSkill(skill) {
+        const r = await apiFetch(API.createSkill, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            body: JSON.stringify(skill),
+        });
+        return r.ok ? r.json() : null;
+    },
+    async updateSkill(skill) {
+        const r = await apiFetch(API.updateSkill, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            body: JSON.stringify(skill),
+        });
+        return r.ok ? r.json() : null;
+    },
+    async deleteSkill(name) {
+        const r = await apiFetch(API.deleteSkill(name), {
+            method: 'DELETE',
+            headers: getAuthHeader(),
+        });
+        return r.ok ? r.json() : null;
     },
     async listKnowledge() {
         const r = await apiFetch(API.listKnowledge, {headers: getAuthHeader()});
@@ -1012,7 +1038,7 @@ const mcp = {
 
 // ===================== §10 Skills =====================
 const skills = {
-    allTools: [],
+    editingSkill: null, // null = view mode, object = creating/editing
 
     openModal() {
         ui.showModal('skills-modal-overlay');
@@ -1021,12 +1047,13 @@ const skills = {
 
     closeModal() {
         ui.hideModal('skills-modal-overlay');
+        this.editingSkill = null;
     },
 
     renderModal() {
         const container = document.getElementById('skills-list');
         const detail = document.getElementById('skills-detail');
-        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情</p></div>';
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情，或点击「新增」创建新技能</p></div>';
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
 
         api.listSkills().then(data => {
@@ -1035,19 +1062,15 @@ const skills = {
                 container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">暂无可用技能</div>';
                 return;
             }
-            // collect all tools
-            skills.allTools = [];
-            if (data.length > 0 && data[0] && data[0].tools) {
-                // get tools from skills
-            }
-            for (const skill of data) {
-                if (skill.tools) skills.allTools.push(...skill.tools);
-            }
 
             for (const skill of data) {
                 const item = document.createElement('div');
                 item.className = 'skill-item';
-                item.innerHTML = `<div class="skill-item-name">${skill.name}</div>`;
+                item.innerHTML = `
+                    <div class="skill-item-name">${skill.name}</div>
+                    <div class="skill-item-desc">${skill.description || ''}</div>
+                    ${skill.source === 'embed' ? '<span class="skill-source-tag">内置</span>' : ''}
+                `;
                 item.addEventListener('click', () => this.select(skill, item));
                 container.appendChild(item);
             }
@@ -1057,6 +1080,7 @@ const skills = {
     },
 
     select(skill, element) {
+        if (this.editingSkill) return; // don't switch while editing
         state.selectedSkill = skill;
         const allItems = document.querySelectorAll('#skills-list .skill-item');
         allItems.forEach(i => i.classList.remove('selected'));
@@ -1064,111 +1088,185 @@ const skills = {
 
         document.getElementById('skill-detail-title').textContent = skill.name;
         const detail = document.getElementById('skills-detail');
+        const isEmbed = skill.source === 'embed';
         let html = '';
 
-        // Tools
-        html += `<div class="detail-section">
-            <div class="detail-section-title">使用工具</div>
-            <div class="tools-tags" id="tools-tags"></div>
-        </div>`;
-
-        // Content
+        // Description
         html += `<div class="detail-section">
             <div class="detail-section-title">技能说明</div>
             <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary);">
-                ${skill.content?.text ? renderMarkdown(skill.content.text) : '<span style="color: var(--text-muted);">无详细说明</span>'}
+                ${skill.content ? renderMarkdown(skill.content) : '<span style="color: var(--text-muted);">无详细说明</span>'}
             </div>
         </div>`;
 
-        // Parameters
+        // Status
         html += `<div class="detail-section">
-            <div class="detail-section-title">参数设置</div>
-            <div id="params-container" style="display: flex; flex-direction: column; gap: 16px;"></div>
+            <div class="detail-section-title">状态</div>
+            <div class="detail-section-content">
+                <span style="color: ${skill.load ? 'var(--success-color, #22c55e)' : 'var(--text-muted)'}">
+                    ${skill.load ? '已加载' : '未加载'}
+                </span>
+                ${isEmbed ? ' · <span style="color: var(--text-muted)">内嵌技能，不可编辑</span>' : ''}
+            </div>
         </div>`;
 
-        // Send button
-        html += `<div style="margin-top: 24px;">
+        // Actions
+        if (!isEmbed) {
+            html += `<div style="margin-top: 24px; display: flex; gap: 12px;">
+                <button class="send-skill-btn" id="edit-skill-btn" style="flex: 1;">编辑技能</button>
+                <button class="delete-skill-btn" id="delete-skill-btn" style="flex: 1; background: var(--error-color, #ef4444);">删除技能</button>
+            </div>`;
+        }
+
+        // Send button (apply skill to chat)
+        html += `<div style="margin-top: 12px;">
             <button class="send-skill-btn" id="send-skill-btn">应用技能并发送</button>
         </div>`;
 
         detail.innerHTML = html;
 
-        // Render tools tags
-        const tagsContainer = detail.querySelector('#tools-tags');
-        if (skill.tools && skill.tools.length > 0) {
-            for (const toolName of skill.tools) {
-                const tag = document.createElement('span');
-                tag.className = 'tool-tag';
-                tag.textContent = toolName;
-                tagsContainer.appendChild(tag);
-            }
-        } else {
-            tagsContainer.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">无指定工具</span>';
-        }
+        // Edit button
+        const editBtn = detail.querySelector('#edit-skill-btn');
+        if (editBtn) editBtn.addEventListener('click', () => this.showEditForm(skill));
 
-        // Render params
-        const paramsContainer = detail.querySelector('#params-container');
-        const skillParams = {};
-        if (skill.params && skill.params.length > 0) {
-            for (const param of skill.params) {
-                const group = document.createElement('div');
-                group.className = 'param-input-group';
+        // Delete button
+        const deleteBtn = detail.querySelector('#delete-skill-btn');
+        if (deleteBtn) deleteBtn.addEventListener('click', () => this.handleDelete(skill));
 
-                const requiredMark = param.required ? '<span style="color: var(--error-color); margin-left: 4px;">*</span>' : '';
-                let inputHtml = '';
+        // Send button
+        detail.querySelector('#send-skill-btn').addEventListener('click', () => this.send(skill, {}));
+    },
 
-                if (param.type === 'SELECT') {
-                    inputHtml = `<select class="param-input" data-param="${param.name}" data-required="${param.required}">`;
-                    if (!param.required) inputHtml += '<option value="">请选择</option>';
-                    if (param.options && param.options.length > 0) {
-                        for (const opt of param.options) {
-                            const sel = param.defaultValue === opt.value ? 'selected' : '';
-                            inputHtml += `<option value="${opt.value}" ${sel}>${opt.label}</option>`;
-                        }
-                    }
-                    inputHtml += '</select>';
-                } else if (param.type === 'TEXT_AREA') {
-                    inputHtml = `<textarea class="param-input param-textarea" placeholder="${param.placeholder || '请输入' + param.label}" data-param="${param.name}" data-required="${param.required}">${param.defaultValue || ''}</textarea>`;
-                } else {
-                    inputHtml = `<input type="text" class="param-input" placeholder="${param.placeholder || '请输入' + param.label}" value="${param.defaultValue || ''}" data-param="${param.name}" data-required="${param.required}">`;
-                }
+    showEditForm(skill) {
+        this.editingSkill = skill;
+        document.getElementById('skill-detail-title').textContent = '编辑技能';
+        const detail = document.getElementById('skills-detail');
+        detail.innerHTML = `
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div>
+                    <label class="param-label">技能名称</label>
+                    <input type="text" id="edit-skill-name" class="param-input" value="${skill.name}" ${skill.source === 'embed' ? 'disabled' : ''} placeholder="例如：周报生成">
+                </div>
+                <div>
+                    <label class="param-label">技能描述</label>
+                    <input type="text" id="edit-skill-desc" class="param-input" value="${skill.description || ''}" placeholder="简要描述技能的功能">
+                </div>
+                <div>
+                    <label class="param-label">技能内容（Prompt 模板）</label>
+                    <textarea id="edit-skill-content" class="param-input param-textarea" style="min-height: 200px; font-family: var(--font-mono, monospace); font-size: 13px;" placeholder="技能内容模板，支持 {param} 占位符">${skill.content || ''}</textarea>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="edit-skill-load" ${skill.load ? 'checked' : ''}>
+                    <label for="edit-skill-load">加载此技能</label>
+                </div>
+                <div style="margin-top: 8px; display: flex; gap: 12px;">
+                    <button class="send-skill-btn" id="save-skill-btn" style="flex: 1;">保存</button>
+                    <button class="send-skill-btn" id="cancel-edit-btn" style="flex: 1; background: var(--text-muted);">取消</button>
+                </div>
+            </div>
+        `;
 
-                group.innerHTML = `<label class="param-label">${param.label}${requiredMark}</label>` + inputHtml;
-
-                const input = group.querySelector('.param-input');
-                input.addEventListener('input', (e) => { skillParams[param.name] = e.target.value; });
-                input.addEventListener('change', (e) => { skillParams[param.name] = e.target.value; });
-                if (param.defaultValue) skillParams[param.name] = param.defaultValue;
-
-                paramsContainer.appendChild(group);
-            }
-        } else {
-            paramsContainer.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">无需设置参数</span>';
-        }
-
-        // Send skill button handler
-        detail.querySelector('#send-skill-btn').addEventListener('click', () => {
-            this.send(skill, skillParams);
+        detail.querySelector('#save-skill-btn').addEventListener('click', () => this.handleSave(skill));
+        detail.querySelector('#cancel-edit-btn').addEventListener('click', () => {
+            this.editingSkill = null;
+            const selectedItem = document.querySelector('#skills-list .skill-item.selected');
+            if (selectedItem) this.select(skill, selectedItem);
         });
     },
 
-    send(skill, skillParams) {
-        // Validate required params
-        if (skill.params && skill.params.length > 0) {
-            const missing = [];
-            for (const param of skill.params) {
-                if (param.required && (!skillParams[param.name] || skillParams[param.name].trim() === '')) {
-                    missing.push(param.label || param.name);
-                }
-            }
-            if (missing.length > 0) {
-                showToast(`请填写完整参数：${missing.join(', ')}`, 'error');
-                return;
-            }
-        }
+    showCreateForm() {
+        this.editingSkill = null;
+        document.getElementById('skill-detail-title').textContent = '新增技能';
+        // Clear selection
+        document.querySelectorAll('#skills-list .skill-item').forEach(i => i.classList.remove('selected'));
+        state.selectedSkill = null;
+        const detail = document.getElementById('skills-detail');
+        detail.innerHTML = `
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div>
+                    <label class="param-label">技能名称 <span style="color: var(--error-color);">*</span></label>
+                    <input type="text" id="edit-skill-name" class="param-input" placeholder="例如：周报生成">
+                </div>
+                <div>
+                    <label class="param-label">技能描述</label>
+                    <input type="text" id="edit-skill-desc" class="param-input" placeholder="简要描述技能的功能">
+                </div>
+                <div>
+                    <label class="param-label">技能内容（Prompt 模板）<span style="color: var(--error-color);">*</span></label>
+                    <textarea id="edit-skill-content" class="param-input param-textarea" style="min-height: 200px; font-family: var(--font-mono, monospace); font-size: 13px;" placeholder="技能内容模板，支持 {param} 占位符"></textarea>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="edit-skill-load" checked>
+                    <label for="edit-skill-load">加载此技能</label>
+                </div>
+                <div style="margin-top: 8px; display: flex; gap: 12px;">
+                    <button class="send-skill-btn" id="save-skill-btn" style="flex: 1;">保存</button>
+                    <button class="send-skill-btn" id="cancel-edit-btn" style="flex: 1; background: var(--text-muted);">取消</button>
+                </div>
+            </div>
+        `;
 
+        detail.querySelector('#save-skill-btn').addEventListener('click', () => this.handleCreate());
+        detail.querySelector('#cancel-edit-btn').addEventListener('click', () => {
+            this.editingSkill = null;
+            document.getElementById('skill-detail-title').textContent = '';
+            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情，或点击「新增」创建新技能</p></div>';
+        });
+    },
+
+    async handleCreate() {
+        const name = document.getElementById('edit-skill-name')?.value?.trim();
+        const description = document.getElementById('edit-skill-desc')?.value?.trim();
+        const content = document.getElementById('edit-skill-content')?.value?.trim();
+        const load = document.getElementById('edit-skill-load')?.checked ?? true;
+
+        if (!name) { showToast('请输入技能名称', 'error'); return; }
+        if (!content) { showToast('请输入技能内容', 'error'); return; }
+
+        const result = await api.createSkill({ name, description, load, content });
+        if (result !== null) {
+            showToast('技能创建成功', 'success');
+            this.editingSkill = null;
+            this.renderModal();
+        } else {
+            showToast('创建失败，请重试', 'error');
+        }
+    },
+
+    async handleSave(originalSkill) {
+        const name = document.getElementById('edit-skill-name')?.value?.trim();
+        const description = document.getElementById('edit-skill-desc')?.value?.trim();
+        const content = document.getElementById('edit-skill-content')?.value?.trim();
+        const load = document.getElementById('edit-skill-load')?.checked ?? true;
+
+        if (!name) { showToast('请输入技能名称', 'error'); return; }
+        if (!content) { showToast('请输入技能内容', 'error'); return; }
+
+        const result = await api.updateSkill({ name, description, load, content });
+        if (result !== null) {
+            showToast('技能保存成功', 'success');
+            this.editingSkill = null;
+            this.renderModal();
+        } else {
+            showToast('保存失败，请重试', 'error');
+        }
+    },
+
+    async handleDelete(skill) {
+        if (!confirm(`确定要删除技能「${skill.name}」吗？此操作不可撤销。`)) return;
+
+        const result = await api.deleteSkill(skill.name);
+        if (result !== null) {
+            showToast('技能已删除', 'success');
+            this.renderModal();
+        } else {
+            showToast('删除失败，请重试', 'error');
+        }
+    },
+
+    send(skill, skillParams) {
         // Build prompt
-        let promptContent = skill.content.text;
+        let promptContent = skill.content;
         if (skill.params && skill.params.length > 0) {
             for (const param of skill.params) {
                 const regex = new RegExp(`\\{${param.name}\\}`, 'g');
@@ -1535,6 +1633,7 @@ const init = async () => {
     addIf('#skills-button', () => skills.openModal());
     addIf('#mcp-close-btn', () => mcp.closeModal());
     addIf('#skills-close-btn', () => skills.closeModal());
+    addIf('#skill-add-btn', () => skills.showCreateForm());
     addIf('.ks-create-btn', () => knowledge.create());
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
 };

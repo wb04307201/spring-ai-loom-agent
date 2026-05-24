@@ -62,8 +62,9 @@ public class DefaultChat implements IChat {
         ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt();
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             StringBuilder extraText = new StringBuilder();
+            final String chatUsername = username;
             for (String fileId : chatRequestRecord.fileIds()) {
-                var fileRecord = file.getById(fileId);
+                var fileRecord = file.getById(fileId, chatUsername);
                 if (fileRecord == null) continue;
                 if (isDocument(fileRecord.mimeType())) {
                     if(extraText.isEmpty()){
@@ -71,7 +72,7 @@ public class DefaultChat implements IChat {
                     }
                     Tika tika = new Tika();
                     try {
-                        String content = tika.parseToString(file.getResourceById(fileId).getInputStream());
+                        String content = tika.parseToString(file.getResourceById(fileId, chatUsername).getInputStream());
                         extraText.append("\n\n--- ").append(fileRecord.fileName()).append(" ---\n\n").append(content);
                     } catch (IOException | TikaException e) {
                         log.error("Failed to parse document: {}", fileRecord.fileName(), e);
@@ -88,10 +89,10 @@ public class DefaultChat implements IChat {
                 u.text(chatRequestRecord.message());
                 for (String fileId : chatRequestRecord.fileIds()) {
                     try {
-                        var fileRecord = file.getById(fileId);
+                        var fileRecord = file.getById(fileId, chatUsername);
                         if (fileRecord == null) continue;
                         if (isImage(fileRecord.mimeType())) {
-                            u.media(MimeTypeUtils.IMAGE_JPEG, file.getResourceById(fileId));
+                            u.media(MimeTypeUtils.IMAGE_JPEG, file.getResourceById(fileId, chatUsername));
                         }
                     } catch (Exception e) {
                         log.error("Failed to add media", e);

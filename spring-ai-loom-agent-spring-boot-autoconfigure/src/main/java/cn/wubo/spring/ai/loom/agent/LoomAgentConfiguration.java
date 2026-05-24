@@ -2,7 +2,6 @@ package cn.wubo.spring.ai.loom.agent;
 
 import cn.wubo.spring.ai.loom.agent.chat.DefaultChat;
 import cn.wubo.spring.ai.loom.agent.chat.IChat;
-import cn.wubo.spring.ai.loom.agent.content.ContentHolderConverter;
 import cn.wubo.spring.ai.loom.agent.document.DefaultDocumentRead;
 import cn.wubo.spring.ai.loom.agent.document.DefaultFileDocument;
 import cn.wubo.spring.ai.loom.agent.document.IDocumentRead;
@@ -45,17 +44,15 @@ import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
 import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -74,6 +71,9 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -141,13 +141,26 @@ import java.util.concurrent.CompletableFuture;
         "org.springframework.ai.mcp.client.common.autoconfigure.McpClientAutoConfiguration",
         "org.springframework.ai.mcp.client.common.autoconfigure.McpToolCallbackAutoConfiguration",
         "org.springframework.ai.mcp.client.common.autoconfigure.annotations.McpClientAnnotationScannerAutoConfiguration"})
-@EnableConfigurationProperties({LoomAgentProperties.class})
 @Slf4j
 public class LoomAgentConfiguration {
 
     @Bean
-    public ContentHolderConverter contentHolderConverter(ResourceLoader resourceLoader) {
-        return new ContentHolderConverter(resourceLoader);
+    public LoomAgentProperties loomAgentProperties(org.springframework.core.env.Environment environment) {
+        LoomAgentProperties properties = new LoomAgentProperties();
+        org.springframework.boot.context.properties.bind.Binder binder = org.springframework.boot.context.properties.bind.Binder.get(environment);
+        org.springframework.boot.context.properties.bind.BindResult<LoomAgentProperties> result = binder.bind("spring.ai.loom.agent", LoomAgentProperties.class);
+        if (result.isBound()) {
+            LoomAgentProperties bound = result.get();
+            properties.setDefaultSystem(bound.getDefaultSystem());
+            properties.setInit(bound.isInit());
+            properties.setRag(bound.getRag());
+            properties.setMcps(bound.getMcps());
+            properties.setSkills(bound.getSkills());
+            properties.setJvector(bound.getJvector());
+            properties.setTimezone(bound.getTimezone());
+            properties.setAllowedDirectories(bound.getAllowedDirectories());
+        }
+        return properties;
     }
 
     @Bean
@@ -225,8 +238,24 @@ public class LoomAgentConfiguration {
 
     @ConditionalOnMissingBean(IEmbedTool.class)
     @Bean
-    public IEmbedTool embedTool(ISkillStorage skillStorage, IFile file) {
-        return new DefaultEmbedTool(skillStorage, file);
+    public IEmbedTool embedTool(ISkillStorage skillStorage, IFile file, LoomAgentProperties properties) {
+        return new DefaultEmbedTool(skillStorage, file, properties);
+    }
+
+    @Bean
+    public BeanFactoryPostProcessor allowedDirectoriesInitializer(LoomAgentProperties properties) {
+        return bf -> {
+            for (String dir : properties.getAllowedDirectories()) {
+                Path path = Paths.get(dir).toAbsolutePath().normalize();
+                if (!Files.exists(path)) {
+                    try {
+                        Files.createDirectories(path);
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to create allowed directory: " + path, e);
+                    }
+                }
+            }
+        };
     }
 
     @ConditionalOnProperty(name = "spring.ai.mcp.client.stdio", havingValue = "ASYNC")
@@ -243,8 +272,8 @@ public class LoomAgentConfiguration {
 
     @ConditionalOnMissingBean(ISkillStorage.class)
     @Bean
-    public ISkillStorage defaultSkillStorage(LoomAgentProperties properties) {
-        return new DefaultSkillStorage(properties.getSkills());
+    public ISkillStorage defaultSkillStorage(JdbcTemplate jdbcTemplate, LoomAgentProperties properties) {
+        return new DefaultSkillStorage(jdbcTemplate, properties.getSkills());
     }
 
     @ConditionalOnMissingBean(IFile.class)
@@ -315,19 +344,25 @@ public class LoomAgentConfiguration {
     @Bean("loomAgentSkillRouter")
     public RouterFunction<ServerResponse> loomAgentSkillRouter(ISkillStorage skillStorage) {
         RouterFunctions.Builder builder = RouterFunctions.route();
-        builder.GET("spring/ai/chat/skill", request -> ServerResponse.ok().body(skillStorage.list()));
-        builder.PUT("spring/ai/chat/skill", request -> {
-            LoomAgentProperties.SkillProperty skill = request.body(LoomAgentProperties.SkillProperty.class);
-            skillStorage.save(skill);
+        builder.GET("spring/ai/loom/skill", request -> {
+            String username = UserContextHolder.getCurrentUser();
+            return ServerResponse.ok().body(skillStorage.list(username));
+        });
+        builder.PUT("spring/ai/loom/skill", request -> {
+            SkillRecord skill = request.body(SkillRecord.class);
+            String username = UserContextHolder.getCurrentUser();
+            skillStorage.save(skill,username);
             return ServerResponse.ok().body(true);
         });
-        builder.GET("spring/ai/chat/skill/{name}", request -> {
+        builder.GET("spring/ai/loom/skill/{name}", request -> {
             String name = request.pathVariable("name");
-            return ServerResponse.ok().body(skillStorage.get(name));
+            String username = UserContextHolder.getCurrentUser();
+            return ServerResponse.ok().body(skillStorage.get(name,username));
         });
-        builder.DELETE("spring/ai/chat/skill/{name}", request -> {
+        builder.DELETE("spring/ai/loom/skill/{name}", request -> {
             String name = request.pathVariable("name");
-            skillStorage.remove(name);
+            String username = UserContextHolder.getCurrentUser();
+            skillStorage.remove(name,username);
             return ServerResponse.ok().body(true);
         });
         return builder.build();
@@ -396,25 +431,11 @@ public class LoomAgentConfiguration {
             String fileId = upload.upload(part.getInputStream(), part.getSubmittedFileName(), part.getContentType());
             return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(java.util.Map.of("fileId", fileId, "status", "success"));
         });
-        builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.list(null)));
+        builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.list(null, UserContextHolder.getCurrentUser())));
         builder.DELETE("/spring/ai/loom/file/{id}", request -> {
             String id = request.pathVariable("id");
-            return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.delete(id));
-        });
-        builder.GET("/spring/ai/chat/file/download/{id}", request -> {
-            String id = request.pathVariable("id");
-            FileRecord fileRecord = file.getById(id);
-            String encodedFileName = URLEncoder.encode(fileRecord.fileName(), StandardCharsets.UTF_8).replaceAll("\\+", "%20");
-            return ServerResponse.ok()
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .header("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName)
-                    .build((res, req) -> {
-                        try (OutputStream os = req.getOutputStream()) {
-                            os.write(upload.download(id));
-                            os.flush();
-                        }
-                        return new ModelAndView();
-                    });
+            String username = UserContextHolder.getCurrentUser();
+            return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.delete(id, username));
         });
         return builder.build();
     }
@@ -445,7 +466,7 @@ public class LoomAgentConfiguration {
         });
         builder.GET("/spring/ai/loom/knowledge/{knowledgeId}/file", request -> {
             String knowledgeId = request.pathVariable("knowledgeId");
-            return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.list(knowledgeId));
+            return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.list(knowledgeId, UserContextHolder.getCurrentUser()));
         });
         builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}", request -> {
             String fileId = request.pathVariable("fileId");

@@ -1,21 +1,16 @@
 package cn.wubo.spring.ai.loom.agent.model;
 
-import cn.wubo.spring.ai.loom.agent.content.ContentHolder;
-import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Data
-@ConfigurationProperties(prefix = "spring.ai.loom.agent")
 public class LoomAgentProperties {
 
     private String defaultSystem = """
             你是一个智能助手，具备「技能检索→匹配→执行」的自动化决策能力。请严格遵守以下工作流：
-            
+
             ━━━━━━━━━━━━━━━━━━━━━━
             【核心工作流（每轮对话必执行）】
             ━━━━━━━━━━━━━━━━━━━━━━
@@ -27,7 +22,7 @@ public class LoomAgentProperties {
                │                → 基于技能信息 + 用户问题，生成最终回复
                │
                └─ ❌ 无匹配技能 → 跳过技能调用，直接基于通用知识回答用户
-            
+
             ━━━━━━━━━━━━━━━━━━━━━━
             【匹配判断标准】
             ━━━━━━━━━━━━━━━━━━━━━━
@@ -35,7 +30,7 @@ public class LoomAgentProperties {
             • 用户问题包含技能关键词（如技能描述中的核心动词/名词）
             • 用户意图与技能功能语义高度相关（如"写邮件"→/write_email）
             • 用户明确要求使用某类能力（如"用专业语气回复"→角色类技能）
-            
+
             ❌ 视为「不匹配」的情况：
             • 用户仅闲聊、问候、表达情绪
             • 问题超出所有技能覆盖范围
@@ -53,6 +48,8 @@ public class LoomAgentProperties {
     private List<McpProperty> mcps = new ArrayList<>();
     private List<SkillProperty> skills = new ArrayList<>();
     private JVectorProperties jvector = new JVectorProperties();
+    private String timezone = "Asia/Shanghai";
+    private List<String> allowedDirectories = List.of(".local/temp");
 
     @Data
     public static class RagProperty {
@@ -100,38 +97,11 @@ public class LoomAgentProperties {
     }
 
     @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class SkillProperty {
         private String name;
         private String description;
-        private boolean defaultPreload = true;
-        private List<String> tools;
-        private ContentHolder content;
-        private List<SkillParamProperty> params;
-
-        @Data
-        public static class SkillParamProperty {
-            private String name;
-            private String label;
-            private ParameterType type;
-            private boolean required;
-            private String defaultValue;
-            private String placeholder;
-            private List<Option> options;
-
-            public enum ParameterType {
-                TEXT,
-                SELECT,
-                TEXT_AREA
-            }
-
-            @Data
-            public static class Option {
-                private String label;
-                private String value;
-            }
-        }
+        private boolean load = true;
+        private String content;
     }
 
     @Data
@@ -140,5 +110,6 @@ public class LoomAgentProperties {
         private int m = 16;
         private int efConstruction = 100;
         private int efSearch = 10;
+
     }
 }
