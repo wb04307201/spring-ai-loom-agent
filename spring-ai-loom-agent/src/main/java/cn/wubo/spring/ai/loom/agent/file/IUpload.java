@@ -12,5 +12,4 @@ public interface IUpload {
 
     int deleteAllKnowledge(String knowledgeId);
 
-    byte[] download(String fileId);
 }

@@ -1,0 +1,59 @@
+{
+  "mcpServers": {
+    "bing-search": {
+      "args": [
+        "-y",
+        "bing-cn-mcp"
+      ],
+      "command": "npx.cmd"
+    },
+    "@tokenizin-agency/mcp-npx-fetch": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@tokenizin/mcp-npx-fetch"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "context7": {
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "playwright": {
+      "command": "npx.cmd",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    },
+    "chrome-devtools": {
+      "args": [
+        "chrome-devtools-mcp@latest"
+      ],
+      "command": "npx.cmd"
+    },
+    "memory": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "http-client-mcp": {
+      "args": [
+        "io.github.wb04307201:http-mcp:1.0.0"
+      ],
+      "command": "jbang.cmd"
+    }
+  }
+}

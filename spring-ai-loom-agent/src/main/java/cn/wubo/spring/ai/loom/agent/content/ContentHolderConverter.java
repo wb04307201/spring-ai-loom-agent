@@ -10,7 +10,7 @@ import org.springframework.util.StreamUtils;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
-@ConfigurationPropertiesBinding
+//@ConfigurationPropertiesBinding
 public class ContentHolderConverter implements Converter<String, ContentHolder> {
 
     private final ResourceLoader resourceLoader;

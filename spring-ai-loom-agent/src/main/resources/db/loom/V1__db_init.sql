@@ -54,3 +54,15 @@ CREATE TABLE user_conversation
 );
 
 CREATE INDEX idx_uc_conversation_id ON user_conversation(conversation_id);
+
+
+CREATE TABLE skill
+(
+    name        VARCHAR(255) NOT NULL,
+    description TEXT,
+    load        BOOLEAN DEFAULT TRUE,
+    content     TEXT,
+    username    VARCHAR(64)  NOT NULL,
+    PRIMARY KEY (name, username)
+);
+
