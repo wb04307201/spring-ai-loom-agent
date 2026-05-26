@@ -125,6 +125,12 @@ spring:
           - name: spring-ai-mcp-client - http-client-mcp
             title: HTTP 客户端
             description: HTTP客户端MCP服务，提供通用HTTP请求功能
+          - name: spring-ai-mcp-client - playwright
+            title: Playwright
+            description: 通过结构化可访问性快照与网页交互
+          - name: spring-ai-mcp-client - chrome-devtools
+            title: Chrome DevTools
+            description: 控制和检查Chrome浏览器，实现自动化操作和调试
         skills:
           - name: 网络月度事件报告
             description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告
