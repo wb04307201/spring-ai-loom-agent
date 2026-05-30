@@ -329,18 +329,7 @@ public IChat customChat(
 | **覆盖方式** | 自定义 `@Bean IEmbedTool`                                             |
 | **控制内容** | 暴露给 LLM 的 `@Tool` 方法：`skillContents`（获取技能目录）、`getSkill`（获取技能详情）、`downloadFileUrl`（生成文件下载链接）、`addFile`（通过路径注册文件） |
 
-### 2.12 `ContentHolderConverter` — 配置属性转换器
-
-| 项目       | 内容                                                            |
-|----------|---------------------------------------------------------------|
-| **类型**   | `cn.wubo.spring.ai.loom.agent.content.ContentHolderConverter` |
-| **默认实现** | `new ContentHolderConverter(resourceLoader)`                  |
-| **覆盖方式** | 自定义 `@Bean ContentHolderConverter`                            |
-| **控制内容** | 将 YAML 中的 String 转换为 `ContentHolder`                          |
-
-**默认行为**: 支持 `classpath:` 前缀从类路径读取文件内容，否则直接使用字符串本身。
-
-### 2.13 `AuthenticationFilter` — 认证过滤器
+### 2.12 `AuthenticationFilter` — 认证过滤器
 
 | 项目       | 内容                                                       |
 |----------|----------------------------------------------------------|
@@ -470,7 +459,7 @@ Spring AI 支持多种模型，通过配置对应 Starter 和 API Key 自动切�
 
 ## 5. 技能自定义
 
-### 5.1 ContentHolder 内容注入
+### 5.1 技能内容注入
 
 在 YAML 中配置技能内容时支持两种方式：
 

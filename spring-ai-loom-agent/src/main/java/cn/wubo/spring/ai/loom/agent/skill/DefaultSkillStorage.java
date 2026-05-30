@@ -4,8 +4,11 @@ import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -17,17 +20,29 @@ public class DefaultSkillStorage implements ISkillStorage {
     private final JdbcTemplate jdbcTemplate;
     List<SkillRecord> skills = new ArrayList<>();
 
-    public DefaultSkillStorage(JdbcTemplate jdbcTemplate, List<LoomAgentProperties.SkillProperty>  skills) {
+    public DefaultSkillStorage(JdbcTemplate jdbcTemplate, List<LoomAgentProperties.SkillProperty> skills, ResourceLoader resourceLoader) {
         this.jdbcTemplate = jdbcTemplate;
         for (LoomAgentProperties.SkillProperty skill : skills) {
             this.skills.add(new SkillRecord(
                     skill.getName(),
                     skill.getDescription(),
                     skill.isLoad(),
-                    skill.getContent(),
+                    resolveContent(skill.getContent(), resourceLoader),
                     "embed"
             ));
         }
+    }
+
+    private String resolveContent(String content, ResourceLoader resourceLoader) {
+        if (content == null) return "";
+        if (content.startsWith("classpath:")) {
+            try {
+                return resourceLoader.getResource(content).getContentAsString(StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new LoomAgentRuntimeException("Failed to load skill content from " + content + ": " + e.getMessage());
+            }
+        }
+        return content;
     }
 
     private SkillRecord mapSkillRecord(ResultSet rs, int rowNum) throws SQLException {

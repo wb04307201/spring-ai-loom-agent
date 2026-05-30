@@ -53,6 +53,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -272,8 +273,8 @@ public class LoomAgentConfiguration {
 
     @ConditionalOnMissingBean(ISkillStorage.class)
     @Bean
-    public ISkillStorage defaultSkillStorage(JdbcTemplate jdbcTemplate, LoomAgentProperties properties) {
-        return new DefaultSkillStorage(jdbcTemplate, properties.getSkills());
+    public ISkillStorage defaultSkillStorage(JdbcTemplate jdbcTemplate, LoomAgentProperties properties, ResourceLoader resourceLoader) {
+        return new DefaultSkillStorage(jdbcTemplate, properties.getSkills(), resourceLoader);
     }
 
     @ConditionalOnMissingBean(IFile.class)

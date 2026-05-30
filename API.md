@@ -445,7 +445,7 @@ GET /spring/ai/chat/skill
 | `description`    | string           | Skill description                                                |
 | `defaultPreload` | boolean          | Whether preloaded by default                                     |
 | `tools`          | string[]         | List of associated tool names                                    |
-| `content`        | ContentHolder    | Skill content (includes prompt template, etc.)                   |
+| `content`        | string             | Skill content (supports `classpath:` prefix to load from classpath) |
 | `params`         | SkillParamProperty[] | Skill parameter definitions                                  |
 | `source`         | string           | Skill source (`configuration` or `database`)                     |
 
@@ -466,7 +466,7 @@ Content-Type: application/json
 | `description`    | string               | Yes      | Skill description                                        |
 | `defaultPreload` | boolean              | No       | Whether preloaded by default, defaults to `true`         |
 | `tools`          | string[]             | No       | List of associated tool names                            |
-| `content`        | ContentHolder        | No       | Skill content                                            |
+| `content`        | string               | No       | Skill content (supports `classpath:` prefix)         |
 | `params`         | SkillParamProperty[] | No       | Skill parameter definitions                              |
 
 **SkillParamProperty**:
