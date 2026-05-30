@@ -9,8 +9,6 @@ import org.apache.tika.Tika;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.core.io.DefaultResourceLoader;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.dao.EmptyResultDataAccessException;
 
 import java.io.IOException;
@@ -32,8 +30,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class DefaultEmbedTool implements IEmbedTool {
-
-    private static final ResourceLoader RESOURCE_LOADER = new DefaultResourceLoader();
 
     private final ISkillStorage skillStorage;
     private final IFile file;
@@ -119,7 +115,7 @@ public class DefaultEmbedTool implements IEmbedTool {
 
         return String.format("技能名:%s%n", skill.name()) +
                 String.format("技能描述:%s%n", skill.description()) +
-                String.format("技能内容:%s%n", resolveContent(skill.content()));
+                String.format("技能内容:%s%n", skill.content());
     }
 
     // ==================== File Tools ====================
@@ -394,18 +390,6 @@ public class DefaultEmbedTool implements IEmbedTool {
     }
 
     // ==================== Helpers ====================
-
-    private String resolveContent(String content) {
-        if (content == null) return "";
-        if (content.startsWith("classpath:")) {
-            try {
-                return RESOURCE_LOADER.getResource(content).getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                return "[无法加载技能内容: " + e.getMessage() + "]";
-            }
-        }
-        return content;
-    }
 
     private Path resolvePath(String path) {
         Path resolved = Paths.get(path).toAbsolutePath().normalize();

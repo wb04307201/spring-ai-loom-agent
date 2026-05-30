@@ -465,7 +465,7 @@ GET /spring/ai/chat/skill
 | `description` | string | 技能描述 |
 | `defaultPreload` | boolean | 是否默认预加载 |
 | `tools` | string[] | 关联的工具名称列表 |
-| `content` | ContentHolder | 技能内容（包含 prompt 模板等） |
+| `content` | string | 技能内容（支持 `classpath:` 前缀从类路径加载） |
 | `params` | SkillParamProperty[] | 技能参数定义 |
 | `source` | string | 技能来源（`configuration` 配置注入 / `database` 数据库存储） |
 
@@ -486,7 +486,7 @@ Content-Type: application/json
 | `description` | string | 是 | 技能描述 |
 | `defaultPreload` | boolean | 否 | 是否默认预加载，默认 `true` |
 | `tools` | string[] | 否 | 关联的工具名称列表 |
-| `content` | ContentHolder | 否 | 技能内容 |
+| `content` | string | 否 | 技能内容（支持 `classpath:` 前缀） |
 | `params` | SkillParamProperty[] | 否 | 技能参数定义 |
 
 **SkillParamProperty**:

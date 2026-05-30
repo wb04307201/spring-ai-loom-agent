@@ -320,18 +320,7 @@ public IChat customChat(
 | **Override**    | Custom `@Bean IEmbedTool`                                                             |
 | **Controls**    | Two `@Tool` methods exposed to the LLM: `skillContents` (get skill directory) and `getSkill` (get skill details) |
 
-### 2.12 `ContentHolderConverter` — Configuration Property Converter
-
-| Item            | Details                                                       |
-|-----------------|---------------------------------------------------------------|
-| **Type**        | `cn.wubo.spring.ai.loom.agent.content.ContentHolderConverter` |
-| **Default**     | `new ContentHolderConverter(resourceLoader)`                  |
-| **Override**    | Custom `@Bean ContentHolderConverter`                         |
-| **Controls**    | Converts YAML strings to `ContentHolder`                      |
-
-**Default behavior**: Reads file content from classpath with `classpath:` prefix; otherwise uses the string directly.
-
-### 2.13 `AuthenticationFilter` — Authentication Filter
+### 2.12 `AuthenticationFilter` — Authentication Filter
 
 | Item            | Details                                                  |
 |-----------------|----------------------------------------------------------|
@@ -461,7 +450,7 @@ Beyond configuring `mcps[]`, you can fully replace the `IMcp` interface to custo
 
 ## 5. Skill Customization
 
-### 5.1 ContentHolder Content Injection
+### 5.1 Skill Content Injection
 
 Two ways to configure skill content in YAML:
 

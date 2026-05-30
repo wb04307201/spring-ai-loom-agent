@@ -146,6 +146,11 @@ spring:
               - 使用 @writeFile保存为html文件，并使用 @viewFileUrl返回预览地址
               
               > {param}为事件主题
+          - name: http测试
+            description: 自定义http服务测试
+            content: classpath:skills/http.st
+            load: false
+
   servlet:
     multipart:
       max-file-size: 10MB
