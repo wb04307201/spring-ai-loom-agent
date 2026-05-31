@@ -68,10 +68,7 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-memory"
-      ],
-      "env": {
-        "MEMORY_FILE_PATH": ".local/memory/memory.json"
-      }
+      ]
     },
     "cn-weather-mcp": {
       "args": [
@@ -79,7 +76,7 @@
       ],
       "command": "jbang.cmd"
     },
-    "http-client-mcp": {
+    "http-mcp": {
       "args": [
         "io.github.wb04307201:http-mcp:1.0.0"
       ],

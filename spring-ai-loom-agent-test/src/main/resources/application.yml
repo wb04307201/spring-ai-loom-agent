@@ -47,7 +47,7 @@ spring:
     mcp:
       client:
         stdio:
-          servers-configuration: classpath:mcp-servers.json
+          servers-configuration: classpath:mcp-servers-dev.json
     loom:
       agent:
         rag:
@@ -122,7 +122,7 @@ spring:
           - name: spring-ai-mcp-client - cn-weather-mcp
             title: 中国天气
             description: 自研中国城市实时天气服务
-          - name: spring-ai-mcp-client - http-client-mcp
+          - name: spring-ai-mcp-client - http-mcp
             title: HTTP 客户端
             description: HTTP客户端MCP服务，提供通用HTTP请求功能
           - name: spring-ai-mcp-client - playwright
@@ -131,6 +131,10 @@ spring:
           - name: spring-ai-mcp-client - chrome-devtools
             title: Chrome DevTools
             description: 控制和检查Chrome浏览器，实现自动化操作和调试
+          - name: spring-ai-mcp-client - context7
+          - name: spring-ai-mcp-client - git-mcp-server
+          - name: spring-ai-mcp-client - mcp-server-docker
+          - name: spring-ai-mcp-client - desktop-commander
         skills:
           - name: 网络月度事件报告
             description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告
@@ -150,7 +154,12 @@ spring:
             description: 自定义http服务测试
             content: classpath:skills/http.st
             load: false
-
+          - name: 测试自动编译
+            description: 测试自动编译，使用git拉取代码，maven编译，构建docker镜像并创建容器运行
+            content: classpath:skills/package-docker.st
+          - name: 测试自动E2E功能验证
+            description: 测试使用浏览器对功能进行E2E测试，并生成验证报告
+            content: classpath:skills/e2e.st
   servlet:
     multipart:
       max-file-size: 10MB
