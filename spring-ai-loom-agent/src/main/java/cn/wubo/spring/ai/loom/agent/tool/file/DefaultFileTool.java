@@ -1,10 +1,7 @@
-package cn.wubo.spring.ai.loom.agent.tool;
+package cn.wubo.spring.ai.loom.agent.tool.file;
 
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.model.FileRecord;
-import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
-import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
-import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
 import org.apache.tika.Tika;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
@@ -18,107 +15,20 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
-public class DefaultEmbedTool implements IEmbedTool {
+public class DefaultFileTool implements IFileTool {
 
-    private final ISkillStorage skillStorage;
+    private static final String BASE_PATH = ".local/file";
+
     private final IFile file;
-    private final String defaultTimezone;
-    private final List<Path> allowedDirectories;
 
-    public DefaultEmbedTool(ISkillStorage skillStorage, IFile file, LoomAgentProperties properties) {
-        this.skillStorage = skillStorage;
+    public DefaultFileTool(IFile file) {
         this.file = file;
-        this.defaultTimezone = properties.getTimezone();
-        this.allowedDirectories = properties.getAllowedDirectories().stream()
-                .map(d -> Paths.get(d).toAbsolutePath().normalize())
-                .toList();
     }
-
-    // ==================== Time Tools ====================
-
-    @Tool(description = "获取指定时区的当前时间")
-    @Override
-    public String getCurrentTime(
-            @ToolParam(description = "IANA 时区名称，如 America/New_York、Europe/London、Asia/Shanghai。不传则使用默认时区") String timezone) {
-        try {
-            ZoneId zone = (timezone == null || timezone.isBlank()) ? ZoneId.of(defaultTimezone) : ZoneId.of(timezone);
-            ZonedDateTime now = ZonedDateTime.now(zone);
-            return String.format("当前时间：%s (%s)",
-                    now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")), zone.getId());
-        } catch (Exception e) {
-            return "获取当前时间失败：" + e.getMessage();
-        }
-    }
-
-    @Tool(description = "在不同时区之间转换时间")
-    @Override
-    public String convertTime(
-            @ToolParam(description = "源时区，IANA 时区名称，如 America/New_York、Europe/London、Asia/Shanghai") String sourceTimezone,
-            @ToolParam(description = "时间，24小时制 HH:MM 格式") String time,
-            @ToolParam(description = "目标时区，IANA 时区名称，如 America/New_York、Europe/London、Asia/Shanghai") String targetTimezone) {
-        try {
-            ZoneId sourceZone = ZoneId.of(sourceTimezone);
-            ZoneId targetZone = ZoneId.of(targetTimezone);
-            LocalTime localTime = LocalTime.parse(time, DateTimeFormatter.ofPattern("HH:mm"));
-            ZonedDateTime zonedDateTime = localTime.atDate(LocalDateTime.now(sourceZone).toLocalDate()).atZone(sourceZone);
-            ZonedDateTime converted = zonedDateTime.withZoneSameInstant(targetZone);
-            return String.format("%s %s (%s) 转换为 %s %s (%s)",
-                    time, sourceTimezone, sourceZone.getRules().getOffset(zonedDateTime.toInstant()),
-                    converted.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")), targetTimezone,
-                    targetZone.getRules().getOffset(converted.toInstant()));
-        } catch (DateTimeParseException e) {
-            return "时间格式错误，请使用 HH:MM 格式（24小时制），例如 14:30";
-        } catch (Exception e) {
-            return "时区转换失败：" + e.getMessage();
-        }
-    }
-
-    // ==================== SKill Tools ====================
-
-    @Tool(description = "列出所有可用的技能，包含技能名和描述。配合 getSkill 工具使用，先调用此工具查看有哪些技能，再根据名称获取详细内容。")
-    @Override
-    public String skillContents(ToolContext toolContext) {
-        String username = (String) toolContext.getContext().get("username");
-        List<SkillRecord> results = skillStorage
-                .list(username)
-                .stream()
-                .filter(SkillRecord::load).toList();
-
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("技能目录（包含 %d 个技能）:%n%n", results.size()));
-        sb.append(String.format("%-10s %-50s%n", "技能名", "技能描述"));
-
-        for (SkillRecord skill : results) {
-            sb.append(String.format("%-10s %-50s%n", skill.name(), skill.description()));
-        }
-
-        sb.append("%n%n提示：调用 @getSkill {\"skill_name\": \"匹配的技能名\"} 获取详细信息");
-        return sb.toString();
-    }
-
-    @Tool(description = "根据技能名称获取详细的技能信息，包含技能名称、描述和完整内容。")
-    @Override
-    public String getSkill(@ToolParam(description = "技能名") String name, ToolContext toolContext) {
-        String username = (String) toolContext.getContext().get("username");
-        SkillRecord skill = skillStorage.get(name, username);
-
-        return String.format("技能名:%s%n", skill.name()) +
-                String.format("技能描述:%s%n", skill.description()) +
-                String.format("技能内容:%s%n", skill.content());
-    }
-
-    // ==================== File Tools ====================
 
     @Tool(description = "根据文件id读取文本文件内容。支持指定 head（仅前N行）或 tail（仅后N行）参数，适合快速查看文件开头或结尾。")
     @Override
@@ -189,16 +99,18 @@ public class DefaultEmbedTool implements IEmbedTool {
         return sb.toString();
     }
 
-    @Tool(description = "创建新文件或完全覆盖已有文件内容。写入新文件后会自动注册到文件管理并返回文件id。如果文件已存在则更新内容并返回原有文件id。")
+    @Tool(description = "创建新文件或完全覆盖已有文件内容。path 为相对于用户文件目录的路径（如 notes/todo.txt）。写入新文件后会自动注册到文件管理并返回文件id。如果文件已存在则更新内容并返回原有文件id。")
     @Override
     public String writeFile(
-            @ToolParam(description = "要写入的文件路径") String path,
+            @ToolParam(description = "相对于用户文件目录的文件路径，如 notes/todo.txt") String path,
             @ToolParam(description = "要写入的文本内容") String content,
             ToolContext toolContext) {
         try {
-            Path resolved = resolvePath(path);
-            if (resolved == null) {
-                return "错误：路径不在允许的目录范围内。允许的目录：" + listAllowedDirsString();
+            String username = (String) toolContext.getContext().get("username");
+            Path userDir = getUserFileDir(username);
+            Path resolved = userDir.resolve(path).normalize();
+            if (!resolved.startsWith(userDir)) {
+                return "错误：路径不能超出用户文件目录范围";
             }
             Path parent = resolved.getParent();
             if (parent != null && !Files.exists(parent)) {
@@ -206,7 +118,6 @@ public class DefaultEmbedTool implements IEmbedTool {
             }
             Files.writeString(resolved, content, StandardCharsets.UTF_8);
 
-            String username = (String) toolContext.getContext().get("username");
             FileRecord existing = file.getByPath(resolved.toString(), username);
 
             if (existing != null) {
@@ -264,13 +175,17 @@ public class DefaultEmbedTool implements IEmbedTool {
         }
     }
 
-    @Tool(description = "创建新目录或确保目录已存在，支持创建多级嵌套目录，如果目录已存在则静默成功。")
+    @Tool(description = "创建新目录或确保目录已存在，支持创建多级嵌套目录，如果目录已存在则静默成功。path 为相对于用户文件目录的路径。")
     @Override
-    public String createDirectory(@ToolParam(description = "要创建的目录路径") String path) {
+    public String createDirectory(
+            @ToolParam(description = "相对于用户文件目录的目录路径，如 notes/2026") String path,
+            ToolContext toolContext) {
         try {
-            Path resolved = resolvePath(path);
-            if (resolved == null) {
-                return "错误：路径不在允许的目录范围内。允许的目录：" + listAllowedDirsString();
+            String username = (String) toolContext.getContext().get("username");
+            Path userDir = getUserFileDir(username);
+            Path resolved = userDir.resolve(path).normalize();
+            if (!resolved.startsWith(userDir)) {
+                return "错误：路径不能超出用户文件目录范围";
             }
             if (Files.exists(resolved)) {
                 if (Files.isDirectory(resolved)) {
@@ -285,11 +200,11 @@ public class DefaultEmbedTool implements IEmbedTool {
         }
     }
 
-    @Tool(description = "根据文件id移动或重命名文件。移动后自动更新文件管理中的路径和文件名信息。目标路径必须在允许的目录范围内。")
+    @Tool(description = "根据文件id移动或重命名文件。移动后自动更新文件管理中的路径和文件名信息。目标路径相对于用户文件目录。")
     @Override
     public String moveFile(
             @ToolParam(description = "要移动的文件id") String fileId,
-            @ToolParam(description = "目标路径") String destination, ToolContext toolContext) {
+            @ToolParam(description = "目标路径，相对于用户文件目录") String destination, ToolContext toolContext) {
         String username = (String) toolContext.getContext().get("username");
         FileRecord fileRecord = validateFileExists(fileId, username);
         if (fileRecord == null) {
@@ -297,12 +212,18 @@ public class DefaultEmbedTool implements IEmbedTool {
         }
         try {
             Path resolvedSource = Path.of(fileRecord.path());
-            Path resolvedDest = resolvePath(destination);
-            if (resolvedDest == null) {
-                return "错误：目标路径不在允许的目录范围内。允许的目录：" + listAllowedDirsString();
+            Path userDir = getUserFileDir(username);
+            Path resolvedDest = userDir.resolve(destination).normalize();
+            if (!resolvedDest.startsWith(userDir)) {
+                return "错误：目标路径不能超出用户文件目录范围";
             }
             if (Files.exists(resolvedDest)) {
                 return "错误：目标路径已存在 - " + destination;
+            }
+            // Ensure parent directory exists
+            Path parent = resolvedDest.getParent();
+            if (parent != null && !Files.exists(parent)) {
+                Files.createDirectories(parent);
             }
             Files.move(resolvedSource, resolvedDest, StandardCopyOption.ATOMIC_MOVE);
             file.update(fileId, resolvedDest.toString(), resolvedDest.getFileName().toString(), null, username);
@@ -354,12 +275,12 @@ public class DefaultEmbedTool implements IEmbedTool {
         }
     }
 
-    @Tool(description = "列出允许访问的目录。写入或创建文件时，路径必须在此列表范围内。")
+    @Tool(description = "列出当前用户的文件操作目录。写入或创建文件时，路径均相对于此目录。")
     @Override
-    public String listAllowedDirectories() {
-        return "允许的目录：\n" + String.join("\n", allowedDirectories.stream()
-                .map(Path::toString)
-                .toList());
+    public String listAllowedDirectories(ToolContext toolContext) {
+        String username = (String) toolContext.getContext().get("username");
+        Path userDir = getUserFileDir(username);
+        return "用户文件目录：" + userDir;
     }
 
     @Tool(description = "根据文件id生成原始文件下载URL（WOPI端点）。适用于需要获取文件原始二进制内容的场景，如图片、音频、二进制文件等。")
@@ -391,14 +312,8 @@ public class DefaultEmbedTool implements IEmbedTool {
 
     // ==================== Helpers ====================
 
-    private Path resolvePath(String path) {
-        Path resolved = Paths.get(path).toAbsolutePath().normalize();
-        for (Path allowed : allowedDirectories) {
-            if (resolved.startsWith(allowed)) {
-                return resolved;
-            }
-        }
-        return null;
+    private Path getUserFileDir(String username) {
+        return Paths.get(BASE_PATH, username, "file");
     }
 
     private FileRecord validateFileExists(String fileId, String username) {
@@ -427,19 +342,13 @@ public class DefaultEmbedTool implements IEmbedTool {
                     filePath.toFile().length(),
                     LocalDateTime.now(),
                     filePath.toString(),
-                    "local",
+                    "tool",
                     mimeType
             ), username);
             return fileId;
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private String listAllowedDirsString() {
-        return allowedDirectories.stream()
-                .map(Path::toString)
-                .collect(Collectors.joining(", "));
     }
 
     private String formatSize(long size) {

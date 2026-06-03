@@ -23,6 +23,7 @@
 - **Skill Library** — Parameterized templates + MCP tool binding, autonomous LLM discovery, runtime dynamic management
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
+- **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more, conditionally enabled via config
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
 ## Quick Start: Add a Chat Interface

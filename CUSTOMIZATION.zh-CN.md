@@ -16,11 +16,15 @@ spring-ai-loom-agent/
 │   ├── file/          IFile / IUpload              # 文件存储、上传与下载
 │   ├── user/          IUser / AuthenticationFilter  # 认证鉴权
 │   ├── vectorstore/   JVectorStore                 # 默认向量存储
-│   ├── tool/          IEmbedTool                   # 技能嵌入工具
+│   ├── tool/          IEmbedTool (marker)          # 聚合工具接口
+│   │   ├── time/      ITimeTool / DefaultTimeTool  # 时间工具
+│   │   ├── skill/     ISkillTool / DefaultSkillTool # 技能工具
+│   │   ├── file/      IFileTool / DefaultFileTool  # 文件工具
+│   │   └── git/       IGitTool / DefaultGitTool    # Git 工具（JGit）
 │   ├── document/      IDocumentRead / IFileDocument # 文档解析
 │   └── model/         *Record / LoomAgentProperties # 模型与配置
 ├── spring-ai-loom-agent-spring-boot-autoconfigure/  # 自动配置
-│   └── LoomAgentConfiguration.java                # 核心装配类
+│   └── LoomAgentConfiguration.java                # 核心装配类（7 个嵌套 @Configuration 子类）
 ├── spring-ai-loom-agent-spring-boot-starter/        # Starter空JAR
 │   └── pom.xml                                    # 仅传递依赖
 └── spring-ai-loom-agent-test/                       # 测试应用
@@ -152,6 +156,29 @@ spring:
                   - { label: 友好, value: friendly }
 ```
 
+### 1.6 Git 配置 (`git.*`)
+
+| 属性                       | 类型     | 默认值   | 说明                                                                |
+|--------------------------|--------|-------|-------------------------------------------------------------------|
+| `git.enabled`            | boolean | `false` | 是否启用 Git 工具（IGitTool）；设为 `true` 激活                            |
+| `git.gitUsername`        | String  | —     | HTTP(S) git 认证用户名（clone/pull/push）                              |
+| `git.gitToken`           | String  | —     | HTTP(S) git 认证令牌/密码                                             |
+
+**示例配置**：
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        git:
+          enabled: true
+          gitUsername: your-git-username
+          gitToken: your-git-token
+```
+
+> Git 凭证也可通过 `ToolContext` 按请求传入（`gitUsername` / `gitToken` 键），会覆盖配置的默认值。
+
 ---
 
 ## 2. Bean 覆盖（接口替换）
@@ -215,7 +242,7 @@ public IUser customUser() {
 | **覆盖方式** | 自定义 `@Bean IChat`                            |
 | **控制内容** | 流式对话处理：用户/会话管理、RAG 顾问、MCP 工具注入、技能工具注入、图片/文档处理、toolContext 跨线程上下文传递 |
 
-**默认行为**: 组装 `ChatClient`，可选加入 `RetrievalAugmentationAdvisor`、`IMcp` 工具、`IEmbedTool` 技能工具、用户会话管理等。文档类文件（PDF/DOCX/XLSX/PPTX/MD 等）通过 Apache Tika 提取文本后以 System Prompt 注入，图片作为 Media 类型传入模型。
+**默认行为**: 组装 `ChatClient`，可选加入 `RetrievalAugmentationAdvisor`、`IMcp` 工具、所有 `IEmbedTool` 子工具（时间、技能、文件、Git）、用户会话管理等。文档类文件（PDF/DOCX/XLSX/PPTX/MD 等）通过 Apache Tika 提取文本后以 System Prompt 注入，图片作为 Media 类型传入模型。
 
 **自定义示例**:
 
@@ -226,11 +253,11 @@ public IChat customChat(
         ChatClient chatClient,
         Optional<RetrievalAugmentationAdvisor> ragAdvisor,
         IMcp mcp,
-        IEmbedTool embedTool,
+        List<IEmbedTool> embedTools,
         IUserConversation userConversation,
         IUser user,
         IFile file) {
-    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTool, userConversation, user, file);
+    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTools, userConversation, user, file);
 }
 ```
 
@@ -256,7 +283,7 @@ public IChat customChat(
 | **覆盖方式** | 自定义 `@Bean IUpload`                         |
 | **控制内容** | 文件上传（普通/知识库）、文件下载、文件删除（关联知识库）、知识库文件批量删除    |
 
-**默认行为**: 文件保存到本地 `.local/file/{username}/{fileId}/{fileName}`，调用 `IDocumentRead` 解析文档（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
+**默认行为**: 聊天上传的文件保存到 `.local/file/{username}/upload/{fileId}/{fileName}`，知识库文件保存到 `.local/file/{username}/knowledge/{knowledgeId}/{fileId}/{fileName}`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
 
 **常见自定义场景**: 上传到云存储（S3/OSS）、接入第三方 OCR、异步文档解析等。
 
@@ -320,14 +347,58 @@ public IChat customChat(
 - 默认使用 `SyncMcp`（基于 `McpSyncClient`）
 - 设置 `spring.ai.mcp.client.stdio=ASYNC` 时切换为 `ASyncMcp`（基于 `McpAsyncClient`）
 
-### 2.11 `IEmbedTool` — 技能嵌入工具
+### 2.11 `IEmbedTool` — 嵌入工具（时间 / 技能 / 文件 / Git）
 
-| 项目       | 内容                                                                 |
-|----------|--------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.IEmbedTool`                     |
-| **默认实现** | `DefaultEmbedTool`                                                 |
-| **覆盖方式** | 自定义 `@Bean IEmbedTool`                                             |
-| **控制内容** | 暴露给 LLM 的 `@Tool` 方法：`skillContents`（获取技能目录）、`getSkill`（获取技能详情）、`downloadFileUrl`（生成文件下载链接）、`addFile`（通过路径注册文件） |
+`IEmbedTool` 是聚合标记接口，四个子接口各自向 LLM 提供独立的 `@Tool` 方法。每个子工具均可通过 `@ConditionalOnMissingBean` 独立替换。
+
+#### `ITimeTool` — 时间工具
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool`                     |
+| **默认实现** | `DefaultTimeTool`                                                      |
+| **覆盖方式** | 自定义 `@Bean ITimeTool`                                                  |
+| **控制内容** | `@Tool` 方法：`getCurrentTime`（获取指定时区的当前时间）、`convertTime`（在不同时区之间转换时间） |
+
+#### `ISkillTool` — 技能工具
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool`                   |
+| **默认实现** | `DefaultSkillTool`                                                     |
+| **覆盖方式** | 自定义 `@Bean ISkillTool`                                                 |
+| **控制内容** | `@Tool` 方法：`skillContents`（列出所有可用技能）、`getSkill`（根据名称获取技能详情） |
+
+#### `IFileTool` — 文件工具
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                     |
+| **默认实现** | `DefaultFileTool`                                                      |
+| **覆盖方式** | 自定义 `@Bean IFileTool`                                                  |
+| **控制内容** | `@Tool` 方法：`readTextFile`、`readMediaFile`、`readMultipleFiles`、`writeFile`、`editFile`、`createDirectory`、`moveFile`、`searchFiles`、`listAllowedDirectories`、`downloadFileUrl`、`viewFileUrl`。注意：`writeFile` 将文件存储在 `.local/file/{username}/file/` 下；`createDirectory` 和 `listAllowedDirectories` 接受 `ToolContext` 以解析用户级路径。 |
+
+#### `IGitTool` — Git 工具
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool`                       |
+| **默认实现** | `DefaultGitTool`（基于 Eclipse JGit 7.2.1）                               |
+| **覆盖方式** | 自定义 `@Bean IGitTool`                                                   |
+| **生效条件** | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — 默认禁用 |
+| **控制内容** | 28 个 `@Tool` 方法：`gitInit`、`gitClone`、`gitDeleteRepo`、`gitStatus`、`gitAdd`、`gitCommit`、`gitDiff`、`gitLog`、`gitBranch`、`gitCheckout`、`gitPull`、`gitPush`、`gitFetch`、`gitMerge`、`gitRebase`、`gitReset`、`gitStash`、`gitTag`、`gitRemote`、`gitBlame`、`gitShow`、`gitReflog`、`gitClean`、`gitCherryPick`、`gitWorktree`、`gitSetWorkingDir`、`gitChangelogAnalyze`、`gitWrapupInstructions` |
+
+Git 仓库存储在 `.local/file/{username}/git/{repoName}/` 下。clone 和 init 操作会自动注册 `FileRecord`（usage=`"git"`）；`gitDeleteRepo` 会同时删除目录和 `FileRecord`。
+
+**自定义示例**（仅替换文件工具，保留默认的时间和技能工具）：
+
+```java
+@Bean
+public IFileTool customFileTool(IFile file) {
+    return new MyCustomFileTool(file);
+}
+// DefaultTimeTool 和 DefaultSkillTool 仍然生效
+```
 
 ### 2.12 `AuthenticationFilter` — 认证过滤器
 
@@ -509,7 +580,7 @@ skills:
 |---------------------|------------|-------------------------------|
 | `knowledge`         | 知识库元数据     | `id`                          |
 | `knowledge_file`    | 知识库-文件关联   | `(knowledge_id, file_id)`     |
-| `file_info`         | 文件元数据与存储路径 | `id`（含 `usage`、`mime_type` 列）|
+| `file_info`         | 文件元数据与存储路径（`usage` 列：`conversation` / `knowledge` / `tool` / `git`） | `id` |
 | `file_document`     | 文件-向量文档关联  | `(file_id, document_id)`      |
 | `user_conversation` | 用户-会话映射    | `(username, conversation_id)` |
 
@@ -573,6 +644,7 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | 不提供 `VectorStore` Bean             | 不引入任何 VectorStore Starter  | 不会创建 `IDocumentRead`、`RetrievalAugmentationAdvisor`、`loomAgentKnowledgeRouter`，知识库功能不可用 |
 | 不提供 `EmbeddingModel` Bean          | 不引入 EmbeddingModel Starter | 不会创建 `JVectorStore`，向量存储不可用                                                             |
 | 自定义同类型 Bean                        | Java `@Bean` 配置            | 对应的 `@ConditionalOnMissingBean` Bean 不会被创建                                              |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml          | 创建 `IGitTool` Bean（`DefaultGitTool`，Eclipse JGit 7.2.1）；未配置时 Git 工具不可用            |
 
 ### 8.1 快速禁用功能清单
 
@@ -581,5 +653,6 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | 整个聊天功能  | 设置 `spring.ai.chat.ui.init=false`                  |
 | RAG/知识库 | 不引入任何 `VectorStore` 或 `EmbeddingModel` Starter     |
 | MCP 功能  | 不配置 `spring.ai.mcp.*` 或自定义 `IMcp` 返回空列表            |
+| Git 工具  | 不设置 `spring.ai.loom.agent.git.enabled=true`（默认禁用）    |
 | 认证过滤器   | 覆盖 `IUser` 的 `isAutoLogin()` 返回 `true`，或自定义 Filter |
 | 自动登录    | 自定义 `IUser` 的 `isAutoLogin()` 返回 `false`           |

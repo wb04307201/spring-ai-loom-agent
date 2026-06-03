@@ -24,6 +24,7 @@ import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -34,16 +35,16 @@ public class DefaultChat implements IChat {
     private final ChatClient chatClient;
     private final Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor;
     private final IMcp mcp;
-    private final IEmbedTool embedTool;
+    private final List<IEmbedTool> embedTools;
     private final IUserConversation userConversation;
     private final cn.wubo.spring.ai.loom.agent.user.IUser user;
     private final IFile file;
 
-    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, IEmbedTool embedTool, IUserConversation userConversation, cn.wubo.spring.ai.loom.agent.user.IUser user, IFile file) {
+    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, cn.wubo.spring.ai.loom.agent.user.IUser user, IFile file) {
         this.chatClient = chatClient;
         this.retrievalAugmentationAdvisor = retrievalAugmentationAdvisor;
         this.mcp = mcp;
-        this.embedTool = embedTool;
+        this.embedTools = embedTools;
         this.userConversation = userConversation;
         this.user = user;
         this.file = file;
@@ -98,9 +99,9 @@ public class DefaultChat implements IChat {
                         log.error("Failed to add media", e);
                     }
                 }
-            }).tools(embedTool);
+            }).tools(embedTools.toArray());
         }else{
-            requestSpec.user(chatRequestRecord.message()).tools(embedTool);
+            requestSpec.user(chatRequestRecord.message()).tools(embedTools.toArray());
         }
         Map<String, Object> props = new HashMap<>();
         props.put("username", username);

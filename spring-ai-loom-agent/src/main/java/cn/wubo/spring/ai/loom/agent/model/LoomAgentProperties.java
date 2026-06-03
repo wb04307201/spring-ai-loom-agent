@@ -49,7 +49,8 @@ public class LoomAgentProperties {
     private List<SkillProperty> skills = new ArrayList<>();
     private JVectorProperties jvector = new JVectorProperties();
     private String timezone = "Asia/Shanghai";
-    private List<String> allowedDirectories = List.of(".local/temp");
+    private String gitUsername;
+    private String gitToken;
 
     @Data
     public static class RagProperty {

@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Module | Purpose |
 |--------|---------|
 | `spring-ai-loom-agent` | Core library — chat, knowledge base, file, MCP, skill, user interfaces + default implementations, JVector vector store, H2 schema, static frontend resources |
-| `spring-ai-loom-agent-spring-boot-autoconfigure` | Single `LoomAgentConfiguration` class — `@AutoConfiguration` with `@ConditionalOnMissingBean` on all beans for full replaceability |
+| `spring-ai-loom-agent-spring-boot-autoconfigure` | `LoomAgentConfiguration` with 7 nested static `@Configuration` classes (Infrastructure, Chat, Rag, Mcp, Tool, Storage, Web) — `@AutoConfiguration` with `@ConditionalOnMissingBean` on all beans for full replaceability |
 | `spring-ai-loom-agent-spring-boot-starter` | Empty JAR that depends on autoconfigure — the one dependency users add |
 | `spring-ai-loom-agent-test` | Test application with `application.yml` — run locally to verify changes |
 
@@ -52,16 +52,33 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IUpload` | `DefaultUpload` | File upload pipeline: Tika parsing → document splitting → vectorization |
 | `IUser` | `DefaultUser` | Token-based auth filter + auto-login |
 | `IUserConversation` | `DefaultUserConversation` | User-to-conversation mapping |
-| `IEmbedTool` | `DefaultEmbedTool` | Embed skill content into chat prompts |
+| `IEmbedTool` | _(marker interface)_ | Aggregate type for all embed tools, sub-interfaces extend it |
+| `ITimeTool` | `DefaultTimeTool` | Time tools: get current time, convert between timezones |
+| `ISkillTool` | `DefaultSkillTool` | Skill tools: list skills, get skill details |
+| `IFileTool` | `DefaultFileTool` | File tools: read/write/edit/search files, manage directories |
+| `IGitTool` | `DefaultGitTool` | Git tools: clone, commit, push, pull, branch, merge, diff, blame, and ~20 more (conditionally enabled via `git.enabled`) |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
 
+Organized into 7 nested static `@Configuration` classes:
+
+| Inner Class | Responsibility |
+|-------------|----------------|
+| `InfrastructureConfiguration` | Properties binding, Flyway, ChatMemory, BeanFactoryPostProcessors |
+| `ChatConfiguration` | ChatClient, IChat, SseController |
+| `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, RAG Advisor, IUpload (all conditional on VectorStore) |
+| `McpConfiguration` | SyncMcp / ASyncMcp |
+| `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool (git conditional on `git.enabled`) |
+| `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
+| `WebConfiguration` | AuthenticationFilter, 6 RouterFunctions |
+
 - `@AutoConfigureAfter` all Spring AI model/embedding/vectorstore/memory/MCP auto-configurations
 - Creates `ChatClient` with `MessageChatMemoryAdvisor` and `SimpleLoggerAdvisor`
 - Default `JVectorStore` (HNSW index, disk-persisted) when no other `VectorStore` bean exists
 - `RetrievalAugmentationAdvisor` with configurable prompt templates and similarity threshold
+- `IGitTool` (Eclipse JGit 7.2.1) conditionally created when `spring.ai.loom.agent.git.enabled=true`
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
 - `AuthenticationFilter` on `/spring/ai/loom/*` paths
 
@@ -79,6 +96,7 @@ All under `spring.ai.loom.agent`:
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
 - `skills` — list of skill templates (name, description, tools, content path, params)
 - `user` — default username, nickname, authentication token
+- `git` — `enabled` (boolean, default false), `gitUsername`, `gitToken` for remote git authentication
 
 ### Frontend
 
@@ -99,3 +117,5 @@ public IChat customChat(...) { return new MyChat(...); }
 ```
 
 To swap the vector store, simply add a Spring AI vector store starter dependency — `JVectorStore` won't be created due to `@ConditionalOnMissingBean(VectorStore.class)`.
+
+`IGitTool` uses both `@ConditionalOnProperty` (requires `git.enabled=true`) and `@ConditionalOnMissingBean` — users can replace it with a custom implementation (e.g., CLI-based git) while still enabling the feature.

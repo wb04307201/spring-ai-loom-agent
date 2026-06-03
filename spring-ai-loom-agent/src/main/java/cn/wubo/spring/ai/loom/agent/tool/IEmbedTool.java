@@ -1,39 +1,12 @@
 package cn.wubo.spring.ai.loom.agent.tool;
 
-import org.springframework.ai.chat.model.ToolContext;
-
-import java.util.List;
-import java.util.Map;
-
+/**
+ * 聚合标记接口，所有嵌入工具（ITimeTool、ISkillTool、IFileTool）均继承此接口。
+ * <p>
+ * DefaultChat 通过注入 {@code List<IEmbedTool>} 收集所有工具实例，
+ * 统一注册到 Spring AI 的 {@code .tools()} 调用中。
+ * <p>
+ * 用户可以单独替换某个子工具（如 IFileTool），而不影响其他子工具的默认实现。
+ */
 public interface IEmbedTool {
-
-    String getCurrentTime(String timezone);
-
-    String convertTime(String sourceTimezone, String time, String targetTimezone);
-
-    String skillContents(ToolContext toolContext);
-
-    String getSkill(String name,ToolContext toolContext);
-
-    String readTextFile(String fileId, Integer head, Integer tail, ToolContext toolContext);
-
-    String readMediaFile(String fileId, ToolContext toolContext);
-
-    String readMultipleFiles(List<String> fileIds, ToolContext toolContext);
-
-    String writeFile(String path, String content, ToolContext toolContext);
-
-    String editFile(String fileId, List<Map<String, String>> edits, ToolContext toolContext);
-
-    String createDirectory(String path);
-
-    String moveFile(String fileId, String destination, ToolContext toolContext);
-
-    String searchFiles(String keyword, ToolContext toolContext);
-
-    String listAllowedDirectories();
-
-    String downloadFileUrl(String fileId, ToolContext toolContext);
-
-    String viewFileUrl(String fileId, ToolContext toolContext);
 }

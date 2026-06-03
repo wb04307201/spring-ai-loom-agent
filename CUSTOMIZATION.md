@@ -16,11 +16,15 @@ spring-ai-loom-agent/
 │   ├── file/          IFile / IUpload              # File storage & upload
 │   ├── user/          IUser / AuthenticationFilter  # Auth & filter
 │   ├── vectorstore/   JVectorStore                 # Default vector store
-│   ├── tool/          IEmbedTool                   # Skill embedding
+│   ├── tool/          IEmbedTool (marker)          # Aggregate tool interface
+│   │   ├── time/      ITimeTool / DefaultTimeTool  # Time tools
+│   │   ├── skill/     ISkillTool / DefaultSkillTool # Skill tools
+│   │   ├── file/      IFileTool / DefaultFileTool  # File tools
+│   │   └── git/       IGitTool / DefaultGitTool    # Git tools (JGit)
 │   ├── document/      IDocumentRead / IFileDocument # Document parsing
 │   └── model/         *Record / LoomAgentProperties # Models & config
 ├── spring-ai-loom-agent-spring-boot-autoconfigure/  # Auto-configuration
-│   └── LoomAgentConfiguration.java                # Core configuration class
+│   └── LoomAgentConfiguration.java                # Core config (7 nested @Configuration classes)
 ├── spring-ai-loom-agent-spring-boot-starter/        # Starter empty JAR
 │   └── pom.xml                                    # Transitive dependencies only
 └── spring-ai-loom-agent-test/                       # Test application
@@ -152,6 +156,29 @@ spring:
                   - { label: Friendly, value: friendly }
 ```
 
+### 1.6 Git Configuration (`git.*`)
+
+| Property                   | Type    | Default | Description                                                                 |
+|----------------------------|---------|---------|-----------------------------------------------------------------------------|
+| `git.enabled`              | boolean | `false` | Whether to enable Git tool (IGitTool); set to `true` to activate            |
+| `git.gitUsername`          | String  | —       | Username for HTTP(S) git authentication (clone/pull/push)                   |
+| `git.gitToken`             | String  | —       | Token/password for HTTP(S) git authentication                               |
+
+**Example Configuration**:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        git:
+          enabled: true
+          gitUsername: your-git-username
+          gitToken: your-git-token
+```
+
+> Git credentials can also be passed per-request via `ToolContext` (`gitUsername` / `gitToken` keys), which override the configured defaults.
+
 ---
 
 ## 2. Bean Override (Interface Replacement)
@@ -207,7 +234,7 @@ public IUser customUser() {
 | **Override**    | Custom `@Bean IChat`                                       |
 | **Controls**    | Streaming chat: user/session management, RAG advisor, MCP tool injection, skill tool injection, image file handling |
 
-**Default behavior**: Assembles `ChatClient`, optionally adding `RetrievalAugmentationAdvisor`, `IMcp` tools, `IEmbedTool` skill tools, and user session management.
+**Default behavior**: Assembles `ChatClient`, optionally adding `RetrievalAugmentationAdvisor`, `IMcp` tools, all `IEmbedTool` sub-tools (time, skill, file, git), and user session management.
 
 **Customization Example**:
 
@@ -218,11 +245,11 @@ public IChat customChat(
         ChatClient chatClient,
         Optional<RetrievalAugmentationAdvisor> ragAdvisor,
         IMcp mcp,
-        IEmbedTool embedTool,
+        List<IEmbedTool> embedTools,
         IUserConversation userConversation,
         IUser user,
         IFile file) {
-    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTool, userConversation, user, file);
+    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTools, userConversation, user, file);
 }
 ```
 
@@ -248,7 +275,7 @@ public IChat customChat(
 | **Override**    | Custom `@Bean IUpload`                            |
 | **Controls**    | File upload (plain/knowledge-base), file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
 
-**Default behavior**: Files saved locally to `.local/file/{username}/{fileId}/{fileName}`, parsed via `IDocumentRead`, and stored in `VectorStore`.
+**Default behavior**: Chat-uploaded files saved to `.local/file/{username}/upload/{fileId}/{fileName}`, knowledge-base files to `.local/file/{username}/knowledge/{knowledgeId}/{fileId}/{fileName}`. Documents are parsed via `IDocumentRead` and stored in `VectorStore`.
 
 **Common use case**: Upload to cloud storage (S3/OSS), integrate third-party OCR, async document parsing.
 
@@ -311,14 +338,58 @@ public IChat customChat(
 - Default: `SyncMcp` (based on `McpSyncClient`)
 - Set `spring.ai.mcp.client.stdio=ASYNC` to switch to `ASyncMcp` (based on `McpAsyncClient`)
 
-### 2.11 `IEmbedTool` — Skill Embed Tool
+### 2.11 `IEmbedTool` — Embed Tools (Time / Skill / File / Git)
+
+`IEmbedTool` is an aggregate marker interface. Four sub-interfaces each provide independent `@Tool` methods to the LLM. Each sub-tool can be replaced independently via `@ConditionalOnMissingBean`.
+
+#### `ITimeTool` — Time Tools
 
 | Item            | Details                                                                               |
 |-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.IEmbedTool`                                        |
-| **Default**     | `DefaultEmbedTool`                                                                    |
-| **Override**    | Custom `@Bean IEmbedTool`                                                             |
-| **Controls**    | Two `@Tool` methods exposed to the LLM: `skillContents` (get skill directory) and `getSkill` (get skill details) |
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool`                                    |
+| **Default**     | `DefaultTimeTool`                                                                     |
+| **Override**    | Custom `@Bean ITimeTool`                                                              |
+| **Controls**    | `@Tool` methods: `getCurrentTime` (get current time by timezone) and `convertTime` (convert between timezones) |
+
+#### `ISkillTool` — Skill Tools
+
+| Item            | Details                                                                               |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool`                                  |
+| **Default**     | `DefaultSkillTool`                                                                    |
+| **Override**    | Custom `@Bean ISkillTool`                                                             |
+| **Controls**    | `@Tool` methods: `skillContents` (list all skills) and `getSkill` (get skill details) |
+
+#### `IFileTool` — File Tools
+
+| Item            | Details                                                                               |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                                    |
+| **Default**     | `DefaultFileTool`                                                                     |
+| **Override**    | Custom `@Bean IFileTool`                                                              |
+| **Controls**    | `@Tool` methods: `readTextFile`, `readMediaFile`, `readMultipleFiles`, `writeFile`, `editFile`, `createDirectory`, `moveFile`, `searchFiles`, `listAllowedDirectories`, `downloadFileUrl`, `viewFileUrl`. Note: `writeFile` stores files under `.local/file/{username}/file/`; `createDirectory` and `listAllowedDirectories` accept `ToolContext` to resolve per-user paths. |
+
+#### `IGitTool` — Git Tools
+
+| Item            | Details                                                                               |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool`                                      |
+| **Default**     | `DefaultGitTool` (based on Eclipse JGit 7.2.1)                                        |
+| **Override**    | Custom `@Bean IGitTool`                                                               |
+| **Condition**   | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — disabled by default |
+| **Controls**    | 28 `@Tool` methods: `gitInit`, `gitClone`, `gitDeleteRepo`, `gitStatus`, `gitAdd`, `gitCommit`, `gitDiff`, `gitLog`, `gitBranch`, `gitCheckout`, `gitPull`, `gitPush`, `gitFetch`, `gitMerge`, `gitRebase`, `gitReset`, `gitStash`, `gitTag`, `gitRemote`, `gitBlame`, `gitShow`, `gitReflog`, `gitClean`, `gitCherryPick`, `gitWorktree`, `gitSetWorkingDir`, `gitChangelogAnalyze`, `gitWrapupInstructions` |
+
+Git repositories are stored under `.local/file/{username}/git/{repoName}/`. Clone and init operations automatically register a `FileRecord` (usage=`"git"`); `gitDeleteRepo` removes both the directory and the `FileRecord`.
+
+**Customization Example** (replace only the file tool, keep default time and skill tools):
+
+```java
+@Bean
+public IFileTool customFileTool(IFile file) {
+    return new MyCustomFileTool(file);
+}
+// DefaultTimeTool and DefaultSkillTool remain active
+```
 
 ### 2.12 `AuthenticationFilter` — Authentication Filter
 
@@ -500,7 +571,7 @@ skills:
 |---------------------|--------------------------------|---------------------------------|
 | `knowledge`         | Knowledge base metadata        | `id`                            |
 | `knowledge_file`    | Knowledge base — file mapping  | `(knowledge_id, file_id)`       |
-| `file_info`         | File metadata and storage path | `id`                            |
+| `file_info`         | File metadata and storage path (`usage` column: `conversation` / `knowledge` / `tool` / `git`) | `id` |
 | `file_document`     | File — vector document mapping | `(file_id, document_id)`        |
 | `user_conversation` | User — conversation mapping    | `(username, conversation_id)`   |
 
@@ -563,6 +634,7 @@ Place same-named static resources in your own project to override the defaults, 
 | No `VectorStore` bean provided       | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, and `loomAgentKnowledgeRouter` are not created; knowledge base features unavailable |
 | No `EmbeddingModel` bean provided    | Do not add EmbeddingModel Starter | `JVectorStore` is not created; vector storage unavailable                                        |
 | Custom bean of the same type         | Java `@Bean` configuration   | The corresponding `@ConditionalOnMissingBean` bean will not be created                           |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml           | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.2.1); without this, no Git tool methods are available to the LLM |
 
 ### 8.1 Quick Feature Disablement Guide
 
@@ -571,5 +643,6 @@ Place same-named static resources in your own project to override the defaults, 
 | Entire chat        | Set `spring.ai.chat.ui.init=false`                                     |
 | RAG / Knowledge Base | Do not add any `VectorStore` or `EmbeddingModel` Starter               |
 | MCP functionality  | Do not configure `spring.ai.mcp.*` or provide a custom `IMcp` returning empty lists |
+| Git tool           | Do not set `spring.ai.loom.agent.git.enabled=true` (default is disabled) |
 | Auth filter        | Override `IUser.isAutoLogin()` to return `true`, or provide a custom Filter |
 | Auto-login         | Override `IUser.isAutoLogin()` to return `false`                       |
