@@ -2,7 +2,7 @@
 
 > **Base URL**: `http://localhost:8089`（测试环境默认端口）
 > **版本**: 1.0.0
-> **认证**: 大部分 `/spring/ai/loom/*` 接口通过 `AuthenticationFilter` 进行认证过滤
+> **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
 
@@ -65,17 +65,34 @@ POST /spring/ai/loom/user/login
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `token` | string | 认证令牌 |
+| `token` | string | Session Token（同时作为 HttpOnly Cookie 设置） |
 | `nickname` | string | 用户昵称 |
+
+**响应头**:
+- `Set-Cookie: loom-agent-session=<token>; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax`
 
 **示例**:
 
 ```json
 {
-  "token": "eyJhbGciOi...",
-  "nickname": "测试用户"
+  "token": "567fb50c-b293-403b-a903-f6b7b597c318",
+  "nickname": "用户"
 }
 ```
+
+---
+
+### 1.3 用户登出
+
+```
+POST /spring/ai/loom/user/logout
+```
+
+**请求体**: 无
+
+**响应**: `true` (boolean)
+
+**效果**: 服务端失效 Session Token，同时清除浏览器的 `loom-agent-session` Cookie（Max-Age=0）。
 
 ---
 
@@ -158,7 +175,6 @@ Accept: text/event-stream
 | `message` | string | 是 | 用户消息内容 |
 | `conversationId` | string | 否 | 会话 ID，不传则创建新会话 |
 | `mcps` | string[] | 否 | 需要启用的 MCP 工具名称列表 |
-| `authentication` | string | 否 | 认证令牌 |
 | `knowledgeId` | string | 否 | 知识库 ID，用于 RAG 检索 |
 | `fileIds` | string[] | 否 | 关联的文件 ID 列表（支持多文件） |
 
@@ -170,7 +186,6 @@ Accept: text/event-stream
   "conversationId": "conv-001",
   "knowledgeId": "kb-001",
   "mcps": [],
-  "authentication": "",
   "fileIds": ["file-abc123", "file-def456"]
 }
 ```
@@ -640,7 +655,6 @@ GET /spring/ai/chat/loom/mcp
   "message": "string",
   "conversationId": "string",
   "mcps": ["string"],
-  "authentication": "string",
   "knowledgeId": "string",
   "fileIds": ["string"]
 }
@@ -681,6 +695,8 @@ GET /spring/ai/chat/loom/mcp
   "nickname": "string"
 }
 ```
+
+> **注意**: `token` 同时会通过 `Set-Cookie` 响应头设置为 HttpOnly Cookie（`loom-agent-session`）。浏览器会自动在后续请求中携带该 Cookie，客户端无需手动存储或发送 Token。
 
 ### FileRecord
 
@@ -780,6 +796,15 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | 构建时的 ef 参数 |
 | `spring.ai.loom.agent.jvector.efSearch` | int | `10` | 搜索时的 ef 参数 |
 
+### 9.6 鉴权配置
+
+| 属性 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `spring.ai.loom.agent.auth.enabled` | boolean | `true` | 鉴权总开关 |
+| `spring.ai.loom.agent.auth.pathPatterns` | string[] | `["/spring/ai/loom/**"]` | 需要鉴权的路径模式 |
+| `spring.ai.loom.agent.auth.cookie.name` | string | `loom-agent-session` | Session Cookie 名称 |
+| `spring.ai.loom.agent.auth.cookie.maxAge` | int | `86400` | Cookie 最大存活时间（秒，24 小时） |
+
 ---
 
 ## 附录：接口总览
@@ -787,7 +812,8 @@ GET /spring/ai/chat/loom/mcp
 | # | 方法 | 路径 | 说明 |
 |---|---|---|---|
 | 1 | `POST` | `/spring/ai/loom/user/isAutoLogin` | 检查自动登录状态 |
-| 2 | `POST` | `/spring/ai/loom/user/login` | 用户登录 |
+| 2 | `POST` | `/spring/ai/loom/user/login` | 用户登录（设置 Session Cookie） |
+| 2a| `POST` | `/spring/ai/loom/user/logout` | 用户登出（失效 Session） |
 | 3 | `GET` | `/spring/ai/loom/conversation` | 获取会话列表 |
 | 4 | `GET` | `/spring/ai/loom/conversation/{id}` | 获取会话历史 |
 | 5 | `DELETE` | `/spring/ai/loom/conversation/{id}` | 删除会话 |

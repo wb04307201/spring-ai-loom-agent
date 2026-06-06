@@ -12,4 +12,5 @@ public interface IUpload {
 
     int deleteAllKnowledge(String knowledgeId);
 
+    byte[] getContentByLocation(String location);
 }

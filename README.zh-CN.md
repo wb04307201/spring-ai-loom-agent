@@ -22,6 +22,7 @@
 - **Skill 技能库** — 参数化模板 + MCP 工具绑定，LLM 自主发现与调用，运行时动态管理
 - **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
+- **Git 仓库管理** — 基于 JGit 的 Git 操作：clone、commit、push、pull、branch、merge、diff、blame 等，通过配置按需启用
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
 
 
@@ -31,7 +32,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.23</version>
+    <version>1.1.24</version>
 </dependency>
 ```
 
@@ -83,6 +84,8 @@ PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
 
 ### 文件下载和预览
 上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。
+
+"文件"入口可统一查看、预览、下载和删除所有非知识库文件（含工具上传的文件和 git 仓库）。
 
 ## 更换其它RAG以替换默认实现
 下面以qdrant向量数据库为例，添加依赖和配置：
@@ -169,7 +172,7 @@ mcp-servers.json:
 }
 ```
 
-配置MCP服务后，工具栏出现MCP服务按钮，点开后可查看目前拥有的MCP服务信息：
+MCP服务按钮可弹出面板查看目前拥有的MCP服务信息：
 ![img_3.png](img_3.png)
 
 可以通过配置为工具添加中文名和描述：

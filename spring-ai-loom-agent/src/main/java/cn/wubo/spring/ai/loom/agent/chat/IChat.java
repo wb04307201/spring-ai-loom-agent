@@ -10,6 +10,6 @@ import java.util.List;
 
 public interface IChat {
 
-    Flux<ChatResponse> stream(ChatRequestRecord chatRecord, HttpServletRequest request);
+    Flux<ChatResponse> stream(ChatRequestRecord chatRecord, String username, HttpServletRequest request);
 
 }

@@ -6,7 +6,6 @@ import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
-import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.tika.Tika;
 import org.apache.tika.exception.TikaException;
@@ -24,6 +23,7 @@ import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -34,26 +34,22 @@ public class DefaultChat implements IChat {
     private final ChatClient chatClient;
     private final Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor;
     private final IMcp mcp;
-    private final IEmbedTool embedTool;
+    private final List<IEmbedTool> embedTools;
     private final IUserConversation userConversation;
-    private final cn.wubo.spring.ai.loom.agent.user.IUser user;
     private final IFile file;
 
-    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, IEmbedTool embedTool, IUserConversation userConversation, cn.wubo.spring.ai.loom.agent.user.IUser user, IFile file) {
+    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
         this.chatClient = chatClient;
         this.retrievalAugmentationAdvisor = retrievalAugmentationAdvisor;
         this.mcp = mcp;
-        this.embedTool = embedTool;
+        this.embedTools = embedTools;
         this.userConversation = userConversation;
-        this.user = user;
         this.file = file;
     }
 
     @Override
-    public Flux<ChatResponse> stream(ChatRequestRecord chatRequestRecord, HttpServletRequest request) {
+    public Flux<ChatResponse> stream(ChatRequestRecord chatRequestRecord, String username, HttpServletRequest request) {
         log.info("Chat request: message={}, fileIds={}", chatRequestRecord.message(), chatRequestRecord.fileIds());
-        String contextUser = UserContextHolder.getCurrentUser();
-        final String username = (contextUser != null) ? contextUser : user.getUsernameByAuthentication(chatRequestRecord.authentication());
         boolean exists = userConversation.exists(new UserConversationRecord(username, chatRequestRecord.conversationId()));
         if (!exists) {
             userConversation.insert(new UserConversationRecord(username, chatRequestRecord.conversationId()));
@@ -62,9 +58,8 @@ public class DefaultChat implements IChat {
         ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt();
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             StringBuilder extraText = new StringBuilder();
-            final String chatUsername = username;
             for (String fileId : chatRequestRecord.fileIds()) {
-                var fileRecord = file.getById(fileId, chatUsername);
+                var fileRecord = file.getById(fileId, username);
                 if (fileRecord == null) continue;
                 if (isDocument(fileRecord.mimeType())) {
                     if(extraText.isEmpty()){
@@ -72,7 +67,7 @@ public class DefaultChat implements IChat {
                     }
                     Tika tika = new Tika();
                     try {
-                        String content = tika.parseToString(file.getResourceById(fileId, chatUsername).getInputStream());
+                        String content = tika.parseToString(file.getResourceById(fileId, username).getInputStream());
                         extraText.append("\n\n--- ").append(fileRecord.fileName()).append(" ---\n\n").append(content);
                     } catch (IOException | TikaException e) {
                         log.error("Failed to parse document: {}", fileRecord.fileName(), e);
@@ -89,18 +84,18 @@ public class DefaultChat implements IChat {
                 u.text(chatRequestRecord.message());
                 for (String fileId : chatRequestRecord.fileIds()) {
                     try {
-                        var fileRecord = file.getById(fileId, chatUsername);
+                        var fileRecord = file.getById(fileId, username);
                         if (fileRecord == null) continue;
                         if (isImage(fileRecord.mimeType())) {
-                            u.media(MimeTypeUtils.IMAGE_JPEG, file.getResourceById(fileId, chatUsername));
+                            u.media(MimeTypeUtils.IMAGE_JPEG, file.getResourceById(fileId, username));
                         }
                     } catch (Exception e) {
                         log.error("Failed to add media", e);
                     }
                 }
-            }).tools(embedTool);
+            }).tools(embedTools.toArray());
         }else{
-            requestSpec.user(chatRequestRecord.message()).tools(embedTool);
+            requestSpec.user(chatRequestRecord.message()).tools(embedTools.toArray());
         }
         Map<String, Object> props = new HashMap<>();
         props.put("username", username);

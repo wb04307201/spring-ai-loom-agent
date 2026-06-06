@@ -23,6 +23,7 @@
 - **Skill Library** — Parameterized templates + MCP tool binding, autonomous LLM discovery, runtime dynamic management
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
+- **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more, conditionally enabled via config
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
 ## Quick Start: Add a Chat Interface
@@ -33,7 +34,7 @@
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.23</version>
+  <version>1.1.24</version>
 </dependency>
 ```
 
@@ -91,6 +92,8 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 
 ### File Download and Preview
 Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`.
+
+The "File" entry provides unified browsing, previewing, downloading, and deleting for all non-knowledge-base files (including tool uploads and git repositories).
 
 ## Replace the Default RAG Implementation
 
@@ -185,7 +188,7 @@ spring:
 }
 ```
 
-After configuring MCP services, an MCP button appears in the toolbar showing available services:
+The MCP button opens a panel showing available services:
 
 ![img_3.png](img_3.png)
 

@@ -39,8 +39,7 @@ public class DefaultUpload implements IUpload {
         this.knowledge = knowledge;
     }
 
-    private Path saveFile(InputStream is, String fileName, String username, String fileId) throws IOException {
-        Path filePath = Paths.get(BASE_PATH, username, fileId, fileName);
+    private Path saveFile(InputStream is, Path filePath) throws IOException {
         Files.createDirectories(filePath.getParent());
         if (Files.exists(filePath)) Files.delete(filePath);
         Files.copy(is, filePath);
@@ -85,7 +84,7 @@ public class DefaultUpload implements IUpload {
         String username = UserContextHolder.getCurrentUser();
         try {
             String fileId = UUID.randomUUID().toString();
-            Path filePath = saveFile(is, fileName, username, fileId);
+            Path filePath = saveFile(is, Paths.get(BASE_PATH, username, "upload", fileId, fileName));
             FileRecord fileRecord = new FileRecord(
                     fileId,
                     null,
@@ -108,7 +107,7 @@ public class DefaultUpload implements IUpload {
         String username = UserContextHolder.getCurrentUser();
         try {
             String fileId = UUID.randomUUID().toString();
-            Path filePath = saveFile(is, fileName, username, fileId);
+            Path filePath = saveFile(is, Paths.get(BASE_PATH, username, "knowledge", knowledgeId, fileId, fileName));
             FileRecord fileRecord = new FileRecord(
                     fileId,
                     knowledgeId,
@@ -161,6 +160,16 @@ public class DefaultUpload implements IUpload {
             delete(fileRecord.id());
         }
         return knowledge.delete(knowledgeId);
+    }
+
+    @Override
+    public byte[] getContentByLocation(String location) {
+        Path path = Path.of(location);
+        try {
+            return Files.readAllBytes(path);
+        } catch (IOException e) {
+            throw new LoomAgentRuntimeException(e);
+        }
     }
 
 }

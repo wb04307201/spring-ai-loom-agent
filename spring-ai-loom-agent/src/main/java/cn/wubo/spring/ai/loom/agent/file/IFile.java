@@ -17,11 +17,14 @@ public interface IFile {
 
     Resource getResourceById(String id, String username);
 
-    List<FileRecord> searchByFileName(String fileNamePattern, String username);
+    /** 按文件路径精确查询已注册的文件记录 */
+    FileRecord getByExactPath(String path, String username);
 
-    int update(String id, String newPath, String newName, Long newSize,String username);
+    /** 按关键词搜索文件（匹配文件名或路径） */
+    List<FileRecord> search(String keyword, String username);
 
-    FileRecord getByPath(String path, String username);
+    /** 返回 usage != 'knowledge' 的所有文件，用于文件管理器 */
+    List<FileRecord> listForManager(String username);
 
-    List<FileRecord> searchByPath(String pathPattern, String username);
+    int update(String id, String newPath, String newName, Long newSize, String username);
 }

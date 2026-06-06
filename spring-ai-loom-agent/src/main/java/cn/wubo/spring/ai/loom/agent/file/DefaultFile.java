@@ -51,6 +51,15 @@ public class DefaultFile implements IFile {
     }
 
     @Override
+    public List<FileRecord> listForManager(String username) {
+        return jdbcTemplate.query(
+                "SELECT * FROM file_info WHERE usage != 'knowledge' AND username = ?",
+                this::mapFileRecord,
+                username
+        );
+    }
+
+    @Override
     public int insert(FileRecord fileInfo, String username) {
         return jdbcTemplate.update(
                 "INSERT INTO file_info (id, username, knowledge_id, file_name, size, upload_time, path, usage, mime_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -92,11 +101,22 @@ public class DefaultFile implements IFile {
     }
 
     @Override
-    public List<FileRecord> searchByFileName(String fileNamePattern, String username) {
-        return jdbcTemplate.query(
-                "SELECT * FROM file_info WHERE file_name LIKE ? AND username = ? AND knowledge_id IS NULL",
+    public FileRecord getByExactPath(String path, String username) {
+        List<FileRecord> records = jdbcTemplate.query(
+                "SELECT * FROM file_info WHERE path = ? AND username = ? AND knowledge_id IS NULL",
                 this::mapFileRecord,
-                "%" + fileNamePattern + "%",
+                path, username
+        );
+        return records.isEmpty() ? null : records.get(0);
+    }
+
+    @Override
+    public List<FileRecord> search(String keyword, String username) {
+        return jdbcTemplate.query(
+                "SELECT * FROM file_info WHERE (file_name LIKE ? OR path LIKE ?) AND username = ? AND knowledge_id IS NULL",
+                this::mapFileRecord,
+                "%" + keyword + "%",
+                "%" + keyword + "%",
                 username
         );
     }
@@ -127,25 +147,5 @@ public class DefaultFile implements IFile {
         params.add(username);
 
         return jdbcTemplate.update(sql.toString(), params.toArray());
-    }
-
-    @Override
-    public FileRecord getByPath(String path, String username) {
-        List<FileRecord> records = jdbcTemplate.query(
-                "SELECT * FROM file_info WHERE path = ? AND username = ? AND knowledge_id IS NULL",
-                this::mapFileRecord,
-                path, username
-        );
-        return records.isEmpty() ? null : records.get(0);
-    }
-
-    @Override
-    public List<FileRecord> searchByPath(String pathPattern, String username) {
-        return jdbcTemplate.query(
-                "SELECT * FROM file_info WHERE path LIKE ? AND username = ? AND knowledge_id IS NULL",
-                this::mapFileRecord,
-                "%" + pathPattern + "%",
-                username
-        );
     }
 }

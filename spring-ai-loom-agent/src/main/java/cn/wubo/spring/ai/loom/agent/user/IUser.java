@@ -11,5 +11,16 @@ public interface IUser {
 
     String getUsernameByAuthentication(String authentication);
 
+    /** Generate a session token for the given username and store it in cache */
+    String createToken(String username);
+
+    /** Validate a session token against cache */
+    boolean validateToken(String token);
+
+    /** Invalidate (remove) a session token from cache */
+    void invalidateToken(String token);
+
+    /** Get username from a valid token in cache */
+    String getUsernameByToken(String token);
 
 }
