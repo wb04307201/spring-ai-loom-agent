@@ -1103,11 +1103,9 @@ const mcp = {
         if (data && data.length > 0) {
             state.mcps = data;
             state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
-            document.getElementById('mcp-button').style.display = 'flex';
         } else {
             state.mcps = [];
             state.selectedMcps = [];
-            document.getElementById('mcp-button').style.display = 'none';
         }
     },
 };
@@ -1367,11 +1365,7 @@ const skills = {
 
     async loadList() {
         const data = await api.listSkills();
-        if (data && data.length > 0) {
-            document.getElementById('skills-button').style.display = 'flex';
-        } else {
-            document.getElementById('skills-button').style.display = 'none';
-        }
+        // Button always visible; just store the result for modal rendering
     },
 };
 
@@ -1627,9 +1621,6 @@ const init = async () => {
     if (loggedIn) {
         // Load MCPs
         await mcp.loadList();
-
-        // Load Skills
-        await skills.loadList();
     }
 
     // Feature detection (image upload)
@@ -1639,15 +1630,6 @@ const init = async () => {
             document.getElementById('image-add-btn').style.display = 'flex';
         }
     } catch { /* upload not available */
-    }
-
-    // Feature detection (file manager)
-    try {
-        const files = await api.listAllFiles();
-        if (files && files.length > 0) {
-            document.getElementById('file-manager-button').style.display = 'flex';
-        }
-    } catch { /* file manager not available */
     }
 
     // Load conversations

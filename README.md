@@ -93,7 +93,7 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 ### File Download and Preview
 Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`.
 
-The toolbar also provides a standalone "File" entry for unified browsing, previewing, downloading, and deleting all non-knowledge-base files (including tool uploads and git repositories).
+The "File" entry provides unified browsing, previewing, downloading, and deleting for all non-knowledge-base files (including tool uploads and git repositories).
 
 ## Replace the Default RAG Implementation
 
@@ -188,7 +188,7 @@ spring:
 }
 ```
 
-After configuring MCP services, an MCP button appears in the toolbar showing available services:
+The MCP button opens a panel showing available services:
 
 ![img_3.png](img_3.png)
 
