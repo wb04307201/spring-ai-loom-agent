@@ -111,6 +111,45 @@ public class LoomAgentProperties {
         private int m = 16;
         private int efConstruction = 100;
         private int efSearch = 10;
-
     }
+
+    @Data
+    public static class AuthProperty {
+        private boolean enabled = true;
+        /**
+         * 需要鉴权的路径模式（Ant 风格）。默认只鉴权 API 路径，
+         * 静态资源（index.html/app.js/style.css）和用户登录接口不在此列。
+         */
+        private List<String> pathPatterns = List.of("/spring/ai/loom/**");
+        private List<String> excludePathPatterns = List.of(
+                "/spring/ai/loom/user/login",
+                "/spring/ai/loom/user/isAutoLogin",
+                "/spring/ai/loom/user/logout",
+                "/spring/ai/loom/index.html",
+                "/spring/ai/loom/app.js",
+                "/spring/ai/loom/style.css"
+        );
+        private CookieProperty cookie = new CookieProperty();
+
+        @Data
+        public static class CookieProperty {
+            private String name = "loom-agent-session";
+            private String path = "/";
+            private String domain = "";
+            private boolean secure = false;
+            private String sameSite = "Lax";
+            private int maxAge = 86400;
+        }
+    }
+
+    private AuthProperty auth = new AuthProperty();
+
+    @Data
+    public static class UserProperty {
+        private String username = "username";
+        private String nickname = "用户";
+        private String authentication = "loom-agent-auth";
+    }
+
+    private UserProperty user = new UserProperty();
 }

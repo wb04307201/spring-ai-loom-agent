@@ -162,4 +162,14 @@ public class DefaultUpload implements IUpload {
         return knowledge.delete(knowledgeId);
     }
 
+    @Override
+    public byte[] getContentByLocation(String location) {
+        Path path = Path.of(location);
+        try {
+            return Files.readAllBytes(path);
+        } catch (IOException e) {
+            throw new LoomAgentRuntimeException(e);
+        }
+    }
+
 }

@@ -1,4 +1,4 @@
-package cn.wubo.spring.ai.loom.agent.file;
+package cn.wubo.spring.ai.loom.agent.file.view;
 
 import cn.wubo.file.view.storage.IFileStorage;
 import cn.wubo.file.view.storage.dto.FileStorageInfo;

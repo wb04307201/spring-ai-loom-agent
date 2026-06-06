@@ -154,6 +154,10 @@ spring:
             description: 自定义http服务测试
             content: classpath:skills/http.st
             load: false
+          - name: 测试保存、下载、预览
+            description: 测试保存、下载、预览
+            content: 你能说明勾股定理么？并保存成md，并给我下载和和预览地址
+            load: false
           - name: 测试自动编译
             description: 测试自动编译，使用git拉取代码，maven编译，构建docker镜像并创建容器运行
             content: classpath:skills/package-docker.st

@@ -34,9 +34,10 @@ const API = {
 };
 
 // ===================== §2 Global State =====================
+// Cookie-based auth (BFF pattern): no token stored in localStorage.
+// Browser automatically sends HttpOnly session cookie with each request.
 const state = {
     username: null,
-    token: null,
     conversationId: null,
     selectedMcps: [],
     selectedKnowledgeId: null,
@@ -80,12 +81,11 @@ function showToast(message, type = 'success') {
     setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
 }
 
-/** Wrapper for fetch that auto-clears auth on 401 */
+/** Wrapper for fetch that clears state on 401 */
 async function apiFetch(url, options = {}) {
     const resp = await fetch(url, options);
-    if (resp.status === 401 && state.token) {
-        // Only clear if there was a token — means token expired or became invalid.
-        // Don't clear during initial load when no token has been set yet.
+    if (resp.status === 401 && state.username) {
+        // Session expired or invalidated — clear client-side state
         auth.clear();
     }
     return resp;
@@ -114,18 +114,24 @@ function truncateText(text, maxLength) {
     return text.substring(0, maxLength) + '...';
 }
 
+/** Render Markdown with post-processing to make all links open in new tab, and LLM-output cleanup */
 function renderMarkdown(text) {
-    try { return marked.parse(text); }
+    try {
+        // Clean up common LLM output artifacts:
+        // 1. Strip "url:" prefix from bare URLs so marked autolinks them
+        text = text.replace(/url:(https?:\/\/[^\s\n]+)/g, '$1');
+        // 2. Strip instruction lines about HTML <a> tags (not useful to the user)
+        text = text.replace(/^使用HTML\s*<a>\s*标签.*$/gm, '').trim();
+        // Parse markdown normally, then post-process all links to open in new tab
+        const html = marked.parse(text);
+        return html.replace(/<a\s/g, '<a target="_blank" rel="noopener noreferrer" ');
+    }
     catch { return text; }
 }
 
-function getAuthHeader() {
-    const h = {};
-    if (state.token) h['Authorization'] = state.token;
-    return h;
-}
-
 // ===================== §4 API Service Layer =====================
+// All requests rely on HttpOnly session cookie for auth (BFF pattern).
+// No Authorization header is sent from the client.
 const api = {
     async autoLogin() {
         const r = await fetch(API.autoLogin, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -140,29 +146,29 @@ const api = {
         return r.ok ? r.json() : null;
     },
     async listConversations() {
-        const r = await apiFetch(API.listConversations, {headers: getAuthHeader()});
+        const r = await apiFetch(API.listConversations);
         return r.ok ? r.json() : [];
     },
     async getConversationMessages(id) {
-        const r = await apiFetch(API.getConversation(id), {headers: getAuthHeader()});
+        const r = await apiFetch(API.getConversation(id));
         return r.ok ? r.json() : [];
     },
     async deleteConversation(id) {
-        const r = await apiFetch(API.deleteConversation(id), {method: 'DELETE', headers: getAuthHeader()});
+        const r = await apiFetch(API.deleteConversation(id), {method: 'DELETE'});
         return r.ok;
     },
     async listMcps() {
-        const r = await apiFetch(API.listMcps, {headers: getAuthHeader()});
+        const r = await apiFetch(API.listMcps);
         return r.ok ? r.json() : [];
     },
     async listSkills() {
-        const r = await apiFetch(API.listSkills, {headers: getAuthHeader()});
+        const r = await apiFetch(API.listSkills);
         return r.ok ? r.json() : [];
     },
     async createSkill(skill) {
         const r = await apiFetch(API.createSkill, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(skill),
         });
         return r.ok ? r.json() : null;
@@ -170,7 +176,7 @@ const api = {
     async updateSkill(skill) {
         const r = await apiFetch(API.updateSkill, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(skill),
         });
         return r.ok ? r.json() : null;
@@ -178,47 +184,45 @@ const api = {
     async deleteSkill(name) {
         const r = await apiFetch(API.deleteSkill(name), {
             method: 'DELETE',
-            headers: getAuthHeader(),
         });
         return r.ok ? r.json() : null;
     },
     async listKnowledge() {
-        const r = await apiFetch(API.listKnowledge, {headers: getAuthHeader()});
+        const r = await apiFetch(API.listKnowledge);
         return r.ok ? r.json() : [];
     },
     async createKnowledge(name) {
         const r = await apiFetch(API.createKnowledge, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name }),
         });
         return r.ok ? r.json() : null;
     },
     async deleteKnowledge(id) {
-        const r = await apiFetch(API.deleteKnowledge(id), {method: 'DELETE', headers: getAuthHeader()});
+        const r = await apiFetch(API.deleteKnowledge(id), {method: 'DELETE'});
         return r.ok ? r.json() : null;
     },
     async listKnowledgeFiles(id) {
-        const r = await apiFetch(API.listKnowledgeFiles(id), {headers: getAuthHeader()});
+        const r = await apiFetch(API.listKnowledgeFiles(id));
         return r.ok ? r.json() : [];
     },
     async uploadToKnowledge(id, file) {
         const fd = new FormData();
         fd.append('file', file);
-        const r = await apiFetch(API.uploadToKnowledge(id), {method: 'POST', body: fd, headers: getAuthHeader()});
+        const r = await apiFetch(API.uploadToKnowledge(id), {method: 'POST', body: fd});
         return r.ok ? r.json() : null;
     },
     async deleteKnowledgeFile(knowledgeId, fileId) {
         const r = await apiFetch(API.deleteKnowledgeFile(knowledgeId, fileId), {
             method: 'DELETE',
-            headers: getAuthHeader()
         });
         return r.ok ? r.json() : null;
     },
     async uploadFile(file) {
         const fd = new FormData();
         fd.append('file', file);
-        const r = await apiFetch(API.uploadFile, {method: 'POST', body: fd, headers: getAuthHeader()});
+        const r = await apiFetch(API.uploadFile, {method: 'POST', body: fd});
         return r.ok ? r.json() : null;
     },
     async uploadImage(file) {
@@ -229,13 +233,13 @@ const api = {
         throw new Error('上传失败：未返回 fileId');
     },
     async checkKnowledgeUpload() {
-        const r = await apiFetch(API.checkKnowledgeUpload, {headers: getAuthHeader()});
+        const r = await apiFetch(API.checkKnowledgeUpload);
         return r.ok;
     },
     async streamChat(record, onChunk, onComplete, onError) {
         const resp = await apiFetch(API.stream, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(record),
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -261,41 +265,25 @@ const api = {
 
 // ===================== §5 Auth Module =====================
 const auth = {
-    STORAGE_KEY_TOKEN: 'loomAgentToken',
-    STORAGE_KEY_NICKNAME: 'loomAgentNickname',
 
     /** Initialize auth state on page load.
-     *  1. If token exists in localStorage → restore session
-     *  2. Else call isAutoLogin → if true, auto-login with empty fields
+     *  BFF pattern: browser automatically sends session cookie.
+     *  1. Call isAutoLogin → checks server-side session validity
+     *  2. If true (supports auto-login or has valid session) → auto-login
      *  3. Else show "未登录"
      */
     async init() {
-        // Try to restore from localStorage first
-        const savedToken = localStorage.getItem(this.STORAGE_KEY_TOKEN);
-        const savedNickname = localStorage.getItem(this.STORAGE_KEY_NICKNAME);
-        if (savedToken && savedNickname) {
-            state.token = savedToken;
-            state.username = savedNickname;
-            this.renderUserState(savedNickname);
-            return true;
-        }
-
-        // Check auto-login
         try {
             const autoLogin = await api.autoLogin();
             if (autoLogin === true) {
                 const data = await api.login({username: '', verified: ''});
-                if (data && data.token) {
-                    state.token = data.token;
+                if (data) {
                     state.username = data.nickname || '用户';
-                    localStorage.setItem(this.STORAGE_KEY_TOKEN, data.token);
-                    localStorage.setItem(this.STORAGE_KEY_NICKNAME, data.nickname || '用户');
                     this.renderUserState(data.nickname || '用户');
                     return true;
                 }
-            } else {
-                this.renderLoggedOut();
             }
+            this.renderLoggedOut();
         } catch (e) {
             this.renderLoggedOut();
         }
@@ -336,7 +324,7 @@ const auth = {
 
     /** Show login modal when clicking "未登录" */
     showLoggedOutMessage() {
-        if (state.token) return; // already logged in
+        if (state.username) return; // already logged in
         let modal = document.getElementById('login-modal');
         if (!modal) {
             modal = document.createElement('div');
@@ -378,11 +366,8 @@ const auth = {
                     return;
                 }
                 const data = await api.login({username, verified});
-                if (data && data.token) {
-                    state.token = data.token;
+                if (data) {
                     state.username = data.nickname || username;
-                    localStorage.setItem(this.STORAGE_KEY_TOKEN, data.token);
-                    localStorage.setItem(this.STORAGE_KEY_NICKNAME, data.nickname || username);
                     this.renderUserState(data.nickname || username);
                     modal.style.display = 'none';
                     showToast('登录成功', 'success');
@@ -407,23 +392,20 @@ const auth = {
         setTimeout(() => modal.querySelector('#login-username-input')?.focus(), 100);
     },
 
-    /** Clear auth state — called on 401 or logout */
+    /** Clear auth state — called on 401 or logout.
+     *  Cookie is HttpOnly and managed by browser; clear client-side state only.
+     */
     clear() {
-        state.token = null;
         state.username = null;
-        localStorage.removeItem(this.STORAGE_KEY_TOKEN);
-        localStorage.removeItem(this.STORAGE_KEY_NICKNAME);
         this.renderLoggedOut();
     },
 
-    async login(username, password) {
-        const data = await api.login({ username, password });
-        if (data) {
-            state.username = data.username;
-            state.token = data.verified || data.token || data.username;
-            return true;
-        }
-        return false;
+    /** Logout: call server to invalidate session, then clear client state */
+    async logout() {
+        try {
+            await fetch(API.login.replace('/login', '/logout'), {method: 'POST'});
+        } catch { /* ignore */ }
+        this.clear();
     },
 };
 
@@ -690,7 +672,6 @@ const chat = {
             mcps: state.selectedMcps,
             enableRag: state.enableRag,
             knowledgeId: state.selectedKnowledgeId || null,
-            authentication: state.token || '',
             fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId) : null,
         };
 
@@ -1544,7 +1525,7 @@ const imageUpload = {
 const init = async () => {
     ui.init();
 
-    // Auth check — auto-login or restore from localStorage
+    // Auth check — auto-login via cookie-based session (BFF pattern)
     const loggedIn = await auth.init();
 
     // Only load protected resources after successful login

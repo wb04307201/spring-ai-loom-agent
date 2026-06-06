@@ -2,7 +2,7 @@
 
 > **Base URL**: `http://localhost:8089` (default port for the test environment)
 > **Version**: 1.0.0
-> **Authentication**: Most `/spring/ai/loom/*` endpoints are protected by an `AuthenticationFilter`.
+> **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
 
@@ -65,17 +65,34 @@ POST /spring/ai/loom/user/login
 
 | Field      | Type   | Description     |
 |------------|--------|-----------------|
-| `token`    | string | Auth token      |
+| `token`    | string | Session token (also set as HttpOnly cookie) |
 | `nickname` | string | User nickname   |
+
+**Response Headers**:
+- `Set-Cookie: loom-agent-session=<token>; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax`
 
 **Example**:
 
 ```json
 {
-  "token": "eyJhbGciOi...",
-  "nickname": "Test User"
+  "token": "567fb50c-b293-403b-a903-f6b7b597c318",
+  "nickname": "用户"
 }
 ```
+
+---
+
+### 1.3 User Logout
+
+```
+POST /spring/ai/loom/user/logout
+```
+
+**Request Body**: None
+
+**Response**: `true` (boolean)
+
+**Effect**: The session token is invalidated server-side and the `loom-agent-session` cookie is cleared (Max-Age=0).
 
 ---
 
@@ -158,9 +175,8 @@ Accept: text/event-stream
 | `message`        | string   | Yes      | User message content                             |
 | `conversationId` | string   | No       | Conversation ID. A new session is created if omitted. |
 | `mcps`           | string[] | No       | List of MCP tool names to enable                 |
-| `authentication` | string   | No       | Auth token                                       |
 | `knowledgeId`    | string   | No       | Knowledge base ID for RAG retrieval              |
-| `fileId`         | string   | No       | Associated file ID                               |
+| `fileIds`        | string[] | No       | List of associated file IDs (supports multiple files) |
 
 **Example**:
 
@@ -170,8 +186,7 @@ Accept: text/event-stream
   "conversationId": "conv-001",
   "knowledgeId": "kb-001",
   "mcps": [],
-  "authentication": "",
-  "fileId": ""
+  "fileIds": ["file-abc123", "file-def456"]
 }
 ```
 
@@ -620,9 +635,8 @@ GET /spring/ai/chat/loom/mcp
   "message": "string",
   "conversationId": "string",
   "mcps": ["string"],
-  "authentication": "string",
   "knowledgeId": "string",
-  "fileId": "string"
+  "fileIds": ["string"]
 }
 ```
 
@@ -661,6 +675,8 @@ GET /spring/ai/chat/loom/mcp
   "nickname": "string"
 }
 ```
+
+> **Note**: The `token` is also set as an HttpOnly `Set-Cookie` header (`loom-agent-session`). The browser will automatically include this cookie in subsequent requests. Clients do not need to store or send the token manually.
 
 ### FileRecord
 
@@ -758,6 +774,16 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.jvector.efConstruction`    | int    | `100`                  | ef parameter at build time   |
 | `spring.ai.loom.agent.jvector.efSearch`          | int    | `10`                   | ef parameter at search time  |
 
+### 9.6 Authentication Configuration
+
+| Property                              | Type    | Default                | Description                                          |
+|---------------------------------------|---------|------------------------|------------------------------------------------------|
+| `spring.ai.loom.agent.auth.enabled`   | boolean | `true`                 | Authentication master switch                         |
+| `spring.ai.loom.agent.auth.pathPatterns` | string[] | `["/spring/ai/loom/**"]` | Paths requiring authentication (Ant-style patterns)  |
+| `spring.ai.loom.agent.auth.excludePathPatterns` | string[] | (see below) | Paths excluded from authentication |
+| `spring.ai.loom.agent.auth.cookie.name` | string  | `loom-agent-session`   | Session cookie name                                  |
+| `spring.ai.loom.agent.auth.cookie.maxAge` | int    | `86400`                | Cookie max age in seconds (24 hours)                 |
+
 ---
 
 ## Appendix: Endpoint Summary
@@ -765,7 +791,8 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | #  | Method   | Path                                                    | Description                          |
 |----|----------|---------------------------------------------------------|--------------------------------------|
 | 1  | `POST`   | `/spring/ai/loom/user/isAutoLogin`                      | Check auto-login status              |
-| 2  | `POST`   | `/spring/ai/loom/user/login`                            | User login                           |
+| 2  | `POST`   | `/spring/ai/loom/user/login`                            | User login (sets session cookie)     |
+| 2a | `POST`   | `/spring/ai/loom/user/logout`                           | User logout (invalidates session)    |
 | 3  | `GET`    | `/spring/ai/loom/conversation`                          | List conversations                   |
 | 4  | `GET`    | `/spring/ai/loom/conversation/{id}`                     | Get conversation history             |
 | 5  | `DELETE` | `/spring/ai/loom/conversation/{id}`                     | Delete conversation                  |

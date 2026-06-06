@@ -29,8 +29,10 @@ import cn.wubo.spring.ai.loom.agent.tool.time.DefaultTimeTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
 import cn.wubo.spring.ai.loom.agent.user.*;
 import cn.wubo.spring.ai.loom.agent.vectorstore.JVectorStore;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.client.McpSyncClient;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.Part;
 import lombok.Data;
@@ -54,12 +56,13 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.cache.Cache;
+import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
@@ -68,6 +71,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.RouterFunctions;
 import org.springframework.web.servlet.function.ServerResponse;
@@ -75,6 +79,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -166,6 +171,8 @@ public class LoomAgentConfiguration {
                 properties.setTimezone(bound.getTimezone());
                 properties.setGitUsername(bound.getGitUsername());
                 properties.setGitToken(bound.getGitToken());
+                properties.setAuth(bound.getAuth());
+                properties.setUser(bound.getUser());
             }
             return properties;
         }
@@ -209,8 +216,8 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IChat.class)
         @Bean
-        public IChat chat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IUser user, IFile file) {
-            return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, user, file);
+        public IChat chat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+            return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file);
         }
 
         @Slf4j
@@ -233,9 +240,10 @@ public class LoomAgentConfiguration {
                 emitter.onCompletion(() -> log.debug("SSE 链接完成"));
                 emitter.onError(e -> log.debug("SSE 链接错误：{}", e.getMessage()));
 
+                String username = UserContextHolder.getCurrentUser();
                 CompletableFuture.runAsync(() -> {
                     try {
-                        Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, request);
+                        Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
                         chatResponseFlux.subscribe(chatResponse -> {
                             try {
@@ -258,9 +266,9 @@ public class LoomAgentConfiguration {
     // ==================== RAG (all beans conditional on VectorStore) ====================
 
     @Configuration
+    @Conditional(AnyEmbeddingProviderCondition.class)
     static class RagConfiguration {
 
-        @ConditionalOnBean(EmbeddingModel.class)
         @ConditionalOnMissingBean(VectorStore.class)
         @Bean
         public VectorStore jVectorStore(EmbeddingModel embeddingModel, LoomAgentProperties properties) {
@@ -292,6 +300,37 @@ public class LoomAgentConfiguration {
         @Bean
         public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge) {
             return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge);
+        }
+    }
+
+    /**
+     * Nested condition: RagConfiguration activates if ANY embedding provider
+     * auto-configuration is present on the classpath.
+     */
+    static class AnyEmbeddingProviderCondition extends AnyNestedCondition {
+
+        AnyEmbeddingProviderCondition() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @ConditionalOnClass(name = "com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeEmbeddingAutoConfiguration")
+        static class DashScopePresent {
+        }
+
+        @ConditionalOnClass(name = "org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration")
+        static class OpenAiEmbeddingPresent {
+        }
+
+        @ConditionalOnClass(name = "org.springframework.ai.model.ollama.autoconfigure.OllamaEmbeddingAutoConfiguration")
+        static class OllamaEmbeddingPresent {
+        }
+
+        @ConditionalOnClass(name = "org.springframework.ai.model.deepseek.autoconfigure.DeepSeekEmbeddingAutoConfiguration")
+        static class DeepSeekEmbeddingPresent {
+        }
+
+        @ConditionalOnClass(name = "org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiEmbeddingAutoConfiguration")
+        static class ZhiPuAiEmbeddingPresent {
         }
     }
 
@@ -351,11 +390,9 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IUser.class)
         @Bean
-        public IUser defaultUser(
-                @org.springframework.beans.factory.annotation.Value("${spring.ai.loom.agent.user.username:username}") String defaultUsername,
-                @org.springframework.beans.factory.annotation.Value("${spring.ai.loom.agent.user.nickname:用户}") String defaultNickname,
-                @org.springframework.beans.factory.annotation.Value("${spring.ai.loom.agent.user.authentication:loom-agent-auth}") String defaultAuthentication) {
-            return new DefaultUser(defaultUsername, defaultNickname, defaultAuthentication);
+        public IUser defaultUser(LoomAgentProperties properties, Cache sessionCache) {
+            LoomAgentProperties.UserProperty userProp = properties.getUser();
+            return new DefaultUser(userProp.getUsername(), userProp.getNickname(), userProp.getAuthentication(), sessionCache);
         }
 
         @ConditionalOnMissingBean(IUserConversation.class)
@@ -395,20 +432,71 @@ public class LoomAgentConfiguration {
     static class WebConfiguration {
 
         @Bean
-        public FilterRegistrationBean<AuthenticationFilter> authenticationFilter(IUser user) {
+        public Cache sessionCache(LoomAgentProperties properties) {
+            int ttlSeconds = properties.getAuth().getCookie().getMaxAge();
+            return new CaffeineCache("loom-agent-auth",
+                    Caffeine.newBuilder()
+                            .maximumSize(10_000)
+                            .expireAfterWrite(java.time.Duration.ofSeconds(ttlSeconds))
+                            .build());
+        }
+
+        @Bean
+        public FilterRegistrationBean<AuthenticationFilter> authenticationFilter(IUser user, LoomAgentProperties properties) {
             FilterRegistrationBean<AuthenticationFilter> registration = new FilterRegistrationBean<>();
-            registration.setFilter(new AuthenticationFilter(user));
-            registration.addUrlPatterns("/spring/ai/loom/*");
+            registration.setFilter(new AuthenticationFilter(user, properties.getAuth()));
+            registration.addUrlPatterns("/*");
             registration.setOrder(1);
             return registration;
         }
 
         @Bean("loomAgentBaseRouter")
-        public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user) {
+        public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom", request -> ServerResponse.temporaryRedirect(URI.create("/spring/ai/loom/index.html")).build());
-            builder.POST("spring/ai/loom/user/isAutoLogin", request -> ServerResponse.ok().body(user.isAutoLogin()));
-            builder.POST("spring/ai/loom/user/login", request -> ServerResponse.ok().body(user.login(request.body(UserRequestRecord.class))));
+
+            // isAutoLogin: check if there's a valid session cookie, or always return true to allow auto-login
+            builder.POST("spring/ai/loom/user/isAutoLogin", request -> {
+                String token = extractTokenFromCookies(request, properties.getAuth().getCookie().getName());
+                boolean hasValidSession = token != null && user.validateToken(token);
+                return ServerResponse.ok().body(hasValidSession || user.isAutoLogin());
+            });
+
+            // login: validate credentials, create session token, set cookie
+            builder.POST("spring/ai/loom/user/login", request -> {
+                UserRequestRecord body = request.body(UserRequestRecord.class);
+                UserResponseRecord response = user.login(body);
+                String username = body.username() != null && !body.username().isEmpty()
+                        ? body.username()
+                        : properties.getUser().getUsername();
+                String token = user.createToken(username);
+                LoomAgentProperties.AuthProperty.CookieProperty cookieProp = properties.getAuth().getCookie();
+                return ServerResponse.ok()
+                        .cookie(createSessionCookie(token, cookieProp))
+                        .body(new UserResponseRecord(token, response.nickname()));
+            });
+
+            // logout: invalidate token and clear cookie
+            builder.POST("spring/ai/loom/user/logout", request -> {
+                String token = extractTokenFromCookies(request, properties.getAuth().getCookie().getName());
+                if (token != null) {
+                    user.invalidateToken(token);
+                }
+                LoomAgentProperties.AuthProperty.CookieProperty cookieProp = properties.getAuth().getCookie();
+                Cookie clearCookie = new Cookie(cookieProp.getName(), "");
+                clearCookie.setPath(cookieProp.getPath());
+                clearCookie.setMaxAge(0);
+                clearCookie.setHttpOnly(true);
+                clearCookie.setSecure(cookieProp.isSecure());
+                clearCookie.setAttribute("SameSite", cookieProp.getSameSite());
+                if (cookieProp.getDomain() != null && !cookieProp.getDomain().isEmpty()) {
+                    clearCookie.setDomain(cookieProp.getDomain());
+                }
+                return ServerResponse.ok()
+                        .cookie(clearCookie)
+                        .body(true);
+            });
+
             return builder.build();
         }
 
@@ -480,8 +568,24 @@ public class LoomAgentConfiguration {
                 String username = UserContextHolder.getCurrentUser();
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.delete(id, username));
             });
+            builder.GET("/spring/ai/loom/file/{id}/download", request -> {
+                String id = request.pathVariable("id");
+                FileRecord fileRecord = file.getById(id, UserContextHolder.getCurrentUser());
+                return ServerResponse.ok()
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .contentLength(fileRecord.size())
+                        .header("Content-Disposition", "attachment; filename=\"" + fileRecord.fileName() + "\"")
+                        .build((res, req) -> {
+                            try (OutputStream os = req.getOutputStream()) {
+                                os.write(upload.getContentByLocation(fileRecord.path()));
+                                os.flush();
+                            }
+                            return new ModelAndView();
+                        });
+            });
             return builder.build();
         }
+
 
         @ConditionalOnBean(VectorStore.class)
         @Bean("loomAgentKnowledgeRouter")
@@ -516,6 +620,44 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.delete(fileId));
             });
             return builder.build();
+        }
+
+        /**
+         * file-view 鉴权 Bean，复用 LoomAgent 的 Cookie Session 鉴权机制。
+         * 当 classpath 存在 file-view 库时自动注册。
+         */
+        @ConditionalOnClass(name = "cn.wubo.file.view.auth.IAuth")
+        @ConditionalOnMissingBean(cn.wubo.file.view.auth.IAuth.class)
+        @Bean
+        public cn.wubo.file.view.auth.IAuth loomAgentFileViewAuth(IUser user, LoomAgentProperties properties) {
+            return new cn.wubo.spring.ai.loom.agent.file.view.LoomAgentAuth(user, properties.getAuth().getCookie().getName());
+        }
+
+        private static String extractTokenFromCookies(
+                org.springframework.web.servlet.function.ServerRequest request, String cookieName) {
+            Cookie[] cookies = request.servletRequest().getCookies();
+            if (cookies != null) {
+                for (Cookie cookie : cookies) {
+                    if (cookieName.equals(cookie.getName())) {
+                        return cookie.getValue();
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static Cookie createSessionCookie(
+                String token, LoomAgentProperties.AuthProperty.CookieProperty cookieProp) {
+            Cookie cookie = new Cookie(cookieProp.getName(), token);
+            cookie.setPath(cookieProp.getPath());
+            cookie.setMaxAge(cookieProp.getMaxAge());
+            cookie.setHttpOnly(true);
+            cookie.setSecure(cookieProp.isSecure());
+            if (cookieProp.getDomain() != null && !cookieProp.getDomain().isEmpty()) {
+                cookie.setDomain(cookieProp.getDomain());
+            }
+            cookie.setAttribute("SameSite", cookieProp.getSameSite());
+            return cookie;
         }
     }
 }

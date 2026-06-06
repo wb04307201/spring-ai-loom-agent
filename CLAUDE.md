@@ -44,13 +44,13 @@ All components follow an **interface + default implementation** pattern. Every b
 
 | Interface | Default Impl | Responsibility |
 |-----------|-------------|----------------|
-| `IChat` | `DefaultChat` | Chat streaming (SSE), MCP tool orchestration, RAG augmentation |
+| `IChat` | `DefaultChat` | Chat streaming (SSE), MCP tool orchestration, RAG augmentation. `stream(record, username, request)` — username injected by filter |
 | `IKnowledge` | `DefaultKnowledge` | Knowledge base CRUD (stored in H2) |
 | `IMcp` | `SyncMcp` / `ASyncMcp` | MCP client wrapper (sync or async), tool discovery & invocation |
 | `ISkillStorage` | `DefaultSkillStorage` | Skill template storage, parameter forms, MCP tool binding |
 | `IFile` | `DefaultFile` | File metadata storage (H2) + disk storage |
 | `IUpload` | `DefaultUpload` | File upload pipeline: Tika parsing → document splitting → vectorization |
-| `IUser` | `DefaultUser` | Token-based auth filter + auto-login |
+| `IUser` | `DefaultUser` | BFF + HttpOnly cookie session auth + auto-login |
 | `IUserConversation` | `DefaultUserConversation` | User-to-conversation mapping |
 | `IEmbedTool` | _(marker interface)_ | Aggregate type for all embed tools, sub-interfaces extend it |
 | `ITimeTool` | `DefaultTimeTool` | Time tools: get current time, convert between timezones |
@@ -80,7 +80,7 @@ Organized into 7 nested static `@Configuration` classes:
 - `RetrievalAugmentationAdvisor` with configurable prompt templates and similarity threshold
 - `IGitTool` (Eclipse JGit 7.2.1) conditionally created when `spring.ai.loom.agent.git.enabled=true`
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
-- `AuthenticationFilter` on `/spring/ai/loom/*` paths
+- `AuthenticationFilter` on `/*` (matches all), with `AntPathMatcher` filtering via `auth.pathPatterns` and `auth.excludePathPatterns`
 
 ### Data Layer
 
@@ -95,14 +95,15 @@ All under `spring.ai.loom.agent`:
 - `jvector` — index path, HNSW params (m, efConstruction, efSearch)
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
 - `skills` — list of skill templates (name, description, tools, content path, params)
-- `user` — default username, nickname, authentication token
+- `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `cookie` (name, path, domain, secure, sameSite, maxAge)
+- `user` — default username, nickname, authentication token (legacy)
 - `git` — `enabled` (boolean, default false), `gitUsername`, `gitToken` for remote git authentication
 
 ### Frontend
 
 Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/`:
 - `index.html` — entry point
-- `app.js` — Vue-based chat UI (SSE streaming, sidebar, modals)
+- `app.js` — Vue-based chat UI (SSE streaming, sidebar, modals). **BFF + Cookie auth**: no localStorage token, browser auto-carries HttpOnly cookie
 - `style.css` — styling
 - Uses marked.js for Markdown rendering, eventsource-parser for SSE
 

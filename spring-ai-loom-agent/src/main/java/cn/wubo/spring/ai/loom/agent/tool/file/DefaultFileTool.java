@@ -283,7 +283,7 @@ public class DefaultFileTool implements IFileTool {
         return "用户文件目录：" + userDir;
     }
 
-    @Tool(description = "根据文件id生成原始文件下载URL（WOPI端点）。适用于需要获取文件原始二进制内容的场景，如图片、音频、二进制文件等。")
+    @Tool(description = "根据文件id生成原始文件下载URL（WOPI端点）。适用于需要获取文件原始二进制内容的场景，如图片、音频、二进制文件等。返回 [下载:文件名](url) 格式的 Markdown 链接。")
     @Override
     public String downloadFileUrl(@ToolParam(description = "文件id") String fileId, ToolContext toolContext) {
         String username = (String) toolContext.getContext().get("username");
@@ -292,11 +292,10 @@ public class DefaultFileTool implements IFileTool {
             return "文件不存在，已被自动清理";
         }
         String baseUrl = (String) toolContext.getContext().get("baseUrl");
-        return "url:" + baseUrl + "/wopi/files/" + fileId + "/contents\n" +
-                "文件名：" + fileRecord.fileName() + "\n";
+        return "[下载:" + fileRecord.fileName() + "](" + baseUrl + "/spring/ai/loom/file/" + fileId + "/download)";
     }
 
-    @Tool(description = "根据文件id生成文件在线预览URL。适用于需要在浏览器中直接查看文件的场景，支持 PDF、Word、Excel、PPT、图片、Markdown 等格式。")
+    @Tool(description = "根据文件id生成文件在线预览URL。适用于需要在浏览器中直接查看文件的场景，支持 PDF、Word、Excel、PPT、图片、Markdown 等格式。返回 [预览:文件名](url) 格式的 Markdown 链接。")
     @Override
     public String viewFileUrl(@ToolParam(description = "文件id") String fileId, ToolContext toolContext) {
         String username = (String) toolContext.getContext().get("username");
@@ -305,9 +304,7 @@ public class DefaultFileTool implements IFileTool {
             return "文件不存在，已被自动清理";
         }
         String baseUrl = (String) toolContext.getContext().get("baseUrl");
-        return "url:" + baseUrl + "/file/view/" + fileId + "\n" +
-                "文件名：" + fileRecord.fileName() + "\n" +
-                "使用HTML <a> 标签展示点击打开新的标签页";
+        return "[预览:" + fileRecord.fileName() + "](" + baseUrl + "/file/view/" + fileId + ")";
     }
 
     // ==================== Helpers ====================

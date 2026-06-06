@@ -156,7 +156,59 @@ spring:
                   - { label: Friendly, value: friendly }
 ```
 
-### 1.6 Git Configuration (`git.*`)
+### 1.6 Authentication Configuration (`auth.*`)
+
+The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** authentication model. After login, the server sets a session cookie, and the browser automatically carries it with each request — no token storage or manual header management is required.
+
+| Property                        | Type    | Default                          | Description                                                     |
+|---------------------------------|---------|----------------------------------|-----------------------------------------------------------------|
+| `auth.enabled`                  | boolean | `true`                           | Authentication master switch; set to `false` to skip all checks |
+| `auth.pathPatterns`             | Array   | `["/spring/ai/loom/**"]`         | Path patterns requiring authentication (Ant-style wildcards)    |
+| `auth.excludePathPatterns`      | Array   | `["/spring/ai/loom/user/login", "/spring/ai/loom/user/isAutoLogin", "/spring/ai/loom/user/logout", "/spring/ai/loom/index.html", "/spring/ai/loom/app.js", "/spring/ai/loom/style.css"]` | Paths explicitly excluded from authentication                     |
+| `auth.cookie.name`              | String  | `loom-agent-session`             | Session cookie name                                             |
+| `auth.cookie.path`              | String  | `/`                              | Cookie path                                                     |
+| `auth.cookie.domain`            | String  | `""`                             | Cookie domain (empty = current domain)                          |
+| `auth.cookie.secure`            | boolean | `false`                          | Whether the cookie is only sent over HTTPS                      |
+| `auth.cookie.sameSite`          | String  | `Lax`                            | SameSite attribute (`Lax` / `Strict` / `None`)                  |
+| `auth.cookie.maxAge`            | int     | `86400`                          | Cookie max age in seconds (default 24 hours)                    |
+
+**Example Configuration**:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        auth:
+          enabled: true
+          path-patterns:
+            - /spring/ai/loom/**
+          exclude-path-patterns:
+            - /spring/ai/loom/user/login
+            - /spring/ai/loom/user/isAutoLogin
+            - /spring/ai/loom/user/logout
+            - /spring/ai/loom/index.html
+            - /spring/ai/loom/app.js
+            - /spring/ai/loom/style.css
+          cookie:
+            name: loom-agent-session
+            path: /
+            secure: false
+            same-site: Lax
+            max-age: 86400
+```
+
+**User Configuration (`user.*`)**:
+
+| Property                          | Type   | Default          | Description                          |
+|-----------------------------------|--------|------------------|--------------------------------------|
+| `user.username`                   | String | `username`       | Default auto-login username          |
+| `user.nickname`                   | String | `用户`           | Default auto-login nickname          |
+| `user.authentication`             | String | `loom-agent-auth`| Legacy token value (backward compatibility) |
+
+**Session Storage**: Uses Spring Cache (default Caffeine) with TTL matching `auth.cookie.maxAge`. Replace the `sessionCache` bean for custom storage (e.g., Redis).
+
+### 1.7 Git Configuration (`git.*`)
 
 | Property                   | Type    | Default | Description                                                                 |
 |----------------------------|---------|---------|-----------------------------------------------------------------------------|
@@ -192,20 +244,45 @@ The project uses the `@ConditionalOnMissingBean` pattern. All interfaces support
 | **Interface**   | `cn.wubo.spring.ai.loom.agent.user.IUser`                                                                                                                             |
 | **Default**     | `DefaultUser`                                                                                                                                                         |
 | **Override**    | Custom `@Bean IUser`                                                                                                                                                  |
-| **Properties**  | `spring.ai.loom.agent.user.username` (default `username`), `spring.ai.loom.agent.user.nickname` (default `User`), `spring.ai.loom.agent.user.authentication` (default `loom-agent-auth`) |
-| **Controls**    | Auto-login check, user login validation, auth token resolution                                                                                                         |
+| **Properties**  | `spring.ai.loom.agent.user.username` (default `username`), `spring.ai.loom.agent.user.nickname` (default `用户`), `spring.ai.loom.agent.user.authentication` (default `loom-agent-auth`) |
+| **Controls**    | Auto-login check, user login validation, session token management                                                                                                       |
 
-**Default behavior**: `isAutoLogin()` always returns `true`; `login()` always succeeds; `getUsernameByAuthentication()` only accepts the preconfigured token.
+**Interface methods**:
+- `isAutoLogin()` — whether auto-login is supported (default: `true`)
+- `login(UserRequestRecord)` — validate credentials and return response
+- `createToken(username)` — generate session token and store in cache
+- `validateToken(token)` — validate session token against cache
+- `invalidateToken(token)` — remove session token (logout)
+- `getUsernameByToken(token)` — resolve username from session token
+- `getUsernameByAuthentication(authentication)` — legacy method (backward compatibility)
+
+**Default behavior**: `isAutoLogin()` always returns `true`; `login()` always succeeds; session tokens are stored in Spring Cache (default Caffeine).
 
 **Customization Example**:
 
 ```java
 @Bean
-public IUser customUser() {
+public IUser customUser(Cache sessionCache) {
     return new IUser() {
         @Override public Boolean isAutoLogin() { return false; }
         @Override public UserResponseRecord login(UserRequestRecord request) {
             // Integrate real LDAP/OAuth/JWT authentication
+            // Return new UserResponseRecord(token, nickname)
+        }
+        @Override public String createToken(String username) {
+            String token = UUID.randomUUID().toString();
+            sessionCache.put(token, username);
+            return token;
+        }
+        @Override public boolean validateToken(String token) {
+            return sessionCache.get(token) != null;
+        }
+        @Override public void invalidateToken(String token) {
+            sessionCache.evict(token);
+        }
+        @Override public String getUsernameByToken(String token) {
+            var wrapper = sessionCache.get(token);
+            return wrapper != null ? (String) wrapper.get() : null;
         }
         @Override public String getUsernameByAuthentication(String authentication) {
             // Parse real JWT or OAuth token
@@ -232,6 +309,7 @@ public IUser customUser() {
 | **Interface**   | `cn.wubo.spring.ai.loom.agent.chat.IChat`                  |
 | **Default**     | `DefaultChat`                                              |
 | **Override**    | Custom `@Bean IChat`                                       |
+| **Method**      | `Flux<ChatResponse> stream(ChatRequestRecord record, String username, HttpServletRequest request)` |
 | **Controls**    | Streaming chat: user/session management, RAG advisor, MCP tool injection, skill tool injection, image file handling |
 
 **Default behavior**: Assembles `ChatClient`, optionally adding `RetrievalAugmentationAdvisor`, `IMcp` tools, all `IEmbedTool` sub-tools (time, skill, file, git), and user session management.
@@ -247,9 +325,8 @@ public IChat customChat(
         IMcp mcp,
         List<IEmbedTool> embedTools,
         IUserConversation userConversation,
-        IUser user,
         IFile file) {
-    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTools, userConversation, user, file);
+    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTools, userConversation, file);
 }
 ```
 
@@ -397,16 +474,17 @@ public IFileTool customFileTool(IFile file) {
 |-----------------|----------------------------------------------------------|
 | **Type**        | `cn.wubo.spring.ai.loom.agent.user.AuthenticationFilter` |
 | **Override**    | Custom Servlet Filter, or override the `IUser` bean       |
-| **Controls**    | Intercepts `/spring/ai/loom/*` requests, validates `Authorization` header |
+| **Controls**    | Intercepts requests matching `auth.pathPatterns`, validates session cookie |
 
-**Whitelist paths** (no authentication required):
+The filter uses `AntPathMatcher` to match request paths against `auth.pathPatterns`. Paths listed in `auth.excludePathPatterns` are always bypassed. When `auth.enabled=false`, the filter passes all requests through without validation.
 
-- `/spring/ai/loom/user/login`
-- `/spring/ai/loom/user/isAutoLogin`
-- `/spring/ai/loom`
-- `/spring/ai/loom/index.html`
-- `/spring/ai/loom/app.js`
-- `/spring/ai/loom/style.css`
+**Session management flow**:
+1. User accesses `/spring/ai/loom/index.html` (no auth required)
+2. Frontend calls `POST /spring/ai/loom/user/isAutoLogin` → returns `true`
+3. Frontend calls `POST /spring/ai/loom/user/login` → server creates session, sets `Set-Cookie: loom-agent-session=...`
+4. Browser automatically includes the HttpOnly cookie in subsequent requests
+5. `AuthenticationFilter` reads the cookie, validates against cache, sets `UserContextHolder`
+6. Logout: `POST /spring/ai/loom/user/logout` → server invalidates token and clears cookie
 
 ---
 
@@ -612,12 +690,12 @@ UI static resources are located at `spring-ai-loom-agent/src/main/resources/META
 |-----------------------------|--------------|--------------------------|
 | AI avatar image             | `app.js`     | `/static/ai.jpg`         |
 | User avatar image           | `app.js`     | `/static/user.png`       |
-| Allowed image upload types  | `app.js`     | JPG, PNG, GIF, WebP, BMP |
-| Max image upload size       | `app.js`     | 10 MB                    |
-| SSE timeout                 | `app.js`     | `0` (no timeout)         |
-| LocalStorage Token Key      | `app.js`     | `loomAgentToken`         |
-| LocalStorage Nickname Key   | `app.js`     | `loomAgentNickname`      |
-| UI modules                  | `index.html` | Knowledge Space, MCP Services, Skill Library |
+| Allowed file upload types | `app.js`     | JPG, PNG, GIF, WebP, BMP, PDF, DOCX, XLSX, PPTX, MD, TXT |
+| Max upload size           | `app.js`     | 10 MB                    |
+| SSE timeout               | `app.js`     | `0` (no timeout)         |
+| UI modules                | `index.html` | Knowledge Space, MCP Services, Skill Library |
+
+> **Note**: The frontend no longer uses localStorage for tokens (BFF + Cookie auth). Session is managed via HttpOnly cookies.
 
 ### 7.3 Override Method
 
@@ -631,7 +709,9 @@ Place same-named static resources in your own project to override the defaults, 
 |--------------------------------------|------------------------------|--------------------------------------------------------------------------------------------------|
 | `spring.ai.chat.ui.init=false`       | application.yml              | `ChatClient` is not created; the entire chat pipeline is unavailable                              |
 | `spring.ai.mcp.client.stdio=ASYNC`   | application.yml              | Switches to `ASyncMcp` (async MCP client)                                                        |
-| No `VectorStore` bean provided       | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, and `loomAgentKnowledgeRouter` are not created; knowledge base features unavailable |
+| `spring.ai.mcp.client.enabled=false` | application.yml              | MCP client auto-configuration disabled (prevents startup failures if MCP servers are unavailable) |
+| `auth.enabled=false`                 | application.yml              | Authentication disabled; `AuthenticationFilter` passes all requests through                      |
+| No `VectorStore` bean provided       | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, `loomAgentFileRouter`, and `loomAgentKnowledgeRouter` are not created; knowledge base and file upload features unavailable |
 | No `EmbeddingModel` bean provided    | Do not add EmbeddingModel Starter | `JVectorStore` is not created; vector storage unavailable                                        |
 | Custom bean of the same type         | Java `@Bean` configuration   | The corresponding `@ConditionalOnMissingBean` bean will not be created                           |
 | `spring.ai.loom.agent.git.enabled=true` | application.yml           | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.2.1); without this, no Git tool methods are available to the LLM |
@@ -642,7 +722,22 @@ Place same-named static resources in your own project to override the defaults, 
 |--------------------|------------------------------------------------------------------------|
 | Entire chat        | Set `spring.ai.chat.ui.init=false`                                     |
 | RAG / Knowledge Base | Do not add any `VectorStore` or `EmbeddingModel` Starter               |
-| MCP functionality  | Do not configure `spring.ai.mcp.*` or provide a custom `IMcp` returning empty lists |
+| MCP functionality  | Set `spring.ai.mcp.client.enabled=false`                               |
 | Git tool           | Do not set `spring.ai.loom.agent.git.enabled=true` (default is disabled) |
-| Auth filter        | Override `IUser.isAutoLogin()` to return `true`, or provide a custom Filter |
+| Auth filter        | Set `spring.ai.loom.agent.auth.enabled=false`                          |
 | Auto-login         | Override `IUser.isAutoLogin()` to return `false`                       |
+
+### 8.2 Session Cache Customization
+
+The `sessionCache` bean uses Caffeine by default with TTL matching `auth.cookie.maxAge`. Replace it for custom storage:
+
+```java
+@Bean
+public Cache sessionCache(RedisCacheManager cacheManager) {
+    return cacheManager.getCache("loom-agent-auth");
+}
+```
+
+### 8.3 IChat Method Signature
+
+The `IChat.stream()` method accepts a `username` parameter (injected by `SseController` from `UserContextHolder`), eliminating the need for `ChatRequestRecord.authentication` field. This makes the username explicit rather than implicit.

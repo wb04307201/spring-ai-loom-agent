@@ -156,7 +156,59 @@ spring:
                   - { label: 友好, value: friendly }
 ```
 
-### 1.6 Git 配置 (`git.*`)
+### 1.6 鉴权配置 (`auth.*`)
+
+项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器设置 Session Cookie，浏览器会在后续请求中自动携带该 Cookie，无需在客户端存储或手动管理 Token。
+
+| 属性                            | 类型    | 默认值                                                                                   | 说明                                                   |
+|---------------------------------|---------|------------------------------------------------------------------------------------------|--------------------------------------------------------|
+| `auth.enabled`                  | boolean | `true`                                                                                   | 鉴权总开关；设为 `false` 则跳过所有鉴权检查              |
+| `auth.pathPatterns`             | Array   | `["/spring/ai/loom/**"]`                                                                 | 需要鉴权的路径模式（Ant 风格通配符）                      |
+| `auth.excludePathPatterns`      | Array   | `["/spring/ai/loom/user/login", "/spring/ai/loom/user/isAutoLogin", "/spring/ai/loom/user/logout", "/spring/ai/loom/index.html", "/spring/ai/loom/app.js", "/spring/ai/loom/style.css"]` | 明确排除鉴权的路径列表                                   |
+| `auth.cookie.name`              | String  | `loom-agent-session`                                                                     | Session Cookie 名称                                    |
+| `auth.cookie.path`              | String  | `/`                                                                                      | Cookie 路径                                            |
+| `auth.cookie.domain`            | String  | `""`                                                                                     | Cookie 域名（空表示当前域名）                            |
+| `auth.cookie.secure`            | boolean | `false`                                                                                  | Cookie 是否仅通过 HTTPS 发送                           |
+| `auth.cookie.sameSite`          | String  | `Lax`                                                                                    | SameSite 属性（`Lax` / `Strict` / `None`）              |
+| `auth.cookie.maxAge`            | int     | `86400`                                                                                  | Cookie 最大存活时间（秒，默认 24 小时）                   |
+
+**示例配置**：
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        auth:
+          enabled: true
+          path-patterns:
+            - /spring/ai/loom/**
+          exclude-path-patterns:
+            - /spring/ai/loom/user/login
+            - /spring/ai/loom/user/isAutoLogin
+            - /spring/ai/loom/user/logout
+            - /spring/ai/loom/index.html
+            - /spring/ai/loom/app.js
+            - /spring/ai/loom/style.css
+          cookie:
+            name: loom-agent-session
+            path: /
+            secure: false
+            same-site: Lax
+            max-age: 86400
+```
+
+**用户配置 (`user.*`)**：
+
+| 属性                            | 类型   | 默认值           | 说明                                  |
+|---------------------------------|--------|------------------|---------------------------------------|
+| `user.username`                 | String | `username`       | 默认自动登录用户名                    |
+| `user.nickname`                 | String | `用户`           | 默认自动登录昵称                      |
+| `user.authentication`           | String | `loom-agent-auth`| 旧版令牌值（向后兼容）                  |
+
+**Session 存储**：默认使用 Spring Cache（Caffeine），TTL 与 `auth.cookie.maxAge` 一致。可替换 `sessionCache` Bean 为自定义存储（如 Redis）。
+
+### 1.7 Git 配置 (`git.*`)
 
 | 属性                       | 类型     | 默认值   | 说明                                                                |
 |--------------------------|--------|-------|-------------------------------------------------------------------|
@@ -193,29 +245,46 @@ spring:
 | **默认实现** | `DefaultUser`                                                                                                                                                      |
 | **覆盖方式** | 自定义 `@Bean IUser`                                                                                                                                                  |
 | **相关属性** | `spring.ai.loom.agent.user.username`（默认 `username`）、`spring.ai.loom.agent.user.nickname`（默认 `用户`）、`spring.ai.loom.agent.user.authentication`（默认 `loom-agent-auth`） |
-| **控制内容** | 自动登录判断、用户登录验证、认证令牌解析                                                                                                                                               |
+| **控制内容** | 自动登录判断、用户登录验证、Session Token 管理                                                                                                                                           |
 
-**默认行为**: `isAutoLogin()` 始终返回 `true`；`login()` 始终返回成功；`getUsernameByAuthentication()` 只接受配置中预设的令牌。
+**接口方法**：
+- `isAutoLogin()` — 是否支持自动登录（默认：`true`）
+- `login(UserRequestRecord)` — 验证凭据并返回响应
+- `createToken(username)` — 生成 Session Token 并存入缓存
+- `validateToken(token)` — 从缓存中校验 Session Token
+- `invalidateToken(token)` — 删除 Session Token（登出）
+- `getUsernameByToken(token)` — 从 Session Token 解析用户名
+- `getUsernameByAuthentication(authentication)` — 旧版方法（向后兼容）
+
+**默认行为**: `isAutoLogin()` 始终返回 `true`；`login()` 始终返回成功；Session Token 存储在 Spring Cache（默认 Caffeine）中。
 
 **自定义示例**:
 
 ```java
-
 @Bean
-public IUser customUser() {
+public IUser customUser(Cache sessionCache) {
     return new IUser() {
-        @Override
-        public Boolean isAutoLogin() {
-            return false;
-        }
-
-        @Override
-        public UserResponseRecord login(UserRequestRecord request) {
+        @Override public Boolean isAutoLogin() { return false; }
+        @Override public UserResponseRecord login(UserRequestRecord request) {
             // 接入真实的 LDAP/OAuth/JWT 认证
+            // 返回 new UserResponseRecord(token, nickname)
         }
-
-        @Override
-        public String getUsernameByAuthentication(String authentication) {
+        @Override public String createToken(String username) {
+            String token = UUID.randomUUID().toString();
+            sessionCache.put(token, username);
+            return token;
+        }
+        @Override public boolean validateToken(String token) {
+            return sessionCache.get(token) != null;
+        }
+        @Override public void invalidateToken(String token) {
+            sessionCache.evict(token);
+        }
+        @Override public String getUsernameByToken(String token) {
+            var wrapper = sessionCache.get(token);
+            return wrapper != null ? (String) wrapper.get() : null;
+        }
+        @Override public String getUsernameByAuthentication(String authentication) {
             // 解析真实的 JWT 或 OAuth token
         }
     };
@@ -240,6 +309,7 @@ public IUser customUser() {
 | **接口**   | `cn.wubo.spring.ai.loom.agent.chat.IChat`    |
 | **默认实现** | `DefaultChat`                                |
 | **覆盖方式** | 自定义 `@Bean IChat`                            |
+| **方法签名** | `Flux<ChatResponse> stream(ChatRequestRecord record, String username, HttpServletRequest request)` |
 | **控制内容** | 流式对话处理：用户/会话管理、RAG 顾问、MCP 工具注入、技能工具注入、图片/文档处理、toolContext 跨线程上下文传递 |
 
 **默认行为**: 组装 `ChatClient`，可选加入 `RetrievalAugmentationAdvisor`、`IMcp` 工具、所有 `IEmbedTool` 子工具（时间、技能、文件、Git）、用户会话管理等。文档类文件（PDF/DOCX/XLSX/PPTX/MD 等）通过 Apache Tika 提取文本后以 System Prompt 注入，图片作为 Media 类型传入模型。
@@ -255,9 +325,8 @@ public IChat customChat(
         IMcp mcp,
         List<IEmbedTool> embedTools,
         IUserConversation userConversation,
-        IUser user,
         IFile file) {
-    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTools, userConversation, user, file);
+    return new MyCustomChat(chatClient, ragAdvisor, mcp, embedTools, userConversation, file);
 }
 ```
 
@@ -406,16 +475,17 @@ public IFileTool customFileTool(IFile file) {
 |----------|----------------------------------------------------------|
 | **类型**   | `cn.wubo.spring.ai.loom.agent.user.AuthenticationFilter` |
 | **覆盖方式** | 自定义 Servlet Filter，或覆盖 `IUser` Bean                      |
-| **控制内容** | 拦截 `/spring/ai/loom/*` 路径的请求，验证 `Authorization` 请求头      |
+| **控制内容** | 拦截匹配 `auth.pathPatterns` 的请求，校验 Session Cookie          |
 
-**白名单路径**（无需认证）:
+过滤器使用 `AntPathMatcher` 匹配请求路径与 `auth.pathPatterns`。`auth.excludePathPatterns` 中列出的路径始终跳过鉴权。当 `auth.enabled=false` 时，过滤器放行所有请求。
 
-- `/spring/ai/loom/user/login`
-- `/spring/ai/loom/user/isAutoLogin`
-- `/spring/ai/loom`
-- `/spring/ai/loom/index.html`
-- `/spring/ai/loom/app.js`
-- `/spring/ai/loom/style.css`
+**Session 管理流程**：
+1. 用户访问 `/spring/ai/loom/index.html`（无需鉴权）
+2. 前端调用 `POST /spring/ai/loom/user/isAutoLogin` → 返回 `true`
+3. 前端调用 `POST /spring/ai/loom/user/login` → 服务端创建 Session，设置 `Set-Cookie: loom-agent-session=...`
+4. 浏览器自动在后续请求中携带 HttpOnly Cookie
+5. `AuthenticationFilter` 读取 Cookie，校验缓存中的 Token，设置 `UserContextHolder`
+6. 登出：`POST /spring/ai/loom/user/logout` → 服务端失效 Token 并清除 Cookie
 
 ---
 
@@ -621,13 +691,12 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 |---------------------------|--------------|--------------------------|
 | AI 头像图片                   | `app.js`     | `/static/ai.jpg`         |
 | 用户头像图片                    | `app.js`     | `/static/user.png`       |
-| 图片上传允许类型                  | `app.js`     | JPG, PNG, GIF, WebP, BMP, PDF, DOCX, XLSX, PPTX, MD, TXT 等 |
-| 图片上传最大大小                  | `app.js`     | 10 MB                    |
-| 文档上传允许类型                  | `app.js`     | 除图片外的所有支持的文档格式         |
-| SSE 超时时间                  | `app.js`     | `0`（不超时）                 |
-| LocalStorage Token Key    | `app.js`     | `loomAgentToken`         |
-| LocalStorage Nickname Key | `app.js`     | `loomAgentNickname`      |
-| UI 模块                     | `index.html` | 知识空间、MCP 服务、技能库          |
+| 允许上传类型                    | `app.js`     | JPG, PNG, GIF, WebP, BMP, PDF, DOCX, XLSX, PPTX, MD, TXT 等 |
+| 最大上传大小                    | `app.js`     | 10 MB                    |
+| SSE 超时时间                    | `app.js`     | `0`（不超时）                 |
+| UI 模块                       | `index.html` | 知识空间、MCP 服务、技能库          |
+
+> **注意**：前端不再使用 localStorage 存储 Token（BFF + Cookie 鉴权模式）。Session 由 HttpOnly Cookie 管理。
 
 ### 7.3 覆盖方式
 
@@ -641,7 +710,9 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 |------------------------------------|----------------------------|-----------------------------------------------------------------------------------------|
 | `spring.ai.chat.ui.init=false`     | application.yml            | 不创建 `ChatClient`，整个聊天流水线不可用                                                             |
 | `spring.ai.mcp.client.stdio=ASYNC` | application.yml            | 切换为 `ASyncMcp`（异步 MCP 客户端）                                                              |
-| 不提供 `VectorStore` Bean             | 不引入任何 VectorStore Starter  | 不会创建 `IDocumentRead`、`RetrievalAugmentationAdvisor`、`loomAgentKnowledgeRouter`，知识库功能不可用 |
+| `spring.ai.mcp.client.enabled=false`| application.yml           | 禁用 MCP 客户端自动配置（当 MCP 服务器不可用时可避免启动失败）                                       |
+| `auth.enabled=false`               | application.yml            | 禁用鉴权；`AuthenticationFilter` 放行所有请求                                                    |
+| 不提供 `VectorStore` Bean             | 不引入任何 VectorStore Starter  | 不会创建 `IDocumentRead`、`RetrievalAugmentationAdvisor`、`loomAgentFileRouter`、`loomAgentKnowledgeRouter`，知识库和文件上传功能不可用 |
 | 不提供 `EmbeddingModel` Bean          | 不引入 EmbeddingModel Starter | 不会创建 `JVectorStore`，向量存储不可用                                                             |
 | 自定义同类型 Bean                        | Java `@Bean` 配置            | 对应的 `@ConditionalOnMissingBean` Bean 不会被创建                                              |
 | `spring.ai.loom.agent.git.enabled=true` | application.yml          | 创建 `IGitTool` Bean（`DefaultGitTool`，Eclipse JGit 7.2.1）；未配置时 Git 工具不可用            |
@@ -652,7 +723,22 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 |---------|----------------------------------------------------|
 | 整个聊天功能  | 设置 `spring.ai.chat.ui.init=false`                  |
 | RAG/知识库 | 不引入任何 `VectorStore` 或 `EmbeddingModel` Starter     |
-| MCP 功能  | 不配置 `spring.ai.mcp.*` 或自定义 `IMcp` 返回空列表            |
+| MCP 功能  | 设置 `spring.ai.mcp.client.enabled=false`               |
 | Git 工具  | 不设置 `spring.ai.loom.agent.git.enabled=true`（默认禁用）    |
-| 认证过滤器   | 覆盖 `IUser` 的 `isAutoLogin()` 返回 `true`，或自定义 Filter |
+| 认证过滤器   | 设置 `spring.ai.loom.agent.auth.enabled=false`         |
 | 自动登录    | 自定义 `IUser` 的 `isAutoLogin()` 返回 `false`           |
+
+### 8.2 Session 缓存自定义
+
+`sessionCache` Bean 默认使用 Caffeine，TTL 与 `auth.cookie.maxAge` 一致。可替换为自定义存储：
+
+```java
+@Bean
+public Cache sessionCache(RedisCacheManager cacheManager) {
+    return cacheManager.getCache("loom-agent-auth");
+}
+```
+
+### 8.3 IChat 方法签名
+
+`IChat.stream()` 方法接收 `username` 参数（由 `SseController` 从 `UserContextHolder` 注入），不再需要 `ChatRequestRecord.authentication` 字段。用户名从隐式变为显式传递。
