@@ -93,6 +93,8 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 ### File Download and Preview
 Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`.
 
+The toolbar also provides a standalone "File" entry for unified browsing, previewing, downloading, and deleting all non-knowledge-base files (including tool uploads and git repositories).
+
 ## Replace the Default RAG Implementation
 
 The following example uses Qdrant as the vector store. Add the dependency:

@@ -63,6 +63,10 @@
                         <span>🧠</span>
                         <span>技能库</span>
                     </button>
+                    <button class="toolbar-btn" id="file-manager-button" style="display: none;">
+                        <span>📁</span>
+                        <span>文件</span>
+                    </button>
                 </div>
                 <textarea id="textarea" placeholder="输入消息... (Ctrl+Enter 换行，Enter 发送)"></textarea>
                 <div class="image-upload-area" id="image-upload-area" style="display: none;">
@@ -137,6 +141,21 @@
                     <div style="padding: 40px; text-align: center; color: var(--text-muted);">
                         <p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情</p>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Manager Modal -->
+    <div id="file-modal-overlay" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 900px; max-height: 80vh;">
+            <div class="modal-header">
+                <h3>文件管理</h3>
+                <div class="close-button" id="file-close-btn">&times;</div>
+            </div>
+            <div class="modal-body" style="padding: 0; flex: 1; display: flex; flex-direction: column;">
+                <div id="file-list" style="flex: 1; overflow: auto; padding: 16px;">
+                    <div class="loading-indicator">加载中...</div>
                 </div>
             </div>
         </div>

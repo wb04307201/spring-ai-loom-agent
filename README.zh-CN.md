@@ -85,6 +85,8 @@ PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
 ### 文件下载和预览
 上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。
 
+输入框上方工具栏还提供独立的"文件"入口，可统一查看、预览、下载和删除所有非知识库文件（含工具上传的文件和 git 仓库）。
+
 ## 更换其它RAG以替换默认实现
 下面以qdrant向量数据库为例，添加依赖和配置：
 ```xml

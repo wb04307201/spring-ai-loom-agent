@@ -562,7 +562,7 @@ public class LoomAgentConfiguration {
                 String fileId = upload.upload(part.getInputStream(), part.getSubmittedFileName(), part.getContentType());
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(java.util.Map.of("fileId", fileId, "status", "success"));
             });
-            builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.list(null, UserContextHolder.getCurrentUser())));
+            builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.listForManager(UserContextHolder.getCurrentUser())));
             builder.DELETE("/spring/ai/loom/file/{id}", request -> {
                 String id = request.pathVariable("id");
                 String username = UserContextHolder.getCurrentUser();

@@ -136,7 +136,7 @@ public class DefaultGitTool implements IGitTool {
             deleteDirectoryRecursive(repoDir);
             String repoPathStr = repoDir.toString();
             try {
-                FileRecord record = file.getByPath(repoPathStr, username);
+                FileRecord record = file.getByExactPath(repoPathStr, username);
                 if (record != null && "git".equals(record.usage())) {
                     file.delete(record.id(), username);
                 }
@@ -1031,7 +1031,7 @@ public class DefaultGitTool implements IGitTool {
     private void registerRepo(Path repoDir, String repoName, String username) {
         try {
             String pathStr = repoDir.toString();
-            FileRecord existing = file.getByPath(pathStr, username);
+            FileRecord existing = file.getByExactPath(pathStr, username);
             if (existing != null) return;
             String fileId = UUID.randomUUID().toString();
             file.insert(new FileRecord(

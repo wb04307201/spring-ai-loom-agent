@@ -236,6 +236,14 @@ const api = {
         const r = await apiFetch(API.checkKnowledgeUpload);
         return r.ok;
     },
+    async listAllFiles() {
+        const r = await apiFetch('/spring/ai/loom/file');
+        return r.ok ? r.json() : [];
+    },
+    async deleteFile(fileId) {
+        const r = await apiFetch(`/spring/ai/loom/file/${fileId}`, {method: 'DELETE'});
+        return r.ok;
+    },
     async streamChat(record, onChunk, onComplete, onError) {
         const resp = await apiFetch(API.stream, {
             method: 'POST',
@@ -647,8 +655,6 @@ const chat = {
         const ta = document.getElementById('textarea');
         const text = ta.value.trim();
         if (!text && !state.isStreaming) {
-            ui.renderUserMessage('');
-            const el = document.getElementById('msg-empty');
             showToast('请输入消息内容', 'error');
             return;
         }
@@ -915,6 +921,95 @@ const knowledge = {
         }
     },
 
+};
+
+// ===================== §8.5 File Manager =====================
+const fileMgr = {
+    openModal() {
+        ui.showModal('file-modal-overlay');
+        this.loadList();
+    },
+
+    closeModal() {
+        ui.hideModal('file-modal-overlay');
+    },
+
+    async loadList() {
+        const files = await api.listAllFiles();
+        this.renderList(files);
+    },
+
+    renderList(files) {
+        const container = document.getElementById('file-list');
+        if (!files || files.length === 0) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">暂无文件</div>';
+            return;
+        }
+        let html = `
+            <table class="knowledge-table">
+                <thead><tr><th>文件名</th><th>来源</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
+                <tbody></tbody>
+            </table>`;
+        container.innerHTML = html;
+        const tbody = container.querySelector('tbody');
+        for (const f of files) {
+            const row = document.createElement('tr');
+            const isGit = f.usage === 'git';
+            const isToolOrUpload = f.usage === 'tool' || f.usage === 'upload';
+            const usageLabel = f.usage === 'tool' ? 'tool' : f.usage === 'upload' ? 'upload' : f.usage === 'git' ? 'git' : (f.usage || '未知');
+            row.innerHTML = `
+                <td title="${f.fileName || ''}">${truncateText(f.fileName || f.path || '', 30)}</td>
+                <td><code>${usageLabel}</code></td>
+                <td>${isGit ? '—' : formatFileSize(f.size || 0)}</td>
+                <td>${formatDate(f.uploadTime || f.createTime)}</td>
+                <td>
+                    ${isGit ? '<span style="color:var(--text-muted);font-size:12px;">git仓库</span>' : ''}
+                    ${isToolOrUpload ? `
+                        <button class="action-btn file-preview-btn" data-file-id="${f.id}">预览</button>
+                        <button class="action-btn file-download-btn" data-file-id="${f.id}">下载</button>
+                        <button class="action-btn file-delete-btn" data-file-id="${f.id}">删除</button>
+                    ` : ''}
+                </td>`;
+            tbody.appendChild(row);
+        }
+        // Bind buttons
+        for (const btn of container.querySelectorAll('.file-preview-btn')) {
+            btn.addEventListener('click', () => this.preview(btn.dataset.fileId));
+        }
+        for (const btn of container.querySelectorAll('.file-download-btn')) {
+            btn.addEventListener('click', () => this.download(btn.dataset.fileId));
+        }
+        for (const btn of container.querySelectorAll('.file-delete-btn')) {
+            btn.addEventListener('click', () => this.delete(btn.dataset.fileId));
+        }
+    },
+
+    preview(fileId) {
+        // Open preview in new tab
+        const url = window.location.origin + '/file/view/' + fileId;
+        window.open(url, '_blank', 'noopener,noreferrer');
+    },
+
+    download(fileId) {
+        // Trigger download in new tab
+        const url = window.location.origin + '/spring/ai/loom/file/' + fileId + '/download';
+        window.open(url, '_blank', 'noopener,noreferrer');
+    },
+
+    async delete(fileId) {
+        if (!confirm('确定要删除这个文件吗？')) return;
+        try {
+            const ok = await api.deleteFile(fileId);
+            if (ok) {
+                showToast('文件已删除', 'success');
+                this.loadList();
+            } else {
+                showToast('删除失败', 'error');
+            }
+        } catch (e) {
+            showToast('删除失败：' + e.message, 'error');
+        }
+    },
 };
 
 // ===================== §9 MCP Service =====================
@@ -1546,6 +1641,15 @@ const init = async () => {
     } catch { /* upload not available */
     }
 
+    // Feature detection (file manager)
+    try {
+        const files = await api.listAllFiles();
+        if (files && files.length > 0) {
+            document.getElementById('file-manager-button').style.display = 'flex';
+        }
+    } catch { /* file manager not available */
+    }
+
     // Load conversations
     await conversation.loadList();
 
@@ -1584,6 +1688,9 @@ const init = async () => {
     document.getElementById('ks-modal-overlay').addEventListener('click', (e) => {
         if (e.target === e.currentTarget) knowledge.closePanel();
     });
+    document.getElementById('file-modal-overlay').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) fileMgr.closeModal();
+    });
 
     // Image upload
     imageUpload.init();
@@ -1612,6 +1719,8 @@ const init = async () => {
     addIf('#ks-button', () => knowledge.openPanel());
     addIf('#mcp-button', () => mcp.openModal());
     addIf('#skills-button', () => skills.openModal());
+    addIf('#file-manager-button', () => fileMgr.openModal());
+    addIf('#file-close-btn', () => fileMgr.closeModal());
     addIf('#mcp-close-btn', () => mcp.closeModal());
     addIf('#skills-close-btn', () => skills.closeModal());
     addIf('#skill-add-btn', () => skills.showCreateForm());
@@ -1622,5 +1731,5 @@ const init = async () => {
 document.addEventListener('DOMContentLoaded', init);
 
 // Expose to global for testing/debugging
-window._loomAgent = {state, api, imageUpload, auth, chat, conversation, ui};
+window._loomAgent = {state, api, imageUpload, auth, chat, conversation, ui, fileMgr};
 window.ui = ui;
