@@ -15,8 +15,9 @@
 - [5. 知识库管理](#5-知识库管理)
 - [6. 技能管理](#6-技能管理)
 - [7. MCP 工具](#7-mcp-工具)
-- [8. 数据模型](#8-数据模型)
-- [9. 配置属性](#9-配置属性)
+- [8. 终端管理](#8-终端管理)
+- [9. 数据模型](#9-数据模型)
+- [10. 配置属性](#10-配置属性)
 
 ---
 
@@ -246,66 +247,81 @@ Content-Type: multipart/form-data
 
 ---
 
-### 4.2 获取文件列表
+### 4.2 获取文件树
 
 ```
 GET /spring/ai/loom/file
+GET /spring/ai/loom/file/tree
 ```
 
-**响应**: `FileRecord[]`
+**响应**: 目录树 JSON（递归结构）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `id` | string | 文件 ID |
-| `username` | string | 上传者用户名 |
-| `knowledgeId` | string | 关联的知识库 ID（无关联时为 null） |
-| `fileName` | string | 文件名 |
-| `size` | number | 文件大小（字节） |
-| `uploadTime` | string | 上传时间 (ISO 8601) |
-| `path` | string | 文件路径 |
-| `usage` | string | 文件用途：`conversation`（对话）/ `knowledge`（知识库）/ `add`（MCP 工具注册） |
-| `mimeType` | string | 文件 MIME 类型 |
+| `name` | string | 文件或目录名称 |
+| `type` | string | `"file"` 或 `"directory"` |
+| `size` | number | 文件大小（字节，仅文件） |
+| `children` | array | 子项（仅目录） |
 
 **示例**:
 
 ```json
-[
-  {
-    "id": "file-abc123",
-    "username": "admin",
-    "knowledgeId": null,
-    "fileName": "report.pdf",
-    "size": 102400,
-    "uploadTime": "2026-05-10T10:30:00",
-    "path": "/files/report.pdf",
-    "usage": "conversation",
-    "mimeType": "application/pdf"
-  }
-]
+{
+  "name": ".",
+  "type": "directory",
+  "children": [
+    { "name": "report.pdf", "type": "file", "size": 102400 },
+    {
+      "name": "docs",
+      "type": "directory",
+      "children": [
+        { "name": "guide.md", "type": "file", "size": 4096 }
+      ]
+    }
+  ]
+}
 ```
 
 ---
 
-### 4.3 删除文件
+### 4.3 按路径预览文件
 
 ```
-DELETE /spring/ai/loom/file/{id}
+GET /spring/ai/loom/file/by-path/view?path=report.pdf
 ```
 
-**路径参数**:
+**查询参数**:
 
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `id` | string | 文件 ID |
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `path` | string | 是 | 相对于用户文件目录的文件路径 |
 
-**响应**: `number` — 删除的记录数
+**响应**: `307 临时重定向` → `/file/view/{fileId}`（WOPI 在线预览）。
+
+> 如果文件尚未注册到 `file_info`，会自动创建临时记录（`usage="temp"`）获取 `fileId`。
 
 ---
 
-### 4.4 下载文件
+### 4.4 按路径下载文件
 
 ```
-GET /spring/ai/chat/file/download/{id}
+GET /spring/ai/loom/file/by-path/download?path=report.pdf
+```
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `path` | string | 是 | 相对于用户文件目录的文件路径 |
+
+**响应**: `307 临时重定向` → `/wopi/files/{fileId}/contents`。
+
+---
+
+### 4.5 按 ID 下载文件
+
+```
+GET /spring/ai/loom/file/{id}/download
 ```
 
 **路径参数**:
@@ -469,7 +485,7 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 ### 6.1 获取技能列表
 
 ```
-GET /spring/ai/chat/skill
+GET /spring/ai/loom/skill
 ```
 
 **响应**: `SkillDocument[]`
@@ -489,7 +505,7 @@ GET /spring/ai/chat/skill
 ### 6.2 创建/更新技能
 
 ```
-PUT /spring/ai/chat/skill
+PUT /spring/ai/loom/skill
 Content-Type: application/json
 ```
 
@@ -569,7 +585,7 @@ Content-Type: application/json
 ### 6.3 获取单个技能
 
 ```
-GET /spring/ai/chat/skill/{name}
+GET /spring/ai/loom/skill/{name}
 ```
 
 **路径参数**:
@@ -585,7 +601,7 @@ GET /spring/ai/chat/skill/{name}
 ### 6.4 删除技能
 
 ```
-DELETE /spring/ai/chat/skill/{name}
+DELETE /spring/ai/loom/skill/{name}
 ```
 
 **路径参数**:
@@ -646,7 +662,142 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 8. 数据模型
+## 8. 终端管理
+
+### 8.1 启动进程
+
+```
+@Tool: startProcess
+```
+
+启动一个终端进程或 REPL 会话。支持两种模式：**Shell 模式**（一次性命令，如 `ls`、`cat`）和 **REPL 模式**（长交互会话，如 `python`、`node`）。REPL 模式优先使用伪终端（PTY）获得真正的交互体验。
+
+| 参数         | 类型     | 必填 | 说明                                                                                  |
+|--------------|----------|------|---------------------------------------------------------------------------------------|
+| `command`    | string   | 是   | 要执行的命令。Shell 模式：任意 shell 命令。REPL 模式：解释器（如 `python`、`node`）   |
+| `workingDir` | string   | 否   | 工作目录（默认 `.local/file/{username}/`）                                             |
+| `repl`       | boolean  | 否   | 是否 REPL 模式。`true` = 长交互会话；`false`/省略 = 一次性命令                         |
+| `timeout`    | long     | 否   | 等待超时时间（毫秒），默认 30000ms                                                     |
+
+---
+
+### 8.2 与进程交互
+
+```
+@Tool: interactWithProcess
+```
+
+向运行中的 REPL 进程发送输入并等待响应。
+
+| 参数         | 类型     | 必填 | 说明                                              |
+|--------------|----------|------|---------------------------------------------------|
+| `sessionId`  | string   | 是   | 会话 ID（由 `startProcess` 返回）                  |
+| `input`      | string   | 是   | 要发送的输入（自动追加换行符）                     |
+| `timeout`    | long     | 否   | 等待响应超时（毫秒），默认 10000                    |
+
+---
+
+### 8.3 读取进程输出
+
+```
+@Tool: readProcessOutput
+```
+
+读取运行中进程的输出内容。支持三种模式：`new`（自上次读取后的新内容，默认）、`tail`（最后 N 行）、`absolute`（从字符位置 N 开始）。
+
+| 参数         | 类型     | 必填 | 说明                                                          |
+|--------------|----------|------|---------------------------------------------------------------|
+| `sessionId`  | string   | 是   | 会话 ID                                                        |
+| `mode`       | string   | 否   | 读取模式：`new` / `tail` / `absolute`                          |
+| `position`   | int      | 否   | 绝对字符位置（仅 `mode=absolute` 时使用）                       |
+| `lines`      | int      | 否   | 行数（仅 `mode=tail` 时使用，默认 50）                          |
+
+---
+
+### 8.4 强制终止
+
+```
+@Tool: forceTerminate
+```
+
+强制终止一个受管终端会话。
+
+| 参数         | 类型     | 必填 | 说明          |
+|--------------|----------|------|---------------|
+| `sessionId`  | string   | 是   | 会话 ID        |
+
+---
+
+### 8.5 列出会话
+
+```
+@Tool: listSessions
+```
+
+列出当前用户所有活动的终端会话。
+
+---
+
+### 8.6 获取进程信息
+
+```
+@Tool: getProcessInfo
+```
+
+获取单个会话的详细信息，包括完整输出、进程状态、工作目录、PTY 模式等。
+
+| 参数         | 类型     | 必填 | 说明          |
+|--------------|----------|------|---------------|
+| `sessionId`  | string   | 是   | 会话 ID        |
+
+---
+
+### 8.7 发送信号
+
+```
+@Tool: sendSignal
+```
+
+向终端会话发送控制信号。PTY 模式支持：`interrupt`（Ctrl+C）、`eof`（Ctrl+D）、`quit`（Ctrl+\）。非 PTY 模式仅支持 `interrupt`（通过 destroy 终止进程）。
+
+| 参数         | 类型     | 必填 | 说明                                              |
+|--------------|----------|------|---------------------------------------------------|
+| `sessionId`  | string   | 是   | 会话 ID                                            |
+| `signal`     | string   | 是   | 信号类型：`interrupt` / `eof` / `quit`              |
+
+---
+
+### 8.8 列出系统进程
+
+```
+@Tool: listProcesses
+```
+
+列出操作系统中所有正在运行的进程（类似 `ps` 或任务管理器）。支持分页查询。
+
+| 参数          | 类型    | 必填 | 说明                                |
+|---------------|---------|------|-------------------------------------|
+| `maxResults`  | int     | 否   | 每页最大结果数（默认 50，最大 200）   |
+| `page`        | int     | 否   | 页码（从 0 开始，默认 0）             |
+
+---
+
+### 8.9 终止进程
+
+```
+@Tool: killProcess
+```
+
+通过 PID 强制终止系统进程。
+
+| 参数    | 类型     | 必填 | 说明                                    |
+|---------|----------|------|-----------------------------------------|
+| `pid`   | long     | 是   | 进程 ID                                  |
+| `force` | boolean  | 否   | 是否强制终止（默认 true）                 |
+
+---
+
+## 9. 数据模型
 
 ### ChatRequestRecord
 
@@ -703,7 +854,6 @@ GET /spring/ai/chat/loom/mcp
 ```json
 {
   "id": "string",
-  "username": "string",
   "knowledgeId": "string",
   "fileName": "string",
   "size": 0,
@@ -805,6 +955,15 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.auth.cookie.name` | string | `loom-agent-session` | Session Cookie 名称 |
 | `spring.ai.loom.agent.auth.cookie.maxAge` | int | `86400` | Cookie 最大存活时间（秒，24 小时） |
 
+### 9.7 文件存储配置
+
+| 属性 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `spring.ai.loom.agent.fileBasePath` | string | `.local/file` | 上传文件的根目录 |
+| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge` | 知识库文件的根目录 |
+
+> 同目录下同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
+
 ---
 
 ## 附录：接口总览
@@ -819,19 +978,20 @@ GET /spring/ai/chat/loom/mcp
 | 5 | `DELETE` | `/spring/ai/loom/conversation/{id}` | 删除会话 |
 | 6 | `POST` | `/spring/ai/loom/stream` | SSE 流式对话 |
 | 7 | `POST` | `/spring/ai/loom/file/upload` | 上传文件 |
-| 8 | `GET` | `/spring/ai/loom/file` | 获取文件列表 |
-| 9 | `DELETE` | `/spring/ai/loom/file/{id}` | 删除文件 |
-| 10 | `GET` | `/spring/ai/chat/file/download/{id}` | 下载文件 |
-| 11 | `GET` | `/spring/ai/loom/knowledge/checkKnowledgeUpload` | 检查知识库状态 |
-| 12 | `GET` | `/spring/ai/loom/knowledge` | 获取知识库列表 |
-| 13 | `PUT` | `/spring/ai/loom/knowledge` | 创建知识库 |
-| 14 | `DELETE` | `/spring/ai/loom/knowledge/{id}` | 删除知识库（级联清理） |
-| 15 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | 上传文件到知识库 |
-| 16 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | 获取知识库文件列表 |
-| 17 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | 删除知识库文件 |
-| 18 | `GET` | `/spring/ai/chat/loom/mcp` | 获取 MCP 工具列表 |
-| 19 | `GET` | `/spring/ai/chat/skill` | 获取技能列表 |
-| 20 | `PUT` | `/spring/ai/chat/skill` | 创建/更新技能 |
-| 21 | `GET` | `/spring/ai/chat/skill/{name}` | 获取单个技能 |
-| 22 | `DELETE` | `/spring/ai/chat/skill/{name}` | 删除技能 |
+| 8 | `GET` | `/spring/ai/loom/file` 或 `/spring/ai/loom/file/tree` | 获取文件树（目录树 JSON） |
+| 8a | `GET` | `/spring/ai/loom/file/by-path/view` | 按路径预览文件（重定向） |
+| 8b | `GET` | `/spring/ai/loom/file/by-path/download` | 按路径下载文件（重定向） |
+| 8c | `GET` | `/spring/ai/loom/file/{id}/download` | 按 ID 下载文件（二进制流） |
+| 9 | `GET` | `/spring/ai/loom/knowledge/checkKnowledgeUpload` | 检查知识库状态 |
+| 10 | `GET` | `/spring/ai/loom/knowledge` | 获取知识库列表 |
+| 11 | `PUT` | `/spring/ai/loom/knowledge` | 创建知识库 |
+| 12 | `DELETE` | `/spring/ai/loom/knowledge/{id}` | 删除知识库（级联清理） |
+| 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | 上传文件到知识库 |
+| 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | 获取知识库文件列表 |
+| 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | 删除知识库文件 |
+| 16 | `GET` | `/spring/ai/chat/loom/mcp` | 获取 MCP 工具列表 |
+| 17 | `GET` | `/spring/ai/loom/skill` | 获取技能列表 |
+| 18 | `PUT` | `/spring/ai/loom/skill` | 创建/更新技能 |
+| 19 | `GET` | `/spring/ai/loom/skill/{name}` | 获取单个技能 |
+| 20 | `DELETE` | `/spring/ai/loom/skill/{name}` | 删除技能 |
 | — | `GET` | `/spring/ai/loom` | 重定向到 UI 首页 |

@@ -49,6 +49,8 @@ public class LoomAgentProperties {
     private List<SkillProperty> skills = new ArrayList<>();
     private JVectorProperties jvector = new JVectorProperties();
     private String timezone = "Asia/Shanghai";
+    private String fileBasePath = ".local/file";
+    private String knowledgeBasePath = ".local/knowledge";
     private String gitUsername;
     private String gitToken;
 

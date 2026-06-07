@@ -27,6 +27,8 @@ import cn.wubo.spring.ai.loom.agent.tool.skill.DefaultSkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.DefaultTimeTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
+import cn.wubo.spring.ai.loom.agent.tool.terminal.DefaultTerminalTool;
+import cn.wubo.spring.ai.loom.agent.tool.terminal.ITerminalTool;
 import cn.wubo.spring.ai.loom.agent.user.*;
 import cn.wubo.spring.ai.loom.agent.vectorstore.JVectorStore;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -81,6 +83,9 @@ import reactor.core.publisher.Flux;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -298,8 +303,8 @@ public class LoomAgentConfiguration {
         @ConditionalOnBean(VectorStore.class)
         @ConditionalOnMissingBean(IUpload.class)
         @Bean
-        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge) {
-            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge);
+        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, LoomAgentProperties properties) {
+            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, properties.getFileBasePath(), properties.getKnowledgeBasePath());
         }
     }
 
@@ -371,15 +376,21 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IFileTool.class)
         @Bean
-        public IFileTool defaultFileTool(IFile file) {
-            return new DefaultFileTool(file);
+        public IFileTool defaultFileTool(IFile file, LoomAgentProperties properties) {
+            return new DefaultFileTool(file, properties.getFileBasePath());
         }
 
         @ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")
         @ConditionalOnMissingBean(IGitTool.class)
         @Bean
-        public IGitTool defaultGitTool(IFile file, LoomAgentProperties properties) {
-            return new DefaultGitTool(file, properties);
+        public IGitTool defaultGitTool(LoomAgentProperties properties) {
+            return new DefaultGitTool(properties);
+        }
+
+        @ConditionalOnMissingBean(ITerminalTool.class)
+        @Bean
+        public ITerminalTool defaultTerminalTool() {
+            return new DefaultTerminalTool();
         }
     }
 
@@ -552,7 +563,7 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnBean(IUpload.class)
         @Bean("loomAgentFileRouter")
-        public RouterFunction<ServerResponse> loomAgentFileRouter(IUpload upload, IFile file) {
+        public RouterFunction<ServerResponse> loomAgentFileRouter(IUpload upload, IFile file, LoomAgentProperties properties) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.POST("/spring/ai/loom/file/upload", request -> {
                 Part part = request.multipartData().getFirst("file");
@@ -562,12 +573,40 @@ public class LoomAgentConfiguration {
                 String fileId = upload.upload(part.getInputStream(), part.getSubmittedFileName(), part.getContentType());
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(java.util.Map.of("fileId", fileId, "status", "success"));
             });
-            builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.listForManager(UserContextHolder.getCurrentUser())));
-            builder.DELETE("/spring/ai/loom/file/{id}", request -> {
-                String id = request.pathVariable("id");
+            // 返回目录树（前端文件管理器用）
+            builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(buildFileTree(properties.getFileBasePath(), UserContextHolder.getCurrentUser())));
+            builder.GET("/spring/ai/loom/file/tree", request -> ServerResponse.ok()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(buildFileTree(properties.getFileBasePath(), UserContextHolder.getCurrentUser())));
+            // 按路径预览：自动注册 temp 记录后重定向到 /file/view/{id}
+            builder.GET("/spring/ai/loom/file/by-path/view", request -> {
+                String path = request.param("path").orElse("");
+                if (path.isEmpty()) {
+                    return ServerResponse.badRequest().body("缺少 path 参数");
+                }
                 String username = UserContextHolder.getCurrentUser();
-                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.delete(id, username));
+                String fileId = getOrCreateFileId(properties.getFileBasePath(), path, username, file);
+                if (fileId == null) {
+                    return ServerResponse.notFound().build();
+                }
+                return ServerResponse.temporaryRedirect(URI.create("/file/view/" + fileId)).build();
             });
+            // 按路径下载：自动注册 temp 记录后重定向到 /wopi/files/{id}/contents
+            builder.GET("/spring/ai/loom/file/by-path/download", request -> {
+                String path = request.param("path").orElse("");
+                if (path.isEmpty()) {
+                    return ServerResponse.badRequest().body("缺少 path 参数");
+                }
+                String username = UserContextHolder.getCurrentUser();
+                String fileId = getOrCreateFileId(properties.getFileBasePath(), path, username, file);
+                if (fileId == null) {
+                    return ServerResponse.notFound().build();
+                }
+                return ServerResponse.temporaryRedirect(URI.create("/wopi/files/" + fileId + "/contents")).build();
+            });
+            // 按 fileId 下载（WOPI 兼容端点，仍保留）
             builder.GET("/spring/ai/loom/file/{id}/download", request -> {
                 String id = request.pathVariable("id");
                 FileRecord fileRecord = file.getById(id, UserContextHolder.getCurrentUser());
@@ -584,6 +623,79 @@ public class LoomAgentConfiguration {
                         });
             });
             return builder.build();
+        }
+
+        /** 构建用户文件目录树 JSON */
+        @SuppressWarnings("unchecked")
+        private java.util.Map<String, Object> buildFileTree(String fileBasePath, String username) {
+            java.util.Map<String, Object> node = new java.util.LinkedHashMap<>();
+            Path baseDir = Paths.get(fileBasePath, username);
+            node.put("name", ".");
+            node.put("type", "directory");
+            node.put("children", buildChildren(baseDir));
+            return node;
+        }
+
+        @SuppressWarnings("unchecked")
+        private java.util.List<java.util.Map<String, Object>> buildChildren(Path dir) {
+            java.util.List<java.util.Map<String, Object>> children = new java.util.ArrayList<>();
+            if (!Files.exists(dir)) return children;
+            try (java.util.stream.Stream<Path> stream = Files.list(dir)) {
+                var sorted = stream.sorted(java.util.Comparator.comparing(p -> Files.isDirectory(p) ? 0 : 1)).toList();
+                for (Path item : sorted) {
+                    java.util.Map<String, Object> child = new java.util.LinkedHashMap<>();
+                    String name = item.getFileName().toString();
+                    if (Files.isDirectory(item)) {
+                        child.put("name", name);
+                        child.put("type", "directory");
+                        child.put("children", buildChildren(item));
+                    } else {
+                        child.put("name", name);
+                        child.put("type", "file");
+                        try {
+                            child.put("size", Files.size(item));
+                        } catch (java.io.IOException e) {
+                            child.put("size", 0);
+                        }
+                    }
+                    children.add(child);
+                }
+            } catch (java.io.IOException e) {
+                // return empty list on error
+            }
+            return children;
+        }
+
+        /** 根据路径获取或创建 fileId，用于预览/下载桥接 */
+        private String getOrCreateFileId(String fileBasePath, String path, String username, IFile file) {
+            try {
+                Path baseDir = Paths.get(fileBasePath, username);
+                Path resolved = baseDir.resolve(path).normalize();
+                if (!resolved.startsWith(baseDir) || !Files.exists(resolved) || !Files.isRegularFile(resolved)) {
+                    return null;
+                }
+                String pathStr = resolved.toString();
+                FileRecord existing = file.getByExactPath(pathStr, username);
+                if (existing != null) return existing.id();
+
+                org.apache.tika.Tika tika = new org.apache.tika.Tika();
+                String mimeType = tika.detect(resolved.toFile());
+                String fileId = java.util.UUID.randomUUID().toString();
+                java.nio.file.attribute.BasicFileAttributes attrs = Files.readAttributes(resolved, java.nio.file.attribute.BasicFileAttributes.class);
+                file.insert(new FileRecord(
+                        fileId,
+                        null,
+                        resolved.getFileName().toString(),
+                        attrs.size(),
+                        java.time.LocalDateTime.ofInstant(attrs.lastModifiedTime().toInstant(), java.time.ZoneId.systemDefault()),
+                        pathStr,
+                        "temp",
+                        mimeType
+                ), username);
+                return fileId;
+            } catch (Exception e) {
+                return null;
+            }
         }
 
 

@@ -158,7 +158,21 @@
                     <div class="loading-indicator">加载中...</div>
                 </div>
             </div>
+            <style>
+                .file-tree { font-size: 14px; line-height: 1.6; }
+                .tree-dir { margin: 2px 0; }
+                .tree-dir-summary { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+                .tree-dir-summary:hover { background: rgba(255,255,255,0.05); }
+                .tree-children { margin-left: 20px; }
+                .tree-file { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; }
+                .tree-file:hover { background: rgba(255,255,255,0.05); }
+                .tree-file-icon { flex-shrink: 0; }
+                .tree-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                .tree-file-size { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
+                .tree-file-btn { font-size: 12px; padding: 2px 8px; cursor: pointer; flex-shrink: 0; }
+            </style>
         </div>
+    </div>
     </div>
 
     <!-- Knowledge Space Modal (full-screen panel) -->

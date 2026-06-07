@@ -23,6 +23,7 @@
 - **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
 - **Git 仓库管理** — 基于 JGit 的 Git 操作：clone、commit、push、pull、branch、merge、diff、blame 等，通过配置按需启用
+- **终端与进程管理** — Shell/REPL 执行，支持 PTY 伪终端实现真正的交互式会话，进程监控与控制，信号发送（Ctrl+C/EOF/Quit）
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
 
 
@@ -32,7 +33,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.24</version>
+    <version>1.1.25</version>
 </dependency>
 ```
 
@@ -42,7 +43,7 @@
 <dependency>
     <groupId>com.alibaba.cloud.ai</groupId>
     <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
-    <version>1.1.2.2</version>
+    <version>1.1.2.3</version>
 </dependency>
 ```
 ```yaml
@@ -66,10 +67,12 @@ spring:
 
 ### 3. 启动项目
 访问`http://localhost:8080/spring/ai/loom`
+
 ![img.png](img.png)
-![img_5.png](img_5.png)
 ![img_1.png](img_1.png)
 ![img_2.png](img_2.png)
+![img_6.png](img_6.png)
+![img_5.png](img_5.png)
 
 ## 文档上传与对话
 点击输入框左侧 `+` 按钮，可上传图片或文档文件。上传后在输入框中输入问题发送即可。

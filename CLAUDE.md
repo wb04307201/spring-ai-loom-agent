@@ -48,15 +48,16 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IKnowledge` | `DefaultKnowledge` | Knowledge base CRUD (stored in H2) |
 | `IMcp` | `SyncMcp` / `ASyncMcp` | MCP client wrapper (sync or async), tool discovery & invocation |
 | `ISkillStorage` | `DefaultSkillStorage` | Skill template storage, parameter forms, MCP tool binding |
-| `IFile` | `DefaultFile` | File metadata storage (H2) + disk storage |
-| `IUpload` | `DefaultUpload` | File upload pipeline: Tika parsing → document splitting → vectorization |
+| `IFile` | `DefaultFile` | File metadata storage (H2) — 仅用于知识空间文件、文件预览/下载桥接、聊天附件 |
+| `IUpload` | `DefaultUpload` | File upload pipeline: 上传文件存储到 `fileBasePath/{username}/`，知识库文件存储到 `knowledgeBasePath/{username}/{knowledgeId}/`，重名自动追加序号 |
 | `IUser` | `DefaultUser` | BFF + HttpOnly cookie session auth + auto-login |
 | `IUserConversation` | `DefaultUserConversation` | User-to-conversation mapping |
 | `IEmbedTool` | _(marker interface)_ | Aggregate type for all embed tools, sub-interfaces extend it |
 | `ITimeTool` | `DefaultTimeTool` | Time tools: get current time, convert between timezones |
 | `ISkillTool` | `DefaultSkillTool` | Skill tools: list skills, get skill details |
-| `IFileTool` | `DefaultFileTool` | File tools: read/write/edit/search files, manage directories |
-| `IGitTool` | `DefaultGitTool` | Git tools: clone, commit, push, pull, branch, merge, diff, blame, and ~20 more (conditionally enabled via `git.enabled`) |
+| `IFileTool` | `DefaultFileTool` | 15 File tools: 基于路径的读写/编辑/搜索/目录浏览（readTextFile, readMediaFile, readMultipleFiles, writeFile, editFile, createDirectory, moveFile, searchFiles, listAllowedDirectories, listDirectory, listDirectoryWithSizes, directoryTree, getFileInfo, downloadFileUrl, viewFileUrl），预览/下载自动桥接 fileId |
+| `IGitTool` | `DefaultGitTool` | 31 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions (conditionally enabled via `git.enabled`)，不依赖 IFile |
+| `ITerminalTool` | `DefaultTerminalTool` | 9 Terminal tools: startProcess, interactWithProcess, readProcessOutput, forceTerminate, listSessions, getProcessInfo, sendSignal, listProcesses, killProcess — supports PTY (pty4j) for true REPL interaction |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 
@@ -70,7 +71,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `ChatConfiguration` | ChatClient, IChat, SseController |
 | `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, RAG Advisor, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool (git conditional on `git.enabled`) |
+| `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool (git conditional on `git.enabled`), ITerminalTool |
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 6 RouterFunctions |
 
@@ -78,7 +79,7 @@ Organized into 7 nested static `@Configuration` classes:
 - Creates `ChatClient` with `MessageChatMemoryAdvisor` and `SimpleLoggerAdvisor`
 - Default `JVectorStore` (HNSW index, disk-persisted) when no other `VectorStore` bean exists
 - `RetrievalAugmentationAdvisor` with configurable prompt templates and similarity threshold
-- `IGitTool` (Eclipse JGit 7.2.1) conditionally created when `spring.ai.loom.agent.git.enabled=true`
+- `IGitTool` (Eclipse JGit 7.6.0) conditionally created when `spring.ai.loom.agent.git.enabled=true`
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
 - `AuthenticationFilter` on `/*` (matches all), with `AntPathMatcher` filtering via `auth.pathPatterns` and `auth.excludePathPatterns`
 
@@ -88,24 +89,35 @@ Organized into 7 nested static `@Configuration` classes:
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
 - **Custom Flyway table**: `loomAgent_schema_history`
 
+### File System Storage
+
+- **用户文件目录**: `{fileBasePath}/{username}/`（默认 `.local/file/{username}/`）— `DefaultUpload.upload()`、`DefaultFileTool` 所有文件操作的根目录
+- **知识库文件目录**: `{knowledgeBasePath}/{username}/{knowledgeId}/`（默认 `.local/knowledge/{username}/{knowledgeId}/`）— `DefaultUpload.uploadWithKnowledge()` 的存储位置
+- **重名处理**: 同名文件自动追加序号，如 `file.txt` → `file(1).txt` → `file(2).txt`
+- **预览/下载桥接**: 路径操作的预览/下载通过 `IFile.getByExactPath()` 查询，不存在时自动插入 `usage='temp'` 记录获取 fileId
+
 ### Configuration Properties
 
 All under `spring.ai.loom.agent`:
 - `rag` — similarity threshold, top-k, prompt templates
 - `jvector` — index path, HNSW params (m, efConstruction, efSearch)
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
-- `skills` — list of skill templates (name, description, tools, content path, params)
+- `skills` — list of skill templates (name, description, load, content path)
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `user` — default username, nickname, authentication token (legacy)
 - `git` — `enabled` (boolean, default false), `gitUsername`, `gitToken` for remote git authentication
+- `fileBasePath` — 用户文件存储根目录，默认 `.local/file`
+- `knowledgeBasePath` — 知识库文件存储根目录，默认 `.local/knowledge`
 
 ### Frontend
 
 Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/`:
-- `index.html` — entry point
+- `index.html` — entry point，含文件管理模态框（目录树视图）
 - `app.js` — Vue-based chat UI (SSE streaming, sidebar, modals). **BFF + Cookie auth**: no localStorage token, browser auto-carries HttpOnly cookie
 - `style.css` — styling
 - Uses marked.js for Markdown rendering, eventsource-parser for SSE
+
+**文件管理模态框**: 显示 `{fileBasePath}/{username}/` 的目录树，支持展开子目录，每个文件有预览/下载按钮
 
 ## Extension Points
 

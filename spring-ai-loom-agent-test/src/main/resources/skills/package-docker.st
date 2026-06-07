@@ -1,15 +1,13 @@
 按照下面的步骤执行，并在每步完成后回复用户
-1. 检查 C:\developer\IdeaProjects\spring-ai-loom-agent\.local\temp\sql-forge-demo 是否存在
+1. 检查 sql-forge-demo 是否存在
    如果存在删除目录
-2. 使用 @git_clone 克隆公开仓库 https://gitee.com/wb04307201/sql-forge-demo.git 到 C:\developer\IdeaProjects\spring-ai-loom-agent\.local\temp\sql-forge-demo
-   token e42655af0d27dad6f287d3da7b27bf8f
-   branch master
-3. 在 C:\developer\IdeaProjects\spring-ai-loom-agent\.local\temp\sql-forge-demo\sql-forge-demo 目录里 执行命令
+2. 使用 @gitClone 克隆公开仓库 https://gitee.com/wb04307201/sql-forge-demo.git 到 sql-forge-demo
+3. 在 sql-forge-demo\sql-forge-demo 目录里 执行命令
    $env:JAVA_HOME = "C:\Program Files\Java\jdk-17\bin"
    $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
    mvn clean package -DskipTests
    进行打包
-4. 为 C:\developer\IdeaProjects\spring-ai-loom-agent\.local\temp\sql-forge-demo\sql-forge-demo\target\sql-forge-demo-0.0.1-SNAPSHOT.jar 创建dockerfile
+4. 为 sql-forge-demo\sql-forge-demo\target\sql-forge-demo-0.0.1-SNAPSHOT.jar 创建dockerfile
    注意：
    使用java 17
    jar的默认端口是8081

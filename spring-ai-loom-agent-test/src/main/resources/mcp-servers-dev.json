@@ -53,25 +53,11 @@
       ],
       "command": "jbang.cmd"
     },
-    "git-mcp-server": {
-      "args": [
-        "@cyanheads/git-mcp-server"
-      ],
-      "command": "npx.cmd",
-      "env": {
-        "GIT_SIGN_COMMITS": "false",
-        "MCP_LOG_LEVEL": "info"
-      }
-    },
     "mcp-server-docker": {
       "command": "uvx",
       "args": [
         "mcp-server-docker"
       ]
-    },
-    "desktop-commander": {
-      "command": "npx.cmd",
-      "args": ["-y", "@wonderwhy-er/desktop-commander@latest"]
     }
   }
 }

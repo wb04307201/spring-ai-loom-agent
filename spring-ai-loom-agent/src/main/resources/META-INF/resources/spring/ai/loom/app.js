@@ -236,13 +236,9 @@ const api = {
         const r = await apiFetch(API.checkKnowledgeUpload);
         return r.ok;
     },
-    async listAllFiles() {
-        const r = await apiFetch('/spring/ai/loom/file');
-        return r.ok ? r.json() : [];
-    },
-    async deleteFile(fileId) {
-        const r = await apiFetch(`/spring/ai/loom/file/${fileId}`, {method: 'DELETE'});
-        return r.ok;
+    async listFileTree() {
+        const r = await apiFetch('/spring/ai/loom/file/tree');
+        return r.ok ? r.json() : { name: '.', type: 'directory', children: [] };
     },
     async streamChat(record, onChunk, onComplete, onError) {
         const resp = await apiFetch(API.stream, {
@@ -927,90 +923,106 @@ const knowledge = {
 const fileMgr = {
     openModal() {
         ui.showModal('file-modal-overlay');
-        this.loadList();
+        this.loadTree();
     },
 
     closeModal() {
         ui.hideModal('file-modal-overlay');
     },
 
-    async loadList() {
-        const files = await api.listAllFiles();
-        this.renderList(files);
+    async loadTree() {
+        const tree = await api.listFileTree();
+        this.renderTree(tree);
     },
 
-    renderList(files) {
+    renderTree(node) {
         const container = document.getElementById('file-list');
-        if (!files || files.length === 0) {
-            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">暂无文件</div>';
+        if (!node || !node.children || node.children.length === 0) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">目录为空</div>';
             return;
         }
-        let html = `
-            <table class="knowledge-table">
-                <thead><tr><th>文件名</th><th>来源</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
-                <tbody></tbody>
-            </table>`;
+        let html = '<div class="file-tree">';
+        html += this.renderTreeNode(node, '');
+        html += '</div>';
         container.innerHTML = html;
-        const tbody = container.querySelector('tbody');
-        for (const f of files) {
-            const row = document.createElement('tr');
-            const isGit = f.usage === 'git';
-            const isToolOrUpload = f.usage === 'tool' || f.usage === 'upload';
-            const usageLabel = f.usage === 'tool' ? 'tool' : f.usage === 'upload' ? 'upload' : f.usage === 'git' ? 'git' : (f.usage || '未知');
-            row.innerHTML = `
-                <td title="${f.fileName || ''}">${truncateText(f.fileName || f.path || '', 30)}</td>
-                <td><code>${usageLabel}</code></td>
-                <td>${isGit ? '—' : formatFileSize(f.size || 0)}</td>
-                <td>${formatDate(f.uploadTime || f.createTime)}</td>
-                <td>
-                    ${isGit ? '<span style="color:var(--text-muted);font-size:12px;">git仓库</span>' : ''}
-                    ${isToolOrUpload ? `
-                        <button class="action-btn file-preview-btn" data-file-id="${f.id}">预览</button>
-                        <button class="action-btn file-download-btn" data-file-id="${f.id}">下载</button>
-                        <button class="action-btn file-delete-btn" data-file-id="${f.id}">删除</button>
-                    ` : ''}
-                </td>`;
-            tbody.appendChild(row);
+        this.bindTreeEvents(container);
+    },
+
+    renderTreeNode(node, path) {
+        if (!node || node.type === 'file') return '';
+        let html = '';
+        const children = node.children || [];
+        // Sort: directories first, then files
+        const dirs = children.filter(c => c.type === 'directory');
+        const files = children.filter(c => c.type === 'file');
+
+        for (const dir of dirs) {
+            const dirPath = path ? path + '/' + dir.name : dir.name;
+            const hasChildren = dir.children && dir.children.length > 0;
+            html += `<details class="tree-dir" ${hasChildren ? '' : ''}>`;
+            html += `<summary class="tree-dir-summary">📁 ${escapeHtml(dir.name)}</summary>`;
+            html += `<div class="tree-children">`;
+            html += this.renderTreeNode(dir, dirPath);
+            html += `</div>`;
+            html += `</details>`;
         }
-        // Bind buttons
-        for (const btn of container.querySelectorAll('.file-preview-btn')) {
-            btn.addEventListener('click', () => this.preview(btn.dataset.fileId));
+
+        for (const file of files) {
+            const filePath = path ? path + '/' + file.name : file.name;
+            const size = file.size ? formatFileSize(file.size) : '';
+            const icon = getFileIcon(file.name);
+            html += `<div class="tree-file">`;
+            html += `<span class="tree-file-icon">${icon}</span>`;
+            html += `<span class="tree-file-name" title="${escapeHtml(filePath)}">${escapeHtml(file.name)}</span>`;
+            html += `<span class="tree-file-size">${size}</span>`;
+            html += `<button class="tree-file-btn tree-file-preview-btn" data-path="${escapeHtml(filePath)}">预览</button>`;
+            html += `<button class="tree-file-btn tree-file-download-btn" data-path="${escapeHtml(filePath)}">下载</button>`;
+            html += `</div>`;
         }
-        for (const btn of container.querySelectorAll('.file-download-btn')) {
-            btn.addEventListener('click', () => this.download(btn.dataset.fileId));
+
+        return html;
+    },
+
+    bindTreeEvents(container) {
+        for (const btn of container.querySelectorAll('.tree-file-preview-btn')) {
+            btn.addEventListener('click', () => this.preview(btn.dataset.path));
         }
-        for (const btn of container.querySelectorAll('.file-delete-btn')) {
-            btn.addEventListener('click', () => this.delete(btn.dataset.fileId));
+        for (const btn of container.querySelectorAll('.tree-file-download-btn')) {
+            btn.addEventListener('click', () => this.download(btn.dataset.path));
         }
     },
 
-    preview(fileId) {
-        // Open preview in new tab
-        const url = window.location.origin + '/file/view/' + fileId;
+    preview(path) {
+        const url = window.location.origin + '/spring/ai/loom/file/by-path/view?path=' + encodeURIComponent(path);
         window.open(url, '_blank', 'noopener,noreferrer');
     },
 
-    download(fileId) {
-        // Trigger download in new tab
-        const url = window.location.origin + '/spring/ai/loom/file/' + fileId + '/download';
+    download(path) {
+        const url = window.location.origin + '/spring/ai/loom/file/by-path/download?path=' + encodeURIComponent(path);
         window.open(url, '_blank', 'noopener,noreferrer');
-    },
-
-    async delete(fileId) {
-        if (!confirm('确定要删除这个文件吗？')) return;
-        try {
-            const ok = await api.deleteFile(fileId);
-            if (ok) {
-                showToast('文件已删除', 'success');
-                this.loadList();
-            } else {
-                showToast('删除失败', 'error');
-            }
-        } catch (e) {
-            showToast('删除失败：' + e.message, 'error');
-        }
     },
 };
+
+function getFileIcon(name) {
+    const ext = name.split('.').pop().toLowerCase();
+    const icons = {
+        pdf: '📕', doc: '📘', docx: '📘', xls: '📗', xlsx: '📗',
+        ppt: '📙', pptx: '📙', png: '🖼️', jpg: '🖼️', jpeg: '🖼️',
+        gif: '🖼️', svg: '🖼️', mp3: '🎵', mp4: '🎬', wav: '🎵',
+        zip: '📦', tar: '📦', gz: '📦', js: '📜', ts: '📜',
+        py: '📜', java: '📜', go: '📜', rs: '📜', md: '📝',
+        txt: '📄', csv: '📊', html: '🌐', css: '🎨', json: '📋',
+        yaml: '⚙️', yml: '⚙️', xml: '📋', sql: '🗃️', sh: '⚡',
+        bat: '⚡', ps1: '⚡'
+    };
+    return icons[ext] || '📄';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
 // ===================== §9 MCP Service =====================
 const mcp = {

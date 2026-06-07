@@ -24,29 +24,27 @@
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
 - **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more, conditionally enabled via config
+- **Terminal & Process Management** — Shell/REPL execution with PTY (pseudo-terminal) support for true interactive sessions, process monitoring and control, signal sending (Ctrl+C/EOF/Quit)
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
 ## Quick Start: Add a Chat Interface
 
 ### 1. Add LoomAgent Dependency
-
 ```xml
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.24</version>
+  <version>1.1.25</version>
 </dependency>
 ```
 
 ### 2. Add a Spring AI Model Dependency
-
 The following example uses Alibaba's Qwen (DashScope). Replace with any other LLM as needed:
-
 ```xml
 <dependency>
     <groupId>com.alibaba.cloud.ai</groupId>
     <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
-    <version>1.1.2.2</version>
+    <version>1.1.2.3</version>
 </dependency>
 ```
 
@@ -70,16 +68,15 @@ spring:
 > **Note**: For document-based Q&A, ensure the model supports multimodal input (e.g., `multi_model: true`). Document content is injected via System Prompt.
 
 ### 3. Start the Project
-
 Visit `http://localhost:8080/spring/ai/loom`
 
 ![img.png](img.png)
-![img_5.png](img_5.png)
 ![img_1.png](img_1.png)
 ![img_2.png](img_2.png)
+![img_6.png](img_6.png)
+![img_5.png](img_5.png)
 
 ## Document Upload & Conversation
-
 Click the `+` button next to the input field to upload images or documents. After uploading, type your question and send it.
 
 ### Supported Document Formats
@@ -96,9 +93,7 @@ Uploaded and generated files can get download links via MCP tool `downloadFileUr
 The "File" entry provides unified browsing, previewing, downloading, and deleting for all non-knowledge-base files (including tool uploads and git repositories).
 
 ## Replace the Default RAG Implementation
-
 The following example uses Qdrant as the vector store. Add the dependency:
-
 ```xml
 <dependency>
     <groupId>org.springframework.ai</groupId>

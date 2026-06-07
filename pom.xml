@@ -51,6 +51,8 @@
         <jvector.version>3.0.6</jvector.version>
         <file-view.version>1.4.1.1-sb3</file-view.version>
         <jgit.version>7.6.0.202603022253-r</jgit.version>
+        <pty4j.version>0.13.5</pty4j.version>
+        <maven.version>3.3.0</maven.version>
     </properties>
 
     <dependencyManagement>
@@ -98,6 +100,16 @@
                 <groupId>org.eclipse.jgit</groupId>
                 <artifactId>org.eclipse.jgit</artifactId>
                 <version>${jgit.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains.pty4j</groupId>
+                <artifactId>pty4j</artifactId>
+                <version>${pty4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.maven.shared</groupId>
+                <artifactId>maven-invoker</artifactId>
+                <version>${maven.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
