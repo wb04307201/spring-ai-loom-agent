@@ -1,6 +1,7 @@
-package cn.wubo.spring.ai.loom.agent.tool.git;
+package cn.wubo.spring.ai.loom.agent;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import cn.wubo.spring.ai.loom.agent.tool.git.DefaultGitTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
