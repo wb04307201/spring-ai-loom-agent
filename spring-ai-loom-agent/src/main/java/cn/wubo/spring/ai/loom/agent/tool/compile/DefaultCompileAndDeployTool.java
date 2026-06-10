@@ -140,6 +140,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         Path workspace = getUserFileDir(username).resolve(workspaceName);
         String repoName = deriveRepoName(gitUrl);
         Path projectDir = workspace.resolve(repoName);
+        // 解析 subDir —— 多模块仓显式选子模块
+        String subDir = str(flat, "subDir", "sub_dir", "module", "submodule");
         String effectiveImage = (imageName != null && !imageName.isBlank())
                 ? imageName : ("compile-deploy-" + Long.toString(System.currentTimeMillis(), 36));
         String effectiveContainer = (containerName != null && !containerName.isBlank())
@@ -168,7 +170,15 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
 
             // Step 2: mvn package
             // 多模块项目根目录无 pom.xml —— 解析出真正的工作目录
-            Path effectiveDir = resolveEffectiveProjectDir(projectDir, repoName);
+            Path effectiveDir;
+            try {
+                effectiveDir = resolveEffectiveProjectDir(projectDir, repoName, subDir);
+            } catch (IllegalArgumentException subErr) {
+                steps.add("❌ 子模块解析失败：" + subErr.getMessage());
+                return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
+                        effectiveContainer, effectivePort, effectiveHealthPath, steps,
+                        subErr.getMessage());
+            }
             if (!effectiveDir.equals(projectDir)) {
                 log.info("Multi-module layout detected. projectDir={}, effectiveDir={}", projectDir, effectiveDir);
             }
@@ -388,25 +398,44 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * 而第一层子目录里才是真正的 Spring Boot 工程。
      * 这一步选错子模块会导致 COPY target/xxx.jar 找不到文件、镜像构建失败。
      * <p>
-     * 启发式：
+     * 规则（按顺序）：
      * <ol>
-     *   <li>如果 {@code projectDir/pom.xml} 存在，单模块项目，直接返回</li>
-     *   <li>否则遍历一层子目录，优先选名字与 repoName 一致的
-     *       （{@code gitee.com/xxx/sql-forge-demo.git} → {@code sql-forge-demo/}），
-     *       这种匹配度最高</li>
-     *   <li>没有名字匹配时退而求其次，按目录名排序后取第一个
-     *       —— 结果稳定可复现，方便用户在日志里看出挑了哪个</li>
+     *   <li>{@code subDir} 非空 → 校验 {@code <projectDir>/<subDir>/pom.xml} 存在；
+     *       存在返回该子目录；不存在抛 {@link IllegalArgumentException}，
+     *       errorMessage 列出实际候选子目录，让 LLM 追问</li>
+     *   <li>{@code subDir} 缺省 + {@code projectDir/pom.xml} 存在 → 单模块，返回 projectDir</li>
+     *   <li>{@code subDir} 缺省 + 根无 pom.xml + 启发式名字匹配（子目录名 = repoName）唯一 → 选该子目录</li>
+     *   <li>{@code subDir} 缺省 + 根无 pom.xml + 启发式无匹配 + 子目录数 = 1 → 兜底取该子目录</li>
+     *   <li>{@code subDir} 缺省 + 根无 pom.xml + 启发式无匹配 + 子目录数 ≥ 2 →
+     *       抛 {@link IllegalArgumentException}，errorMessage 列出候选子目录，让 LLM 追问</li>
      * </ol>
      */
-    Path resolveEffectiveProjectDir(Path projectDir, String repoName) {
+    Path resolveEffectiveProjectDir(Path projectDir, String repoName, String subDir) {
+        // 规则 1：subDir 显式
+        if (subDir != null && !subDir.isBlank()) {
+            Path target = projectDir.resolve(subDir);
+            if (Files.isDirectory(target) && Files.isRegularFile(target.resolve("pom.xml"))) {
+                log.info("resolveEffectiveProjectDir: subDir='{}' picked", subDir);
+                return target;
+            }
+            List<Path> candidates = listChildDirs(projectDir);
+            String names = formatNames(candidates);
+            throw new IllegalArgumentException(
+                    "参数错误：subDir='" + subDir + "' 在克隆后的仓库中不存在，可选子目录：" + names
+                            + "，请向用户确认");
+        }
+
+        // 规则 2：单模块
         if (Files.isRegularFile(projectDir.resolve("pom.xml"))) {
             return projectDir;
         }
+
+        // 规则 3-5：多模块启发式
         List<Path> children = listChildDirs(projectDir);
         if (children.isEmpty()) {
             return projectDir;
         }
-        // 优先选名字与 repoName 完全一致的子目录
+        // 规则 3：名字匹配
         if (repoName != null && !repoName.isBlank()) {
             for (Path c : children) {
                 if (c.getFileName().toString().equals(repoName)) {
@@ -415,11 +444,25 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                 }
             }
         }
-        // 兜底：排序后取第一个（让结果稳定）
-        Path fallback = children.get(0);
-        log.info("resolveEffectiveProjectDir: no submodule matched repoName={}, falling back to {}",
-                repoName, fallback.getFileName());
-        return fallback;
+        // 规则 4 vs 5：单子目录兜底 vs 多子目录歧义
+        if (children.size() == 1) {
+            Path only = children.get(0);
+            log.info("resolveEffectiveProjectDir: only one submodule, falling back to {}", only.getFileName());
+            return only;
+        }
+        // 规则 5：歧义
+        String names = formatNames(children);
+        throw new IllegalArgumentException(
+                "参数错误：仓库根目录无 pom.xml，且多个子模块无法自动选择，可选子目录：" + names
+                        + "，请向用户确认要部署哪个");
+    }
+
+    private static String formatNames(List<Path> paths) {
+        List<String> names = new ArrayList<>();
+        for (Path p : paths) {
+            names.add(p.getFileName().toString());
+        }
+        return names.toString();
     }
 
     private static List<Path> listChildDirs(Path parent) {

@@ -233,9 +233,9 @@ class DefaultCompileAndDeployToolTest {
     void resolveEffective_singleModule(@TempDir Path projectDir) throws Exception {
         Files.writeString(projectDir.resolve("pom.xml"), "<project/>");
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
-                "resolveEffectiveProjectDir", Path.class, String.class);
+                "resolveEffectiveProjectDir", Path.class, String.class, String.class);
         m.setAccessible(true);
-        Path result = (Path) m.invoke(tool, projectDir, "demo");
+        Path result = (Path) m.invoke(tool, projectDir, "demo", null);
         assertEquals(projectDir, result);
     }
 
@@ -249,26 +249,114 @@ class DefaultCompileAndDeployToolTest {
         Files.writeString(projectDir.resolve("sql-forge-demo").resolve("pom.xml"), "<project/>");
 
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
-                "resolveEffectiveProjectDir", Path.class, String.class);
+                "resolveEffectiveProjectDir", Path.class, String.class, String.class);
         m.setAccessible(true);
-        Path result = (Path) m.invoke(tool, projectDir, "sql-forge-demo");
+        Path result = (Path) m.invoke(tool, projectDir, "sql-forge-demo", null);
         assertEquals(projectDir.resolve("sql-forge-demo"), result,
                 "应当挑与仓库名同名的子目录，而不是按字母序选 spring-ai-chat-demo");
     }
 
     @Test
-    @DisplayName("resolveEffectiveProjectDir: 没有名字匹配时按字母序兜底")
+    @DisplayName("resolveEffectiveProjectDir: 没有名字匹配且只有一个子目录时取该子目录")
     void resolveEffective_multiModule_fallback(@TempDir Path projectDir) throws Exception {
-        Files.createDirectories(projectDir.resolve("zeta"));
-        Files.writeString(projectDir.resolve("zeta").resolve("pom.xml"), "<project/>");
-        Files.createDirectories(projectDir.resolve("alpha"));
-        Files.writeString(projectDir.resolve("alpha").resolve("pom.xml"), "<project/>");
+        // 只有唯一一个子目录，且名字与 repoName 不匹配 —— 走 Rule 4 兜底
+        Files.createDirectories(projectDir.resolve("only-one"));
+        Files.writeString(projectDir.resolve("only-one").resolve("pom.xml"), "<project/>");
 
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
-                "resolveEffectiveProjectDir", Path.class, String.class);
+                "resolveEffectiveProjectDir", Path.class, String.class, String.class);
         m.setAccessible(true);
-        Path result = (Path) m.invoke(tool, projectDir, "some-other-name");
-        assertEquals(projectDir.resolve("alpha"), result, "无名字匹配时按字母序选 alpha");
+        Path result = (Path) m.invoke(tool, projectDir, "some-other-name", null);
+        assertEquals(projectDir.resolve("only-one"), result,
+                "无名字匹配但只有 1 个子目录时取该子目录");
+    }
+
+    @Test
+    @DisplayName("resolveEffectiveProjectDir: subDir 显式入参覆盖启发式")
+    void resolveEffectiveProjectDir_subDirOverridesHeuristic() throws Exception {
+        LoomAgentProperties props = new LoomAgentProperties();
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(props);
+
+        // 模拟 sql-forge-demo 仓：根无 pom.xml，两个子目录，名字匹配的是 sql-forge-demo/，
+        // 但用户传 subDir=spring-ai-chat-demo，应选 spring-ai-chat-demo/
+        Path tmp = Files.createTempDirectory("loom-cdt-resolve-");
+        try {
+            Files.createDirectories(tmp.resolve("sql-forge-demo"));
+            Files.createFile(tmp.resolve("sql-forge-demo/pom.xml"));
+            Files.createDirectories(tmp.resolve("spring-ai-chat-demo"));
+            Files.createFile(tmp.resolve("spring-ai-chat-demo/pom.xml"));
+
+            Method method = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                    "resolveEffectiveProjectDir", Path.class, String.class, String.class);
+            method.setAccessible(true);
+            Path picked = (Path) method.invoke(tool, tmp, "sql-forge-demo", "spring-ai-chat-demo");
+
+            assertThat(picked.getFileName().toString()).isEqualTo("spring-ai-chat-demo");
+        } finally {
+            // 反射调用 private static deleteRecursively
+            Method del = DefaultCompileAndDeployTool.class.getDeclaredMethod("deleteRecursively", Path.class);
+            del.setAccessible(true);
+            del.invoke(null, tmp);
+        }
+    }
+
+    @Test
+    @DisplayName("resolveEffectiveProjectDir: subDir 不存在抛 IllegalArgumentException 并列出候选子目录")
+    void resolveEffectiveProjectDir_subDirMissing_throwsWithCandidateList() throws Exception {
+        LoomAgentProperties props = new LoomAgentProperties();
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(props);
+
+        Path tmp = Files.createTempDirectory("loom-cdt-resolve-");
+        try {
+            Files.createDirectories(tmp.resolve("a"));
+            Files.createFile(tmp.resolve("a/pom.xml"));
+            Files.createDirectories(tmp.resolve("b"));
+            Files.createFile(tmp.resolve("b/pom.xml"));
+
+            Method method = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                    "resolveEffectiveProjectDir", Path.class, String.class, String.class);
+            method.setAccessible(true);
+
+            // subDir 不存在时，工具应抛异常（IllegalArgumentException）或返回 fail —— 本任务选抛异常
+            // 这样调用方 compileAndDeploy 能 catch 并转为 CompileAndDeployResult.fail
+            // 注意：method.invoke 包装异常为 InvocationTargetException，
+            // 所以 .hasRootCauseInstanceOf(IllegalArgumentException.class) 命中的是 ITE 的 cause
+            assertThatThrownBy(() -> method.invoke(tool, tmp, "sql-forge-demo", "nonexistent"))
+                    .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                    .hasRootCauseMessage("参数错误：subDir='nonexistent' 在克隆后的仓库中不存在，可选子目录：[a, b]，请向用户确认");
+        } finally {
+            Method del = DefaultCompileAndDeployTool.class.getDeclaredMethod("deleteRecursively", Path.class);
+            del.setAccessible(true);
+            del.invoke(null, tmp);
+        }
+    }
+
+    @Test
+    @DisplayName("resolveEffectiveProjectDir: 多个子模块无法自动选择时抛 IllegalArgumentException 列出候选")
+    void resolveEffectiveProjectDir_ambiguousNoMatch_throwsWithCandidateList() throws Exception {
+        LoomAgentProperties props = new LoomAgentProperties();
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(props);
+
+        Path tmp = Files.createTempDirectory("loom-cdt-resolve-");
+        try {
+            // 根无 pom.xml，两个子目录都没有 pom.xml
+            Files.createDirectories(tmp.resolve("aaa"));
+            Files.createDirectories(tmp.resolve("bbb"));
+            // 注意：aaa/、bbb/ 都没有 pom.xml —— 走 "歧义" 分支
+
+            Method method = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                    "resolveEffectiveProjectDir", Path.class, String.class, String.class);
+            method.setAccessible(true);
+
+            // 启发式无法唯一确定（既无名字匹配，子目录又 ≥ 2），应抛
+            assertThatThrownBy(() -> method.invoke(tool, tmp, "sql-forge-demo", null))
+                    .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                    .hasRootCauseMessage("参数错误：仓库根目录无 pom.xml，且多个子模块无法自动选择，可选子目录：[aaa, bbb]，请向用户确认要部署哪个");
+        } finally {
+            Method del = DefaultCompileAndDeployTool.class.getDeclaredMethod("deleteRecursively", Path.class);
+            del.setAccessible(true);
+            del.invoke(null, tmp);
+        }
     }
 
     @Test
