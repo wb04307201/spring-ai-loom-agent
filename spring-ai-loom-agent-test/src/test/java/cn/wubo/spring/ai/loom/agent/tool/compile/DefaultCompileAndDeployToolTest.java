@@ -132,6 +132,7 @@ class DefaultCompileAndDeployToolTest {
                 java.util.Map.of(), ctx("alice"));
         assertFalse(r.success());
         assertTrue(r.errorMessage().contains("gitUrl"));
+        assertTrue(r.errorMessage().contains("请向用户"));
         assertTrue(r.steps().isEmpty());
     }
 
@@ -514,5 +515,7 @@ class DefaultCompileAndDeployToolTest {
         assertThat(result.success()).isFalse();
         assertThat(result.errorMessage()).contains("containerPort").contains("不能为空");
         assertThat(result.errorMessage()).contains("请向用户");
+        assertThat(result.accessUrl()).isNull();
+        assertThat(result.steps()).isEmpty();
     }
 }
