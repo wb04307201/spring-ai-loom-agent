@@ -81,7 +81,7 @@ public interface ICompileAndDeployTool extends IEmbedTool {
             @ToolParam(description = "工具入参 Map，包含 gitUrl 等键。支持的键（大小写不敏感）："
                     + "gitUrl（必填）、gitUsername、gitPassword、branch、"
                     + "port（必填，宿主机对外端口）、containerPort（必填，容器内应用端口）、"
-                    + "subDir（多模块仓显式选子模块）、"
+                    + "subDir（可选，多模块仓显式选子模块）、"
                     + "imageName、containerName、healthPath、"
                     + "baseImage（java17/java21/nginx/python3 或完整镜像名）、"
                     + "runCommand（字符串数组，覆盖模板 ENTRYPOINT）") Map<String, Object> params,
