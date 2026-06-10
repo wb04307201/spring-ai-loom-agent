@@ -133,7 +133,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                     "无法获取用户名，请通过登录态调用");
         }
 
-        // 上面已 fail-fast，port/containerPort 必非 null；effectiveContainerPort 暂未使用，Task 4/5 接入
+        // 上面已 fail-fast，port/containerPort 必非 null
         int effectivePort = port;
         int effectiveContainerPort = containerPort;
         String workspaceName = WORKSPACE_SUBDIR + "-" + UUID.randomUUID().toString().substring(0, 8);

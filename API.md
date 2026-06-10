@@ -990,7 +990,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `nginx`    | `nginx:1.27-alpine`                      | `["nginx","-g","daemon off;"]`              |
 | `python3`  | `python:3.12-slim`                       | `["python","app.py"]`                       |
 
-Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`):
+Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port`, and `containerPort`):
 
 - `gitUrl` (required) — git repository URL
 - `gitUsername` / `gitPassword` — credentials for private repos
