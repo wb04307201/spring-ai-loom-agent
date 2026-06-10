@@ -111,13 +111,22 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         String gitPassword = str(flat, "gitPassword", "git_password", "password", "token");
         String branch = str(flat, "branch", "ref");
         Integer port = intOrNull(flat, "port");
+        Integer containerPort = intOrNull(flat, "containerPort", "container_port", "containerPort");
         String imageName = str(flat, "imageName", "image_name", "image");
         String containerName = str(flat, "containerName", "container_name", "container");
         String healthPath = str(flat, "healthPath", "health_path");
 
         if (gitUrl == null || gitUrl.isBlank()) {
             return CompileAndDeployResult.fail(null, null, null, null, null, null, steps,
-                    "参数错误：gitUrl 不能为空");
+                    "参数错误：gitUrl 不能为空，请向用户索取仓库 URL");
+        }
+        if (port == null) {
+            return CompileAndDeployResult.fail(null, gitUrl, null, null, null, null, steps,
+                    "参数错误：port 不能为空，请向用户索取宿主机端口（对外暴露的端口）");
+        }
+        if (containerPort == null) {
+            return CompileAndDeployResult.fail(null, gitUrl, null, null, null, null, steps,
+                    "参数错误：containerPort 不能为空，请向用户索取应用监听端口（参考 application.yml 的 server.port）");
         }
         if (username == null) {
             return CompileAndDeployResult.fail(null, gitUrl, null, null, null, null, steps,
@@ -125,7 +134,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         }
 
         // 临时兜底：port 现已从对话入参给，Task 3 改为 fail-fast（缺 port 即返回）
-        int effectivePort = (port != null && port > 0) ? port : 8080;
+        int effectivePort = port;
+        int effectiveContainerPort = containerPort;
         String workspaceName = WORKSPACE_SUBDIR + "-" + UUID.randomUUID().toString().substring(0, 8);
         Path workspace = getUserFileDir(username).resolve(workspaceName);
         String repoName = deriveRepoName(gitUrl);

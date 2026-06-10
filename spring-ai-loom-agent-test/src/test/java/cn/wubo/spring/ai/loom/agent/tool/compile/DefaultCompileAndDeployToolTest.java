@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -138,7 +139,8 @@ class DefaultCompileAndDeployToolTest {
     @DisplayName("compileAndDeploy username 为空立即失败")
     void compileAndDeploy_emptyUsername() {
         CompileAndDeployResult r = tool.compileAndDeploy(
-                java.util.Map.of("gitUrl", "https://gitee.com/xxx/demo.git"),
+                java.util.Map.of("gitUrl", "https://gitee.com/xxx/demo.git",
+                        "port", 8080, "containerPort", 8080),
                 ctx(null));
         assertFalse(r.success());
         assertTrue(r.errorMessage().contains("用户名"));
@@ -148,7 +150,8 @@ class DefaultCompileAndDeployToolTest {
     @DisplayName("compileAndDeploy username 为空字符串同样视为缺失")
     void compileAndDeploy_blankUsername() {
         CompileAndDeployResult r = tool.compileAndDeploy(
-                java.util.Map.of("gitUrl", "https://gitee.com/xxx/demo.git"),
+                java.util.Map.of("gitUrl", "https://gitee.com/xxx/demo.git",
+                        "port", 8080, "containerPort", 8080),
                 ctx(""));
         assertFalse(r.success());
     }
@@ -479,5 +482,37 @@ class DefaultCompileAndDeployToolTest {
     void compileProperty_noBaseImageField() {
         assertThatThrownBy(() -> LoomAgentProperties.CompileProperty.class.getDeclaredField("baseImage"))
                 .isInstanceOf(NoSuchFieldException.class);
+    }
+
+    @Test
+    @DisplayName("缺 port 入参 → fail 并引导 LLM 追问用户")
+    void compileAndDeploy_missingPort_returnsFailWithAskUserHint() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("gitUrl", "https://gitee.com/test/repo.git");
+        // 故意不传 port
+        params.put("containerPort", 8080);
+
+        CompileAndDeployResult result = tool.compileAndDeploy(params, ctx("tester"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorMessage()).contains("port").contains("不能为空");
+        assertThat(result.errorMessage()).contains("请向用户");
+        assertThat(result.accessUrl()).isNull();
+        assertThat(result.steps()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("缺 containerPort 入参 → fail 并引导 LLM 追问用户")
+    void compileAndDeploy_missingContainerPort_returnsFailWithAskUserHint() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("gitUrl", "https://gitee.com/test/repo.git");
+        params.put("port", 8080);
+        // 故意不传 containerPort
+
+        CompileAndDeployResult result = tool.compileAndDeploy(params, ctx("tester"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorMessage()).contains("containerPort").contains("不能为空");
+        assertThat(result.errorMessage()).contains("请向用户");
     }
 }
