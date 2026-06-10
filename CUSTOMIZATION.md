@@ -21,7 +21,7 @@ spring-ai-loom-agent/
 │   │   ├── skill/     ISkillTool / DefaultSkillTool # Skill tools
 │   │   ├── file/      IFileTool / DefaultFileTool  # File tools
 │   │   ├── git/       IGitTool / DefaultGitTool    # Git tools (JGit)
-│   │   └── terminal/  ITerminalTool / DefaultTerminalTool # Terminal/Process tools (pty4j)
+│   │   └── maven/     IMavenTool / DefaultMavenTool # Maven build tools (maven-invoker)
 │   ├── document/      IDocumentRead / IFileDocument # Document parsing
 │   └── model/         *Record / LoomAgentProperties # Models & config
 ├── spring-ai-loom-agent-spring-boot-autoconfigure/  # Auto-configuration
@@ -192,11 +192,13 @@ Files with duplicate names in the same directory are auto-renamed: `file.txt` �
 
 ### 1.8 Git Configuration (`git.*`)
 
-| Property                   | Type    | Default | Description                                                                 |
-|----------------------------|---------|---------|-----------------------------------------------------------------------------|
-| `git.enabled`              | boolean | `false` | Whether to enable Git tool (IGitTool); set to `true` to activate            |
-| `git.gitUsername`          | String  | —       | Username for HTTP(S) git authentication (clone/pull/push)                   |
-| `git.gitToken`             | String  | —       | Token/password for HTTP(S) git authentication                               |
+| Property            | Type    | Default | Description                                                                              |
+|---------------------|---------|---------|------------------------------------------------------------------------------------------|
+| `git.enabled`       | boolean | `false` | Whether to enable Git tool (IGitTool); opt-in. End-to-end deployment uses `ICompileAndDeployTool` (always on) instead. Set to `true` to expose 31 git commands to the LLM. |
+| `git.username`      | String  | —       | Username for HTTP(S) git authentication (clone/pull/push)                                |
+| `git.token`         | String  | —       | Token/password for HTTP(S) git authentication                                            |
+| `gitUsername`       | String  | —       | **Legacy** top-level alias for `git.username`                                            |
+| `gitToken`          | String  | —       | **Legacy** top-level alias for `git.token`                                               |
 
 **Example Configuration**:
 
@@ -206,12 +208,71 @@ spring:
     loom:
       agent:
         git:
-          enabled: true
-          gitUsername: your-git-username
-          gitToken: your-git-token
+          enabled: true   # default; set to false to disable
+          username: your-git-username
+          token: your-git-token
 ```
 
 > Git credentials can also be passed per-request via `ToolContext` (`gitUsername` / `gitToken` keys), which override the configured defaults.
+
+### 1.9 Tool Group Switches (`{time,file,skill,git,maven}.enabled`)
+
+Every built-in tool group is **enabled by default** (`matchIfMissing=true`). Set the corresponding `enabled` property to `false` in yml to disable a group entirely.
+
+| Property           | Type    | Default | Description                                                       |
+|--------------------|---------|---------|-------------------------------------------------------------------|
+| `time.enabled`     | boolean | `true`  | Time tools (`ITimeTool` — current time, timezone conversion)       |
+| `file.enabled`     | boolean | `true`  | File tools (`IFileTool` — 16 path-based read/write/edit/delete)   |
+| `skill.enabled`    | boolean | `true`  | Skill tools (`ISkillTool` — list skills, get skill details)       |
+| `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 31 git operations). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
+| `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
+| `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → mvn package → docker build → docker run → health check). |
+| `compile.baseImage`| string  | `eclipse-temurin:17-jre-alpine` | Fallback Docker base image used when `baseImage` tool param is empty or unrecognized. |
+| `compile.imageTemplates` | map<string, ImageTemplate> | (see below) | Predefined base-image aliases selectable via the `baseImage` tool param (default: `java17` / `java21` / `nginx` / `python3`). |
+
+**Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        compile:
+          base-image: eclipse-temurin:17-jre-alpine  # fallback
+          image-templates:
+            java17:
+              image: eclipse-temurin:17-jre-alpine
+              command: [java, -jar, app.jar]
+            nginx:
+              image: nginx:1.27-alpine
+              command: [nginx, -g, "daemon off;"]
+```
+
+Example tool parameters:
+
+```json
+{
+  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+  "port": 8081,
+  "baseImage": "java17",
+  "healthPath": "sql-forge-demo"
+}
+```
+
+**Example — disable git and maven**:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        git:
+          enabled: false
+        maven:
+          enabled: false
+```
+
+> Even with the tool group disabled, you can still register your own `@Bean IGitTool` / `@Bean IMavenTool` to opt back in — `@ConditionalOnMissingBean` honors user beans first.
 
 ---
 
@@ -426,7 +487,7 @@ public IChat customChat(
 | **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                                    |
 | **Default**     | `DefaultFileTool`                                                                     |
 | **Override**    | Custom `@Bean IFileTool`                                                              |
-| **Controls**    | `@Tool` methods: `readTextFile`, `readMediaFile`, `readMultipleFiles`, `writeFile`, `editFile`, `createDirectory`, `moveFile`, `searchFiles`, `listAllowedDirectories`, `listDirectory`, `listDirectoryWithSizes`, `directoryTree`, `getFileInfo`, `downloadFileUrl`, `viewFileUrl`. All path-based operations use `{fileBasePath}/{username}/` as root; `downloadFileUrl`/`viewFileUrl` auto-create temporary `file_info` records (`usage="temp"`) for bridge access. |
+| **Controls**    | `@Tool` methods: `readTextFile`, `readMediaFile`, `readMultipleFiles`, `writeFile`, `editFile`, `createDirectory`, `moveFile`, `searchFiles`, `listAllowedDirectories`, `listDirectory`, `listDirectoryWithSizes`, `directoryTree`, `getFileInfo`, `downloadFileUrl`, `viewFileUrl`, `deleteFileOrDirectory`. All path-based operations use `{fileBasePath}/{username}/` as root; `downloadFileUrl`/`viewFileUrl` auto-create temporary `file_info` records (`usage="temp"`) for bridge access; `deleteFileOrDirectory` requires explicit `Y/y/Yes/yes` confirmation, supports recursive directory removal, and cleans up `file_info` records for deleted files. |
 
 #### `IGitTool` — Git Tools
 
@@ -450,16 +511,25 @@ public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
 // DefaultTimeTool and DefaultSkillTool remain active
 ```
 
-#### `ITerminalTool` — Terminal/Process Tools
+#### `IMavenTool` — Maven Build Tools
 
 | Item            | Details                                                                               |
 |-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.terminal.ITerminalTool`                            |
-| **Default**     | `DefaultTerminalTool` (optional pty4j support for pseudo-terminal REPL interaction)   |
-| **Override**    | Custom `@Bean ITerminalTool`                                                          |
-| **Controls**    | 9 `@Tool` methods: `startProcess` (start shell/REPL session), `interactWithProcess` (send input to REPL), `readProcessOutput` (read output in new/tail/absolute mode), `forceTerminate` (kill session), `listSessions` (list user sessions), `getProcessInfo` (session details with full output), `sendSignal` (Ctrl+C/EOF/quit signals), `listProcesses` (list OS processes with pagination), `killProcess` (terminate OS process by PID) |
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool`                                  |
+| **Default**     | `DefaultMavenTool` (based on maven-invoker 3.3.0, no shell dependency)                |
+| **Override**    | Custom `@Bean IMavenTool`                                                             |
+| **Condition**   | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` and `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true", matchIfMissing = true)` |
+| **Controls**    | 6 `@Tool` methods: `mavenExecute` (generic Maven goal execution), `mavenBuild` (compile), `mavenPackage` (package JAR/WAR), `mavenTest` (run tests, supports test pattern), `mavenDependencyTree` (dependency tree with scope filter), `mavenValidate` (validate project structure) |
 
-**PTY Support**: When `pty4j` is on the classpath, REPL mode launches a pseudo-terminal for full terminal interaction (Ctrl+C signals, etc.). Without pty4j, REPL falls back to ProcessBuilder (limited interaction). Shell mode always works without pty4j.
+**Configuration**:
+
+| Property                                      | Type    | Default | Description                                        |
+|-----------------------------------------------|---------|---------|----------------------------------------------------|
+| `spring.ai.loom.agent.maven.enabled`          | boolean | `true`  | Whether to enable Maven tool                       |
+| `spring.ai.loom.agent.maven.mavenHome`        | String  | —       | Maven install directory (optional, uses PATH if empty) |
+| `spring.ai.loom.agent.maven.localRepository`  | String  | —       | Local repository path (optional)                   |
+| `spring.ai.loom.agent.maven.maxOutputLines`   | int     | `200`   | Max output lines before truncation                 |
+| `spring.ai.loom.agent.maven.defaultTimeoutMs` | long    | `300000`| Default execution timeout (5 minutes)              |
 
 ### 2.12 `AuthenticationFilter` — Authentication Filter
 
@@ -698,7 +768,7 @@ Place same-named static resources in your own project to override the defaults, 
 | No `EmbeddingModel` bean provided    | Do not add EmbeddingModel Starter | `JVectorStore` is not created; vector storage unavailable                                        |
 | Custom bean of the same type         | Java `@Bean` configuration   | The corresponding `@ConditionalOnMissingBean` bean will not be created                           |
 | `spring.ai.loom.agent.git.enabled=true` | application.yml           | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.6.0); without this, no Git tool methods are available to the LLM |
-| `pty4j` on classpath                 | Optional dependency          | Enables PTY (pseudo-terminal) mode for REPL sessions in `ITerminalTool`; without it, REPL falls back to ProcessBuilder |
+| `maven-invoker` on classpath         | Provided dependency          | Enables `IMavenTool` bean creation; without it, Maven tool is not available |
 
 ### 8.1 Quick Feature Disablement Guide
 
@@ -708,7 +778,7 @@ Place same-named static resources in your own project to override the defaults, 
 | RAG / Knowledge Base | Do not add any `VectorStore` or `EmbeddingModel` Starter               |
 | MCP functionality  | Set `spring.ai.mcp.client.enabled=false`                               |
 | Git tool           | Do not set `spring.ai.loom.agent.git.enabled=true` (default is disabled) |
-| Terminal tool      | Provide a no-op `@Bean ITerminalTool` override                         |
+| Maven tool         | Set `spring.ai.loom.agent.maven.enabled=false`                         |
 | Auth filter        | Set `spring.ai.loom.agent.auth.enabled=false`                          |
 | Auto-login         | Override `IUser.isAutoLogin()` to return `false`                       |
 

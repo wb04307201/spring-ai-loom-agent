@@ -21,7 +21,7 @@ spring-ai-loom-agent/
 │   │   ├── skill/     ISkillTool / DefaultSkillTool # 技能工具
 │   │   ├── file/      IFileTool / DefaultFileTool  # 文件工具
 │   │   ├── git/       IGitTool / DefaultGitTool    # Git 工具（JGit）
-│   │   └── terminal/  ITerminalTool / DefaultTerminalTool # 终端/进程工具（pty4j）
+│   │   └── maven/     IMavenTool / DefaultMavenTool # Maven 构建工具（maven-invoker）
 │   ├── document/      IDocumentRead / IFileDocument # 文档解析
 │   └── model/         *Record / LoomAgentProperties # 模型与配置
 ├── spring-ai-loom-agent-spring-boot-autoconfigure/  # 自动配置
@@ -192,11 +192,13 @@ spring:
 
 ### 1.8 Git 配置 (`git.*`)
 
-| 属性                       | 类型     | 默认值   | 说明                                                                |
-|--------------------------|--------|-------|-------------------------------------------------------------------|
-| `git.enabled`            | boolean | `false` | 是否启用 Git 工具（IGitTool）；设为 `true` 激活                            |
-| `git.gitUsername`        | String  | —     | HTTP(S) git 认证用户名（clone/pull/push）                              |
-| `git.gitToken`           | String  | —     | HTTP(S) git 认证令牌/密码                                             |
+| 属性                | 类型     | 默认值   | 说明                                                                 |
+|-------------------|--------|-------|--------------------------------------------------------------------|
+| `git.enabled`     | boolean | `false` | 是否启用 Git 工具（IGitTool）。**默认禁用**（opt-in）—— 端到端部署请走 `ICompileAndDeployTool`（始终启用）。设为 `true` 时再暴露 31 个 git 命令给 LLM。 |
+| `git.username`    | String  | —     | HTTP(S) git 认证用户名（clone/pull/push）                               |
+| `git.token`       | String  | —     | HTTP(S) git 认证令牌/密码                                              |
+| `gitUsername`     | String  | —     | **兼容** 顶层字段，等价于 `git.username`                                  |
+| `gitToken`        | String  | —     | **兼容** 顶层字段，等价于 `git.token`                                     |
 
 **示例配置**：
 
@@ -206,12 +208,71 @@ spring:
     loom:
       agent:
         git:
-          enabled: true
-          gitUsername: your-git-username
-          gitToken: your-git-token
+          enabled: true   # 默认；设为 false 禁用
+          username: your-git-username
+          token: your-git-token
 ```
 
 > Git 凭证也可通过 `ToolContext` 按请求传入（`gitUsername` / `gitToken` 键），会覆盖配置的默认值。
+
+### 1.9 工具启用开关（`{time,file,skill,git,maven}.enabled`）
+
+所有内置工具组**默认全部开启**（`matchIfMissing=true`）。在 yml 中把对应的 `enabled` 设为 `false` 即可关闭整组工具。
+
+| 属性                | 类型     | 默认值   | 说明                                                       |
+|-------------------|--------|-------|----------------------------------------------------------|
+| `time.enabled`    | boolean | `true` | 时间工具（`ITimeTool` — 当前时间、时区转换）                            |
+| `file.enabled`    | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除）                     |
+| `skill.enabled`   | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
+| `git.enabled`     | boolean | `false` | Git 工具（`IGitTool` — 31 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
+| `maven.enabled`   | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** —— 编译/打包走 `ICompileAndDeployTool`。 |
+| `compile.enabled` | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → mvn package → docker build → docker run → health check）。 |
+| `compile.baseImage` | string | `eclipse-temurin:17-jre-alpine` | 兜底 Docker 基础镜像，当 `baseImage` 工具入参为空或无法识别时使用。 |
+| `compile.imageTemplates` | map<string, ImageTemplate> | （见下） | 预置基础镜像别名，可通过工具入参 `baseImage` 选择（默认：`java17` / `java21` / `nginx` / `python3`）。 |
+
+**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` 四个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        compile:
+          base-image: eclipse-temurin:17-jre-alpine  # 兜底
+          image-templates:
+            java17:
+              image: eclipse-temurin:17-jre-alpine
+              command: [java, -jar, app.jar]
+            nginx:
+              image: nginx:1.27-alpine
+              command: [nginx, -g, "daemon off;"]
+```
+
+工具入参示例：
+
+```json
+{
+  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+  "port": 8081,
+  "baseImage": "java17",
+  "healthPath": "sql-forge-demo"
+}
+```
+
+**示例 —— 开启 git 和 maven 工具**（默认是关闭的）：
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        git:
+          enabled: false
+        maven:
+          enabled: false
+```
+
+> 即便工具组被禁用，你仍可注册自己的 `@Bean IGitTool` / `@Bean IMavenTool` 来重新启用 — `@ConditionalOnMissingBean` 优先使用用户提供的 Bean。
 
 ---
 
@@ -427,7 +488,7 @@ public IChat customChat(
 | **接口**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                     |
 | **默认实现** | `DefaultFileTool`                                                      |
 | **覆盖方式** | 自定义 `@Bean IFileTool`                                                  |
-| **控制内容** | `@Tool` 方法：`readTextFile`、`readMediaFile`、`readMultipleFiles`、`writeFile`、`editFile`、`createDirectory`、`moveFile`、`searchFiles`、`listAllowedDirectories`、`listDirectory`、`listDirectoryWithSizes`、`directoryTree`、`getFileInfo`、`downloadFileUrl`、`viewFileUrl`。所有基于路径的操作以 `{fileBasePath}/{username}/` 为根目录；`downloadFileUrl`/`viewFileUrl` 自动创建临时 `file_info` 记录（`usage="temp"`）用于桥接访问。 |
+| **控制内容** | `@Tool` 方法：`readTextFile`、`readMediaFile`、`readMultipleFiles`、`writeFile`、`editFile`、`createDirectory`、`moveFile`、`searchFiles`、`listAllowedDirectories`、`listDirectory`、`listDirectoryWithSizes`、`directoryTree`、`getFileInfo`、`downloadFileUrl`、`viewFileUrl`、`deleteFileOrDirectory`。所有基于路径的操作以 `{fileBasePath}/{username}/` 为根目录；`downloadFileUrl`/`viewFileUrl` 自动创建临时 `file_info` 记录（`usage="temp"`）用于桥接访问；`deleteFileOrDirectory` 需要明确传入 `Y/y/Yes/yes` 确认，支持递归删除目录，并清理已删除文件对应的 `file_info` 记录。 |
 
 #### `IGitTool` — Git 工具
 
@@ -451,16 +512,25 @@ public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
 // DefaultTimeTool 和 DefaultSkillTool 仍然生效
 ```
 
-#### `ITerminalTool` — 终端/进程工具
+#### `IMavenTool` — Maven 构建工具
 
 | 项目       | 内容                                                                     |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.terminal.ITerminalTool`             |
-| **默认实现** | `DefaultTerminalTool`（可选 pty4j 伪终端支持 REPL 交互）                  |
-| **覆盖方式** | 自定义 `@Bean ITerminalTool`                                           |
-| **控制内容** | 9 个 `@Tool` 方法：`startProcess`（启动 Shell/REPL 会话）、`interactWithProcess`（向 REPL 发送输入）、`readProcessOutput`（按 new/tail/absolute 模式读取输出）、`forceTerminate`（强制终止会话）、`listSessions`（列出用户会话）、`getProcessInfo`（会话详情含完整输出）、`sendSignal`（Ctrl+C/EOF/quit 信号）、`listProcesses`（列出系统进程，支持分页）、`killProcess`（通过 PID 终止系统进程） |
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool`                   |
+| **默认实现** | `DefaultMavenTool`（基于 maven-invoker 3.3.0，不依赖 shell）              |
+| **覆盖方式** | 自定义 `@Bean IMavenTool`                                              |
+| **生效条件** | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` 且 `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")`（默认 disabled，需 opt-in） |
+| **控制内容** | 6 个 `@Tool` 方法：`mavenExecute`（通用 Maven 命令执行）、`mavenBuild`（编译）、`mavenPackage`（打包 JAR/WAR）、`mavenTest`（运行测试，支持测试模式匹配）、`mavenDependencyTree`（依赖树，支持范围过滤）、`mavenValidate`（验证项目结构） |
 
-**PTY 支持**: 当 `pty4j` 在 classpath 上时，REPL 模式使用伪终端实现真正的终端交互（支持 Ctrl+C 信号等）。没有 pty4j 时，REPL 回退到 ProcessBuilder（交互受限）。Shell 模式不需要 pty4j。
+**配置属性**：
+
+| 属性                                              | 类型     | 默认值       | 说明                                              |
+|---------------------------------------------------|----------|-------------|---------------------------------------------------|
+| `spring.ai.loom.agent.maven.enabled`              | boolean  | `false`     | 是否启用 Maven 工具（**opt-in**）—— 编译/打包走 `ICompileAndDeployTool` |
+| `spring.ai.loom.agent.maven.mavenHome`            | String   | —           | Maven 安装目录（可选，空则使用 PATH）                  |
+| `spring.ai.loom.agent.maven.localRepository`      | String   | —           | 本地仓库路径（可选）                                  |
+| `spring.ai.loom.agent.maven.maxOutputLines`       | int      | `200`       | 输出最大行数（超出截断）                               |
+| `spring.ai.loom.agent.maven.defaultTimeoutMs`     | long     | `300000`    | 默认执行超时（5 分钟）                                 |
 
 ### 2.12 `AuthenticationFilter` — 认证过滤器
 
@@ -699,7 +769,7 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | 不提供 `EmbeddingModel` Bean          | 不引入 EmbeddingModel Starter | 不会创建 `JVectorStore`，向量存储不可用                                                             |
 | 自定义同类型 Bean                        | Java `@Bean` 配置            | 对应的 `@ConditionalOnMissingBean` Bean 不会被创建                                              |
 | `spring.ai.loom.agent.git.enabled=true` | application.yml          | 创建 `IGitTool` Bean（`DefaultGitTool`，Eclipse JGit 7.6.0）；未配置时 Git 工具不可用            |
-| classpath 上有 `pty4j`                  | 可选依赖                     | 启用 `ITerminalTool` 的 PTY（伪终端）REPL 模式；没有时回退到 ProcessBuilder                     |
+| classpath 上有 `maven-invoker`           | 已提供依赖                     | 启用 `IMavenTool` Bean 创建；没有时 Maven 工具不可用                                       |
 
 ### 8.1 快速禁用功能清单
 
@@ -709,7 +779,7 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | RAG/知识库 | 不引入任何 `VectorStore` 或 `EmbeddingModel` Starter     |
 | MCP 功能  | 设置 `spring.ai.mcp.client.enabled=false`               |
 | Git 工具  | 不设置 `spring.ai.loom.agent.git.enabled=true`（默认禁用）    |
-| 终端工具  | 提供无操作 `@Bean ITerminalTool` 覆盖实现               |
+| Maven 工具 | 设置 `spring.ai.loom.agent.maven.enabled=false`            |
 | 认证过滤器   | 设置 `spring.ai.loom.agent.auth.enabled=false`         |
 | 自动登录    | 自定义 `IUser` 的 `isAutoLogin()` 返回 `false`           |
 

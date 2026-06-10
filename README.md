@@ -23,9 +23,38 @@
 - **Skill Library** — Parameterized templates + MCP tool binding, autonomous LLM discovery, runtime dynamic management
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
-- **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more, conditionally enabled via config
-- **Terminal & Process Management** — Shell/REPL execution with PTY (pseudo-terminal) support for true interactive sessions, process monitoring and control, signal sending (Ctrl+C/EOF/Quit)
+- **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more; **opt-in** (default disabled), enable via `spring.ai.loom.agent.git.enabled=true`. End-to-end deployment is provided by `ICompileAndDeployTool` (always on).
+- **Maven Build Tools** — Java-based Maven build/compile/package/test/dependency-tree execution via maven-invoker, no shell needed; **opt-in** (default disabled), enable via `spring.ai.loom.agent.maven.enabled=true`. Compile/package for deployment is handled by `ICompileAndDeployTool`.
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
+
+**Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        compile:
+          base-image: eclipse-temurin:17-jre-alpine  # fallback
+          image-templates:
+            java17:
+              image: eclipse-temurin:17-jre-alpine
+              command: [java, -jar, app.jar]
+            nginx:
+              image: nginx:1.27-alpine
+              command: [nginx, -g, "daemon off;"]
+```
+
+Example tool parameters:
+
+```json
+{
+  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+  "port": 8081,
+  "baseImage": "java17",
+  "healthPath": "sql-forge-demo"
+}
+```
 
 ## Quick Start: Add a Chat Interface
 
@@ -87,8 +116,8 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 2. **Documents**: Text content extracted via Apache Tika, injected as System Prompt into the conversation context
 3. **Mixed scenarios**: Images and documents can be uploaded together; the model synthesizes visual information and document text
 
-### File Download and Preview
-Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`.
+### File Download, Preview, and Deletion
+Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`. Files and directories can be removed via MCP tool `deleteFileOrDirectory` (requires explicit `Y/y/Yes/yes` confirmation, supports recursive directory removal, and cleans up temporary `file_info` records).
 
 The "File" entry provides unified browsing, previewing, downloading, and deleting for all non-knowledge-base files (including tool uploads and git repositories).
 

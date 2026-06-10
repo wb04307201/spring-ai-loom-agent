@@ -22,9 +22,38 @@
 - **Skill 技能库** — 参数化模板 + MCP 工具绑定，LLM 自主发现与调用，运行时动态管理
 - **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
-- **Git 仓库管理** — 基于 JGit 的 Git 操作：clone、commit、push、pull、branch、merge、diff、blame 等，通过配置按需启用
-- **终端与进程管理** — Shell/REPL 执行，支持 PTY 伪终端实现真正的交互式会话，进程监控与控制，信号发送（Ctrl+C/EOF/Quit）
+- **Git 仓库管理** — 基于 JGit 的 Git 操作：clone、commit、push、pull、branch、merge、diff、blame 等；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.git.enabled=true` 开启。端到端部署由 `ICompileAndDeployTool`（始终启用）提供。
+- **Maven 构建工具** — 基于 maven-invoker 的 Java 构建/编译/打包/测试/依赖分析，无需 shell；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.maven.enabled=true` 开启。部署场景的编译/打包由 `ICompileAndDeployTool` 处理。
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
+
+**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` 四个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        compile:
+          base-image: eclipse-temurin:17-jre-alpine  # 兜底
+          image-templates:
+            java17:
+              image: eclipse-temurin:17-jre-alpine
+              command: [java, -jar, app.jar]
+            nginx:
+              image: nginx:1.27-alpine
+              command: [nginx, -g, "daemon off;"]
+```
+
+工具入参示例：
+
+```json
+{
+  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+  "port": 8081,
+  "baseImage": "java17",
+  "healthPath": "sql-forge-demo"
+}
+```
 
 
 ## 快速添加聊天界面
@@ -85,8 +114,8 @@ PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
 2. **文档**: 通过 Apache Tika 提取文本内容，作为 System Prompt 注入对话上下文
 3. **混合场景**: 可同时上传图片和文档，模型会综合图片视觉信息与文档文本内容进行回答
 
-### 文件下载和预览
-上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。
+### 文件下载、预览和删除
+上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。文件和目录可通过 MCP 工具 `deleteFileOrDirectory` 删除（需显式传入 `Y/y/Yes/yes` 确认，支持递归删除目录，并清理已删除文件对应的临时 `file_info` 记录）。
 
 "文件"入口可统一查看、预览、下载和删除所有非知识库文件（含工具上传的文件和 git 仓库）。
 
