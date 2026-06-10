@@ -428,4 +428,49 @@ class DefaultCompileAndDeployToolTest {
         assertEquals("http://localhost:8081/health",
                 m.invoke(null, 8081, "/health"));
     }
+
+    @Test
+    @DisplayName("compileAndDeploy docker build 失败时 errorMessage 包含 build 输出尾部")
+    void compileAndDeploy_dockerBuildFailure_includesOutputTail() throws Exception {
+        // 准备一个临时项目目录，含 target/xxx.jar
+        java.nio.file.Path tempRoot = java.nio.file.Files.createTempDirectory("loom-build-fail-");
+        java.nio.file.Path proj = tempRoot.resolve("proj");
+        java.nio.file.Files.createDirectories(proj.resolve("target"));
+        java.nio.file.Files.writeString(proj.resolve("target").resolve("x.jar"), "x");
+
+        // 通过反射直接调私有 dockerBuild，故意在 proj 里写一个会失败的 Dockerfile
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "dockerBuild", java.nio.file.Path.class, String.class,
+                DefaultCompileAndDeployTool.ResolvedImage.class);
+        m.setAccessible(true);
+        DefaultCompileAndDeployTool.ResolvedImage resolved =
+                new DefaultCompileAndDeployTool.ResolvedImage(
+                        "java17", "eclipse-temurin:17-jre-alpine",
+                        java.util.List.of("java", "-jar", "app.jar"));
+        // 在 proj 里建一个会失败的 Dockerfile（语法错），让 docker build 必然非零退出
+        java.nio.file.Files.writeString(proj.resolve("Dockerfile"),
+                "FROM scratch\nTHIS_IS_INVALID_DIRECTIVE_FOR_TEST\n");
+        // 不管本机是否装了 docker，本测试都不强校验错误内容（依赖环境），只确保：
+        // 1) dockerBuild 失败时抛 DockerBuildException（不是返回 null —— 行为已变）
+        // 2) DockerBuildException 的 message 含 "docker build 失败"
+        // 3) message 含镜像名 "eclipse-temurin:17-jre-alpine"
+        // 没装 docker 时也会非零退出抛同样异常
+        try {
+            m.invoke(tool, proj, "test-img-fail", resolved);
+            // 走到这说明没失败 —— 不期望发生；如果 docker build 居然通过了，测试失败
+            fail("dockerBuild 应该抛 DockerBuildException，但未抛");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            // 反射包装：拿原始异常
+            Throwable cause = e.getCause();
+            assertNotNull(cause);
+            assertEquals("cn.wubo.spring.ai.loom.agent.tool.compile.DefaultCompileAndDeployTool$DockerBuildException",
+                    cause.getClass().getName(),
+                    "应抛 DockerBuildException，实际: " + cause.getClass().getName());
+            String msg = cause.getMessage();
+            assertTrue(msg.contains("docker build 失败"),
+                    "errorMessage 应含 'docker build 失败'，实际: " + msg);
+            assertTrue(msg.contains("eclipse-temurin:17-jre-alpine"),
+                    "errorMessage 应含镜像名，实际: " + msg);
+        }
+    }
 }

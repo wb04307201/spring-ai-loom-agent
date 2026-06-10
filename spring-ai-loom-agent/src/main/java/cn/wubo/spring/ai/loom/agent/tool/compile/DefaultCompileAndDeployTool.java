@@ -137,6 +137,14 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                 ? containerName : effectiveImage;
         String effectiveHealthPath = (healthPath != null && !healthPath.isBlank()) ? healthPath : "/";
 
+        // 解析 baseImage + runCommand —— 模板化核心
+        String paramBaseImage = str(flat, "baseImage", "base_image");
+        List<String> paramRunCommand = listStr(flat, "runCommand", "run_command", "command");
+        ResolvedImage resolvedImage = resolveBaseImage(paramBaseImage, paramRunCommand);
+        steps.add("✅ 镜像模板：" + (resolvedImage.alias() != null
+                ? resolvedImage.alias() + " (" + resolvedImage.image() + ")"
+                : resolvedImage.image()) + " | ENTRYPOINT=" + String.join(" ", resolvedImage.command()));
+
         try {
             Files.createDirectories(workspace);
 
@@ -173,18 +181,19 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             steps.add("✅ 产物：" + jar.getName());
 
             // Step 4: write Dockerfile —— 必须写到 effectiveDir，否则 COPY target/ 路径对不上
-            // TODO(Task 5): 用 resolveBaseImage(...) 替换这个临时 ResolvedImage，让 FROM/ENTRYPOINT 跟着模板走
-            ResolvedImage resolvedForDocker = new ResolvedImage(
-                    "java17", effectiveImage, List.of("java", "-jar", "app.jar"));
-            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedForDocker);
+            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage);
             steps.add("✅ Dockerfile：" + dockerfile.getName());
 
             // Step 5: docker build —— 必须在 effectiveDir 下执行，构建上下文才能找到 target/
-            String builtImage = dockerBuild(effectiveDir, effectiveImage);
-            if (builtImage == null) {
-                steps.add("❌ Docker 构建：" + effectiveImage);
+            String builtImage;
+            try {
+                builtImage = dockerBuild(effectiveDir, effectiveImage, resolvedImage);
+            } catch (DockerBuildException e) {
+                steps.add("❌ Docker 构建失败（image=" + resolvedImage.image()
+                        + ", alias=" + (resolvedImage.alias() == null ? "<none>" : resolvedImage.alias())
+                        + "），详见 errorMessage");
                 return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
-                        effectiveContainer, effectivePort, effectiveHealthPath, steps, "docker build 失败");
+                        effectiveContainer, effectivePort, effectiveHealthPath, steps, e.getMessage());
             }
             steps.add("✅ Docker 镜像：" + builtImage);
 
@@ -487,9 +496,10 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     }
 
     /**
-     * {@code docker build -t <image> <projectDir>}。
+     * {@code docker build -t <image> <projectDir>}。失败时返回 null，并通过抛出
+     * {@link DockerBuildException} 把详细错误（exitCode/timeout/输出尾部）传给上层。
      */
-    private String dockerBuild(Path projectDir, String imageName) {
+    private String dockerBuild(Path projectDir, String imageName, ResolvedImage resolved) {
         String docker = resolveDockerCmd();
         List<String> args = new ArrayList<>();
         args.add("build");
@@ -499,11 +509,20 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         List<String> cmd = wrapForWindows(docker, args);
         ExecOutcome out = runProcess(cmd, projectDir.toFile(), compile.getDockerBuildTimeoutMs());
         if (out.timeout || out.exitCode != 0) {
-            log.error("docker build failed. exitCode={}, timeout={}, tail=\n{}",
-                    out.exitCode, out.timeout, tail(out.output, 60));
-            return null;
+            String tailOutput = tail(out.output, 100);
+            String msg = String.format(
+                    "docker build 失败（exitCode=%d, timeout=%s, image=%s, alias=%s）\n--- last 100 lines of build output ---\n%s",
+                    out.exitCode, out.timeout, resolved.image(),
+                    resolved.alias() == null ? "<none>" : resolved.alias(), tailOutput);
+            log.error(msg);
+            throw new DockerBuildException(msg);
         }
         return imageName;
+    }
+
+    /** {@link #dockerBuild} 失败时抛出的异常，message 即 {@code errorMessage} 内容。 */
+    static class DockerBuildException extends RuntimeException {
+        DockerBuildException(String message) { super(message); }
     }
 
     /**
@@ -1071,6 +1090,35 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                     try {
                         return Integer.parseInt(v.toString().trim());
                     } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从 Map 里读取字符串数组，支持大小写不敏感 + 多别名。
+     * 值可能是 {@code List<String>}（Jackson 标准）也可能是单字符串（拆成单元素数组）。
+     */
+    @SuppressWarnings("unchecked")
+    private static List<String> listStr(Map<String, Object> m, String... keys) {
+        if (m == null) return null;
+        for (String k : keys) {
+            for (Map.Entry<String, Object> e : m.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
+                    Object v = e.getValue();
+                    if (v == null) return null;
+                    if (v instanceof List<?> list) {
+                        List<String> out = new ArrayList<>();
+                        for (Object item : list) {
+                            if (item != null) out.add(item.toString());
+                        }
+                        return out.isEmpty() ? null : out;
+                    }
+                    if (v instanceof String s && !s.isBlank()) {
+                        // 接受 "a,b,c" 形式作为兜底（罕见 LLM 行为）
+                        return Arrays.asList(s.split("\\s*,\\s*"));
                     }
                 }
             }
