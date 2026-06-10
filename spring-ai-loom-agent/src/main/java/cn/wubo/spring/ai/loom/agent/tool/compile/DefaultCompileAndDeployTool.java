@@ -91,9 +91,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         // 编译工具的 mavenHome 优先于全局 maven.mavenHome —— 这是项目特定的偏好
         String configured = compile != null ? compile.getMavenHome() : mavenHome;
         this.resolvedMavenHome = MavenHomeResolver.resolve(configured);
-        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, fileBasePath={}, defaultPort={}",
-                compile != null && compile.isEnabled(), resolvedMavenHome, this.fileBasePath,
-                compile != null ? compile.getDefaultPort() : 8080);
+        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, fileBasePath={}",
+                compile != null && compile.isEnabled(), resolvedMavenHome, this.fileBasePath);
     }
 
     // ==================== Tool Entry ====================
@@ -125,7 +124,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                     "无法获取用户名，请通过登录态调用");
         }
 
-        int effectivePort = port != null && port > 0 ? port : compile.getDefaultPort();
+        int effectivePort = (port != null && port > 0) ? port : 8080;
         String workspaceName = WORKSPACE_SUBDIR + "-" + UUID.randomUUID().toString().substring(0, 8);
         Path workspace = getUserFileDir(username).resolve(workspaceName);
         String repoName = deriveRepoName(gitUrl);
@@ -180,7 +179,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             steps.add("✅ 产物：" + jar.getName());
 
             // Step 4: write Dockerfile —— 必须写到 effectiveDir，否则 COPY target/ 路径对不上
-            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage);
+            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage, effectivePort);  // 本任务用 effectivePort 兜底，Task 4 改 containerPort
             steps.add("✅ Dockerfile：" + dockerfile.getName());
 
             // Step 5: docker build —— 必须在 effectiveDir 下执行，构建上下文才能找到 target/
@@ -458,7 +457,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * command 序列化为 JSON 数组（Dockerfile exec 形式）：
      * {@code ["java", "-jar", "app.jar"]} 或 {@code ["nginx", "-g", "daemon off;"]}。
      */
-    File writeDockerfile(Path projectDir, File jar, ResolvedImage resolved) {
+    File writeDockerfile(Path projectDir, File jar, ResolvedImage resolved, int containerPort) {
         File dockerfile = projectDir.resolve("Dockerfile").toFile();
         String entrypoint = toJsonArray(resolved.command());
         String content = String.format("""
@@ -468,7 +467,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                 COPY target/%s app.jar
                 EXPOSE %d
                 ENTRYPOINT %s
-                """, resolved.image(), jar.getName(), compile.getDefaultPort(), entrypoint);
+                """, resolved.image(), jar.getName(), containerPort, entrypoint);
         try {
             Files.writeString(dockerfile.toPath(), content, StandardCharsets.UTF_8);
             return dockerfile;
@@ -973,8 +972,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * <ol>
      *   <li>入参 baseImage 命中 yml 模板 key → 用模板的 image + command</li>
      *   <li>入参 baseImage 含 {@code :} 或 {@code /}（典型镜像名形式）→ 直接用入参作 image，command 走 java17 兜底</li>
-     *   <li>入参 baseImage 为空/null → 用 {@code compile.getBaseImage()} 作 image，command 走 java17 兜底</li>
-     *   <li>入参非空但既不命中模板也不像完整镜像名（防御 LLM 拼错）→ 同分支 3 回退到 compile.baseImage</li>
+     *   <li>入参 baseImage 为空/null → 用 {@code imageTemplates.java17.image} 兜底，command 走 java17 兜底</li>
+     *   <li>入参非空但既不命中模板也不像完整镜像名（防御 LLM 拼错）→ 同分支 3 回退到 java17 模板</li>
      *   <li>入参 runCommand 非空 → 覆盖上面解析出的 command</li>
      * </ol>
      */
@@ -992,9 +991,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         String alias = null;
         String image;
         List<String> command;
-        String fallbackImage = (compile != null && compile.getBaseImage() != null && !compile.getBaseImage().isBlank())
-                ? compile.getBaseImage()
-                : java17Fallback.getImage();
+        String fallbackImage = java17Fallback.getImage();
 
         if (paramBaseImage != null && !paramBaseImage.isBlank()) {
             if (templates.containsKey(paramBaseImage)) {
@@ -1008,7 +1005,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                 image = paramBaseImage;
                 command = new ArrayList<>(java17Fallback.getCommand());
             } else {
-                // 不在模板里也不像完整镜像名（防御 LLM 拼错），回退到 compile.baseImage
+                // 不在模板里也不像完整镜像名（防御 LLM 拼错），回退到 java17 模板
                 image = fallbackImage;
                 command = new ArrayList<>(java17Fallback.getCommand());
             }

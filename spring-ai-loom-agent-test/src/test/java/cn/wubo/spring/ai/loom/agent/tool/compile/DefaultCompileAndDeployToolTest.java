@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -43,8 +44,6 @@ class DefaultCompileAndDeployToolTest {
     @BeforeEach
     void setUp() {
         compile = new CompileProperty();
-        compile.setDefaultPort(9090);
-        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
         tool = new DefaultCompileAndDeployTool(compile, null, ".local/file");
     }
 
@@ -68,15 +67,15 @@ class DefaultCompileAndDeployToolTest {
                         java.util.List.of("java", "-jar", "app.jar"));
 
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
-                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class);
+                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class, int.class);
         m.setAccessible(true);
-        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved);
+        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved, 8080);
 
         assertTrue(dockerfile.exists());
         String content = Files.readString(dockerfile.toPath(), StandardCharsets.UTF_8);
         assertTrue(content.contains("FROM eclipse-temurin:17-jre-alpine"), "缺 FROM 行: " + content);
         assertTrue(content.contains("COPY target/demo-0.0.1-SNAPSHOT.jar app.jar"), "缺 COPY 行: " + content);
-        assertTrue(content.contains("EXPOSE 9090"), "缺 EXPOSE 行: " + content);
+        assertTrue(content.contains("EXPOSE 8080"), "缺 EXPOSE 行: " + content);
         assertTrue(content.contains("ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]"), "缺 ENTRYPOINT 行: " + content);
     }
 
@@ -93,9 +92,9 @@ class DefaultCompileAndDeployToolTest {
                         java.util.List.of("nginx", "-g", "daemon off;"));
 
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
-                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class);
+                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class, int.class);
         m.setAccessible(true);
-        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved);
+        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved, 8080);
         String content = Files.readString(dockerfile.toPath(), StandardCharsets.UTF_8);
         assertTrue(content.contains("FROM nginx:1.27-alpine"));
         assertTrue(content.contains("ENTRYPOINT [\"nginx\",\"-g\",\"daemon off;\"]"), "nginx ENTRYPOINT: " + content);
@@ -174,8 +173,6 @@ class DefaultCompileAndDeployToolTest {
         LoomAgentProperties p = new LoomAgentProperties();
         assertNotNull(p.getCompile());
         assertTrue(p.getCompile().isEnabled());
-        assertEquals(8080, p.getCompile().getDefaultPort());
-        assertEquals("eclipse-temurin:17-jre-alpine", p.getCompile().getBaseImage());
         assertNotNull(p.getCompile().getExtraRunArgs());
         assertTrue(p.getCompile().getExtraRunArgs().isEmpty());
     }
@@ -349,7 +346,6 @@ class DefaultCompileAndDeployToolTest {
     @Test
     @DisplayName("resolveBaseImage: 别名命中用模板")
     void resolveBaseImage_aliasHit() throws Exception {
-        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
                 "resolveBaseImage", String.class, java.util.List.class);
         m.setAccessible(true);
@@ -367,7 +363,6 @@ class DefaultCompileAndDeployToolTest {
     @Test
     @DisplayName("resolveBaseImage: 完整镜像名不命中模板，command 走 java17 兜底")
     void resolveBaseImage_fullImageFallback() throws Exception {
-        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
                 "resolveBaseImage", String.class, java.util.List.class);
         m.setAccessible(true);
@@ -382,9 +377,8 @@ class DefaultCompileAndDeployToolTest {
     }
 
     @Test
-    @DisplayName("resolveBaseImage: 入参为空用 compile.baseImage 兜底")
+    @DisplayName("resolveBaseImage: 入参为空用 java17 模板兜底")
     void resolveBaseImage_emptyInput() throws Exception {
-        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
                 "resolveBaseImage", String.class, java.util.List.class);
         m.setAccessible(true);
@@ -399,7 +393,6 @@ class DefaultCompileAndDeployToolTest {
     @Test
     @DisplayName("resolveBaseImage: runCommand 覆盖模板 command")
     void resolveBaseImage_runCommandOverride() throws Exception {
-        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
         Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
                 "resolveBaseImage", String.class, java.util.List.class);
         m.setAccessible(true);
@@ -472,5 +465,17 @@ class DefaultCompileAndDeployToolTest {
             assertTrue(msg.contains("eclipse-temurin:17-jre-alpine"),
                     "errorMessage 应含镜像名，实际: " + msg);
         }
+    }
+
+    @Test
+    void compileProperty_noDefaultPortField() {
+        assertThatThrownBy(() -> LoomAgentProperties.CompileProperty.class.getDeclaredField("defaultPort"))
+                .isInstanceOf(NoSuchFieldException.class);
+    }
+
+    @Test
+    void compileProperty_noBaseImageField() {
+        assertThatThrownBy(() -> LoomAgentProperties.CompileProperty.class.getDeclaredField("baseImage"))
+                .isInstanceOf(NoSuchFieldException.class);
     }
 }

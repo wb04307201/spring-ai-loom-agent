@@ -258,10 +258,9 @@ public class LoomAgentProperties {
     /**
      * 一站式编译部署工具配置。
      * <p>
-     * yml 通过 {@code spring.ai.loom.agent.compile.*} 配置：
+     * yml 通过 {@code spring.ai.loom.agent.compile.*} 配置（仅运维参数）：
      * <ul>
      *   <li>{@code enabled} — 是否启用该工具（默认 true）</li>
-     *   <li>{@code defaultPort} — 端口缺省值（默认 8080）</li>
      *   <li>{@code mavenHome} — 可选；不配则复用 {@link MavenProperty#getMavenHome()}，
      *       再不行就环境变量自动探测</li>
      *   <li>{@code dockerCmd} — 可选；不配则用 PATH 上的 {@code docker}</li>
@@ -271,14 +270,17 @@ public class LoomAgentProperties {
      *   <li>{@code healthCheckMaxWaitMs} — 容器启动后健康检查总等待（默认 60000）</li>
      *   <li>{@code healthCheckIntervalMs} — 健康检查轮询间隔（默认 2000）</li>
      *   <li>{@code keepWorkspace} — 是否保留工作区目录（默认 false）</li>
-     *   <li>{@code baseImage} — 生成的 Dockerfile 基础镜像（默认 eclipse-temurin:17-jre-alpine）</li>
      *   <li>{@code extraRunArgs} — {@code docker run} 额外参数（默认空）</li>
+     *   <li>{@code imageTemplates} — 预置基础镜像模板（key=别名，value=ImageTemplate），
+     *       工具入参 {@code baseImage} 命中 key 时使用；缺省回退到 {@code java17}</li>
      * </ul>
+     * <p>
+     * 业务参数（{@code port}、{@code containerPort}、{@code subDir}、{@code healthPath}、
+     * {@code baseImage}、{@code runCommand}）一律从对话给到 AI，不在 yml 中配置。
      */
     @Data
     public static class CompileProperty {
         private boolean enabled = true;
-        private int defaultPort = 8080;
         private String mavenHome;
         private String dockerCmd;
         private long mavenTimeoutMs = 600000L;
@@ -287,7 +289,6 @@ public class LoomAgentProperties {
         private long healthCheckMaxWaitMs = 60000L;
         private long healthCheckIntervalMs = 2000L;
         private boolean keepWorkspace = false;
-        private String baseImage = "eclipse-temurin:17-jre-alpine";
         /**
          * 注入到 {@code docker run} 命令的额外参数，例如 {@code ["--network=host", "-e", "TZ=Asia/Shanghai"]}。
          * 顺序敏感，会被插在 {@code -d -p ... --name ...} 之后、镜像名之前。
