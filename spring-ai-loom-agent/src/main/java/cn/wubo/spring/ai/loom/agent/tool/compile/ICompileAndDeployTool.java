@@ -54,6 +54,9 @@ public interface ICompileAndDeployTool extends IEmbedTool {
      *                       <li>{@code imageName}     — Docker 镜像名（可选）</li>
      *                       <li>{@code containerName} — Docker 容器名（可选）</li>
      *                       <li>{@code healthPath}    — 健康检查路径（可选，默认 {@code /}）</li>
+     *                       <li>{@code baseImage}     — 基础镜像（可选）；支持模板别名 {@code java17/java21/nginx/python3}，
+     *                                                  或完整镜像名如 {@code openjdk:17-slim}。默认 java17</li>
+     *                       <li>{@code runCommand}    — 容器启动命令（可选）；缺省按 baseImage 模板自动生成</li>
      *                     </ul>
      * @param toolContext  Spring AI 工具上下文（注入 username）
      * @return 编译部署结果
