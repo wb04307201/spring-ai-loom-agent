@@ -543,4 +543,33 @@ class DefaultCompileAndDeployToolTest {
         assertTrue(content.contains("EXPOSE 9090"), "EXPOSE 应当用 containerPort=9090（不是 port=8888）: " + content);
         assertFalse(content.contains("EXPOSE 8888"), "EXPOSE 不应该用 port=8888: " + content);
     }
+
+    @Test
+    @DisplayName("dockerRun 命令里 -p 用 <port>:<containerPort>（非 <port>:<port>）")
+    void buildDockerRunCommand_mapsPortToContainerPort() throws Exception {
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "buildDockerRunCommand", String.class, String.class, int.class, int.class, List.class);
+        m.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<String> cmd = (List<String>) m.invoke(null, "img1", "c1", 8888, 9090, List.of());
+
+        int pIdx = cmd.indexOf("-p");
+        assertTrue(pIdx > 0, "应在 cmd 列表里出现 -p: " + cmd);
+        assertEquals("8888:9090", cmd.get(pIdx + 1), "应当 -p <宿主机>:<容器>");
+    }
+
+    @Test
+    @DisplayName("dockerRun 不加 -e SERVER_PORT（让 application.yml 的 server.port 原样生效）")
+    void buildDockerRunCommand_noServerPortEnv() throws Exception {
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "buildDockerRunCommand", String.class, String.class, int.class, int.class, List.class);
+        m.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<String> cmd = (List<String>) m.invoke(null, "img1", "c1", 8080, 8080, List.of());
+
+        assertFalse(cmd.contains("-e"), "不应加 -e: " + cmd);
+        assertFalse(cmd.contains("SERVER_PORT"), "不应注入 SERVER_PORT: " + cmd);
+    }
 }

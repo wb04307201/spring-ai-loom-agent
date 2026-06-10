@@ -208,7 +208,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             steps.add("✅ Docker 镜像：" + builtImage);
 
             // Step 6: docker run
-            String runningContainer = dockerRun(effectiveImage, effectiveContainer, effectivePort);
+            String runningContainer = dockerRun(effectiveImage, effectiveContainer, effectivePort, effectiveContainerPort);
             if (runningContainer == null) {
                 steps.add("❌ Docker 启动：" + effectiveContainer);
                 return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
@@ -536,10 +536,13 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     }
 
     /**
-     * {@code docker rm -f <name> ; docker run -d -p <port>:<port> --name <name> <image> [extraArgs]}。
+     * {@code docker rm -f <name> ; docker run -d -p <port>:<containerPort> --name <name> <image> [extraArgs]}。
      * 同名容器已存在时先清理。
+     * <p>
+     * 故意不加 {@code -e SERVER_PORT=...} —— 仓里 application.yml 的 server.port 原样生效；
+     * 用户应在对话里告诉 LLM "server.port 是 X"，LLM 再传 containerPort=X。
      */
-    private String dockerRun(String imageName, String containerName, int port) {
+    private String dockerRun(String imageName, String containerName, int port, int containerPort) {
         String docker = resolveDockerCmd();
         // 先清理同名容器（force remove）
         List<String> rmArgs = new ArrayList<>();
@@ -549,18 +552,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         // 不关心 exitCode —— 不存在时也会非 0
         runProcess(wrapForWindows(docker, rmArgs), null, 15_000L);
 
-        List<String> runArgs = new ArrayList<>();
-        runArgs.add("run");
-        runArgs.add("-d");
-        runArgs.add("-p");
-        runArgs.add(port + ":" + port);
-        runArgs.add("--name");
-        runArgs.add(containerName);
-        if (compile.getExtraRunArgs() != null && !compile.getExtraRunArgs().isEmpty()) {
-            runArgs.addAll(compile.getExtraRunArgs());
-        }
-        runArgs.add(imageName);
-
+        List<String> runArgs = buildDockerRunCommand(imageName, containerName, port, containerPort,
+                compile.getExtraRunArgs());
         List<String> cmd = wrapForWindows(docker, runArgs);
         ExecOutcome out = runProcess(cmd, null, compile.getDockerRunTimeoutMs());
         if (out.timeout || out.exitCode != 0) {
@@ -569,6 +562,26 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             return null;
         }
         return containerName;
+    }
+
+    /**
+     * 构造 {@code docker run} 的参数列表（不含 docker 本身），便于测试断言。
+     * 暴露为 package-private 静态是因为单元测试需要拿到 list 校验。
+     */
+    static List<String> buildDockerRunCommand(String imageName, String containerName, int port,
+                                              int containerPort, List<String> extraRunArgs) {
+        List<String> runArgs = new ArrayList<>();
+        runArgs.add("run");
+        runArgs.add("-d");
+        runArgs.add("-p");
+        runArgs.add(port + ":" + containerPort);
+        runArgs.add("--name");
+        runArgs.add(containerName);
+        if (extraRunArgs != null && !extraRunArgs.isEmpty()) {
+            runArgs.addAll(extraRunArgs);
+        }
+        runArgs.add(imageName);
+        return runArgs;
     }
 
     /**
