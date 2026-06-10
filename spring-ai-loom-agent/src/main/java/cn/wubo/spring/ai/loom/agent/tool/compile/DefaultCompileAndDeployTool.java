@@ -111,7 +111,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         String gitPassword = str(flat, "gitPassword", "git_password", "password", "token");
         String branch = str(flat, "branch", "ref");
         Integer port = intOrNull(flat, "port");
-        Integer containerPort = intOrNull(flat, "containerPort", "container_port", "containerPort");
+        Integer containerPort = intOrNull(flat, "containerPort", "container_port");
         String imageName = str(flat, "imageName", "image_name", "image");
         String containerName = str(flat, "containerName", "container_name", "container");
         String healthPath = str(flat, "healthPath", "health_path");
