@@ -318,4 +318,67 @@ class DefaultCompileAndDeployToolTest {
             bat.delete();
         }
     }
+
+    @Test
+    @DisplayName("resolveBaseImage: 别名命中用模板")
+    void resolveBaseImage_aliasHit() throws Exception {
+        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "resolveBaseImage", String.class, java.util.List.class);
+        m.setAccessible(true);
+        Object r = m.invoke(tool, "nginx", null);
+        // 反射拿 record 字段
+        java.lang.reflect.RecordComponent[] comps = ((java.lang.reflect.RecordComponent[]) r.getClass().getRecordComponents());
+        String alias = (String) comps[0].getAccessor().invoke(r);
+        String image = (String) comps[1].getAccessor().invoke(r);
+        java.util.List<String> command = (java.util.List<String>) comps[2].getAccessor().invoke(r);
+        assertEquals("nginx", alias);
+        assertEquals("nginx:1.27-alpine", image);
+        assertEquals(List.of("nginx", "-g", "daemon off;"), command);
+    }
+
+    @Test
+    @DisplayName("resolveBaseImage: 完整镜像名不命中模板，command 走 java17 兜底")
+    void resolveBaseImage_fullImageFallback() throws Exception {
+        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "resolveBaseImage", String.class, java.util.List.class);
+        m.setAccessible(true);
+        Object r = m.invoke(tool, "openjdk:17-slim", null);
+        java.lang.reflect.RecordComponent[] comps = (java.lang.reflect.RecordComponent[]) r.getClass().getRecordComponents();
+        String alias = (String) comps[0].getAccessor().invoke(r);
+        String image = (String) comps[1].getAccessor().invoke(r);
+        java.util.List<String> command = (java.util.List<String>) comps[2].getAccessor().invoke(r);
+        assertNull(alias, "非别名入参时 alias 应当为 null");
+        assertEquals("openjdk:17-slim", image);
+        assertEquals(List.of("java", "-jar", "app.jar"), command, "command 走 java17 兜底");
+    }
+
+    @Test
+    @DisplayName("resolveBaseImage: 入参为空用 compile.baseImage 兜底")
+    void resolveBaseImage_emptyInput() throws Exception {
+        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "resolveBaseImage", String.class, java.util.List.class);
+        m.setAccessible(true);
+        Object r = m.invoke(tool, null, null);
+        java.lang.reflect.RecordComponent[] comps = (java.lang.reflect.RecordComponent[]) r.getClass().getRecordComponents();
+        String image = (String) comps[1].getAccessor().invoke(r);
+        java.util.List<String> command = (java.util.List<String>) comps[2].getAccessor().invoke(r);
+        assertEquals("eclipse-temurin:17-jre-alpine", image);
+        assertEquals(List.of("java", "-jar", "app.jar"), command);
+    }
+
+    @Test
+    @DisplayName("resolveBaseImage: runCommand 覆盖模板 command")
+    void resolveBaseImage_runCommandOverride() throws Exception {
+        compile.setBaseImage("eclipse-temurin:17-jre-alpine");
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "resolveBaseImage", String.class, java.util.List.class);
+        m.setAccessible(true);
+        Object r = m.invoke(tool, "nginx", List.of("sh", "-c", "echo hi"));
+        java.lang.reflect.RecordComponent[] comps = (java.lang.reflect.RecordComponent[]) r.getClass().getRecordComponents();
+        java.util.List<String> command = (java.util.List<String>) comps[2].getAccessor().invoke(r);
+        assertEquals(List.of("sh", "-c", "echo hi"), command, "runCommand 应覆盖模板默认命令");
+    }
 }
