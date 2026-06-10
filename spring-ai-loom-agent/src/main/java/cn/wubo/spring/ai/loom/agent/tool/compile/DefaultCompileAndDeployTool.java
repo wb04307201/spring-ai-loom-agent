@@ -924,6 +924,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      *   <li>入参 baseImage 命中 yml 模板 key → 用模板的 image + command</li>
      *   <li>入参 baseImage 含 {@code :} 或 {@code /}（典型镜像名形式）→ 直接用入参作 image，command 走 java17 兜底</li>
      *   <li>入参 baseImage 为空/null → 用 {@code compile.getBaseImage()} 作 image，command 走 java17 兜底</li>
+     *   <li>入参非空但既不命中模板也不像完整镜像名（防御 LLM 拼错）→ 同分支 3 回退到 compile.baseImage</li>
      *   <li>入参 runCommand 非空 → 覆盖上面解析出的 command</li>
      * </ol>
      */
@@ -932,15 +933,18 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                 compile != null && compile.getImageTemplates() != null
                         ? compile.getImageTemplates()
                         : Map.of();
-        LoomAgentProperties.CompileProperty.ImageTemplate java17Fallback =
-                templates.getOrDefault("java17",
-                        new LoomAgentProperties.CompileProperty.ImageTemplate(
-                                "eclipse-temurin:17-jre-alpine",
-                                List.of("java", "-jar", "app.jar")));
+        LoomAgentProperties.CompileProperty.ImageTemplate java17Fallback = templates.get("java17");
+        if (java17Fallback == null) {
+            java17Fallback = new LoomAgentProperties.CompileProperty.ImageTemplate(
+                    "eclipse-temurin:17-jre-alpine", List.of("java", "-jar", "app.jar"));
+        }
 
         String alias = null;
         String image;
         List<String> command;
+        String fallbackImage = (compile != null && compile.getBaseImage() != null && !compile.getBaseImage().isBlank())
+                ? compile.getBaseImage()
+                : java17Fallback.getImage();
 
         if (paramBaseImage != null && !paramBaseImage.isBlank()) {
             if (templates.containsKey(paramBaseImage)) {
@@ -955,16 +959,12 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                 command = new ArrayList<>(java17Fallback.getCommand());
             } else {
                 // 不在模板里也不像完整镜像名（防御 LLM 拼错），回退到 compile.baseImage
-                image = compile != null && compile.getBaseImage() != null && !compile.getBaseImage().isBlank()
-                        ? compile.getBaseImage()
-                        : java17Fallback.getImage();
+                image = fallbackImage;
                 command = new ArrayList<>(java17Fallback.getCommand());
             }
         } else {
             // 分支 3：入参为空
-            image = compile != null && compile.getBaseImage() != null && !compile.getBaseImage().isBlank()
-                    ? compile.getBaseImage()
-                    : java17Fallback.getImage();
+            image = fallbackImage;
             command = new ArrayList<>(java17Fallback.getCommand());
         }
 
