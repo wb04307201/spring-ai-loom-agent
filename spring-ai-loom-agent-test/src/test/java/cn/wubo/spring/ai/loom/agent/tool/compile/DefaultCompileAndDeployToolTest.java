@@ -55,16 +55,22 @@ class DefaultCompileAndDeployToolTest {
     }
 
     @Test
-    @DisplayName("writeDockerfile 写入 FROM/EXPOSE/ENTRYPOINT")
+    @DisplayName("writeDockerfile 写入 FROM/EXPOSE/ENTRYPOINT，ENTRYPOINT 来自模板 command")
     void writeDockerfile_content(@TempDir Path projectDir) throws Exception {
         // 模拟一个 target/ 下的 jar
         Files.createDirectories(projectDir.resolve("target"));
         File jar = projectDir.resolve("target").resolve("demo-0.0.1-SNAPSHOT.jar").toFile();
         Files.writeString(jar.toPath(), "fake-jar-content");
 
-        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod("writeDockerfile", Path.class, File.class);
+        DefaultCompileAndDeployTool.ResolvedImage resolved =
+                new DefaultCompileAndDeployTool.ResolvedImage(
+                        "java17", "eclipse-temurin:17-jre-alpine",
+                        java.util.List.of("java", "-jar", "app.jar"));
+
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class);
         m.setAccessible(true);
-        File dockerfile = (File) m.invoke(tool, projectDir, jar);
+        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved);
 
         assertTrue(dockerfile.exists());
         String content = Files.readString(dockerfile.toPath(), StandardCharsets.UTF_8);
@@ -72,6 +78,27 @@ class DefaultCompileAndDeployToolTest {
         assertTrue(content.contains("COPY target/demo-0.0.1-SNAPSHOT.jar app.jar"), "缺 COPY 行: " + content);
         assertTrue(content.contains("EXPOSE 9090"), "缺 EXPOSE 行: " + content);
         assertTrue(content.contains("ENTRYPOINT [\"java\", \"-jar\", \"app.jar\"]"), "缺 ENTRYPOINT 行: " + content);
+    }
+
+    @Test
+    @DisplayName("writeDockerfile 用 nginx 模板时 ENTRYPOINT 是 nginx 命令")
+    void writeDockerfile_nginxTemplate(@TempDir Path projectDir) throws Exception {
+        Files.createDirectories(projectDir.resolve("target"));
+        File jar = projectDir.resolve("target").resolve("app.jar").toFile();
+        Files.writeString(jar.toPath(), "x");
+
+        DefaultCompileAndDeployTool.ResolvedImage resolved =
+                new DefaultCompileAndDeployTool.ResolvedImage(
+                        "nginx", "nginx:1.27-alpine",
+                        java.util.List.of("nginx", "-g", "daemon off;"));
+
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class);
+        m.setAccessible(true);
+        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved);
+        String content = Files.readString(dockerfile.toPath(), StandardCharsets.UTF_8);
+        assertTrue(content.contains("FROM nginx:1.27-alpine"));
+        assertTrue(content.contains("ENTRYPOINT [\"nginx\", \"-g\", \"daemon off;\"]"), "nginx ENTRYPOINT: " + content);
     }
 
     @Test
