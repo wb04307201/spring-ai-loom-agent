@@ -518,4 +518,29 @@ class DefaultCompileAndDeployToolTest {
         assertThat(result.accessUrl()).isNull();
         assertThat(result.steps()).isEmpty();
     }
+
+    @Test
+    @DisplayName("writeDockerfile EXPOSE 用 containerPort（与 port 解耦）")
+    void writeDockerfile_exposeUsesContainerPort(@TempDir Path projectDir) throws Exception {
+        // 模拟 target/app.jar
+        Files.createDirectories(projectDir.resolve("target"));
+        File jar = projectDir.resolve("target/app.jar").toFile();
+        Files.writeString(jar.toPath(), "fake");
+
+        DefaultCompileAndDeployTool.ResolvedImage resolved =
+                new DefaultCompileAndDeployTool.ResolvedImage(
+                        "java17", "eclipse-temurin:17-jre-alpine",
+                        java.util.List.of("java", "-jar", "app.jar"));
+
+        // 反射调用 writeDockerfile(Path, File, ResolvedImage, int)
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "writeDockerfile", Path.class, File.class, DefaultCompileAndDeployTool.ResolvedImage.class, int.class);
+        m.setAccessible(true);
+        // 关键：port 传 8888，containerPort 传 9090
+        File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved, 9090);
+
+        String content = Files.readString(dockerfile.toPath(), StandardCharsets.UTF_8);
+        assertTrue(content.contains("EXPOSE 9090"), "EXPOSE 应当用 containerPort=9090（不是 port=8888）: " + content);
+        assertFalse(content.contains("EXPOSE 8888"), "EXPOSE 不应该用 port=8888: " + content);
+    }
 }

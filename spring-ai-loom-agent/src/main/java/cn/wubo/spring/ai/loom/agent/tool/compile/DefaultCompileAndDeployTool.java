@@ -190,8 +190,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             steps.add("✅ 产物：" + jar.getName());
 
             // Step 4: write Dockerfile —— 必须写到 effectiveDir，否则 COPY target/ 路径对不上
-            // 临时用 effectivePort 作为容器端口（参数名 containerPort 是为 Task 4 预留的）；Task 4 改用独立的 containerPort 入参
-            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage, effectivePort);
+            // EXPOSE 端口用 effectiveContainerPort（容器内应用端口），与 effectivePort（宿主机对外端口）解耦
+            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage, effectiveContainerPort);
             steps.add("✅ Dockerfile：" + dockerfile.getName());
 
             // Step 5: docker build —— 必须在 effectiveDir 下执行，构建上下文才能找到 target/
