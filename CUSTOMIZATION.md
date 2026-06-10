@@ -227,7 +227,6 @@ Every built-in tool group is **enabled by default** (`matchIfMissing=true`). Set
 | `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 31 git operations). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
 | `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
 | `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → mvn package → docker build → docker run → health check). |
-| `compile.baseImage`| string  | `eclipse-temurin:17-jre-alpine` | Fallback Docker base image used when `baseImage` tool param is empty or unrecognized. |
 | `compile.imageTemplates` | map<string, ImageTemplate> | (see below) | Predefined base-image aliases selectable via the `baseImage` tool param (default: `java17` / `java21` / `nginx` / `python3`). |
 
 **Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
@@ -238,7 +237,6 @@ spring:
     loom:
       agent:
         compile:
-          base-image: eclipse-temurin:17-jre-alpine  # fallback
           image-templates:
             java17:
               image: eclipse-temurin:17-jre-alpine
@@ -254,6 +252,8 @@ Example tool parameters:
 {
   "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
   "port": 8081,
+  "containerPort": 8080,
+  "subDir": "sql-forge-web",
   "baseImage": "java17",
   "healthPath": "sql-forge-demo"
 }

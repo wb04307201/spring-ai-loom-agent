@@ -976,8 +976,6 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | Property                                          | Type     | Default                          | Description                                                                                                  |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
 | `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`                           | Whether to register the end-to-end deploy tool (default enabled)                                            |
-| `spring.ai.loom.agent.compile.defaultPort`        | int      | `8080`                           | Default container port when caller does not pass `port`                                                      |
-| `spring.ai.loom.agent.compile.baseImage`          | string   | `eclipse-temurin:17-jre-alpine`  | Fallback base image used when `baseImage` param is null/blank and no template matches                        |
 | `spring.ai.loom.agent.compile.mavenHome`          | string   | auto-discover                    | Optional Maven install dir; falls back to `maven.mavenHome` and PATH                                         |
 | `spring.ai.loom.agent.compile.dockerCmd`          | string   | `docker`                         | Optional override for the docker CLI binary                                                                  |
 | `spring.ai.loom.agent.compile.imageTemplates`     | map      | (4 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
@@ -997,7 +995,9 @@ Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`):
 - `gitUrl` (required) — git repository URL
 - `gitUsername` / `gitPassword` — credentials for private repos
 - `branch` — branch to clone (defaults to remote HEAD)
-- `port` — service port (defaults to `compile.defaultPort`)
+- `port` — host port the container will publish (the port the caller accesses via `http://localhost:{port}/{healthPath}`)
+- `containerPort` — Container port the application listens on inside the container (required, no yml fallback; reference `server.port` in application.yml)
+- `subDir` — Subdirectory of a multi-module repo to deploy (optional; without it, multi-module resolution may pick the wrong module)
 - `imageName` / `containerName` — Docker image and container names (defaults derived from timestamp)
 - `healthPath` — both the health-check path and the access URL path (e.g. `healthPath=sql-forge-demo` → `http://localhost:8080/sql-forge-demo`)
 - `baseImage` — template alias (`java17`/`java21`/`nginx`/`python3`) or full image name (e.g. `openjdk:17-slim`)
@@ -1011,7 +1011,6 @@ spring:
     loom:
       agent:
         compile:
-          base-image: eclipse-temurin:17-jre-alpine  # fallback
           image-templates:
             java17:
               image: eclipse-temurin:17-jre-alpine
@@ -1027,6 +1026,8 @@ Example tool invocation:
 {
   "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
   "port": 8081,
+  "containerPort": 8080,
+  "subDir": "sql-forge-web",
   "baseImage": "java17",
   "healthPath": "sql-forge-demo"
 }

@@ -35,7 +35,6 @@ spring:
     loom:
       agent:
         compile:
-          base-image: eclipse-temurin:17-jre-alpine  # fallback
           image-templates:
             java17:
               image: eclipse-temurin:17-jre-alpine
@@ -51,6 +50,8 @@ Example tool parameters:
 {
   "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
   "port": 8081,
+  "containerPort": 8080,
+  "subDir": "sql-forge-web",
   "baseImage": "java17",
   "healthPath": "sql-forge-demo"
 }
