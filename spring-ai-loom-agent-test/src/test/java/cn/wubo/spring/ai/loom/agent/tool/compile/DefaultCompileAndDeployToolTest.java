@@ -77,7 +77,7 @@ class DefaultCompileAndDeployToolTest {
         assertTrue(content.contains("FROM eclipse-temurin:17-jre-alpine"), "缺 FROM 行: " + content);
         assertTrue(content.contains("COPY target/demo-0.0.1-SNAPSHOT.jar app.jar"), "缺 COPY 行: " + content);
         assertTrue(content.contains("EXPOSE 9090"), "缺 EXPOSE 行: " + content);
-        assertTrue(content.contains("ENTRYPOINT [\"java\", \"-jar\", \"app.jar\"]"), "缺 ENTRYPOINT 行: " + content);
+        assertTrue(content.contains("ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]"), "缺 ENTRYPOINT 行: " + content);
     }
 
     @Test
@@ -98,7 +98,7 @@ class DefaultCompileAndDeployToolTest {
         File dockerfile = (File) m.invoke(tool, projectDir, jar, resolved);
         String content = Files.readString(dockerfile.toPath(), StandardCharsets.UTF_8);
         assertTrue(content.contains("FROM nginx:1.27-alpine"));
-        assertTrue(content.contains("ENTRYPOINT [\"nginx\", \"-g\", \"daemon off;\"]"), "nginx ENTRYPOINT: " + content);
+        assertTrue(content.contains("ENTRYPOINT [\"nginx\",\"-g\",\"daemon off;\"]"), "nginx ENTRYPOINT: " + content);
     }
 
     @Test
