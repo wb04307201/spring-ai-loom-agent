@@ -470,20 +470,20 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     }
 
     /**
-     * 把 {@code ["java", "-jar", "app.jar"]} 序列化成 Dockerfile 兼容的 JSON 数组字面量。
+     * 把 {@code ["java", "-jar", "app.jar"]} 序列化成 Dockerfile exec 形式（JSON 数组）。
      * <p>
-     * 注意：Dockerfile ENTRYPOINT exec 形式是 JSON，所以字符串值必须用双引号、反斜杠转义。
-     * 这里手写一个极简的 JSON 字符串数组序列化器 —— 避免引入 JSON 库。
+     * 复用类内已存在的 {@link #LENIENT_MAPPER} 序列化，不再手写转义逻辑。
+     * 失败时抛 {@link IllegalStateException}（writeDockerfile 会包装成 RuntimeException）。
      */
     static String toJsonArray(List<String> parts) {
-        if (parts == null || parts.isEmpty()) return "[\"sh\", \"-c\", \"true\"]";
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < parts.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append('"').append(parts.get(i).replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+        if (parts == null || parts.isEmpty()) {
+            throw new IllegalArgumentException("ResolvedImage.command must not be empty");
         }
-        sb.append("]");
-        return sb.toString();
+        try {
+            return LENIENT_MAPPER.writeValueAsString(parts);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize ENTRYPOINT to JSON: " + e.getMessage(), e);
+        }
     }
 
     /**
