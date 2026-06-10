@@ -3,7 +3,9 @@ package cn.wubo.spring.ai.loom.agent.model;
 import lombok.Data;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Data
 public class LoomAgentProperties {
@@ -53,6 +55,15 @@ public class LoomAgentProperties {
     private String knowledgeBasePath = ".local/knowledge";
     private String gitUsername;
     private String gitToken;
+
+    // 工具启用开关。yml 可通过 spring.ai.loom.agent.{time,file,skill,git,maven,compile}.enabled=false 关闭对应工具。
+    // 默认 time/file/skill/compile 开启，git/maven 关闭 —— 编译部署走 ICompileAndDeployTool，
+    // 单点 git/maven 命令是 opt-in。
+    private ToolGroupProperty time = new ToolGroupProperty();
+    private FileToolProperty file = new FileToolProperty();
+    private ToolGroupProperty skill = new ToolGroupProperty();
+    private GitProperty git = new GitProperty();
+    private CompileProperty compile = new CompileProperty();
 
     @Data
     public static class RagProperty {
@@ -154,4 +165,162 @@ public class LoomAgentProperties {
     }
 
     private UserProperty user = new UserProperty();
+
+    private MavenProperty maven = new MavenProperty();
+
+    @Data
+    public static class MavenProperty {
+        /**
+         * 是否注册 IMavenTool bean。默认 false —— 编译/打包请走 ICompileAndDeployTool。
+         * 设 true 时再暴露 6 个 mvn 命令给 LLM。
+         */
+        private boolean enabled = false;
+        /** Maven 安装目录（可选，空则用系统 PATH） */
+        private String mavenHome;
+        /** 本地仓库路径（可选，空则用默认 ~/.m2） */
+        private String localRepository;
+        /** 输出最大行数，默认 200 */
+        private int maxOutputLines = 200;
+        /** 默认超时毫秒数，默认 300000（5 分钟） */
+        private long defaultTimeoutMs = 300000L;
+    }
+
+    /**
+     * 通用工具启用开关。yml 通过 spring.ai.loom.agent.{time,skill}.enabled=false 关闭对应工具。
+     * 默认全部为 true。{@code file} 走 {@link FileToolProperty}，有更细的配置。
+     */
+    @Data
+    public static class ToolGroupProperty {
+        private boolean enabled = true;
+    }
+
+    /**
+     * 文件工具配置。yml 通过 {@code spring.ai.loom.agent.file.*} 配置。
+     * <p>
+     * 默认值针对 LLM 工具调用场景做了保守约束：
+     * <ul>
+     *   <li>{@code maxFileSize} = 5MB — 超过则拒绝读取 / 写入（防 OOM + 防 LLM context 溢出）</li>
+     *   <li>{@code maxMediaSize} = 1MB — 媒体文件 base64 后体积翻倍，更严</li>
+     *   <li>{@code maxWalkDepth} = 5 — 目录树 / 搜索递归上限</li>
+     *   <li>{@code maxWalkEntries} = 1000 — 单次列出 / 树节点上限</li>
+     *   <li>{@code excludedDirs} — 默认排除常见大目录（{@code .git}/{@code node_modules}/
+     *       {@code target}/{@code build}/{@code dist}/...）</li>
+     *   <li>{@code maxSearchResults} = 500 — {@code searchFiles} 命中上限</li>
+     *   <li>{@code deleteConfirmToken} = {@code I_CONFIRM_DELETE} —
+     *       {@code deleteFileOrDirectory} 必须传这个字符串才执行（防 LLM 误删）</li>
+     * </ul>
+     */
+    @Data
+    public static class FileToolProperty {
+        private boolean enabled = true;
+        /** 单次读取 / 写入文件大小上限（字节）。超过返回错误而非抛 OOM。 */
+        private long maxFileSize = 5L * 1024 * 1024;
+        /** 媒体文件（图片 / 音频）大小上限。base64 后体积 ≈ 4/3，更严。 */
+        private long maxMediaSize = 1L * 1024 * 1024;
+        /** 目录树 / 递归列出 / 搜索的深度上限。 */
+        private int maxWalkDepth = 5;
+        /** 单次目录遍历返回的条目数上限（防 LLM context 溢出）。 */
+        private int maxWalkEntries = 1000;
+        /** 单次 searchFiles 返回的命中数上限。 */
+        private int maxSearchResults = 500;
+        /** 删除操作必须传的确认字符串（防 LLM 误删 + 误传 confirm="Y"）。 */
+        private String deleteConfirmToken = "I_CONFIRM_DELETE";
+        /**
+         * 目录遍历时跳过的目录名（精确匹配，非 glob）。Spring Boot 项目的
+         * {@code target/}、前端的 {@code node_modules/}、仓库的 {@code .git/}
+         * 会让单次列表爆掉，默认排除。
+         */
+        private List<String> excludedDirs = List.of(
+                ".git", "node_modules", "target", "build", "dist",
+                ".idea", ".vscode", ".gradle", "out", "bin");
+    }
+
+    /**
+     * Git 工具配置。yml 通过 spring.ai.loom.agent.git.{enabled,username,token,remoteTimeoutSeconds} 配置。
+     * 为保持向后兼容，旧的顶层字段 gitUsername / gitToken 仍然可用。
+     */
+    @Data
+    public static class GitProperty {
+        /**
+         * 是否注册 IGitTool bean。默认 false —— 端到端部署请走 ICompileAndDeployTool。
+         * 设 true 时再暴露 31 个 git 命令给 LLM（适合需要 git status/log/blame/branch 等单点操作的场景）。
+         */
+        private boolean enabled = false;
+        private String username;
+        private String token;
+        /**
+         * 远程操作（clone / pull / fetch / push）底层 transport 的超时秒数。
+         * 默认 60s。设得过短可能误杀慢仓库；设得过长会让卡死的连接占住 SSE 链路。
+         */
+        private int remoteTimeoutSeconds = 60;
+    }
+
+    /**
+     * 一站式编译部署工具配置。
+     * <p>
+     * yml 通过 {@code spring.ai.loom.agent.compile.*} 配置：
+     * <ul>
+     *   <li>{@code enabled} — 是否启用该工具（默认 true）</li>
+     *   <li>{@code defaultPort} — 端口缺省值（默认 8080）</li>
+     *   <li>{@code mavenHome} — 可选；不配则复用 {@link MavenProperty#getMavenHome()}，
+     *       再不行就环境变量自动探测</li>
+     *   <li>{@code dockerCmd} — 可选；不配则用 PATH 上的 {@code docker}</li>
+     *   <li>{@code mavenTimeoutMs} — maven 编译超时（默认 600000 = 10 分钟）</li>
+     *   <li>{@code dockerBuildTimeoutMs} — docker build 超时（默认 600000）</li>
+     *   <li>{@code dockerRunTimeoutMs} — docker run 启动等待超时（默认 60000）</li>
+     *   <li>{@code healthCheckMaxWaitMs} — 容器启动后健康检查总等待（默认 60000）</li>
+     *   <li>{@code healthCheckIntervalMs} — 健康检查轮询间隔（默认 2000）</li>
+     *   <li>{@code keepWorkspace} — 是否保留工作区目录（默认 false）</li>
+     *   <li>{@code baseImage} — 生成的 Dockerfile 基础镜像（默认 eclipse-temurin:17-jre-alpine）</li>
+     *   <li>{@code extraRunArgs} — {@code docker run} 额外参数（默认空）</li>
+     * </ul>
+     */
+    @Data
+    public static class CompileProperty {
+        private boolean enabled = true;
+        private int defaultPort = 8080;
+        private String mavenHome;
+        private String dockerCmd;
+        private long mavenTimeoutMs = 600000L;
+        private long dockerBuildTimeoutMs = 600000L;
+        private long dockerRunTimeoutMs = 60000L;
+        private long healthCheckMaxWaitMs = 60000L;
+        private long healthCheckIntervalMs = 2000L;
+        private boolean keepWorkspace = false;
+        private String baseImage = "eclipse-temurin:17-jre-alpine";
+        /**
+         * 注入到 {@code docker run} 命令的额外参数，例如 {@code ["--network=host", "-e", "TZ=Asia/Shanghai"]}。
+         * 顺序敏感，会被插在 {@code -d -p ... --name ...} 之后、镜像名之前。
+         */
+        private List<String> extraRunArgs = new ArrayList<>();
+        /**
+         * 预置基础镜像模板。key 是模板别名（如 "java17" / "nginx"），
+         * value 是 {@link ImageTemplate{image, command}}。
+         * 工具入参 baseImage 传别名时匹配这里的 key；
+         * 传完整镜像名时等同直接覆盖 FROM，command 走 java17 模板兜底。
+         */
+        private Map<String, ImageTemplate> imageTemplates = new LinkedHashMap<>(Map.of(
+                "java17",  new ImageTemplate("eclipse-temurin:17-jre-alpine",
+                                             List.of("java", "-jar", "app.jar")),
+                "java21",  new ImageTemplate("eclipse-temurin:21-jre-alpine",
+                                             List.of("java", "-jar", "app.jar")),
+                "nginx",   new ImageTemplate("nginx:1.27-alpine",
+                                             List.of("nginx", "-g", "daemon off;")),
+                "python3", new ImageTemplate("python:3.12-slim",
+                                             List.of("python", "app.py"))
+        ));
+
+        /**
+         * 预置基础镜像模板：完整镜像名 + exec 形式启动命令。
+         */
+        @Data
+        @lombok.AllArgsConstructor
+        @lombok.NoArgsConstructor
+        public static class ImageTemplate {
+            /** 完整镜像名（含 tag）。 */
+            private String image;
+            /** exec 形式启动命令，会被序列化为 Dockerfile 的 ENTRYPOINT JSON 数组。 */
+            private List<String> command;
+        }
+    }
 }
