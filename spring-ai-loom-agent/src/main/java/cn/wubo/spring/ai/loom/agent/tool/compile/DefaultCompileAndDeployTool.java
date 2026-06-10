@@ -124,6 +124,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                     "无法获取用户名，请通过登录态调用");
         }
 
+        // 临时兜底：port 现已从对话入参给，Task 3 改为 fail-fast（缺 port 即返回）
         int effectivePort = (port != null && port > 0) ? port : 8080;
         String workspaceName = WORKSPACE_SUBDIR + "-" + UUID.randomUUID().toString().substring(0, 8);
         Path workspace = getUserFileDir(username).resolve(workspaceName);
@@ -179,7 +180,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             steps.add("✅ 产物：" + jar.getName());
 
             // Step 4: write Dockerfile —— 必须写到 effectiveDir，否则 COPY target/ 路径对不上
-            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage, effectivePort);  // 本任务用 effectivePort 兜底，Task 4 改 containerPort
+            // 临时用 effectivePort 作为容器端口（参数名 containerPort 是为 Task 4 预留的）；Task 4 改用独立的 containerPort 入参
+            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage, effectivePort);
             steps.add("✅ Dockerfile：" + dockerfile.getName());
 
             // Step 5: docker build —— 必须在 effectiveDir 下执行，构建上下文才能找到 target/

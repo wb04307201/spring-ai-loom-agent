@@ -468,12 +468,14 @@ class DefaultCompileAndDeployToolTest {
     }
 
     @Test
+    @DisplayName("CompileProperty 已删除 defaultPort 字段")
     void compileProperty_noDefaultPortField() {
         assertThatThrownBy(() -> LoomAgentProperties.CompileProperty.class.getDeclaredField("defaultPort"))
                 .isInstanceOf(NoSuchFieldException.class);
     }
 
     @Test
+    @DisplayName("CompileProperty 已删除 baseImage 字段")
     void compileProperty_noBaseImageField() {
         assertThatThrownBy(() -> LoomAgentProperties.CompileProperty.class.getDeclaredField("baseImage"))
                 .isInstanceOf(NoSuchFieldException.class);
