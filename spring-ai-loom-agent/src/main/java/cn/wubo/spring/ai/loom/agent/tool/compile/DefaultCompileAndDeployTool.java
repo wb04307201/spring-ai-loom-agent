@@ -199,7 +199,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
 
             // Step 7: health check
             boolean healthy = waitForHealthy(effectivePort, effectiveHealthPath);
-            String accessUrl = "http://localhost:" + effectivePort;
+            String accessUrl = buildAccessUrl(effectivePort, effectiveHealthPath);
             if (!healthy) {
                 steps.add("⚠ 健康检查未在 " + compile.getHealthCheckMaxWaitMs() + "ms 内通过，"
                         + "容器已保留，可手动访问 " + accessUrl + effectiveHealthPath);
@@ -550,8 +550,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      */
     private boolean waitForHealthy(int port, String healthPath) {
         long deadline = System.currentTimeMillis() + compile.getHealthCheckMaxWaitMs();
-        String urlStr = "http://localhost:" + port
-                + (healthPath.startsWith("/") ? healthPath : "/" + healthPath);
+        String urlStr = buildAccessUrl(port, healthPath);
         while (System.currentTimeMillis() < deadline) {
             try {
                 HttpURLConnection conn = (HttpURLConnection) URI.create(urlStr).toURL().openConnection();
@@ -889,6 +888,16 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         if (name.endsWith(".git")) name = name.substring(0, name.length() - 4);
         if (name.isBlank()) name = "repo";
         return name;
+    }
+
+    /**
+     * 把 {@code localhost:port + healthPath} 拼成完整 URL，healthPath 缺前导 / 时自动补。
+     * 供 {@code accessUrl} 和 {@link #waitForHealthy} 共用，保证两者一致。
+     */
+    static String buildAccessUrl(int port, String healthPath) {
+        String path = (healthPath == null || healthPath.isEmpty()) ? "/" : healthPath;
+        String suffix = path.startsWith("/") ? path : "/" + path;
+        return "http://localhost:" + port + suffix;
     }
 
     private static void deleteRecursively(Path dir) {

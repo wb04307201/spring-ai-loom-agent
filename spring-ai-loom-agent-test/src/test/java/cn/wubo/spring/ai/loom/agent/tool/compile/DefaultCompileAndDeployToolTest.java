@@ -408,4 +408,24 @@ class DefaultCompileAndDeployToolTest {
         java.util.List<String> command = (java.util.List<String>) comps[2].getAccessor().invoke(r);
         assertEquals(List.of("sh", "-c", "echo hi"), command, "runCommand 应覆盖模板默认命令");
     }
+
+    @Test
+    @DisplayName("buildAccessUrl: healthPath 不带前导 / 时自动补")
+    void buildAccessUrl_healthPathWithoutLeadingSlash() throws Exception {
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "buildAccessUrl", int.class, String.class);
+        m.setAccessible(true);
+        assertEquals("http://localhost:8081/sql-forge-demo",
+                m.invoke(null, 8081, "sql-forge-demo"));
+    }
+
+    @Test
+    @DisplayName("buildAccessUrl: healthPath 带前导 / 时不重复加")
+    void buildAccessUrl_healthPathWithLeadingSlash() throws Exception {
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "buildAccessUrl", int.class, String.class);
+        m.setAccessible(true);
+        assertEquals("http://localhost:8081/health",
+                m.invoke(null, 8081, "/health"));
+    }
 }
