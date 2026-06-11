@@ -46,4 +46,16 @@ public sealed interface BuildStrategy
      * @return 写入的 Dockerfile 文件
      */
     File writeDockerfile(Path projectDir, ResolvedImage image, int containerPort, String artifact) throws IOException;
+
+    /**
+     * 在 {@code candidateDir}（由 {@link #artifactCandidates()} 解析出的目录）下挑出具体产物文件 / 目录。
+     * <p>
+     * 缺省实现返回 {@code candidateDir} 自身（Node / Python 整体拷贝目录即可）。
+     * Maven 在此覆盖为：{@code target/} 下选体积最大的非 {@code .original.jar} / {@code -sources.jar} / {@code -javadoc.jar} jar。
+     *
+     * @return 选中的产物绝对路径；找不到返回 null（让上层 fail-fast）
+     */
+    default Path findArtifact(Path candidateDir) {
+        return candidateDir;
+    }
 }

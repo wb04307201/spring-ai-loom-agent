@@ -660,4 +660,55 @@ class DefaultCompileAndDeployToolTest {
         assertFalse(cmd.contains("-e"), "不应加 -e: " + cmd);
         assertFalse(cmd.contains("SERVER_PORT"), "不应注入 SERVER_PORT: " + cmd);
     }
+
+    @Test
+    @DisplayName("findArtifact 委托给 strategy.findArtifact：Maven 在 target/ 下选最大 jar")
+    void findArtifact_mavenStrategy_picksLargestJar(@TempDir Path tmp) throws Exception {
+        // 模拟 Maven 工程：pom.xml + target/ + 3 个大小不等的 jar
+        Files.writeString(tmp.resolve("pom.xml"), "<project/>");
+        Path target = Files.createDirectories(tmp.resolve("target"));
+        Files.writeString(target.resolve("a-small.jar"), "x");                       // 1 字节
+        Files.writeString(target.resolve("c-mid.jar"), "xxxxxxxx");                 // 8 字节
+        Files.writeString(target.resolve("b-big.jar"), "xxxxxxxxxxxxxxxxxx");       // 18 字节
+        // 干扰项：.original / -sources / -javadoc 全部跳过
+        Files.writeString(target.resolve("a-small.jar.original"), "orig");
+        Files.writeString(target.resolve("a-small-sources.jar"), "src");
+
+        // 反射调 private findArtifact(BuildStrategy, Path)
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "findArtifact",
+                Class.forName("cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategy"),
+                Path.class);
+        m.setAccessible(true);
+        Object strategy = Class.forName("cn.wubo.spring.ai.loom.agent.tool.compile.strategy.MavenBuildStrategy")
+                .getDeclaredConstructor().newInstance();
+
+        Path artifact = (Path) m.invoke(tool, strategy, tmp);
+        assertNotNull(artifact, "应当挑出最大 jar");
+        // 用 endsWith 跨平台断言（Windows 上 Path.toString() 用 "\\"）
+        assertTrue(artifact.toString().endsWith("b-big.jar"),
+                "应当跳过 .original/-sources 选 b-big.jar（18 字节最大），实际: " + artifact);
+        assertTrue(artifact.toString().contains("target"),
+                "路径应当含 target/，实际: " + artifact);
+    }
+
+    @Test
+    @DisplayName("findArtifact 委托给 strategy.findArtifact：Maven target/ 无 jar 时返回 null")
+    void findArtifact_mavenStrategy_noJarReturnsNull(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("pom.xml"), "<project/>");
+        Path target = Files.createDirectories(tmp.resolve("target"));
+        // target/ 存在但里面没 jar
+        Files.writeString(target.resolve("readme.txt"), "no jars here");
+
+        Method m = DefaultCompileAndDeployTool.class.getDeclaredMethod(
+                "findArtifact",
+                Class.forName("cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategy"),
+                Path.class);
+        m.setAccessible(true);
+        Object strategy = Class.forName("cn.wubo.spring.ai.loom.agent.tool.compile.strategy.MavenBuildStrategy")
+                .getDeclaredConstructor().newInstance();
+
+        Path artifact = (Path) m.invoke(tool, strategy, tmp);
+        assertNull(artifact, "target/ 下无 jar 时 findArtifact 应返回 null");
+    }
 }

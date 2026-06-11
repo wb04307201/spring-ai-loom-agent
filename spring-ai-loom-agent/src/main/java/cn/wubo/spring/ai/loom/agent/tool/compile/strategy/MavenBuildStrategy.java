@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -54,5 +56,34 @@ public record MavenBuildStrategy() implements BuildStrategy {
                 """, image.image(), artifact, containerPort, entrypoint);
         Files.writeString(dockerfile.toPath(), content, StandardCharsets.UTF_8);
         return dockerfile;
+    }
+
+    /**
+     * 在 {@code target/} 下挑体积最大的 Spring Boot fat jar，
+     * 跳过 repackage 前的 {@code .original.jar} / {@code -sources.jar} / {@code -javadoc.jar}。
+     *
+     * @return 选中 jar 的绝对路径；找不到返回 null
+     */
+    @Override
+    public Path findArtifact(Path targetDir) {
+        File jar = pickJarFromTarget(targetDir);
+        return jar != null ? jar.toPath() : null;
+    }
+
+    /**
+     * 在 {@code target/} 下挑体积最大的 Spring Boot fat jar。
+     * 跳过 {@code .original.jar} / {@code -sources.jar} / {@code -javadoc.jar}。
+     * <p>
+     * 从 Task 1 的 {@code DefaultCompileAndDeployTool#pickJarFromTarget} 迁移过来 —— 选最大 jar
+     * 属于 Maven 专有行为，理应放在 strategy 内而非主流程。
+     */
+    private static File pickJarFromTarget(Path target) {
+        File dir = target.toFile();
+        File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar") && !name.endsWith(".original.jar")
+                && !name.endsWith("-sources.jar") && !name.endsWith("-javadoc.jar"));
+        if (jars == null || jars.length == 0) return null;
+        // 取体积最大的（Spring Boot repackage jar 一定比普通 jar 大）
+        Arrays.sort(jars, Comparator.comparingLong(File::length).reversed());
+        return jars[0];
     }
 }

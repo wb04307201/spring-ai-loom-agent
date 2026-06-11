@@ -64,13 +64,6 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     private final CompileProperty compile;
     private final String resolvedMavenHome;
     private final String fileBasePath;
-    /**
-     * 构建策略：当前固定为 Maven / Java。
-     * <p>
-     * 后续 Task 2 引入 {@code BuildStrategyFactory} 后会改为按 marker file 自动探测。
-     * 保留为 {@code private final} 字段方便子类 / 测试覆盖（{@code @Test setAccessible(true)}）。
-     */
-    private final BuildStrategy strategy = new MavenBuildStrategy();
 
     /**
      * 工具内部使用的极宽松 JSON 解析器。
@@ -124,6 +117,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         String imageName = str(flat, "imageName", "image_name", "image");
         String containerName = str(flat, "containerName", "container_name", "container");
         String healthPath = str(flat, "healthPath", "health_path");
+        // 解析 buildTool —— 显式选 strategy；缺省（null/blank）时 main flow 走 autoDetect
+        String paramBuildTool = str(flat, "buildTool", "build_tool", "projectType", "stack");
 
         if (gitUrl == null || gitUrl.isBlank()) {
             return CompileAndDeployResult.fail(null, null, null, null, null, null, steps,
@@ -190,6 +185,23 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             if (!effectiveDir.equals(projectDir)) {
                 log.info("Multi-module layout detected. projectDir={}, effectiveDir={}", projectDir, effectiveDir);
             }
+
+            // Step 1.5: pick build strategy (显式 buildTool 或 autoDetect)
+            cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategy strategy;
+            try {
+                if (paramBuildTool != null && !paramBuildTool.isBlank()) {
+                    strategy = cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategyFactory.forBuildTool(paramBuildTool);
+                } else {
+                    strategy = cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategyFactory.autoDetect(effectiveDir);
+                }
+            } catch (IllegalArgumentException strategyErr) {
+                steps.add("❌ 项目类型识别失败：" + strategyErr.getMessage());
+                return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
+                        effectiveContainer, effectivePort, effectiveHealthPath, steps,
+                        strategyErr.getMessage());
+            }
+            steps.add("✅ 构建策略：" + strategy.getClass().getSimpleName());
+
             // Step 2: build (委托给 strategy)
             String buildLog = buildArtifact(strategy, effectiveDir);
             if (buildLog == null) {
@@ -339,8 +351,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     /**
      * 委托给 strategy 查找 build 产物路径（相对 {@code effectiveDir}）。
      * <p>
-     * Maven 特例：{@code target/} 目录下挑体积最大的 jar，
-     * 走 {@link #pickJarFromTarget}（跳过 .original / -sources / -javadoc）。
+     * 默认实现：{@link BuildStrategy#findArtifact(Path)} 直接返回 {@code candidateDir} 自身
+     * （Node / Python 整体拷贝目录即可）。Maven 在 strategy 内覆盖为 {@code target/} 下选最大 jar。
      *
      * @return 相对路径（如 {@code target/app.jar}）；未找到返回 null
      */
@@ -348,13 +360,9 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         for (String candidate : strategy.artifactCandidates()) {
             Path dir = effectiveDir.resolve(candidate);
             if (!Files.isDirectory(dir)) continue;
-            if (strategy instanceof MavenBuildStrategy) {
-                File jar = pickJarFromTarget(dir);
-                if (jar != null) return effectiveDir.relativize(dir.resolve(jar.getName()));
-                continue;
-            }
-            if (".".equals(candidate)) return effectiveDir.relativize(effectiveDir);
-            return effectiveDir.relativize(dir);
+            Path picked = strategy.findArtifact(dir);
+            if (picked == null) continue;
+            return effectiveDir.relativize(picked);
         }
         return null;
     }
@@ -585,7 +593,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     File writeDockerfile(Path projectDir, File jar, ResolvedImage resolved, int containerPort) {
         try {
             String artifact = "target/" + jar.getName();
-            return strategy.writeDockerfile(projectDir, resolved, containerPort, artifact);
+            return new MavenBuildStrategy().writeDockerfile(projectDir, resolved, containerPort, artifact);
         } catch (IOException e) {
             throw new RuntimeException("写 Dockerfile 失败: " + e.getMessage(), e);
         }
