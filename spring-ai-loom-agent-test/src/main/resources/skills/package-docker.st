@@ -51,5 +51,5 @@
    - 若 result.success == false：把 result.steps 里的每一步用 Markdown 列表展示给用户，
      并在末尾附上 result.errorMessage，让用户知道卡在哪一步
 
-注意：不要手动调用 git / mvn / docker 工具，也不要拆分 @compileAndDeploy。
+注意：不要手动调用 git / mvn / docker / npm 工具，也不要拆分 @compileAndDeploy。
 整个流程是 LLM → 单次工具调用 → 渲染结果。
