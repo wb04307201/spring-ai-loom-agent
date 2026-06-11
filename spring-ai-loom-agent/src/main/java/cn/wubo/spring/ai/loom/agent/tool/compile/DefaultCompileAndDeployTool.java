@@ -2,6 +2,8 @@ package cn.wubo.spring.ai.loom.agent.tool.compile;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.CompileProperty;
+import cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategy;
+import cn.wubo.spring.ai.loom.agent.tool.compile.strategy.MavenBuildStrategy;
 import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -62,6 +64,13 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     private final CompileProperty compile;
     private final String resolvedMavenHome;
     private final String fileBasePath;
+    /**
+     * 构建策略：当前固定为 Maven / Java。
+     * <p>
+     * 后续 Task 2 引入 {@code BuildStrategyFactory} 后会改为按 marker file 自动探测。
+     * 保留为 {@code private final} 字段方便子类 / 测试覆盖（{@code @Test setAccessible(true)}）。
+     */
+    private final BuildStrategy strategy = new MavenBuildStrategy();
 
     /**
      * 工具内部使用的极宽松 JSON 解析器。
@@ -168,7 +177,6 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             }
             steps.add("✅ 克隆：" + projectDir);
 
-            // Step 2: mvn package
             // 多模块项目根目录无 pom.xml —— 解析出真正的工作目录
             Path effectiveDir;
             try {
@@ -182,26 +190,27 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             if (!effectiveDir.equals(projectDir)) {
                 log.info("Multi-module layout detected. projectDir={}, effectiveDir={}", projectDir, effectiveDir);
             }
-            String mvnLog = mavenPackage(effectiveDir);
-            if (mvnLog == null) {
-                steps.add("❌ 编译：mvn clean package -DskipTests");
+            // Step 2: build (委托给 strategy)
+            String buildLog = buildArtifact(strategy, effectiveDir);
+            if (buildLog == null) {
+                steps.add("❌ 编译：" + strategy.getClass().getSimpleName());
                 return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
-                        effectiveContainer, effectivePort, effectiveHealthPath, steps, "Maven 编译失败");
+                        effectiveContainer, effectivePort, effectiveHealthPath, steps, "编译失败");
             }
-            steps.add("✅ 编译：mvn clean package");
+            steps.add("✅ 编译：" + strategy.getClass().getSimpleName());
 
-            // Step 3: pick the Spring Boot jar (or any executable jar) —— 在 effectiveDir 下找
-            File jar = findBuiltJar(effectiveDir);
-            if (jar == null) {
-                steps.add("❌ 查找 jar：未在 target/ 下找到可执行 jar");
+            // Step 3: pick artifact (委托给 strategy)
+            Path artifact = findArtifact(strategy, effectiveDir);
+            if (artifact == null) {
+                steps.add("❌ 查找产物：未在 " + strategy.artifactCandidates() + " 找到");
                 return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
-                        effectiveContainer, effectivePort, effectiveHealthPath, steps, "target/ 下未找到 jar");
+                        effectiveContainer, effectivePort, effectiveHealthPath, steps, "产物未找到");
             }
-            steps.add("✅ 产物：" + jar.getName());
+            steps.add("✅ 产物：" + artifact);
 
-            // Step 4: write Dockerfile —— 必须写到 effectiveDir，否则 COPY target/ 路径对不上
+            // Step 4: write Dockerfile (委托给 strategy) —— 必须写到 effectiveDir，否则 COPY 路径对不上
             // EXPOSE 端口用 effectiveContainerPort（容器内应用端口），与 effectivePort（宿主机对外端口）解耦
-            File dockerfile = writeDockerfile(effectiveDir, jar, resolvedImage, effectiveContainerPort);
+            File dockerfile = strategy.writeDockerfile(effectiveDir, resolvedImage, effectiveContainerPort, artifact.toString());
             steps.add("✅ Dockerfile：" + dockerfile.getName());
 
             // Step 5: docker build —— 必须在 effectiveDir 下执行，构建上下文才能找到 target/
@@ -310,13 +319,57 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     }
 
     /**
+     * 委托给 strategy 执行编译。
+     * <p>
+     * 当前只有 {@link MavenBuildStrategy}，内部走 {@link #mavenPackage}（保留其 mvn -f
+     * 多模块解析逻辑）。后续 Npm/Python strategy 接入后在这里 dispatch。
+     *
+     * @return 编译输出日志；编译失败 / 超时返回 null
+     */
+    private String buildArtifact(BuildStrategy strategy, Path effectiveDir) {
+        List<List<String>> commands = strategy.buildCommands();
+        if (commands.isEmpty()) {
+            // 无独立 build 步骤（e.g. Python 走 Dockerfile 内 pip install）—— 视为成功
+            return "";
+        }
+        // 当前唯一非空实现是 MavenBuildStrategy
+        return mavenPackage(effectiveDir);
+    }
+
+    /**
+     * 委托给 strategy 查找 build 产物路径（相对 {@code effectiveDir}）。
+     * <p>
+     * Maven 特例：{@code target/} 目录下挑体积最大的 jar，
+     * 走 {@link #pickJarFromTarget}（跳过 .original / -sources / -javadoc）。
+     *
+     * @return 相对路径（如 {@code target/app.jar}）；未找到返回 null
+     */
+    private Path findArtifact(BuildStrategy strategy, Path effectiveDir) {
+        for (String candidate : strategy.artifactCandidates()) {
+            Path dir = effectiveDir.resolve(candidate);
+            if (!Files.isDirectory(dir)) continue;
+            if (strategy instanceof MavenBuildStrategy) {
+                File jar = pickJarFromTarget(dir);
+                if (jar != null) return effectiveDir.relativize(dir.resolve(jar.getName()));
+                continue;
+            }
+            if (".".equals(candidate)) return effectiveDir.relativize(effectiveDir);
+            return effectiveDir.relativize(dir);
+        }
+        return null;
+    }
+
+    /**
      * mvn clean package -DskipTests。
      * 直接走 ProcessBuilder 避开 maven-invoker 的 Windows 句柄泄漏问题。
      * <p>
      * 多模块项目（如 gitee.com/xxx/demo，包含 demo-api、demo-web 等子模块），
      * 仓库根目录往往没有 pom.xml。这种情况下走"找到第一个含 pom.xml 的子目录
      * 作为工作目录"的兜底策略；构建产物同样会落到子目录的 target/ 下。
+     *
+     * @deprecated 由 {@link #buildArtifact(BuildStrategy, Path)} 委托
      */
+    @Deprecated
     private String mavenPackage(Path projectDir) {
         // 解析出真正要执行 mvn 的目录和 pom.xml
         Path[] effective = resolveMavenTarget(projectDir);
@@ -368,7 +421,10 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * <p>
      * 注意：故意不递归更深的层级。多模块项目的约定是"根目录 + 一层子模块"，
      * 递归查找容易误中 utility/lib 之类的子模块。
+     *
+     * @deprecated 由 {@link #buildArtifact(BuildStrategy, Path)} 委托
      */
+    @Deprecated
     private Path[] resolveMavenTarget(Path projectDir) {
         Path rootPom = projectDir.resolve("pom.xml");
         if (Files.isRegularFile(rootPom)) {
@@ -487,7 +543,10 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * <p>
      * 调用方应当传入 {@link #resolveEffectiveProjectDir} 解析出的目录，
      * 多模块项目这样 jar 才会落在 {@code target/} 下。
+     *
+     * @deprecated 由 {@link #findArtifact(BuildStrategy, Path)} 委托
      */
+    @Deprecated
     File findBuiltJar(Path effectiveDir) {
         Path target = effectiveDir.resolve("target");
         if (!Files.isDirectory(target)) {
@@ -496,6 +555,10 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         return pickJarFromTarget(target);
     }
 
+    /**
+     * @deprecated 由 {@link #findArtifact(BuildStrategy, Path)} 委托
+     */
+    @Deprecated
     private File pickJarFromTarget(Path target) {
         File dir = target.toFile();
         File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar") && !name.endsWith(".original.jar")
@@ -511,21 +574,18 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * <p>
      * command 序列化为 JSON 数组（Dockerfile exec 形式）：
      * {@code ["java", "-jar", "app.jar"]} 或 {@code ["nginx", "-g", "daemon off;"]}。
+     * <p>
+     * 委托给 {@link MavenBuildStrategy#writeDockerfile} 实际写文件 —— 保持原签名
+     * 以兼容反射测试（{@code DefaultCompileAndDeployToolTest#writeDockerfile_content} 等）。
+     * 后续 Task 2+ 引入 factory 后此方法可移除。
+     *
+     * @deprecated 直接调 {@link BuildStrategy#writeDockerfile}
      */
+    @Deprecated
     File writeDockerfile(Path projectDir, File jar, ResolvedImage resolved, int containerPort) {
-        File dockerfile = projectDir.resolve("Dockerfile").toFile();
-        String entrypoint = toJsonArray(resolved.command());
-        String content = String.format("""
-                # Auto-generated by DefaultCompileAndDeployTool
-                FROM %s
-                WORKDIR /app
-                COPY target/%s app.jar
-                EXPOSE %d
-                ENTRYPOINT %s
-                """, resolved.image(), jar.getName(), containerPort, entrypoint);
         try {
-            Files.writeString(dockerfile.toPath(), content, StandardCharsets.UTF_8);
-            return dockerfile;
+            String artifact = "target/" + jar.getName();
+            return strategy.writeDockerfile(projectDir, resolved, containerPort, artifact);
         } catch (IOException e) {
             throw new RuntimeException("写 Dockerfile 失败: " + e.getMessage(), e);
         }
@@ -537,7 +597,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * 复用类内已存在的 {@link #LENIENT_MAPPER} 序列化，不再手写转义逻辑。
      * 失败时抛 {@link IllegalStateException}（writeDockerfile 会包装成 RuntimeException）。
      */
-    static String toJsonArray(List<String> parts) {
+    public static String toJsonArray(List<String> parts) {
         if (parts == null || parts.isEmpty()) {
             throw new IllegalArgumentException("ResolvedImage.command must not be empty");
         }
@@ -1031,7 +1091,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      *  - image: 完整镜像名（必填，最终写入 Dockerfile FROM）
      *  - command: exec 形式启动命令（写入 Dockerfile ENTRYPOINT）
      */
-    record ResolvedImage(String alias, String image, List<String> command) {}
+    public record ResolvedImage(String alias, String image, List<String> command) {}
 
     /**
      * 解析工具入参 baseImage / runCommand + yml 模板，给出最终镜像配置。
