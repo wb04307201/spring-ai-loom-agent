@@ -128,7 +128,8 @@ class PathSecurityTest {
 
         Object result = getWd.invoke(tool, tc(context));
         assertNotNull(result);
-        assertEquals(Paths.get(".local/file/testuser/my-repo"), result);
+        // getWorkingDir now returns absolute path
+        assertEquals(Paths.get(".local/file/testuser/my-repo").toAbsolutePath().normalize(), result);
     }
 
     /**

@@ -1,6 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.tool.maven;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.MavenProperty;
+import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
@@ -71,7 +72,7 @@ class DefaultMavenToolRealProjectIT {
         assumeTrue(pom.isFile(), "跳过：真实项目 " + REAL_PROJECT + " 不存在");
 
         // 让工具先自己探测一次
-        String autoHome = DefaultMavenTool.resolveMavenHome(null);
+        String autoHome = MavenHomeResolver.resolve(null);
         assumeTrue(autoHome != null, "跳过：自动探测未发现 Maven Home");
 
         MavenProperty props = new MavenProperty();

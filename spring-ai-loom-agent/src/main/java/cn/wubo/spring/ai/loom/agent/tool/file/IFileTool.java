@@ -37,4 +37,6 @@ public interface IFileTool extends IEmbedTool {
     String downloadFileUrl(String path, ToolContext toolContext);
 
     String viewFileUrl(String path, ToolContext toolContext);
+
+    String deleteFileOrDirectory(String path, String confirm, ToolContext toolContext);
 }

@@ -100,6 +100,73 @@ class DefaultGitToolTest {
         return new ToolContext(m);
     }
 
+    // ==================== gitClone 超时 ====================
+
+    /**
+     * 验证 gitClone 在网络挂死时不会无限阻塞整个聊天会话。
+     * <p>
+     * 旧实现下，{@code CloneCommand.call()} 没有 setTimeout，遇到 gitee 慢
+     * 或网络抖动会无限挂死，整个工具调用链跟着卡住。下游 LLM 看不到任何反馈，
+     * 表现就是"步骤 2 克隆代码仓库就停了"。
+     * <p>
+     * 现在的实现走 {@code setTimeout(remoteTimeoutSeconds)}，超时应在
+     * transport 抛 {@code TransportException}，工具返回包含"失败"的结果。
+     * <p>
+     * 用一个本地 TCP "黑洞" server：accept 但永不写数据，模拟挂死 remote。
+     */
+    @Test
+    @DisplayName("gitClone 在远端挂死时会被超时打断，不再无限阻塞")
+    void gitClone_hangsThenTimesOut() throws Exception {
+        // 启动黑洞 server：accept 但永不返回 HTTP 响应
+        java.net.ServerSocket server = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress());
+        int port = server.getLocalPort();
+        java.util.concurrent.atomic.AtomicBoolean stop = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.List<java.net.Socket> held = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        Thread acceptor = new Thread(() -> {
+            while (!stop.get()) {
+                try {
+                    java.net.Socket s = server.accept();
+                    held.add(s);
+                    // 不读、不写 —— 让客户端 HTTP read 永远等
+                } catch (java.io.IOException e) {
+                    return;
+                }
+            }
+        }, "blackhole-acceptor");
+        acceptor.setDaemon(true);
+        acceptor.start();
+
+        try {
+            // 用一个 2s 超时的工具（生产默认 60s，测试里太慢）
+            LoomAgentProperties fastProps = new LoomAgentProperties();
+            fastProps.setFileBasePath(tmpRoot.getParent().toString());
+            fastProps.getGit().setRemoteTimeoutSeconds(2);
+            DefaultGitTool fastTool = new DefaultGitTool(fastProps);
+
+            String url = "http://127.0.0.1:" + port + "/never-responds.git";
+            long start = System.currentTimeMillis();
+            String result = fastTool.gitClone(url, "hung-clone", null, null, null, null, ctx());
+            long cost = System.currentTimeMillis() - start;
+
+            // 关键断言 1：必须返回失败，不能无限阻塞
+            assertTrue(result.contains("失败"),
+                    "应返回失败结果。实际:\n" + result);
+
+            // 关键断言 2：耗时应在 timeout(2s) + 一些 jgit 自身缓冲(<=10s) 内
+            //           —— 证明 setTimeout 真的生效了，不是依赖 Future.cancel
+            assertTrue(cost < 15_000,
+                    "应被超时打断，不应无限阻塞。实际耗时 " + cost + "ms");
+            assertTrue(cost >= 1_500,
+                    "应在超时(2s)左右才返回，过早返回(<1.5s) 说明配置没生效。实际 " + cost + "ms");
+        } finally {
+            stop.set(true);
+            try { server.close(); } catch (IOException ignored) { }
+            for (java.net.Socket s : held) {
+                try { s.close(); } catch (IOException ignored) { }
+            }
+        }
+    }
+
     // ==================== Init / Clone ====================
 
     @Test

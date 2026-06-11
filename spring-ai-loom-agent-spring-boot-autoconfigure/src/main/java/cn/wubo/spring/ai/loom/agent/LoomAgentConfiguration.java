@@ -19,6 +19,8 @@ import cn.wubo.spring.ai.loom.agent.model.*;
 import cn.wubo.spring.ai.loom.agent.skill.DefaultSkillStorage;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.compile.DefaultCompileAndDeployTool;
+import cn.wubo.spring.ai.loom.agent.tool.compile.ICompileAndDeployTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.DefaultFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.IFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.DefaultGitTool;
@@ -27,8 +29,8 @@ import cn.wubo.spring.ai.loom.agent.tool.skill.DefaultSkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.DefaultTimeTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
-import cn.wubo.spring.ai.loom.agent.tool.terminal.DefaultTerminalTool;
-import cn.wubo.spring.ai.loom.agent.tool.terminal.ITerminalTool;
+import cn.wubo.spring.ai.loom.agent.tool.maven.DefaultMavenTool;
+import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
 import cn.wubo.spring.ai.loom.agent.user.*;
 import cn.wubo.spring.ai.loom.agent.vectorstore.JVectorStore;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -160,6 +162,33 @@ public class LoomAgentConfiguration {
     @Configuration
     static class InfrastructureConfiguration {
 
+        private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(InfrastructureConfiguration.class);
+
+        /**
+         * 放宽 Spring AI 内部 {@code JsonParser} 使用的 ObjectMapper，
+         * 允许 JS 风格注释（{@code //}、{@code /* *}{@code /}）和单引号。
+         * <p>
+         * 部分 LLM（特别是 qwen 系列）在工具调用时输出的 JSON 会带 JS 注释，
+         * 默认的 Jackson 配置会抛 {@code JsonParseException: Unexpected character ('/') ... maybe a comment}，
+         * 整条工具链直接断掉。开启 {@code ALLOW_COMMENTS} 后这类 LLM 输出能正常解析。
+         */
+        @Bean
+        public org.springframework.beans.factory.SmartInitializingSingleton springAiJsonParserConfig() {
+            return () -> {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper om =
+                            org.springframework.ai.util.json.JsonParser.getObjectMapper();
+                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
+                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_YAML_COMMENTS, true);
+                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
+                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
+                } catch (Throwable t) {
+                    // 静默失败 —— Spring AI 内部 API 可能在新版本里被替换
+                    LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
+                }
+            };
+        }
+
         @Bean
         public LoomAgentProperties loomAgentProperties(org.springframework.core.env.Environment environment) {
             LoomAgentProperties properties = new LoomAgentProperties();
@@ -178,6 +207,8 @@ public class LoomAgentConfiguration {
                 properties.setGitToken(bound.getGitToken());
                 properties.setAuth(bound.getAuth());
                 properties.setUser(bound.getUser());
+                properties.setMaven(bound.getMaven());
+                properties.setCompile(bound.getCompile());
             }
             return properties;
         }
@@ -360,24 +391,27 @@ public class LoomAgentConfiguration {
     // ==================== Embed Tools ====================
 
     @Configuration
-    static class ToolConfiguration {
+    public static class ToolConfiguration {
 
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.time.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(ITimeTool.class)
         @Bean
         public ITimeTool defaultTimeTool(LoomAgentProperties properties) {
             return new DefaultTimeTool(properties);
         }
 
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.skill.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(ISkillTool.class)
         @Bean
         public ISkillTool defaultSkillTool(ISkillStorage skillStorage) {
             return new DefaultSkillTool(skillStorage);
         }
 
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.file.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(IFileTool.class)
         @Bean
         public IFileTool defaultFileTool(IFile file, LoomAgentProperties properties) {
-            return new DefaultFileTool(file, properties.getFileBasePath());
+            return new DefaultFileTool(file, properties.getFileBasePath(), properties.getFile());
         }
 
         @ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")
@@ -387,10 +421,19 @@ public class LoomAgentConfiguration {
             return new DefaultGitTool(properties);
         }
 
-        @ConditionalOnMissingBean(ITerminalTool.class)
+        @ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")
+        @ConditionalOnMissingBean(IMavenTool.class)
         @Bean
-        public ITerminalTool defaultTerminalTool() {
-            return new DefaultTerminalTool();
+        public IMavenTool defaultMavenTool(LoomAgentProperties properties) {
+            return new DefaultMavenTool(properties.getMaven(), properties.getFileBasePath());
+        }
+
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.compile.enabled", havingValue = "true", matchIfMissing = true)
+        @ConditionalOnMissingBean(ICompileAndDeployTool.class)
+        @Bean
+        public ICompileAndDeployTool defaultCompileAndDeployTool(LoomAgentProperties properties) {
+            return new DefaultCompileAndDeployTool(properties);
         }
     }
 

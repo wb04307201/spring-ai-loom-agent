@@ -49,14 +49,15 @@ class LoomAgentToolAutoConfigTest {
             .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.ToolConfiguration.class);
 
     @Test
-    @DisplayName("默认配置下所有 tool bean 都存在")
+    @DisplayName("默认配置下常用 tool bean 加载（git/maven 是 opt-in，默认不加载）")
     void allToolsLoadedByDefault() {
         runner.run(ctx -> {
             assertThat(ctx).hasSingleBean(ITimeTool.class);
             assertThat(ctx).hasSingleBean(ISkillTool.class);
             assertThat(ctx).hasSingleBean(IFileTool.class);
-            assertThat(ctx).hasSingleBean(IGitTool.class);
-            assertThat(ctx).hasSingleBean(IMavenTool.class);
+            // IGitTool / IMavenTool 是 opt-in（默认 false），应由显式 enabled=true 启用
+            assertThat(ctx).doesNotHaveBean(IGitTool.class);
+            assertThat(ctx).doesNotHaveBean(IMavenTool.class);
         });
     }
 
@@ -75,7 +76,10 @@ class LoomAgentToolAutoConfigTest {
     @Test
     @DisplayName("yml spring.ai.loom.agent.maven.enabled=false 时 IMavenTool 不加载")
     void mavenDisabledByConfig() {
-        runner.withPropertyValues("spring.ai.loom.agent.maven.enabled=false")
+        // 默认 git/maven 都是 opt-in（默认 false），这里显式开 git 以验证 maven 关闭仍能加载 git
+        runner.withPropertyValues(
+                        "spring.ai.loom.agent.maven.enabled=false",
+                        "spring.ai.loom.agent.git.enabled=true")
                 .run(ctx -> {
                     assertThat(ctx).doesNotHaveBean(IMavenTool.class);
                     assertThat(ctx).hasSingleBean(IGitTool.class);

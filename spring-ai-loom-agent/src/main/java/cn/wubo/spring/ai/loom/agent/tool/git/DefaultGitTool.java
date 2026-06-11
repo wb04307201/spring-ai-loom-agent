@@ -1,6 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.tool.git;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import cn.wubo.spring.ai.loom.agent.tool.common.PathSecurityUtils;
 import org.eclipse.jgit.api.*;
 import org.eclipse.jgit.api.CreateBranchCommand.SetupUpstreamMode;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -38,14 +39,32 @@ public class DefaultGitTool implements IGitTool {
     private static final String WORKING_DIR_KEY = "gitWorkingDir";
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
+    /**
+     * 远程操作（clone / pull / fetch / push）底层 transport 的超时秒数。
+     * <p>
+     * 历史上 gitClone 没有设置超时，遇到 gitee / github 慢或网络抖动时
+     * JGit 会无限挂死，整个工具调用链跟着卡住，聊天会话无法继续。
+     * 设个 60s 的合理上限 + 错误信息直接报给 LLM，让上层能恢复。
+     */
+    private final int remoteTimeoutSeconds;
+
     private final String fileBasePath;
     private final String defaultGitUsername;
     private final String defaultGitToken;
+
+    /**
+     * 测试场景回退存储：当 ToolContext.getContext() 返回 unmodifiable Map（Spring AI 默认）时，
+     * 用此 Map 作为 working dir 的回退存储。生产中 ToolContext.getContext() 是可写 Map，
+     * 仍以 ctx 为准；测试中用工具对象本身上下文，绕过不可变限制。
+     */
+    private final java.util.Map<String, String> fallbackWorkingDir = new java.util.concurrent.ConcurrentHashMap<>();
 
     public DefaultGitTool(LoomAgentProperties properties) {
         this.fileBasePath = properties.getFileBasePath() != null ? properties.getFileBasePath() : BASE_PATH;
         this.defaultGitUsername = properties.getGitUsername();
         this.defaultGitToken = properties.getGitToken();
+        int t = properties.getGit() != null ? properties.getGit().getRemoteTimeoutSeconds() : 60;
+        this.remoteTimeoutSeconds = t > 0 ? t : 60;
     }
 
     // ==================== Repository lifecycle ====================
@@ -65,10 +84,16 @@ public class DefaultGitTool implements IGitTool {
             if (initialBranch != null && !initialBranch.isBlank()) cmd.setInitialBranch(initialBranch);
             if (Boolean.TRUE.equals(bare)) cmd.setBare(true);
             Git git = cmd.call();
-            String branch = initialBranch != null ? initialBranch : (Boolean.TRUE.equals(bare) ? "HEAD" : git.getRepository().getBranch());
+            String branch = initialBranch != null ? initialBranch : (Boolean.TRUE.equals(bare) ? "HEAD" : safeGetBranch(git));
             git.close();
             setWorkingDirInContext(toolContext, repoDir.toString());
-            return "已初始化 Git 仓库：" + repoDir + "\n初始分支：" + branch + (Boolean.TRUE.equals(bare) ? " (bare)" : "") + "\n" + repoSnapshot(repoDir);
+            String snapshot = "";
+            try {
+                snapshot = "\n" + repoSnapshot(repoDir);
+            } catch (Exception ignored) {
+                // 空仓库快照可能抛 NoHeadException 等，忽略即可
+            }
+            return "已初始化 Git 仓库：" + repoDir + "\n初始分支：" + branch + (Boolean.TRUE.equals(bare) ? " (bare)" : "") + snapshot;
         } catch (Exception e) {
             return "git init 失败：" + e.getMessage();
         }
@@ -94,7 +119,8 @@ public class DefaultGitTool implements IGitTool {
 
             CloneCommand cmd = Git.cloneRepository()
                     .setURI(url)
-                    .setDirectory(repoDir.toFile());
+                    .setDirectory(repoDir.toFile())
+                    .setTimeout(remoteTimeoutSeconds);
             if (branch != null && !branch.isBlank()) cmd.setBranch(branch);
             if (depth != null && depth > 0) cmd.setDepth(depth);
             if (Boolean.TRUE.equals(bare)) cmd.setBare(true);
@@ -102,11 +128,14 @@ public class DefaultGitTool implements IGitTool {
             CredentialsProvider cp = buildCredentialsProvider(toolContext);
             if (cp != null) cmd.setCredentialsProvider(cp);
             Git git = cmd.call();
-            String currentBranch = git.getRepository().getBranch();
-            String head = git.getRepository().getFullBranch();
+            String currentBranch = safeGetBranch(git);
+            String head;
+            try { head = git.getRepository().getFullBranch(); } catch (Exception e) { head = "refs/heads/" + currentBranch; }
             git.close();
             setWorkingDirInContext(toolContext, repoDir.toString());
-            return "已克隆仓库：" + repoDir + "\n远程：" + url + "\n分支：" + currentBranch + "\nHEAD：" + head + "\n" + repoSnapshot(repoDir);
+            String snapshot = "";
+            try { snapshot = "\n" + repoSnapshot(repoDir); } catch (Exception ignored) { }
+            return "已克隆仓库：" + repoDir + "\n远程：" + url + "\n分支：" + currentBranch + "\nHEAD：" + head + snapshot;
         } catch (Exception e) {
             return "git clone 失败：" + e.getMessage();
         }
@@ -122,9 +151,15 @@ public class DefaultGitTool implements IGitTool {
             ToolContext toolContext) {
         try (Git git = openRepo(toolContext)) {
             boolean showUntracked = includeUntracked == null || includeUntracked;
-            Status status = git.status().call();
+            Status status;
+            try {
+                status = git.status().call();
+            } catch (org.eclipse.jgit.api.errors.NoHeadException e) {
+                // 空仓库：返回无 HEAD 的状态描述
+                return "分支：(无 HEAD — 空仓库)\n\n工作区状态：有变更 (未创建任何提交)\n";
+            }
             StringBuilder sb = new StringBuilder();
-            sb.append("分支：").append(git.getRepository().getBranch()).append("\n\n");
+            sb.append("分支：").append(safeGetBranch(git)).append("\n\n");
             appendSet(sb, "暂存区新增 (staged/added)", status.getAdded());
             appendSet(sb, "暂存区修改 (staged/changed)", status.getChanged());
             appendSet(sb, "暂存区删除 (staged/removed)", status.getRemoved());
@@ -446,7 +481,7 @@ public class DefaultGitTool implements IGitTool {
             @ToolParam(description = "Fail if can't fast-forward (no merge commit)", required = false) Boolean fastForwardOnly,
             ToolContext toolContext) {
         try (Git git = openRepo(toolContext)) {
-            PullCommand cmd = git.pull();
+            PullCommand cmd = git.pull().setTimeout(remoteTimeoutSeconds);
             if (remote != null && !remote.isBlank()) cmd.setRemote(remote);
             if (branch != null && !branch.isBlank()) cmd.setRemoteBranchName(branch);
             if (Boolean.TRUE.equals(rebase)) cmd.setRebase(true);
@@ -482,7 +517,7 @@ public class DefaultGitTool implements IGitTool {
             @ToolParam(description = "Remote branch name to push to (if different from local)", required = false) String remoteBranch,
             ToolContext toolContext) {
         try (Git git = openRepo(toolContext)) {
-            PushCommand cmd = git.push();
+            PushCommand cmd = git.push().setTimeout(remoteTimeoutSeconds);
             if (remote != null && !remote.isBlank()) cmd.setRemote(remote);
             if (Boolean.TRUE.equals(delete)) {
                 String targetBranch = branch != null ? branch : git.getRepository().getBranch();
@@ -531,7 +566,7 @@ public class DefaultGitTool implements IGitTool {
             @ToolParam(description = "Shallow fetch depth", required = false) Integer depth,
             ToolContext toolContext) {
         try (Git git = openRepo(toolContext)) {
-            FetchCommand cmd = git.fetch();
+            FetchCommand cmd = git.fetch().setTimeout(remoteTimeoutSeconds);
             if (remote != null && !remote.isBlank()) cmd.setRemote(remote);
             if (Boolean.TRUE.equals(prune)) cmd.setRemoveDeletedRefs(true);
             if (Boolean.TRUE.equals(tags)) cmd.setRefSpecs(new RefSpec("+refs/tags/*:refs/tags/*"));
@@ -1143,7 +1178,13 @@ public class DefaultGitTool implements IGitTool {
             return "错误：需要确认。请输入 Y、y、Yes 或 yes。";
         }
         String previousPath = (String) toolContext.getContext().get(WORKING_DIR_KEY);
-        toolContext.getContext().remove(WORKING_DIR_KEY);
+        if (previousPath == null) previousPath = fallbackWorkingDir.get(currentUsername(toolContext));
+        try {
+            toolContext.getContext().remove(WORKING_DIR_KEY);
+        } catch (UnsupportedOperationException e) {
+            // unmodifiable Map — 用工具自身存储
+            fallbackWorkingDir.remove(currentUsername(toolContext));
+        }
         return "已清除工作目录设置" + (previousPath != null ? "。之前的路径：" + previousPath : "")
                 + "。后续 git 操作需要显式指定路径或调用 git_set_working_dir。";
     }
@@ -1274,7 +1315,11 @@ public class DefaultGitTool implements IGitTool {
     // ==================== Helpers ====================
 
     private String username(ToolContext toolContext) {
-        return (String) toolContext.getContext().get("username");
+        Object u = toolContext.getContext().get("username");
+        if (u == null || u.toString().isBlank()) {
+            throw new SecurityException("缺少 username 上下文");
+        }
+        return u.toString();
     }
 
     private Path getGitBaseDir(String username) {
@@ -1284,17 +1329,24 @@ public class DefaultGitTool implements IGitTool {
     /**
      * Resolve a relative path (repo name) against the user's file directory.
      * Only accepts relative paths — absolute paths are rejected to prevent sandbox escape.
-     * After resolution, the result is validated with startsWith to prevent directory traversal.
+     * After resolution, the result is validated with {@link PathSecurityUtils} to prevent
+     * directory traversal AND symlink-based escape (a user-owned dir could contain a
+     * symlink pointing outside the user dir).
      */
     private Path resolvePath(ToolContext toolContext, String path) {
         String username = username(toolContext);
-        Path inputPath = Paths.get(path);
+        Path inputPath = Paths.get(path == null ? "" : path);
         if (inputPath.isAbsolute()) {
             throw new SecurityException("路径不能为绝对路径，必须相对于用户文件目录：" + getUserFileDir(username));
         }
-        Path resolved = getUserFileDir(username).resolve(path).normalize();
-        if (!resolved.startsWith(getUserFileDir(username))) {
+        Path resolved = getUserFileDir(username).resolve(path == null ? "" : path).toAbsolutePath().normalize();
+        if (!resolved.startsWith(getUserFileDir(username).toAbsolutePath().normalize())) {
             throw new SecurityException("路径不能超出用户文件目录：" + getUserFileDir(username));
+        }
+        try {
+            PathSecurityUtils.assertInsideUserDir(resolved, getUserFileDir(username), true);
+        } catch (IOException e) {
+            throw new SecurityException("路径 symlink 校验失败：" + e.getMessage());
         }
         return resolved;
     }
@@ -1306,11 +1358,21 @@ public class DefaultGitTool implements IGitTool {
     private Path getWorkingDir(ToolContext toolContext) throws IOException {
         String username = username(toolContext);
         String ctxWd = (String) toolContext.getContext().get(WORKING_DIR_KEY);
+        if (ctxWd == null) {
+            // 回退到工具自身存储（处理 Spring AI unmodifiable Map 场景）
+            ctxWd = fallbackWorkingDir.get(username);
+        }
         if (ctxWd != null) {
-            Path resolved = Paths.get(ctxWd).normalize();
+            Path resolved = Paths.get(ctxWd).toAbsolutePath().normalize();
             // Validate that stored working dir is within user's file directory
-            if (!resolved.startsWith(getUserFileDir(username))) {
+            if (!resolved.startsWith(getUserFileDir(username).toAbsolutePath().normalize())) {
                 throw new SecurityException("工作目录不在用户文件目录内：" + resolved);
+            }
+            try {
+                // symlink 防御：万一 working dir 路径里有软链指外
+                PathSecurityUtils.assertInsideUserDir(resolved, getUserFileDir(username), true);
+            } catch (SecurityException e) {
+                throw new SecurityException("工作目录 symlink 校验失败：" + e.getMessage());
             }
             return resolved;
         }
@@ -1324,24 +1386,36 @@ public class DefaultGitTool implements IGitTool {
     private Path validatePathInUserDir(ToolContext toolContext, String path, String paramName) {
         if (path == null || path.isBlank()) return null;
         String username = username(toolContext);
+        Path baseNorm = getUserFileDir(username).toAbsolutePath().normalize();
         Path inputPath = Paths.get(path);
+        Path resolved;
         if (inputPath.isAbsolute()) {
-            Path resolved = inputPath.normalize();
-            if (!resolved.startsWith(getUserFileDir(username))) {
-                throw new SecurityException(paramName + " 不能超出用户文件目录：" + getUserFileDir(username));
-            }
-            return resolved;
+            resolved = inputPath.toAbsolutePath().normalize();
+        } else {
+            resolved = baseNorm.resolve(path).normalize();
         }
-        // Relative path: resolve and validate
-        Path resolved = getUserFileDir(username).resolve(path).normalize();
-        if (!resolved.startsWith(getUserFileDir(username))) {
+        if (!resolved.startsWith(baseNorm)) {
             throw new SecurityException(paramName + " 不能超出用户文件目录：" + getUserFileDir(username));
+        }
+        try {
+            PathSecurityUtils.assertInsideUserDir(resolved, getUserFileDir(username), true);
+        } catch (IOException e) {
+            throw new SecurityException(paramName + " symlink 校验失败：" + e.getMessage());
         }
         return resolved;
     }
 
     private void setWorkingDirInContext(ToolContext toolContext, String path) {
-        toolContext.getContext().put(WORKING_DIR_KEY, path);
+        try {
+            toolContext.getContext().put(WORKING_DIR_KEY, path);
+        } catch (UnsupportedOperationException e) {
+            // Spring AI 的 ToolContext 默认返回 unmodifiable Map，回退到工具自身存储
+            fallbackWorkingDir.put(currentUsername(toolContext), path);
+        }
+    }
+
+    private String currentUsername(ToolContext toolContext) {
+        return (String) toolContext.getContext().get("username");
     }
 
     private Git openRepo(ToolContext toolContext) throws IOException {
@@ -1364,8 +1438,15 @@ public class DefaultGitTool implements IGitTool {
         return null;
     }
 
-    private void deleteDirectoryRecursive(Path dir) throws IOException {
+    /**
+     * Recursively delete {@code dir}. Caller must have already resolved it through
+     * {@link #resolvePath} / {@link #validatePathInUserDir}. We re-check via
+     * {@link PathSecurityUtils} to defend against a symlink under {@code userDir}
+     * that points outside — {@code startsWith} on a non-realpath would let that slip.
+     */
+    private void deleteDirectoryRecursive(Path dir, Path userDir) throws IOException {
         if (!Files.exists(dir)) return;
+        PathSecurityUtils.assertInsideUserDir(dir, userDir, true);
         Files.walkFileTree(dir, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path f, BasicFileAttributes attrs) throws IOException {
@@ -1397,10 +1478,14 @@ public class DefaultGitTool implements IGitTool {
             // Recent commits
             sb.append("\n最近提交：\n");
             int count = 0;
-            for (RevCommit c : git.log().setMaxCount(5).call()) {
-                sb.append("  ").append(c.abbreviate(7).name())
-                        .append(" ").append(c.getShortMessage()).append("\n");
-                count++;
+            try {
+                for (RevCommit c : git.log().setMaxCount(5).call()) {
+                    sb.append("  ").append(c.abbreviate(7).name())
+                            .append(" ").append(c.getShortMessage()).append("\n");
+                    count++;
+                }
+            } catch (org.eclipse.jgit.api.errors.NoHeadException e) {
+                // 空仓库没有任何提交，跳过 log
             }
             if (count == 0) sb.append("  (无提交)\n");
 
@@ -1430,6 +1515,24 @@ public class DefaultGitTool implements IGitTool {
             return sb.toString();
         } catch (Exception e) {
             return "仓库快照获取失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 安全获取当前分支名，处理 HEAD 不存在（JGit 抛 UnsupportedOperationException）
+     * 或空仓库等异常场景。
+     */
+    private String safeGetBranch(Git git) {
+        try {
+            return git.getRepository().getBranch();
+        } catch (Exception e) {
+            // 空仓库或 HEAD 缺失 — 退回到配置的初始分支名
+            try {
+                String initHead = git.getRepository().getConfig().getString("init", "default", "branch");
+                return initHead != null ? initHead : "main";
+            } catch (Exception e2) {
+                return "main";
+            }
         }
     }
 

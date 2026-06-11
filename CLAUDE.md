@@ -55,9 +55,10 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IEmbedTool` | _(marker interface)_ | Aggregate type for all embed tools, sub-interfaces extend it |
 | `ITimeTool` | `DefaultTimeTool` | Time tools: get current time, convert between timezones |
 | `ISkillTool` | `DefaultSkillTool` | Skill tools: list skills, get skill details |
-| `IFileTool` | `DefaultFileTool` | 15 File tools: 基于路径的读写/编辑/搜索/目录浏览（readTextFile, readMediaFile, readMultipleFiles, writeFile, editFile, createDirectory, moveFile, searchFiles, listAllowedDirectories, listDirectory, listDirectoryWithSizes, directoryTree, getFileInfo, downloadFileUrl, viewFileUrl），预览/下载自动桥接 fileId |
-| `IGitTool` | `DefaultGitTool` | 31 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions (conditionally enabled via `git.enabled`)，不依赖 IFile |
-| `ITerminalTool` | `DefaultTerminalTool` | 9 Terminal tools: startProcess, interactWithProcess, readProcessOutput, forceTerminate, listSessions, getProcessInfo, sendSignal, listProcesses, killProcess — supports PTY (pty4j) for true REPL interaction |
+| `IFileTool` | `DefaultFileTool` | 16 File tools: 基于路径的读写/编辑/搜索/目录浏览（readTextFile, readMediaFile, readMultipleFiles, writeFile, editFile, createDirectory, moveFile, searchFiles, listAllowedDirectories, listDirectory, listDirectoryWithSizes, directoryTree, getFileInfo, downloadFileUrl, viewFileUrl, deleteFileOrDirectory），预览/下载自动桥接 fileId，删除支持递归 + 显式确认 + 清理临时 file_info 记录 |
+| `IGitTool` | `DefaultGitTool` | 31 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions（**默认 disabled** — `git.enabled=false`；需要单点 git 操作时设 `true`），不依赖 IFile |
+| `IMavenTool` | `DefaultMavenTool` | 6 Maven tools: mavenExecute (generic), mavenBuild (compile), mavenPackage (package), mavenTest (run tests), mavenDependencyTree (dep tree), mavenValidate (validate) — based on maven-invoker, no shell needed（**默认 disabled** — `maven.enabled=false`；编译/打包请走 `ICompileAndDeployTool`，需要单点 mvn 命令时设 `true`） |
+| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → Maven 打包 → Docker 镜像构建 → 容器启动 → 健康检查（**默认 enabled**）。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 
@@ -71,7 +72,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `ChatConfiguration` | ChatClient, IChat, SseController |
 | `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, RAG Advisor, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool (git conditional on `git.enabled`), ITerminalTool |
+| `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — `time/file/skill/compile` 默认 enabled；`git/maven` 默认 disabled。Each can be enabled/disabled via `spring.ai.loom.agent.{time,file,skill,git,maven,compile}.enabled=true/false`. IMavenTool additionally requires maven-invoker on the classpath. |
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 6 RouterFunctions |
 
@@ -79,7 +80,9 @@ Organized into 7 nested static `@Configuration` classes:
 - Creates `ChatClient` with `MessageChatMemoryAdvisor` and `SimpleLoggerAdvisor`
 - Default `JVectorStore` (HNSW index, disk-persisted) when no other `VectorStore` bean exists
 - `RetrievalAugmentationAdvisor` with configurable prompt templates and similarity threshold
-- `IGitTool` (Eclipse JGit 7.6.0) conditionally created when `spring.ai.loom.agent.git.enabled=true`
+- `IGitTool` (Eclipse JGit 7.6.0) is **disabled by default** (`git.enabled=false`); users opt in with `spring.ai.loom.agent.git.enabled=true` for single-point git operations (status/log/blame/branch etc.) or replace it with a custom `@Bean IGitTool` via `@ConditionalOnMissingBean`. End-to-end deployment is handled by `ICompileAndDeployTool`.
+- `IMavenTool` is **disabled by default** (`maven.enabled=false`); same opt-in pattern. Compile/package is handled by `ICompileAndDeployTool`.
+- `ICompileAndDeployTool` is **enabled by default**; the supported entry point for git clone → mvn package → docker build → docker run → health check.
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
 - `AuthenticationFilter` on `/*` (matches all), with `AntPathMatcher` filtering via `auth.pathPatterns` and `auth.excludePathPatterns`
 
@@ -105,7 +108,9 @@ All under `spring.ai.loom.agent`:
 - `skills` — list of skill templates (name, description, load, content path)
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `user` — default username, nickname, authentication token (legacy)
-- `git` — `enabled` (boolean, default false), `gitUsername`, `gitToken` for remote git authentication
+- `time` / `file` / `skill` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group
+- `git` — `enabled` (boolean, default **false** — opt-in), `username` / `token` for remote git authentication. Top-level `gitUsername` / `gitToken` are kept for backward compatibility
+- `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
 - `fileBasePath` — 用户文件存储根目录，默认 `.local/file`
 - `knowledgeBasePath` — 知识库文件存储根目录，默认 `.local/knowledge`
 
@@ -131,4 +136,6 @@ public IChat customChat(...) { return new MyChat(...); }
 
 To swap the vector store, simply add a Spring AI vector store starter dependency — `JVectorStore` won't be created due to `@ConditionalOnMissingBean(VectorStore.class)`.
 
-`IGitTool` uses both `@ConditionalOnProperty` (requires `git.enabled=true`) and `@ConditionalOnMissingBean` — users can replace it with a custom implementation (e.g., CLI-based git) while still enabling the feature.
+`IGitTool` uses both `@ConditionalOnProperty` (`matchIfMissing=false`; set `git.enabled=true` to enable) and `@ConditionalOnMissingBean` — users can replace it with a custom implementation (e.g., CLI-based git) while keeping the feature on. Disabled by default; `ICompileAndDeployTool` is the supported end-to-end entry point.
+
+`IMavenTool` uses `@ConditionalOnClass` (maven-invoker on classpath) + `@ConditionalOnProperty` (default off) + `@ConditionalOnMissingBean`. Disabled by default; same opt-in pattern.
