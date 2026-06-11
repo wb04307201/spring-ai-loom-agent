@@ -4,6 +4,8 @@ import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.CompileProperty;
 import cn.wubo.spring.ai.loom.agent.tool.compile.strategy.BuildStrategy;
 import cn.wubo.spring.ai.loom.agent.tool.compile.strategy.MavenBuildStrategy;
+import cn.wubo.spring.ai.loom.agent.tool.compile.strategy.NpmBackendBuildStrategy;
+import cn.wubo.spring.ai.loom.agent.tool.compile.strategy.NpmFrontendBuildStrategy;
 import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -333,8 +335,15 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     /**
      * 委托给 strategy 执行编译。
      * <p>
-     * 当前只有 {@link MavenBuildStrategy}，内部走 {@link #mavenPackage}（保留其 mvn -f
-     * 多模块解析逻辑）。后续 Npm/Python strategy 接入后在这里 dispatch。
+     * 分发规则：
+     * <ul>
+     *   <li>{@code buildCommands()} 为空（如 Python）—— 视为成功，return ""</li>
+     *   <li>{@link MavenBuildStrategy} —— 走 {@link #mavenPackage}（保留 mvn -f 多模块解析逻辑）</li>
+     *   <li>{@link NpmBackendBuildStrategy}（Node 长驻后端，Task 3）——
+     *       走 {@link #runNpmPipeline} 跑 {@code npm ci} + {@code npm run build}</li>
+     *   <li>其他 strategy（e.g. {@link NpmFrontendBuildStrategy} 留作 Task 4 接入；
+     *       {@link PythonBuildStrategy} 无独立 build 步骤）—— 抛 IAE 让上层 fail-fast</li>
+     * </ul>
      *
      * @return 编译输出日志；编译失败 / 超时返回 null
      */
@@ -344,14 +353,44 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             // 无独立 build 步骤（e.g. Python 走 Dockerfile 内 pip install）—— 视为成功
             return "";
         }
-        // Task 2 之前：硬编码走 Maven。Task 3 引入 NpmBackend 之后必须按 strategy 分发，
-        // 在此 fail-fast 比"静默跑 mvn 在 Node 项目上"安全得多。
-        if (!(strategy instanceof MavenBuildStrategy)) {
-            throw new IllegalStateException(
-                    "buildArtifact 尚未支持 " + strategy.getClass().getSimpleName()
-                            + "（Task 3-5 负责实现分发）");
+        if (strategy instanceof MavenBuildStrategy) {
+            return mavenPackage(effectiveDir);
         }
-        return mavenPackage(effectiveDir);
+        if (strategy instanceof NpmBackendBuildStrategy) {
+            return runNpmPipeline(strategy, effectiveDir);
+        }
+        // NpmFrontend 在 Task 4 接入；Python 无 build 步骤
+        throw new IllegalArgumentException(
+                "buildArtifact 尚未支持 " + strategy.getClass().getSimpleName()
+                        + "（Task 4 接入 NpmFrontend / Task 5 接入 Python）");
+    }
+
+    /**
+     * 跑 strategy 的 buildCommands 列表，按顺序执行每个子进程。
+     * 任何一条命令 timeout / 退出码非 0 → 返回 null。
+     * <p>
+     * Node 项目的 buildCommands 通常是 {@code [npm ci, npm run build]}，与 NpmFrontend
+     * 一致 —— 故先在 NpmBackend 落地，Task 4 NpmFrontend 直接复用（如果 buildCommands 列表
+     * 相同）。当前仅 NpmBackend 调用，{@link NpmFrontendBuildStrategy} 的 buildCommands
+     * 暂空，本方法不会被它触发。
+     *
+     * @return 所有命令都成功时返回日志前缀；任意一条失败返回 null
+     */
+    private String runNpmPipeline(BuildStrategy strategy, Path effectiveDir) {
+        for (List<String> cmd : strategy.buildCommands()) {
+            ExecOutcome out = runProcess(cmd, effectiveDir.toFile(), compile.getMavenTimeoutMs());
+            if (out.timeout) {
+                log.error("npm pipeline timed out after {}ms. cmd={}", compile.getMavenTimeoutMs(),
+                        String.join(" ", cmd));
+                return null;
+            }
+            if (out.exitCode != 0) {
+                log.error("npm pipeline failed. exitCode={}, cmd={}, outputTail=\n{}",
+                        out.exitCode, String.join(" ", cmd), tail(out.output, 60));
+                return null;
+            }
+        }
+        return "npm pipeline ok (" + strategy.buildCommands().size() + " steps)";
     }
 
     /**

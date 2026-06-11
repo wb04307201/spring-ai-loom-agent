@@ -308,7 +308,9 @@ public class LoomAgentProperties {
                 "nginx",   new ImageTemplate("nginx:1.27-alpine",
                                              List.of("nginx", "-g", "daemon off;")),
                 "python3", new ImageTemplate("python:3.12-slim",
-                                             List.of("python", "app.py"))
+                                             List.of("python", "app.py")),
+                "node20",  new ImageTemplate("node:20-alpine",
+                                             List.of("node", "dist/index.js"))
         ));
 
         /**
