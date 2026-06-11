@@ -55,8 +55,8 @@ class PythonBuildStrategyTest {
             assertThat(content).contains("pip install --no-cache-dir -r requirements.txt");
             assertThat(content).contains("COPY . .");
             assertThat(content).contains("EXPOSE 8000");
-            assertThat(content).contains("ENTRYPOINT");
-            assertThat(content).contains("uvicorn").contains("app:app");
+            // 锁定 toJsonArray 输出格式：Jackson 默认 compact 形式，无空格分隔
+            assertThat(content).contains("ENTRYPOINT [\"uvicorn\",\"app:app\",\"--host\",\"0.0.0.0\",\"--port\",\"8000\"]");
         } finally {
             deleteRecursively(tmp);
         }
