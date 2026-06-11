@@ -344,7 +344,13 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
             // 无独立 build 步骤（e.g. Python 走 Dockerfile 内 pip install）—— 视为成功
             return "";
         }
-        // 当前唯一非空实现是 MavenBuildStrategy
+        // Task 2 之前：硬编码走 Maven。Task 3 引入 NpmBackend 之后必须按 strategy 分发，
+        // 在此 fail-fast 比"静默跑 mvn 在 Node 项目上"安全得多。
+        if (!(strategy instanceof MavenBuildStrategy)) {
+            throw new IllegalStateException(
+                    "buildArtifact 尚未支持 " + strategy.getClass().getSimpleName()
+                            + "（Task 3-5 负责实现分发）");
+        }
         return mavenPackage(effectiveDir);
     }
 
