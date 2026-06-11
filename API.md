@@ -989,6 +989,8 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `java21`   | `eclipse-temurin:21-jre-alpine`          | `["java","-jar","app.jar"]`                 |
 | `nginx`    | `nginx:1.27-alpine`                      | `["nginx","-g","daemon off;"]`              |
 | `python3`  | `python:3.12-slim`                       | `["python","app.py"]`                       |
+| `node20`   | `node:20-alpine`                         | `["node","app.js"]`                         |
+| `node20-serve` | `nginx:1.27-alpine`                  | `["nginx","-g","daemon off;"]`              |
 
 Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port`, and `containerPort`):
 
@@ -998,9 +1000,10 @@ Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port
 - `port` — host port the container will publish (the port the caller accesses via `http://localhost:{port}/{healthPath}`)
 - `containerPort` — Container port the application listens on inside the container (required, no yml fallback; reference `server.port` in application.yml)
 - `subDir` — Subdirectory of a multi-module repo to deploy (optional; without it, multi-module resolution may pick the wrong module)
+- `buildTool` — Build tool / project type: `maven` / `npm` / `npm-frontend` / `pip` (optional; auto-detected from `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`)
 - `imageName` / `containerName` — Docker image and container names (defaults derived from timestamp)
 - `healthPath` — both the health-check path and the access URL path (e.g. `healthPath=sql-forge-demo` → `http://localhost:8080/sql-forge-demo`)
-- `baseImage` — template alias (`java17`/`java21`/`nginx`/`python3`) or full image name (e.g. `openjdk:17-slim`)
+- `baseImage` — template alias (`java17`/`java21`/`nginx`/`python3`/`node20`/`node20-serve`) or full image name (e.g. `openjdk:17-slim`)
 - `runCommand` — string array overriding the template's default ENTRYPOINT (rare)
 
 Example yml overriding the default templates:

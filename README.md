@@ -27,7 +27,7 @@
 - **Maven Build Tools** — Java-based Maven build/compile/package/test/dependency-tree execution via maven-invoker, no shell needed; **opt-in** (default disabled), enable via `spring.ai.loom.agent.maven.enabled=true`. Compile/package for deployment is handled by `ICompileAndDeployTool`.
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
-**Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
+**Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
 
 ```yaml
 spring:
@@ -52,6 +52,7 @@ Example tool parameters:
   "port": 8081,
   "containerPort": 8080,
   "subDir": "sql-forge-web",
+  "buildTool": "maven",
   "baseImage": "java17",
   "healthPath": "sql-forge-demo"
 }

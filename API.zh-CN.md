@@ -1226,9 +1226,9 @@ spring:
 | 属性                                              | 类型     | 默认值       | 说明                                                                                                          |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
 | `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`      | 是否启用端到端部署工具。默认开启，是部署场景的推荐入口。                                                                            |
-| `spring.ai.loom.agent.compile.imageTemplates`     | map<string, ImageTemplate> | `java17` / `java21` / `nginx` / `python3` | 预置基础镜像别名（`ImageTemplate { image, command[] }`），可通过工具入参 `baseImage` 选择。                              |
+| `spring.ai.loom.agent.compile.imageTemplates`     | map<string, ImageTemplate> | `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` | 预置基础镜像别名（`ImageTemplate { image, command[] }`），可通过工具入参 `baseImage` 选择。                              |
 
-**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` 四个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
+**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
 
 ```yaml
 spring:
@@ -1253,6 +1253,7 @@ spring:
   "port": 8081,
   "containerPort": 8080,
   "subDir": "sql-forge-web",
+  "buildTool": "maven",
   "baseImage": "java17",
   "healthPath": "sql-forge-demo"
 }

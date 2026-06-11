@@ -26,7 +26,7 @@
 - **Maven 构建工具** — 基于 maven-invoker 的 Java 构建/编译/打包/测试/依赖分析，无需 shell；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.maven.enabled=true` 开启。部署场景的编译/打包由 `ICompileAndDeployTool` 处理。
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
 
-**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` 四个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
+**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
 
 ```yaml
 spring:
@@ -51,6 +51,7 @@ spring:
   "port": 8081,
   "containerPort": 8080,
   "subDir": "sql-forge-web",
+  "buildTool": "maven",
   "baseImage": "java17",
   "healthPath": "sql-forge-demo"
 }
