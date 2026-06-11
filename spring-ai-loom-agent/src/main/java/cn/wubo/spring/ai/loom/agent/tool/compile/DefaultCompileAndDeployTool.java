@@ -358,7 +358,7 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
         // 已知 strategy 都被上面覆盖；下面是真正的"未知 strategy"防护
         throw new IllegalArgumentException(
                 "buildArtifact 尚未支持 " + strategy.getClass().getSimpleName()
-                        + "（Task 5 接入 Python）");
+                        + "（在 BuildStrategyFactory.forBuildTool 新增别名 / 在此处加 if 分支）");
     }
 
     /**
