@@ -301,16 +301,18 @@ public class LoomAgentProperties {
          * 传完整镜像名时等同直接覆盖 FROM，command 走 java17 模板兜底。
          */
         private Map<String, ImageTemplate> imageTemplates = new LinkedHashMap<>(Map.of(
-                "java17",  new ImageTemplate("eclipse-temurin:17-jre-alpine",
-                                             List.of("java", "-jar", "app.jar")),
-                "java21",  new ImageTemplate("eclipse-temurin:21-jre-alpine",
-                                             List.of("java", "-jar", "app.jar")),
-                "nginx",   new ImageTemplate("nginx:1.27-alpine",
-                                             List.of("nginx", "-g", "daemon off;")),
-                "python3", new ImageTemplate("python:3.12-slim",
-                                             List.of("python", "app.py")),
-                "node20",  new ImageTemplate("node:20-alpine",
-                                             List.of("node", "dist/index.js"))
+                "java17",      new ImageTemplate("eclipse-temurin:17-jre-alpine",
+                                                 List.of("java", "-jar", "app.jar")),
+                "java21",      new ImageTemplate("eclipse-temurin:21-jre-alpine",
+                                                 List.of("java", "-jar", "app.jar")),
+                "nginx",       new ImageTemplate("nginx:1.27-alpine",
+                                                 List.of("nginx", "-g", "daemon off;")),
+                "python3",     new ImageTemplate("python:3.12-slim",
+                                                 List.of("python", "app.py")),
+                "node20",      new ImageTemplate("node:20-alpine",
+                                                 List.of("node", "dist/index.js")),
+                "node20-serve", new ImageTemplate("nginx:1.27-alpine",
+                                                  List.of("nginx", "-g", "daemon off;"))
         ));
 
         /**

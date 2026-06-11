@@ -333,46 +333,40 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     }
 
     /**
-     * 委托给 strategy 执行编译。
+     * 跑 strategy 的 build 步骤。空 commands 跳过，否则按 strategy 类型分发。
      * <p>
-     * 分发规则：
+     * 当前分发：
      * <ul>
-     *   <li>{@code buildCommands()} 为空（如 Python）—— 视为成功，return ""</li>
-     *   <li>{@link MavenBuildStrategy} —— 走 {@link #mavenPackage}（保留 mvn -f 多模块解析逻辑）</li>
-     *   <li>{@link NpmBackendBuildStrategy}（Node 长驻后端，Task 3）——
-     *       走 {@link #runNpmPipeline} 跑 {@code npm ci} + {@code npm run build}</li>
-     *   <li>其他 strategy（e.g. {@link NpmFrontendBuildStrategy} 留作 Task 4 接入；
-     *       {@link PythonBuildStrategy} 无独立 build 步骤）—— 抛 IAE 让上层 fail-fast</li>
+     *   <li>MavenBuildStrategy → {@link #mavenPackage}</li>
+     *   <li>NpmBackendBuildStrategy / NpmFrontendBuildStrategy → {@link #runNpmPipeline}（npm ci + npm run build 共用）</li>
+     *   <li>PythonBuildStrategy（commands 为空）→ 早返回</li>
+     *   <li>其他 → IllegalArgumentException</li>
      * </ul>
-     *
-     * @return 编译输出日志；编译失败 / 超时返回 null
      */
     private String buildArtifact(BuildStrategy strategy, Path effectiveDir) {
         List<List<String>> commands = strategy.buildCommands();
         if (commands.isEmpty()) {
-            // 无独立 build 步骤（e.g. Python 走 Dockerfile 内 pip install）—— 视为成功
-            return "";
+            return "";  // Python 等无 build 阶段的 strategy
         }
         if (strategy instanceof MavenBuildStrategy) {
             return mavenPackage(effectiveDir);
         }
-        if (strategy instanceof NpmBackendBuildStrategy) {
+        if (strategy instanceof NpmBackendBuildStrategy || strategy instanceof NpmFrontendBuildStrategy) {
+            // 两个 npm 策略共用 npm ci + npm run build 流水线
             return runNpmPipeline(strategy, effectiveDir);
         }
-        // NpmFrontend 在 Task 4 接入；Python 无 build 步骤
+        // 已知 strategy 都被上面覆盖；下面是真正的"未知 strategy"防护
         throw new IllegalArgumentException(
                 "buildArtifact 尚未支持 " + strategy.getClass().getSimpleName()
-                        + "（Task 4 接入 NpmFrontend / Task 5 接入 Python）");
+                        + "（Task 5 接入 Python）");
     }
 
     /**
      * 跑 strategy 的 buildCommands 列表，按顺序执行每个子进程。
      * 任何一条命令 timeout / 退出码非 0 → 返回 null。
      * <p>
-     * Node 项目的 buildCommands 通常是 {@code [npm ci, npm run build]}，与 NpmFrontend
-     * 一致 —— 故先在 NpmBackend 落地，Task 4 NpmFrontend 直接复用（如果 buildCommands 列表
-     * 相同）。当前仅 NpmBackend 调用，{@link NpmFrontendBuildStrategy} 的 buildCommands
-     * 暂空，本方法不会被它触发。
+     * NpmBackend / NpmFrontend 共享同一套 buildCommands 列表（{@code [npm ci, npm run build]}），
+     * 故两个 strategy 都走此方法。
      *
      * @return 所有命令都成功时返回日志前缀；任意一条失败返回 null
      */
