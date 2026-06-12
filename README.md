@@ -25,6 +25,7 @@
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
 - **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more; **opt-in** (default disabled), enable via `spring.ai.loom.agent.git.enabled=true`. End-to-end deployment is provided by `ICompileAndDeployTool` (always on).
 - **Maven Build Tools** — Java-based Maven build/compile/package/test/dependency-tree execution via maven-invoker, no shell needed; **opt-in** (default disabled), enable via `spring.ai.loom.agent.maven.enabled=true`. Compile/package for deployment is handled by `ICompileAndDeployTool`.
+- **End-to-End Deployment** — `ICompileAndDeployTool` runs the full pipeline (`git clone → build → docker build → docker run → health check`) in a single LLM tool call. Supports Maven, Node.js (backend + static-frontend → nginx), and Python projects — selected by the `buildTool` param or auto-detected from `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`.
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
 **Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.

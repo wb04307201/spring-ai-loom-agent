@@ -1221,7 +1221,7 @@ spring:
 
 ### 9.10 端到端部署配置（`ICompileAndDeployTool`）
 
-`ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → mvn package → docker build → docker run → health check` 整条部署流水线。所有配置项均在 `spring.ai.loom.agent.compile.*` 下。
+`ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → 按 buildTool 打包（maven / npm / pip）→ docker build → docker run → health check` 整条部署流水线。支持 Maven、Node.js（后端 + 静态前端 → nginx）、Python 等多栈项目。所有配置项均在 `spring.ai.loom.agent.compile.*` 下。
 
 | 属性                                              | 类型     | 默认值       | 说明                                                                                                          |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|

@@ -971,7 +971,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
 ### 9.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
 
-`ICompileAndDeployTool` performs the full deployment pipeline in a single LLM tool call: `git clone → mvn package → docker build → docker run → health check`. All settings live under `spring.ai.loom.agent.compile.*`.
+`ICompileAndDeployTool` performs the full deployment pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. Supports Maven, Node.js (backend and static-frontend → nginx), and Python projects. All settings live under `spring.ai.loom.agent.compile.*`.
 
 | Property                                          | Type     | Default                          | Description                                                                                                  |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|

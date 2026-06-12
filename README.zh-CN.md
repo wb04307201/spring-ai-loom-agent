@@ -24,6 +24,7 @@
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
 - **Git 仓库管理** — 基于 JGit 的 Git 操作：clone、commit、push、pull、branch、merge、diff、blame 等；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.git.enabled=true` 开启。端到端部署由 `ICompileAndDeployTool`（始终启用）提供。
 - **Maven 构建工具** — 基于 maven-invoker 的 Java 构建/编译/打包/测试/依赖分析，无需 shell；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.maven.enabled=true` 开启。部署场景的编译/打包由 `ICompileAndDeployTool` 处理。
+- **端到端部署** — `ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → 按 buildTool 打包 → docker build → docker run → health check` 整条部署流水线。支持 Maven、Node.js（后端 + 静态前端 → nginx）、Python 等多栈项目，通过 `buildTool` 入参显式选择或按 `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml` 自动探测。
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
 
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。

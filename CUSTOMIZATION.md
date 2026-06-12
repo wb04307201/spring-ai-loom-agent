@@ -226,7 +226,7 @@ Every built-in tool group is **enabled by default** (`matchIfMissing=true`). Set
 | `skill.enabled`    | boolean | `true`  | Skill tools (`ISkillTool` — list skills, get skill details)       |
 | `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 31 git operations). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
 | `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
-| `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → mvn package → docker build → docker run → health check). |
+| `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → buildTool build [maven/npm/pip] → docker build → docker run → health check). Supports Spring Boot, Node (backend + static-frontend → nginx), and Python projects. |
 | `compile.imageTemplates` | map<string, ImageTemplate> | (see below) | Predefined base-image aliases selectable via the `baseImage` tool param (default: `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`). |
 
 **Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.

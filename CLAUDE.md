@@ -58,7 +58,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IFileTool` | `DefaultFileTool` | 16 File tools: 基于路径的读写/编辑/搜索/目录浏览（readTextFile, readMediaFile, readMultipleFiles, writeFile, editFile, createDirectory, moveFile, searchFiles, listAllowedDirectories, listDirectory, listDirectoryWithSizes, directoryTree, getFileInfo, downloadFileUrl, viewFileUrl, deleteFileOrDirectory），预览/下载自动桥接 fileId，删除支持递归 + 显式确认 + 清理临时 file_info 记录 |
 | `IGitTool` | `DefaultGitTool` | 31 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions（**默认 disabled** — `git.enabled=false`；需要单点 git 操作时设 `true`），不依赖 IFile |
 | `IMavenTool` | `DefaultMavenTool` | 6 Maven tools: mavenExecute (generic), mavenBuild (compile), mavenPackage (package), mavenTest (run tests), mavenDependencyTree (dep tree), mavenValidate (validate) — based on maven-invoker, no shell needed（**默认 disabled** — `maven.enabled=false`；编译/打包请走 `ICompileAndDeployTool`，需要单点 mvn 命令时设 `true`） |
-| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → Maven 打包 → Docker 镜像构建 → 容器启动 → 健康检查（**默认 enabled**）。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
+| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → 按 buildTool 打包（maven / npm / npm-frontend / pip）→ Docker 镜像构建 → 容器启动 → 健康检查（**默认 enabled**）。支持 Spring Boot / Node（前后端） / Python 等多栈项目。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 
@@ -82,7 +82,7 @@ Organized into 7 nested static `@Configuration` classes:
 - `RetrievalAugmentationAdvisor` with configurable prompt templates and similarity threshold
 - `IGitTool` (Eclipse JGit 7.6.0) is **disabled by default** (`git.enabled=false`); users opt in with `spring.ai.loom.agent.git.enabled=true` for single-point git operations (status/log/blame/branch etc.) or replace it with a custom `@Bean IGitTool` via `@ConditionalOnMissingBean`. End-to-end deployment is handled by `ICompileAndDeployTool`.
 - `IMavenTool` is **disabled by default** (`maven.enabled=false`); same opt-in pattern. Compile/package is handled by `ICompileAndDeployTool`.
-- `ICompileAndDeployTool` is **enabled by default**; the supported entry point for git clone → mvn package → docker build → docker run → health check.
+- `ICompileAndDeployTool` is **enabled by default**; the supported entry point for `git clone → buildTool build (maven/npm/pip) → docker build → docker run → health check`. Supports `maven` / `npm` (Node 后端) / `npm-frontend` (Node 前端 → nginx) / `pip` (Python) — selected by `buildTool` param or auto-detected from marker files (`pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`).
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
 - `AuthenticationFilter` on `/*` (matches all), with `AntPathMatcher` filtering via `auth.pathPatterns` and `auth.excludePathPatterns`
 

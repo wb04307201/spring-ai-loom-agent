@@ -226,7 +226,7 @@ spring:
 | `skill.enabled`   | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
 | `git.enabled`     | boolean | `false` | Git 工具（`IGitTool` — 31 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
 | `maven.enabled`   | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** —— 编译/打包走 `ICompileAndDeployTool`。 |
-| `compile.enabled` | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → mvn package → docker build → docker run → health check）。 |
+| `compile.enabled` | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
 | `compile.imageTemplates` | map<string, ImageTemplate> | （见下） | 预置基础镜像别名，可通过工具入参 `baseImage` 选择（默认：`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`）。 |
 
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
