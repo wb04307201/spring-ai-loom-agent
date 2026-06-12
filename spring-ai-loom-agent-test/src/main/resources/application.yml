@@ -153,19 +153,8 @@ spring:
           - name: spring-ai-mcp-client - desktop-commander
         skills:
           - name: 网络月度事件报告
-            description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告
-            content: |
-              通过网络搜索获取{param}当前年每月的重要的事件，通过深度分析生成洞察报告，要求：
-              - 使用 @get_current_time 获取当前时间
-              - 使用 @sequentialthinking 来规划所有的步骤，思考和分支
-              - 可以使用 @bing_search 按照当前年逐月进行{param}的重要的事件搜索，每一轮Thinking之前都先搜索验证
-              - 可以用 @crawl_webpage 来查看搜索到的网页详情
-              - 思考轮数不低于5轮，且需要有发散脑暴意识，需要有思考分支
-              - 每一轮需要根据查询的信息结果，反思自己的决策是否正确
-              - 进行事件关联分析与结论形成 网络月度事件报告
-              - 使用 @writeFile保存为html文件，并使用 @viewFileUrl返回预览地址
-              
-              > {param}为事件主题
+            description: 围绕一个主题，按月梳理当年的重要事件并产出 HTML 洞察报告（主题 {topic} 来自用户当前对话）
+            content: classpath:skills/news-watch.st
           - name: http测试
             description: 自定义http服务测试
             content: classpath:skills/http.st
@@ -178,8 +167,8 @@ spring:
             description: 测试保存、下载、预览2
             content: 你能说明微积分么？并保存成html，并给我下载和和预览地址
             load: false
-          - name: 测试自动编译
-            description: 测试自动编译，使用git拉取代码，maven编译，构建docker镜像并创建容器运行
+          - name: 部署仓库
+            description: 使用 @compileAndDeploy 部署项目：使用git拉取代码，maven编译，构建docker镜像并创建容器运行
             content: classpath:skills/package-docker.st
           - name: 测试自动E2E功能验证
             description: 测试使用浏览器对功能进行E2E测试，并生成验证报告

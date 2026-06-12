@@ -20,12 +20,10 @@
 - **Chat Interface** — SSE streaming, multi-turn conversations, collapsible model reasoning, message copy/download
 - **RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, optional LLM metadata enrichment, JVector local vector store
 - **MCP Service Integration** — Sync/async dual mode, per-session tool enable/disable at runtime
-- **Skill Library** — Parameterized templates + MCP tool binding, autonomous LLM discovery, runtime dynamic management
+- **Skill Library** — Markdown-style prompt templates, autonomous LLM discovery and invocation, runtime dynamic management. Skills reference MCP tools by `@tool_name` inside their `content`; available MCP tools come from the `mcps:` configuration block.
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
-- **Git Repository Management** — JGit-based Git operations: clone, commit, push, pull, branch, merge, diff, blame, and more; **opt-in** (default disabled), enable via `spring.ai.loom.agent.git.enabled=true`. End-to-end deployment is provided by `ICompileAndDeployTool` (always on).
-- **Maven Build Tools** — Java-based Maven build/compile/package/test/dependency-tree execution via maven-invoker, no shell needed; **opt-in** (default disabled), enable via `spring.ai.loom.agent.maven.enabled=true`. Compile/package for deployment is handled by `ICompileAndDeployTool`.
-- **End-to-End Deployment** — `ICompileAndDeployTool` runs the full pipeline (`git clone → build → docker build → docker run → health check`) in a single LLM tool call. Supports Maven, Node.js (backend + static-frontend → nginx), and Python projects — selected by the `buildTool` param or auto-detected from `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`.
+- **Built-in Tools** — Time, file, skill, git, maven, and the end-to-end deploy tool. Time/file/skill/compile are enabled by default; git/maven are opt-in. See [TOOLS.md](docs/TOOLS.md) for all `@Tool` method signatures, defaults, and configuration.
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
 **Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
@@ -102,11 +100,11 @@ spring:
 ### 3. Start the Project
 Visit `http://localhost:8080/spring/ai/loom`
 
-![img.png](img.png)
-![img_1.png](img_1.png)
-![img_2.png](img_2.png)
-![img_6.png](img_6.png)
-![img_5.png](img_5.png)
+![img.png](docs/img.png)
+![img_1.png](docs/img_1.png)
+![img_2.png](docs/img_2.png)
+![img_6.png](docs/img_6.png)
+![img_5.png](docs/img_5.png)
 
 ## Document Upload & Conversation
 Click the `+` button next to the input field to upload images or documents. After uploading, type your question and send it.
@@ -217,7 +215,7 @@ spring:
 
 The MCP button opens a panel showing available services:
 
-![img_3.png](img_3.png)
+![img_3.png](docs/img_3.png)
 
 Add Chinese labels and descriptions for tools via configuration:
 
@@ -242,7 +240,7 @@ spring:
 
 ## Skill Library
 
-You can write skills and add them to the skill library. Skills can be configured with parameters and associated tools:
+You can write skills and add them to the skill library. A skill has four fields: `name`, `description`, `load` (whether the LLM should preload it; defaults to `true`), and `content` (the prompt template; supports `classpath:` prefix to load from the classpath). Inside `content` you can reference MCP tools by `@tool_name` — the available tools are those declared in the `mcps:` block above.
 
 ```yaml
 spring:
@@ -251,29 +249,14 @@ spring:
       agent:
         skills:
           - name: Monthly Event Report
-            description: Collect monthly events on specified topics through web search, generate monthly event insight reports through in-depth analysis, suitable for enterprise intelligence monitoring, industry trend tracking, etc.
-            tools:
-              - spring-ai-mcp-client - time
-              - spring-ai-mcp-client - sequential-thinking
-              - spring-ai-mcp-client - bing-search
-              - spring-ai-mcp-client - http-mcp
+            description: Generate an HTML insight report of important events on a topic, month by month, for the current year (topic {topic} comes from the user's current conversation)
             content: classpath:skills/news-watch.st
-            params:
-              - name: param1
-                label: Topic
-                type: text
-                required: true
-                default-value: Party
 ```
 
-Skill content file (`classpath:skills/news-watch.st`):
+Skill content file (`classpath:skills/news-watch.st`) — keep it short and operational; the LLM interprets `{topic}` from the current conversation, not as a literal substitution:
 
 ```text
-Search the web to obtain important monthly events for {param1} in the current year, generate insight reports through in-depth analysis. Requirements:
-- Use @get_current_time to get current time
-- Use @sequentialthinking to plan all steps, thoughts, and branches
-- Use @bing_search to search month by month for important events. Verify with search before each Thinking round
-- Use @crawl_webpage to view detailed webpage content from search results
+The user's current topic is {topic}. Note: {topic} is NOT a literal substitution variable — it's a stand-in for "whatever topic the user is currently asking about". First classify the topic and decide the search strategy:
 - Thinking rounds should be no less than 5, with divergent brainstorming awareness and thinking branches
 - Each round needs to reflect on whether decisions are correct based on query results
 - Perform event correlation analysis and form conclusions. Generate "Monthly Event Report"
@@ -281,9 +264,10 @@ Search the web to obtain important monthly events for {param1} in the current ye
 
 You can precisely invoke skills through the Skill Library button in the UI. Skills are preloaded by default and can also be used directly in conversations.
 
-![img_4.png](img_4.png)
+![img_4.png](docs/img_4.png)
 
 ---
 
-- For more configuration and extension points, see: [Spring AI LoomAgent Customization Guide](CUSTOMIZATION.md)
-- For custom UI integration and API reference, see: [Spring AI LoomAgent API Documentation](API.md)
+- For built-in tool reference (time / skill / file / git / maven / compile), see: [TOOLS.md](docs/TOOLS.md)
+- For more configuration and extension points, see: [Spring AI LoomAgent Customization Guide](docs/CUSTOMIZATION.md)
+- For custom UI integration and API reference, see: [Spring AI LoomAgent API Documentation](docs/API.md)

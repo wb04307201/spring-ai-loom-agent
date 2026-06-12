@@ -215,65 +215,20 @@ spring:
 
 > Git 凭证也可通过 `ToolContext` 按请求传入（`gitUsername` / `gitToken` 键），会覆盖配置的默认值。
 
-### 1.9 工具启用开关（`{time,file,skill,git,maven}.enabled`）
+### 1.9 工具启用开关（`{time,file,skill,git,maven,compile}.enabled`）
 
-所有内置工具组**默认全部开启**（`matchIfMissing=true`）。在 yml 中把对应的 `enabled` 设为 `false` 即可关闭整组工具。
+所有内置工具组（`ITimeTool` / `ISkillTool` / `IFileTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`）的完整参考——包括默认状态、所有 `@Tool` 方法签名、配置属性、基础镜像模板、端到端部署参数——见 **[TOOLS.zh-CN.md](./TOOLS.zh-CN.md)**。
+
+开关一览：
 
 | 属性                | 类型     | 默认值   | 说明                                                       |
 |-------------------|--------|-------|----------------------------------------------------------|
-| `time.enabled`    | boolean | `true` | 时间工具（`ITimeTool` — 当前时间、时区转换）                            |
-| `file.enabled`    | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除）                     |
-| `skill.enabled`   | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
-| `git.enabled`     | boolean | `false` | Git 工具（`IGitTool` — 31 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
-| `maven.enabled`   | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** —— 编译/打包走 `ICompileAndDeployTool`。 |
-| `compile.enabled` | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
-| `compile.imageTemplates` | map<string, ImageTemplate> | （见下） | 预置基础镜像别名，可通过工具入参 `baseImage` 选择（默认：`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`）。 |
-
-**基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
-
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        compile:
-          image-templates:
-            java17:
-              image: eclipse-temurin:17-jre-alpine
-              command: [java, -jar, app.jar]
-            nginx:
-              image: nginx:1.27-alpine
-              command: [nginx, -g, "daemon off;"]
-```
-
-工具入参示例：
-
-```json
-{
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "port": 8081,
-  "containerPort": 8080,
-  "subDir": "sql-forge-web",
-  "buildTool": "maven",
-  "baseImage": "java17",
-  "healthPath": "sql-forge-demo"
-}
-```
-
-**示例 —— 开启 git 和 maven 工具**（默认是关闭的）：
-
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        git:
-          enabled: false
-        maven:
-          enabled: false
-```
-
-> 即便工具组被禁用，你仍可注册自己的 `@Bean IGitTool` / `@Bean IMavenTool` 来重新启用 — `@ConditionalOnMissingBean` 优先使用用户提供的 Bean。
+| `time.enabled`    | boolean | `true` | `ITimeTool` — 时间与时区工具                                |
+| `file.enabled`    | boolean | `true` | `IFileTool` — 16 个基于路径的文件工具                          |
+| `skill.enabled`   | boolean | `true` | `ISkillTool` — 列出技能、获取技能详情                          |
+| `git.enabled`     | boolean | `false` | `IGitTool`（JGit）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
+| `maven.enabled`   | boolean | `false` | `IMavenTool`（需 `maven-invoker`）。**opt-in** —— 编译/打包走 `ICompileAndDeployTool`。 |
+| `compile.enabled` | boolean | `true`  | `ICompileAndDeployTool` — 端到端 `git clone → build → docker run → health check` |
 
 ---
 
@@ -460,78 +415,11 @@ public IChat customChat(
 - 默认使用 `SyncMcp`（基于 `McpSyncClient`）
 - 设置 `spring.ai.mcp.client.stdio=ASYNC` 时切换为 `ASyncMcp`（基于 `McpAsyncClient`）
 
-### 2.11 `IEmbedTool` — 嵌入工具（时间 / 技能 / 文件 / Git）
+### 2.11 `IEmbedTool` — 嵌入工具（时间 / 技能 / 文件 / Git / Maven / 部署）
 
-`IEmbedTool` 是聚合标记接口，四个子接口各自向 LLM 提供独立的 `@Tool` 方法。每个子工具均可通过 `@ConditionalOnMissingBean` 独立替换。
+`IEmbedTool` 是聚合标记接口，子接口（`ITimeTool`、`ISkillTool`、`IFileTool`、`IGitTool`、`IMavenTool`、`ICompileAndDeployTool`）各自向 LLM 提供独立的 `@Tool` 方法。每个子工具均可通过 `@ConditionalOnMissingBean` 独立替换。
 
-#### `ITimeTool` — 时间工具
-
-| 项目       | 内容                                                                     |
-|----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool`                     |
-| **默认实现** | `DefaultTimeTool`                                                      |
-| **覆盖方式** | 自定义 `@Bean ITimeTool`                                                  |
-| **控制内容** | `@Tool` 方法：`getCurrentTime`（获取指定时区的当前时间）、`convertTime`（在不同时区之间转换时间） |
-
-#### `ISkillTool` — 技能工具
-
-| 项目       | 内容                                                                     |
-|----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool`                   |
-| **默认实现** | `DefaultSkillTool`                                                     |
-| **覆盖方式** | 自定义 `@Bean ISkillTool`                                                 |
-| **控制内容** | `@Tool` 方法：`skillContents`（列出所有可用技能）、`getSkill`（根据名称获取技能详情） |
-
-#### `IFileTool` — 文件工具
-
-| 项目       | 内容                                                                     |
-|----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                     |
-| **默认实现** | `DefaultFileTool`                                                      |
-| **覆盖方式** | 自定义 `@Bean IFileTool`                                                  |
-| **控制内容** | `@Tool` 方法：`readTextFile`、`readMediaFile`、`readMultipleFiles`、`writeFile`、`editFile`、`createDirectory`、`moveFile`、`searchFiles`、`listAllowedDirectories`、`listDirectory`、`listDirectoryWithSizes`、`directoryTree`、`getFileInfo`、`downloadFileUrl`、`viewFileUrl`、`deleteFileOrDirectory`。所有基于路径的操作以 `{fileBasePath}/{username}/` 为根目录；`downloadFileUrl`/`viewFileUrl` 自动创建临时 `file_info` 记录（`usage="temp"`）用于桥接访问；`deleteFileOrDirectory` 需要明确传入 `Y/y/Yes/yes` 确认，支持递归删除目录，并清理已删除文件对应的 `file_info` 记录。 |
-
-#### `IGitTool` — Git 工具
-
-| 项目       | 内容                                                                     |
-|----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool`                       |
-| **默认实现** | `DefaultGitTool`（基于 Eclipse JGit 7.6.0）                               |
-| **覆盖方式** | 自定义 `@Bean IGitTool`                                                   |
-| **生效条件** | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — 默认禁用 |
-| **控制内容** | 27 个 `@Tool` 方法：`gitInit`、`gitClone`、`gitStatus`、`gitAdd`、`gitCommit`、`gitDiff`、`gitLog`、`gitBranch`、`gitCheckout`、`gitPull`、`gitPush`、`gitFetch`、`gitMerge`、`gitRebase`、`gitReset`、`gitStash`、`gitTag`、`gitRemote`、`gitBlame`、`gitShow`、`gitReflog`、`gitClean`、`gitCherryPick`、`gitWorktree`、`gitSetWorkingDir`、`gitClearWorkingDir`、`gitChangelogAnalyze`、`gitWrapupInstructions` |
-
-Git 仓库通过 `gitSetWorkingDir` 设置工作目录，所有操作基于当前工作目录执行。`gitInit`/`gitClone` 支持绝对路径或相对于用户文件目录的相对路径。
-
-**自定义示例**（仅替换文件工具，保留默认的时间和技能工具）：
-
-```java
-@Bean
-public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
-    return new MyCustomFileTool(file, properties.getFileBasePath());
-}
-// DefaultTimeTool 和 DefaultSkillTool 仍然生效
-```
-
-#### `IMavenTool` — Maven 构建工具
-
-| 项目       | 内容                                                                     |
-|----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool`                   |
-| **默认实现** | `DefaultMavenTool`（基于 maven-invoker 3.3.0，不依赖 shell）              |
-| **覆盖方式** | 自定义 `@Bean IMavenTool`                                              |
-| **生效条件** | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` 且 `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")`（默认 disabled，需 opt-in） |
-| **控制内容** | 6 个 `@Tool` 方法：`mavenExecute`（通用 Maven 命令执行）、`mavenBuild`（编译）、`mavenPackage`（打包 JAR/WAR）、`mavenTest`（运行测试，支持测试模式匹配）、`mavenDependencyTree`（依赖树，支持范围过滤）、`mavenValidate`（验证项目结构） |
-
-**配置属性**：
-
-| 属性                                              | 类型     | 默认值       | 说明                                              |
-|---------------------------------------------------|----------|-------------|---------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled`              | boolean  | `false`     | 是否启用 Maven 工具（**opt-in**）—— 编译/打包走 `ICompileAndDeployTool` |
-| `spring.ai.loom.agent.maven.mavenHome`            | String   | —           | Maven 安装目录（可选，空则使用 PATH）                  |
-| `spring.ai.loom.agent.maven.localRepository`      | String   | —           | 本地仓库路径（可选）                                  |
-| `spring.ai.loom.agent.maven.maxOutputLines`       | int      | `200`       | 输出最大行数（超出截断）                               |
-| `spring.ai.loom.agent.maven.defaultTimeoutMs`     | long     | `300000`    | 默认执行超时（5 分钟）                                 |
+完整参考（所有 `@Tool` 方法签名、配置属性、基础镜像模板、端到端部署参数、替换示例）见 **[TOOLS.zh-CN.md](./TOOLS.zh-CN.md)**。
 
 ### 2.12 `AuthenticationFilter` — 认证过滤器
 

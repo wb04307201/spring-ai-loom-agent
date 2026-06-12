@@ -492,17 +492,15 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 GET /spring/ai/loom/skill
 ```
 
-**Response**: `SkillDocument[]`
+**Response**: `SkillRecord[]` (see model fields below)
 
-| Field            | Type             | Description                                                      |
-|------------------|------------------|------------------------------------------------------------------|
-| `name`           | string           | Skill name                                                       |
-| `description`    | string           | Skill description                                                |
-| `defaultPreload` | boolean          | Whether preloaded by default                                     |
-| `tools`          | string[]         | List of associated tool names                                    |
-| `content`        | string             | Skill content (supports `classpath:` prefix to load from classpath) |
-| `params`         | SkillParamProperty[] | Skill parameter definitions                                  |
-| `source`         | string           | Skill source (`configuration` or `database`)                     |
+| Field         | Type    | Description                                                                                  |
+|---------------|---------|----------------------------------------------------------------------------------------------|
+| `name`        | string  | Skill name                                                                                   |
+| `description` | string  | Skill description                                                                            |
+| `load`        | boolean | Whether the LLM preloads this skill into the system prompt (`true` for embedded skills)      |
+| `content`     | string  | Skill content (prompt template; supports `classpath:` prefix to load from the classpath)     |
+| `source`      | string  | Skill source — `configuration` (from yml) or `database` (user-created via API)               |
 
 ---
 
@@ -515,33 +513,17 @@ Content-Type: application/json
 
 **Request Body** (`SkillProperty`):
 
-| Field            | Type                 | Required | Description                                              |
-|------------------|----------------------|----------|----------------------------------------------------------|
-| `name`           | string               | Yes      | Skill name                                               |
-| `description`    | string               | Yes      | Skill description                                        |
-| `defaultPreload` | boolean              | No       | Whether preloaded by default, defaults to `true`         |
-| `tools`          | string[]             | No       | List of associated tool names                            |
-| `content`        | string               | No       | Skill content (supports `classpath:` prefix)         |
-| `params`         | SkillParamProperty[] | No       | Skill parameter definitions                              |
+| Field         | Type    | Required | Description                                                                              |
+|---------------|---------|----------|------------------------------------------------------------------------------------------|
+| `name`        | string  | Yes      | Skill name                                                                               |
+| `description` | string  | No       | Skill description                                                                        |
+| `load`        | boolean | No       | Whether the LLM preloads this skill; defaults to `true`                                  |
+| `content`     | string  | No       | Skill content / prompt template (supports `classpath:` prefix to load from the classpath) |
 
-**SkillParamProperty**:
-
-| Field            | Type     | Required | Description                                            |
-|------------------|----------|----------|--------------------------------------------------------|
-| `name`           | string   | Yes      | Parameter name                                         |
-| `label`          | string   | Yes      | Parameter display label                                |
-| `type`           | string   | No       | Parameter type: `TEXT` / `SELECT` / `TEXT_AREA`        |
-| `required`       | boolean  | No       | Whether required                                       |
-| `defaultValue`   | string   | No       | Default value                                          |
-| `placeholder`    | string   | No       | Placeholder text                                       |
-| `options`        | Option[] | No       | Dropdown options (used when `type=SELECT`)             |
-
-**Option**:
-
-| Field   | Type   | Description       |
-|---------|--------|-------------------|
-| `label` | string | Option label text |
-| `value` | string | Option value      |
+> **Note:** The body shape matches the `SkillRecord` model (`name` / `description` / `load` / `content`).
+> There is no `params`, `tools`, or `defaultPreload` field — `{param}` placeholders inside `content`
+> are LLM-interpreted at runtime, not declared as structured form fields. MCP tool references
+> inside `content` use `@tool_name` and resolve to the MCPs configured in `mcps:`.
 
 **Example**:
 
@@ -549,36 +531,8 @@ Content-Type: application/json
 {
   "name": "email_writer",
   "description": "Professional email writing assistant",
-  "defaultPreload": true,
-  "tools": [],
-  "params": [
-    {
-      "name": "recipient",
-      "label": "Recipient",
-      "type": "TEXT",
-      "required": true,
-      "placeholder": "Enter recipient email"
-    },
-    {
-      "name": "tone",
-      "label": "Tone",
-      "type": "SELECT",
-      "required": false,
-      "defaultValue": "formal",
-      "options": [
-        { "label": "Formal", "value": "formal" },
-        { "label": "Friendly", "value": "friendly" },
-        { "label": "Concise", "value": "concise" }
-      ]
-    },
-    {
-      "name": "content",
-      "label": "Email Content",
-      "type": "TEXT_AREA",
-      "required": true,
-      "placeholder": "Enter main content of the email"
-    }
-  ]
+  "load": true,
+  "content": "You are an email assistant. The recipient is {recipient}, the tone should be {tone}, and the main points are: {content}. Generate the email body now."
 }
 ```
 
@@ -598,7 +552,7 @@ GET /spring/ai/loom/skill/{name}
 |-----------|--------|-------------|
 | `name`    | string | Skill name  |
 
-**Response**: `SkillDocument`
+**Response**: `SkillRecord`
 
 ---
 
@@ -896,9 +850,19 @@ Force-terminate a system process by PID.
 }
 ```
 
-### SkillDocument
+### SkillRecord
 
-Inherits `SkillProperty`, with an additional `source` field indicating the origin.
+```json
+{
+  "name": "string",
+  "description": "string",
+  "load": true,
+  "content": "string",
+  "source": "configuration"
+}
+```
+
+> The response shape is the same as the PUT request body (the `SkillProperty` yml model is a strict subset — `name` / `description` / `load` / `content` — plus a `source` field set by the server to indicate where the skill was loaded from).
 
 ---
 

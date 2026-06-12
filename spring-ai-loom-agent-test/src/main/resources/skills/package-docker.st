@@ -9,10 +9,10 @@
    - gitUsername：Git 用户名（公开仓库可省略，私有仓库必填）
    - gitPassword：Git 密码或 token（同上）
    - port：宿主机对外端口（必填，例如用户说"我要在 9090 访问" → port=9090）
-   - containerPort：应用在容器内实际监听的端口（必填）
+   - containerPort：应用在容器内实际监听的端口（必填，工具无 yml 兜底，缺失会 fail）
       如果用户没明说，提示"请确认仓里 application.yml 的 server.port 是多少"，
-      让用户回答后再调用。如果仓没有 application.yml 或没有 server.port 字段，
-      默认 8080 并告知用户
+      让用户回答后再调用。**不要替用户猜默认值**——工具对缺 port / containerPort
+      会 fail-fast 反问，你直接传一个 8080 兜底反而把责任揽到自己身上
    - subDir（可选）：多模块仓库指定子模块名。如果不指定，工具会自动尝试，但可能选错——
       多模块场景下请主动向用户确认要部署哪个
    - buildTool（可选）：maven / npm / npm-frontend / pip

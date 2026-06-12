@@ -19,12 +19,10 @@
 - **对话交互** — SSE 流式聊天，多轮对话，模型推理过程折叠展示，消息复制/下载
 - **RAG 知识库** — 多知识库管理，Tika 文档解析 + 向量化，可选 LLM 元数据增强，JVector 本地向量存储
 - **MCP 服务集成** — 同步/异步双模式，运行时按会话启用/禁用
-- **Skill 技能库** — 参数化模板 + MCP 工具绑定，LLM 自主发现与调用，运行时动态管理
+- **Skill 技能库** — Markdown 风格 prompt 模板，LLM 自主发现与调用，运行时动态管理。技能通过 `content` 里的 `@工具名` 引用 MCP 工具，可用 MCP 由 `mcps:` 配置块决定。
 - **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
-- **Git 仓库管理** — 基于 JGit 的 Git 操作：clone、commit、push、pull、branch、merge、diff、blame 等；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.git.enabled=true` 开启。端到端部署由 `ICompileAndDeployTool`（始终启用）提供。
-- **Maven 构建工具** — 基于 maven-invoker 的 Java 构建/编译/打包/测试/依赖分析，无需 shell；**默认禁用（opt-in）**，通过 `spring.ai.loom.agent.maven.enabled=true` 开启。部署场景的编译/打包由 `ICompileAndDeployTool` 处理。
-- **端到端部署** — `ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → 按 buildTool 打包 → docker build → docker run → health check` 整条部署流水线。支持 Maven、Node.js（后端 + 静态前端 → nginx）、Python 等多栈项目，通过 `buildTool` 入参显式选择或按 `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml` 自动探测。
+- **内置工具** — 时间、文件、技能、Git、Maven 及端到端部署工具。时间/文件/技能/部署默认启用，Git/Maven 需 opt-in 开启。详细方法签名、默认值、配置见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
 
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
@@ -100,11 +98,11 @@ spring:
 ### 3. 启动项目
 访问`http://localhost:8080/spring/ai/loom`
 
-![img.png](img.png)
-![img_1.png](img_1.png)
-![img_2.png](img_2.png)
-![img_6.png](img_6.png)
-![img_5.png](img_5.png)
+![img.png](docs/img.png)
+![img_1.png](docs/img_1.png)
+![img_2.png](docs/img_2.png)
+![img_6.png](docs/img_6.png)
+![img_5.png](docs/img_5.png)
 
 ## 文档上传与对话
 点击输入框左侧 `+` 按钮，可上传图片或文档文件。上传后在输入框中输入问题发送即可。
@@ -208,7 +206,7 @@ mcp-servers.json:
 ```
 
 MCP服务按钮可弹出面板查看目前拥有的MCP服务信息：
-![img_3.png](img_3.png)
+![img_3.png](docs/img_3.png)
 
 可以通过配置为工具添加中文名和描述：
 ```yaml
@@ -229,7 +227,8 @@ spring:
 ```
 
 ## 技能库
-可以编写技能加入技能库，技能可以配置参数与使用的工具，配置说明如下：
+可以编写技能加入技能库。一个技能只有 4 个字段：`name` / `description` / `load`（是否预加载到 LLM，默认 `true`） / `content`（prompt 模板，支持 `classpath:` 前缀从 classpath 加载）。`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由上文 `mcps:` 配置块决定。
+
 ```yaml
 spring:
   ai:
@@ -237,28 +236,16 @@ spring:
       agent:
         skills:
           - name: 网络月度事件报告
-            description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告，适用于企业情报监控、行业趋势追踪等场景
-            tools:
-              - spring-ai-mcp-client - time
-              - spring-ai-mcp-client - sequential-thinking
-              - spring-ai-mcp-client - bing-search
-              - spring-ai-mcp-client - http-mcp
+            description: 围绕一个主题，按月梳理当年的重要事件并产出 HTML 洞察报告（主题 {topic} 来自用户当前对话）
             content: classpath:skills/news-watch.st
-            params:
-              - name: param1
-                label: 主题
-                type: text
-                required: true
-                default-value: 党
 ```
 
+技能内容文件 `classpath:skills/news-watch.st`（保持简短、聚焦操作，LLM 把 `{topic}` 解释为"用户当前对话里聊的主题"，不是字面替换）：
+
 ```text
-通过网络搜索获取{param1}当前年每月的重要的事件，通过深度分析生成洞察报告，要求：
-- 使用 @get_current_time 获取当前时间
-- 使用 @sequentialthinking 来规划所有的步骤，思考和分支
-- 可以使用 @bing_search 按照当前年逐月进行一汽的重要的事件搜索，每一轮Thinking之前都先搜索验证
-- 可以用 @crawl_webpage 来查看搜索到的网页详情
-- 思考轮数不低于5轮，且需要有发散脑暴意识，需要有思考分支
+用户当前对话的主题暂记为 {topic}。注意：{topic} 不是字面替换变量，是「用户最近在问的那个主题」的代称。
+先判断它属于哪一类，决定搜索策略：
+- 思考轮数 ≥ 5，每轮反思"是否覆盖到位"
 - 每一轮需要根据查询的信息结果，反思自己的决策是否正确
 - 进行事件关联分析与结论形成 网络月度事件报告
 ```
@@ -266,11 +253,11 @@ spring:
 可以通过技能库按钮精准使用技能 ，
 技能默认设置了预加载，也通过对话直接使用
 
-![img_4.png](img_4.png)
+![img_4.png](docs/img_4.png)
 
 
 ---
 
-- 其他配置和扩展点说明:[Spring AI LoomAgent 自定义能力总览](CUSTOMIZATION.zh-CN.md)
-- 自定义UI界面对接API参考:[Spring AI LoomAgent API 文档](API.zh-CN.md)
+- 其他配置和扩展点说明:[Spring AI LoomAgent 自定义能力总览](docs/CUSTOMIZATION.zh-CN.md)
+- 自定义UI界面对接API参考:[Spring AI LoomAgent API 文档](docs/API.zh-CN.md)
 

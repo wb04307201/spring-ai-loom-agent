@@ -489,17 +489,15 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 GET /spring/ai/loom/skill
 ```
 
-**响应**: `SkillDocument[]`
+**响应**: `SkillRecord[]`（模型字段见下表）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `name` | string | 技能名称 |
 | `description` | string | 技能描述 |
-| `defaultPreload` | boolean | 是否默认预加载 |
-| `tools` | string[] | 关联的工具名称列表 |
-| `content` | string | 技能内容（支持 `classpath:` 前缀从类路径加载） |
-| `params` | SkillParamProperty[] | 技能参数定义 |
-| `source` | string | 技能来源（`configuration` 配置注入 / `database` 数据库存储） |
+| `load` | boolean | 是否预加载到 LLM 系统提示（内嵌技能固定为 `true`） |
+| `content` | string | 技能内容 / prompt 模板（支持 `classpath:` 前缀从类路径加载） |
+| `source` | string | 技能来源（`configuration` yml 注入 / `database` 用户通过 API 创建） |
 
 ---
 
@@ -515,30 +513,12 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `name` | string | 是 | 技能名称 |
-| `description` | string | 是 | 技能描述 |
-| `defaultPreload` | boolean | 否 | 是否默认预加载，默认 `true` |
-| `tools` | string[] | 否 | 关联的工具名称列表 |
-| `content` | string | 否 | 技能内容（支持 `classpath:` 前缀） |
-| `params` | SkillParamProperty[] | 否 | 技能参数定义 |
+| `description` | string | 否 | 技能描述 |
+| `load` | boolean | 否 | 是否预加载到 LLM 系统提示，默认 `true` |
+| `content` | string | 否 | 技能内容 / prompt 模板（支持 `classpath:` 前缀从类路径加载） |
 
-**SkillParamProperty**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `name` | string | 是 | 参数名称 |
-| `label` | string | 是 | 参数显示名称 |
-| `type` | string | 否 | 参数类型：`TEXT` / `SELECT` / `TEXT_AREA` |
-| `required` | boolean | 否 | 是否必填 |
-| `defaultValue` | string | 否 | 默认值 |
-| `placeholder` | string | 否 | 占位符文本 |
-| `options` | Option[] | 否 | 下拉选项（`type=SELECT` 时使用） |
-
-**Option**:
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `label` | string | 选项显示文本 |
-| `value` | string | 选项值 |
+> **注意：** 请求体形态与 `SkillRecord` 模型一致（`name` / `description` / `load` / `content`）。
+> 没有 `params` / `tools` / `defaultPreload` 字段。`content` 里的 `{param}` 占位符由 LLM 在运行时从对话上下文解释，不是结构化表单字段。`content` 里通过 `@工具名` 引用 MCP 工具，可用工具由 `mcps:` 配置块决定。
 
 **示例**:
 
@@ -546,36 +526,8 @@ Content-Type: application/json
 {
   "name": "email_writer",
   "description": "专业邮件撰写助手",
-  "defaultPreload": true,
-  "tools": [],
-  "params": [
-    {
-      "name": "recipient",
-      "label": "收件人",
-      "type": "TEXT",
-      "required": true,
-      "placeholder": "请输入收件人邮箱"
-    },
-    {
-      "name": "tone",
-      "label": "语气",
-      "type": "SELECT",
-      "required": false,
-      "defaultValue": "formal",
-      "options": [
-        { "label": "正式", "value": "formal" },
-        { "label": "友好", "value": "friendly" },
-        { "label": "简洁", "value": "concise" }
-      ]
-    },
-    {
-      "name": "content",
-      "label": "邮件内容",
-      "type": "TEXT_AREA",
-      "required": true,
-      "placeholder": "请输入邮件主要内容"
-    }
-  ]
+  "load": true,
+  "content": "你是一名邮件助手。收件人是 {recipient}，语气是 {tone}，要点是：{content}。请生成邮件正文。"
 }
 ```
 
@@ -595,7 +547,7 @@ GET /spring/ai/loom/skill/{name}
 |---|---|---|
 | `name` | string | 技能名称 |
 
-**响应**: `SkillDocument`
+**响应**: `SkillRecord`
 
 ---
 
@@ -1076,9 +1028,19 @@ GET /spring/ai/chat/loom/mcp
 }
 ```
 
-### SkillDocument
+### SkillRecord
 
-继承 `SkillProperty`，额外包含 `source` 字段标识来源。
+```json
+{
+  "name": "string",
+  "description": "string",
+  "load": true,
+  "content": "string",
+  "source": "configuration"
+}
+```
+
+> 响应形态与 PUT 请求体一致（yml 配置的 `SkillProperty` 模型是子集——`name` / `description` / `load` / `content`，由服务端在响应里补一个 `source` 字段标识数据来源）。
 
 ---
 

@@ -215,65 +215,20 @@ spring:
 
 > Git credentials can also be passed per-request via `ToolContext` (`gitUsername` / `gitToken` keys), which override the configured defaults.
 
-### 1.9 Tool Group Switches (`{time,file,skill,git,maven}.enabled`)
+### 1.9 Tool Group Switches (`{time,file,skill,git,maven,compile}.enabled`)
 
-Every built-in tool group is **enabled by default** (`matchIfMissing=true`). Set the corresponding `enabled` property to `false` in yml to disable a group entirely.
+For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
+
+A quick summary of the switches:
 
 | Property           | Type    | Default | Description                                                       |
 |--------------------|---------|---------|-------------------------------------------------------------------|
-| `time.enabled`     | boolean | `true`  | Time tools (`ITimeTool` — current time, timezone conversion)       |
-| `file.enabled`     | boolean | `true`  | File tools (`IFileTool` — 16 path-based read/write/edit/delete)   |
-| `skill.enabled`    | boolean | `true`  | Skill tools (`ISkillTool` — list skills, get skill details)       |
-| `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 31 git operations). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
-| `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
-| `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → buildTool build [maven/npm/pip] → docker build → docker run → health check). Supports Spring Boot, Node (backend + static-frontend → nginx), and Python projects. |
-| `compile.imageTemplates` | map<string, ImageTemplate> | (see below) | Predefined base-image aliases selectable via the `baseImage` tool param (default: `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`). |
-
-**Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
-
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        compile:
-          image-templates:
-            java17:
-              image: eclipse-temurin:17-jre-alpine
-              command: [java, -jar, app.jar]
-            nginx:
-              image: nginx:1.27-alpine
-              command: [nginx, -g, "daemon off;"]
-```
-
-Example tool parameters:
-
-```json
-{
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "port": 8081,
-  "containerPort": 8080,
-  "subDir": "sql-forge-web",
-  "buildTool": "maven",
-  "baseImage": "java17",
-  "healthPath": "sql-forge-demo"
-}
-```
-
-**Example — disable git and maven**:
-
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        git:
-          enabled: false
-        maven:
-          enabled: false
-```
-
-> Even with the tool group disabled, you can still register your own `@Bean IGitTool` / `@Bean IMavenTool` to opt back in — `@ConditionalOnMissingBean` honors user beans first.
+| `time.enabled`     | boolean | `true`  | `ITimeTool` — time and timezone tools                              |
+| `file.enabled`     | boolean | `true`  | `IFileTool` — 16 path-based file tools                             |
+| `skill.enabled`    | boolean | `true`  | `ISkillTool` — list skills, get skill details                     |
+| `git.enabled`      | boolean | `false` | `IGitTool` (JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
+| `maven.enabled`    | boolean | `false` | `IMavenTool` (maven-invoker required). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
+| `compile.enabled`  | boolean | `true`  | `ICompileAndDeployTool` — end-to-end `git clone → build → docker run → health check` |
 
 ---
 
@@ -459,78 +414,11 @@ public IChat customChat(
 - Default: `SyncMcp` (based on `McpSyncClient`)
 - Set `spring.ai.mcp.client.stdio=ASYNC` to switch to `ASyncMcp` (based on `McpAsyncClient`)
 
-### 2.11 `IEmbedTool` — Embed Tools (Time / Skill / File / Git)
+### 2.11 `IEmbedTool` — Embed Tools (Time / Skill / File / Git / Maven / Compile)
 
-`IEmbedTool` is an aggregate marker interface. Four sub-interfaces each provide independent `@Tool` methods to the LLM. Each sub-tool can be replaced independently via `@ConditionalOnMissingBean`.
+`IEmbedTool` is an aggregate marker interface. Sub-interfaces (`ITimeTool`, `ISkillTool`, `IFileTool`, `IGitTool`, `IMavenTool`, `ICompileAndDeployTool`) each contribute independent `@Tool` methods to the LLM. Each can be replaced independently via `@ConditionalOnMissingBean`.
 
-#### `ITimeTool` — Time Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool`                                    |
-| **Default**     | `DefaultTimeTool`                                                                     |
-| **Override**    | Custom `@Bean ITimeTool`                                                              |
-| **Controls**    | `@Tool` methods: `getCurrentTime` (get current time by timezone) and `convertTime` (convert between timezones) |
-
-#### `ISkillTool` — Skill Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool`                                  |
-| **Default**     | `DefaultSkillTool`                                                                    |
-| **Override**    | Custom `@Bean ISkillTool`                                                             |
-| **Controls**    | `@Tool` methods: `skillContents` (list all skills) and `getSkill` (get skill details) |
-
-#### `IFileTool` — File Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                                    |
-| **Default**     | `DefaultFileTool`                                                                     |
-| **Override**    | Custom `@Bean IFileTool`                                                              |
-| **Controls**    | `@Tool` methods: `readTextFile`, `readMediaFile`, `readMultipleFiles`, `writeFile`, `editFile`, `createDirectory`, `moveFile`, `searchFiles`, `listAllowedDirectories`, `listDirectory`, `listDirectoryWithSizes`, `directoryTree`, `getFileInfo`, `downloadFileUrl`, `viewFileUrl`, `deleteFileOrDirectory`. All path-based operations use `{fileBasePath}/{username}/` as root; `downloadFileUrl`/`viewFileUrl` auto-create temporary `file_info` records (`usage="temp"`) for bridge access; `deleteFileOrDirectory` requires explicit `Y/y/Yes/yes` confirmation, supports recursive directory removal, and cleans up `file_info` records for deleted files. |
-
-#### `IGitTool` — Git Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool`                                      |
-| **Default**     | `DefaultGitTool` (based on Eclipse JGit 7.6.0)                                        |
-| **Override**    | Custom `@Bean IGitTool`                                                               |
-| **Condition**   | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — disabled by default |
-| **Controls**    | 31 `@Tool` methods: `gitInit`, `gitClone`, `gitStatus`, `gitAdd`, `gitCommit`, `gitDiff`, `gitLog`, `gitBranch`, `gitCheckout`, `gitPull`, `gitPush`, `gitFetch`, `gitMerge`, `gitRebase`, `gitReset`, `gitStash`, `gitTag`, `gitRemote`, `gitBlame`, `gitShow`, `gitReflog`, `gitClean`, `gitCherryPick`, `gitWorktree`, `gitSetWorkingDir`, `gitClearWorkingDir`, `gitChangelogAnalyze`, `gitWrapupInstructions` |
-
-Git repositories are stored under `{fileBasePath}/{username}/` (for clone/init by repo name) or absolute paths (for `gitSetWorkingDir`). All file operations go through JGit's `Repository` object.
-
-**Customization Example** (replace only the file tool, keep default time and skill tools):
-
-```java
-@Bean
-public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
-    return new MyCustomFileTool(file, properties.getFileBasePath());
-}
-// DefaultTimeTool and DefaultSkillTool remain active
-```
-
-#### `IMavenTool` — Maven Build Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool`                                  |
-| **Default**     | `DefaultMavenTool` (based on maven-invoker 3.3.0, no shell dependency)                |
-| **Override**    | Custom `@Bean IMavenTool`                                                             |
-| **Condition**   | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` and `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true", matchIfMissing = true)` |
-| **Controls**    | 6 `@Tool` methods: `mavenExecute` (generic Maven goal execution), `mavenBuild` (compile), `mavenPackage` (package JAR/WAR), `mavenTest` (run tests, supports test pattern), `mavenDependencyTree` (dependency tree with scope filter), `mavenValidate` (validate project structure) |
-
-**Configuration**:
-
-| Property                                      | Type    | Default | Description                                        |
-|-----------------------------------------------|---------|---------|----------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled`          | boolean | `true`  | Whether to enable Maven tool                       |
-| `spring.ai.loom.agent.maven.mavenHome`        | String  | —       | Maven install directory (optional, uses PATH if empty) |
-| `spring.ai.loom.agent.maven.localRepository`  | String  | —       | Local repository path (optional)                   |
-| `spring.ai.loom.agent.maven.maxOutputLines`   | int     | `200`   | Max output lines before truncation                 |
-| `spring.ai.loom.agent.maven.defaultTimeoutMs` | long    | `300000`| Default execution timeout (5 minutes)              |
+For the full reference (all `@Tool` method signatures, configuration properties, base-image templates, end-to-end deployment parameters, and replacement examples) see **[TOOLS.md](./TOOLS.md)**.
 
 ### 2.12 `AuthenticationFilter` — Authentication Filter
 
