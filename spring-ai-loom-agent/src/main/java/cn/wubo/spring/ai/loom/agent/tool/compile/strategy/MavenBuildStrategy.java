@@ -74,8 +74,8 @@ public record MavenBuildStrategy() implements BuildStrategy {
      * 在 {@code target/} 下挑体积最大的 Spring Boot fat jar。
      * 跳过 {@code .original.jar} / {@code -sources.jar} / {@code -javadoc.jar}。
      * <p>
-     * 从 Task 1 的 {@code DefaultCompileAndDeployTool#pickJarFromTarget} 迁移过来 —— 选最大 jar
-     * 属于 Maven 专有行为，理应放在 strategy 内而非主流程。
+     * 选最大 jar 属于 Maven 专有行为，放在 strategy 内（这里）而不是
+     * {@code DefaultCompileAndDeployTool} 主流程；原主流程里的同名 helper 已废弃。
      */
     private static File pickJarFromTarget(Path target) {
         File dir = target.toFile();
