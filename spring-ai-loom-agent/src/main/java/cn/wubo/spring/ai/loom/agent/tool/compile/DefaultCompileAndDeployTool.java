@@ -410,9 +410,8 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * mvn clean package -DskipTests。
      * 直接走 ProcessBuilder 避开 maven-invoker 的 Windows 句柄泄漏问题。
      * <p>
-     * 多模块项目（如 gitee.com/xxx/demo，包含 demo-api、demo-web 等子模块），
-     * 仓库根目录往往没有 pom.xml。这种情况下走"找到第一个含 pom.xml 的子目录
-     * 作为工作目录"的兜底策略；构建产物同样会落到子目录的 target/ 下。
+     * 多模块项目根目录无 pom.xml 时，{@code effectiveDir} 解析规则见
+     * {@link #resolveMavenTarget}；本方法只是它解析出来的有效目录上跑 mvn。
      *
      * @deprecated 由 {@link #buildArtifact(BuildStrategy, Path)} 委托
      */
@@ -622,11 +621,13 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
      * command 序列化为 JSON 数组（Dockerfile exec 形式）：
      * {@code ["java", "-jar", "app.jar"]} 或 {@code ["nginx", "-g", "daemon off;"]}。
      * <p>
-     * 委托给 {@link MavenBuildStrategy#writeDockerfile} 实际写文件 —— 保持原签名
-     * 以兼容反射测试（{@code DefaultCompileAndDeployToolTest#writeDockerfile_content} 等）。
-     * 后续 Task 2+ 引入 factory 后此方法可移除。
+     * 委托给 {@link MavenBuildStrategy#writeDockerfile} 实际写文件 —— 保持原 4 参
+     * 签名仅为了向后兼容 {@code DefaultCompileAndDeployToolTest} 里走反射调用旧签名
+     * 的测试（如 {@code writeDockerfile_content}）。新策略测试应直接调
+     * {@link BuildStrategy#writeDockerfile}，不必再走此方法。
      *
-     * @deprecated 直接调 {@link BuildStrategy#writeDockerfile}
+     * @deprecated 新代码直接调 {@link BuildStrategy#writeDockerfile}；本方法仅
+     *             保留为反射测试的兼容入口，未来不会删除。
      */
     @Deprecated
     File writeDockerfile(Path projectDir, File jar, ResolvedImage resolved, int containerPort) {

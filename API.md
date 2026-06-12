@@ -978,7 +978,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`                           | Whether to register the end-to-end deploy tool (default enabled)                                            |
 | `spring.ai.loom.agent.compile.mavenHome`          | string   | auto-discover                    | Optional Maven install dir; falls back to `maven.mavenHome` and PATH                                         |
 | `spring.ai.loom.agent.compile.dockerCmd`          | string   | `docker`                         | Optional override for the docker CLI binary                                                                  |
-| `spring.ai.loom.agent.compile.imageTemplates`     | map      | (4 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
+| `spring.ai.loom.agent.compile.imageTemplates`     | map      | (6 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
 | `spring.ai.loom.agent.compile.extraRunArgs`       | string[] | `[]`                             | Extra `docker run` args injected between `--name` and the image name                                         |
 
 **Base-image templates** (built-in):
@@ -989,7 +989,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `java21`   | `eclipse-temurin:21-jre-alpine`          | `["java","-jar","app.jar"]`                 |
 | `nginx`    | `nginx:1.27-alpine`                      | `["nginx","-g","daemon off;"]`              |
 | `python3`  | `python:3.12-slim`                       | `["python","app.py"]`                       |
-| `node20`   | `node:20-alpine`                         | `["node","app.js"]`                         |
+| `node20`   | `node:20-alpine`                         | `["node","dist/index.js"]`                   |
 | `node20-serve` | `nginx:1.27-alpine`                  | `["nginx","-g","daemon off;"]`              |
 
 Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port`, and `containerPort`):
