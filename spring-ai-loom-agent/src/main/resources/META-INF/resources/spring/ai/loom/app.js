@@ -414,7 +414,7 @@ const auth = {
 };
 
 // ===================== §12 UI Components (only DOM manipulation) =====================
-const aiImage = '/static/ai.jpg';
+const aiImage = '/static/ai.png';
 const userImage = '/static/user.png';
 
 const ui = {
