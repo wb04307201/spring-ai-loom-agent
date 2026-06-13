@@ -261,7 +261,7 @@ public class LoomAgentProperties {
      * yml 通过 {@code spring.ai.loom.agent.compile.*} 配置（仅运维参数）：
      * <ul>
      *   <li>{@code enabled} — 是否启用该工具（默认 true）</li>
-     *   <li>{@code mavenHome} — 可选；不配则复用 {@link MavenProperty#getMavenHome()}，
+     *   <li>{@code mavenHome} — 可选；不配则复用 {@code MavenProperty#getMavenHome()}，
      *       再不行就环境变量自动探测</li>
      *   <li>{@code dockerCmd} — 可选；不配则用 PATH 上的 {@code docker}</li>
      *   <li>{@code mavenTimeoutMs} — maven 编译超时（默认 600000 = 10 分钟）</li>

@@ -26,7 +26,7 @@ import java.util.Objects;
  * <h2>设计要点</h2>
  * <ul>
  *   <li><b>mustExist=true</b>（读 / 删除 / 查询）：解析后的路径必须真实存在，
- *       用 {@link Path#toRealPath()} 跟软链后判断是否仍在 userDir 内。</li>
+ *       用 {@code Path.toRealPath} 跟软链后判断是否仍在 userDir 内。</li>
  *   <li><b>mustExist=false</b>（写 / 创建）：路径可能还不存在。沿祖先链向上
  *       找到第一个真实存在的祖先，对祖先做 toRealPath 跟链检查，再确认
  *       不存在部分不含 {@code ..}。这样可以安全创建新文件，
