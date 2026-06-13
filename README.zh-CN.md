@@ -116,7 +116,7 @@ PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
 3. **混合场景**: 可同时上传图片和文档，模型会综合图片视觉信息与文档文本内容进行回答
 
 ### 文件下载、预览和删除
-上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。文件和目录可通过 MCP 工具 `deleteFileOrDirectory` 删除（需显式传入 `Y/y/Yes/yes` 确认，支持递归删除目录，并清理已删除文件对应的临时 `file_info` 记录）。
+上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接。文件和目录可通过 MCP 工具 `deleteFileOrDirectory` 删除（需显式传入 `I_CONFIRM_DELETE` 确认 — token 可在 `spring.ai.loom.agent.file.deleteConfirmToken` 改，支持递归删除目录，并清理已删除文件对应的临时 `file_info` 记录）。
 
 "文件"入口可统一查看、预览、下载和删除所有非知识库文件（含工具上传的文件和 git 仓库）。
 

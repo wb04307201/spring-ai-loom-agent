@@ -121,7 +121,7 @@ spring:
 | `getFileInfo`            | 获取文件/目录的元信息（大小、修改时间、类型）                                            |
 | `downloadFileUrl`        | 获取下载链接（自动创建临时 `file_info` 记录，`usage="temp"`）                        |
 | `viewFileUrl`            | 获取预览链接（自动创建临时 `file_info` 记录）                                       |
-| `deleteFileOrDirectory`  | 删除（需显式 `Y/y/Yes/yes` 确认）；支持递归删除目录；清理已删除文件对应的 `file_info` 记录         |
+| `deleteFileOrDirectory`  | 删除（需显式 `I_CONFIRM_DELETE` 确认，token 可在 `spring.ai.loom.agent.file.deleteConfirmToken` 改）；支持递归删除目录；清理已删除文件对应的 `file_info` 记录         |
 
 ---
 
@@ -200,7 +200,7 @@ spring:
 | `branch`           | 否    | 克隆分支（默认远程 HEAD）                                                                                                  |
 | `port`             | 是    | 宿主机对外端口（也是访问 URL 的端口，如 `http://localhost:{port}/{healthPath}`）                                                       |
 | `containerPort`    | 是    | 容器内应用监听端口（无 yml 兜底，参考 application.yml 的 `server.port`）                                                            |
-| `subDir`           | 否    | 多模块仓库的子目录；根目录无 `pom.xml` 时建议显式指定，避免工具选错模块                                                                             |
+| `subDir`           | 否    | 多模块仓库的子目录；根目录无 `pom.xml` 时**必须**显式指定，否则工具会返回 fail                                                                          |
 | `imageName`        | 否    | Docker 镜像名（默认按时间戳自动生成）                                                                                            |
 | `containerName`    | 否    | Docker 容器名（默认按时间戳自动生成）                                                                                            |
 | `healthPath`       | 否    | 健康检查路径，同时作为访问 URL 路径（如 `healthPath=sql-forge-demo` → `http://localhost:{port}/sql-forge-demo`；无 context-path 时传 `/`） |
@@ -217,6 +217,12 @@ spring:
 | `spring.ai.loom.agent.compile.enabled`                    | boolean | `true`                    | 是否注册端到端部署工具（默认启用）                                                                                   |
 | `spring.ai.loom.agent.compile.mavenHome`                  | string  | 自动探测                      | 可选 Maven 安装目录；回退到 `maven.mavenHome` 与 PATH                                                             |
 | `spring.ai.loom.agent.compile.dockerCmd`                  | string  | `docker`                  | 可选 docker CLI 二进制覆盖                                                                                  |
+| `spring.ai.loom.agent.compile.mavenTimeoutMs`             | long    | `600000`                  | Maven 编译超时（10 分钟）                                                                                    |
+| `spring.ai.loom.agent.compile.dockerBuildTimeoutMs`       | long    | `600000`                  | `docker build` 超时（10 分钟）                                                                                |
+| `spring.ai.loom.agent.compile.dockerRunTimeoutMs`         | long    | `60000`                   | `docker run` 启动超时（1 分钟）                                                                               |
+| `spring.ai.loom.agent.compile.healthCheckMaxWaitMs`       | long    | `60000`                   | 容器启动后健康检查总等待（1 分钟）                                                                                   |
+| `spring.ai.loom.agent.compile.healthCheckIntervalMs`      | long    | `2000`                    | 健康检查轮询间隔（2 秒）                                                                                        |
+| `spring.ai.loom.agent.compile.keepWorkspace`              | boolean | `false`                   | 部署完成后是否保留工作区（默认删；调试时设 `true`）                                                                          |
 | `spring.ai.loom.agent.compile.imageTemplates`             | map     | （6 个预置模板）                  | 按别名预置的基础镜像模板，见下                                                                                     |
 | `spring.ai.loom.agent.compile.extraRunArgs`               | string[]| `[]`                      | 注入到 `--name` 与镜像名之间的额外 `docker run` 参数                                                                   |
 
@@ -266,36 +272,18 @@ spring:
 
 ### 8.5 端到端对话示例
 
-下面是一个**完整的对话场景**，展示用户如何在聊天中向 LLM 描述部署需求，LLM 如何追问缺失字段、抽取参数、调用 `@compileAndDeploy`。
+下面是一个**完整的对话场景**，展示用户如何在聊天中向 LLM 描述部署需求，LLM 如何追问缺失字段、抽取参数、调用端到端部署工具（即 `ICompileAndDeployTool`，注册名由 Spring AI 按方法名自动生成）。
 
 #### 场景 A：Maven 多模块 Spring Boot 项目
 
 **用户提示词**：
 
 ```text
-请用 @compileAndDeploy 部署我的项目：
-
-- 仓库 URL：https://gitee.com/wb04307201/sql-forge-demo.git
-- 用户名：wb04307201
-- 密码：••••••••（示例占位；详见下方"安全提示"）
-- 子目录：sql-forge-demo（多模块仓，要部署这个子模块）
-- 宿主机端口：8081（我要在浏览器用 http://localhost:8081 访问）
-- 容器内应用端口：8081（application.yml 里 server.port 是 8081）
-- 健康检查路径：/sql/forge/web
+帮我部署一下 https://gitee.com/wb04307201/sql-forge-demo.git 这个项目，要部署 sql-forge-demo 子模块。私有仓，用户名 wb04307201，密码 ••••••••。
+宿主机和容器内都用 8081 端口，健康检查路径 /sql/forge/web
 ```
 
-**LLM 追问（多模块仓 `buildTool` 探测可能歧义）**：
-
-> 这个仓库根目录没有 `pom.xml`，且子模块名 `sql-forge-demo` 同时含 `pom.xml` 和 `package.json`，`buildTool` 无法自动判断。请问你想用什么构建栈？
->
-> - `maven`（Java/Spring Boot）
-> - `npm`（Node 后端，产物跑 `node dist/index.js`）
-> - `npm-frontend`（Node 静态前端，打包后用 nginx serve）
-> - `pip`（Python，`pip install -r requirements.txt`）
-
-**用户回答**：`maven`
-
-**LLM 最终下发的工具入参**：
+**LLM 抽取后下发的工具入参**（`buildTool` 由子模块里的 `pom.xml` 自动识别，无需用户显式说明）：
 
 ```json
 {

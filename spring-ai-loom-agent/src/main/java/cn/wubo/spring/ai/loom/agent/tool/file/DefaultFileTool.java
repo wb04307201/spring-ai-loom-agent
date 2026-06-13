@@ -454,14 +454,25 @@ public class DefaultFileTool implements IFileTool {
 
     // ==================== List directories ====================
 
-    @Tool(description = "列出当前用户的文件操作目录。写入或创建文件时，路径均相对于此目录。")
+    @Tool(description = "列出当前用户的文件操作目录（返回的是**绝对路径**）。写入或创建文件时，path 参数均相对于此目录。")
     @Override
     public String listAllowedDirectories(ToolContext toolContext) {
         String username = requireUsername(toolContext);
-        Path userDir = getUserFileDir(username);
-        return "用户文件目录：" + userDir + "\n\n" +
-                "说明：所有文件操作的路径参数均相对于此目录。\n" +
-                "例如：read_text_file 的 path 参数 'notes/todo.txt' 实际读取 '" + userDir.resolve("notes/todo.txt") + "'。";
+        Path userDir = getUserFileDir(username).toAbsolutePath().normalize();
+        try {
+            // 确保用户目录存在（与 DefaultUpload.upload() 对齐）—— 否则首次写文件时
+            // PathSecurityUtils 会因 userDir 不存在、且其最近祖先在 userDir 之上而误判
+            // "路径通过 symlink 越界"。listAllowedDirectories 是绝大多数 skill（特别是
+            // news-watch.st）的前置调用，在这里建一次目录最干净。
+            Files.createDirectories(userDir);
+        } catch (IOException e) {
+            return "错误：无法创建用户文件目录 " + userDir + "：" + e.getMessage();
+        }
+        Path example = userDir.resolve("notes/todo.txt");
+        return "用户文件目录（绝对路径）：" + userDir + "\n\n" +
+                "说明：所有文件操作的 path 参数均**相对于此目录**（不要拼绝对路径）。\n" +
+                "例如：read_text_file 的 path 参数 'notes/todo.txt' 实际读取 '" + example + "'。\n" +
+                "⚠️ 必须使用上面返回的精确绝对路径，不要用字符串拼接 / 路径替换重新构造。";
     }
 
     @Tool(description = "列出目录内容。区分文件 [FILE] 和目录 [DIR]。支持 depth 参数控制递归深度（受 maxWalkDepth 限制）。")

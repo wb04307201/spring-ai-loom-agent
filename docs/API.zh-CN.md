@@ -1159,7 +1159,7 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.time.enabled`           | boolean  | `true` | 时间工具（`ITimeTool` — 获取当前时间、时区转换）                                                  |
 | `spring.ai.loom.agent.file.enabled`           | boolean  | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/搜索/删除操作）                                   |
 | `spring.ai.loom.agent.skill.enabled`          | boolean  | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                                                  |
-| `spring.ai.loom.agent.git.enabled`            | boolean  | `false` | Git 工具（`IGitTool` — 31 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
+| `spring.ai.loom.agent.git.enabled`            | boolean  | `false` | Git 工具（`IGitTool` — 28 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
 | `spring.ai.loom.agent.maven.enabled`          | boolean  | `false` | Maven 工具（同时需要 classpath 上有 `maven-invoker`）。**opt-in** —— 部署场景的编译/打包走 `ICompileAndDeployTool`。 |
 | `spring.ai.loom.agent.git.username`           | string   | —     | HTTP(S) Git 认证用户名（clone/pull/push）                                                          |
 | `spring.ai.loom.agent.git.token`              | string   | —     | HTTP(S) Git 认证 token / 密码                                                                    |

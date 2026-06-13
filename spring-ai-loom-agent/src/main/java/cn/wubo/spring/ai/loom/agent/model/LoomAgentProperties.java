@@ -159,7 +159,7 @@ public class LoomAgentProperties {
 
     @Data
     public static class UserProperty {
-        private String username = "username";
+        private String username = "wb04307201";
         private String nickname = "用户";
         private String authentication = "loom-agent-auth";
     }

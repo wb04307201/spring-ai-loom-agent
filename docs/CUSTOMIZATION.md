@@ -194,7 +194,7 @@ Files with duplicate names in the same directory are auto-renamed: `file.txt` �
 
 | Property            | Type    | Default | Description                                                                              |
 |---------------------|---------|---------|------------------------------------------------------------------------------------------|
-| `git.enabled`       | boolean | `false` | Whether to enable Git tool (IGitTool); opt-in. End-to-end deployment uses `ICompileAndDeployTool` (always on) instead. Set to `true` to expose 31 git commands to the LLM. |
+| `git.enabled`       | boolean | `false` | Whether to enable Git tool (IGitTool); opt-in. End-to-end deployment uses `ICompileAndDeployTool` (always on) instead. Set to `true` to expose 28 git commands to the LLM. |
 | `git.username`      | String  | —       | Username for HTTP(S) git authentication (clone/pull/push)                                |
 | `git.token`         | String  | —       | Token/password for HTTP(S) git authentication                                            |
 | `gitUsername`       | String  | —       | **Legacy** top-level alias for `git.username`                                            |

@@ -118,7 +118,7 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 3. **Mixed scenarios**: Images and documents can be uploaded together; the model synthesizes visual information and document text
 
 ### File Download, Preview, and Deletion
-Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`. Files and directories can be removed via MCP tool `deleteFileOrDirectory` (requires explicit `Y/y/Yes/yes` confirmation, supports recursive directory removal, and cleans up temporary `file_info` records).
+Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`. Files and directories can be removed via MCP tool `deleteFileOrDirectory` (requires explicit `I_CONFIRM_DELETE` confirmation — token configurable via `spring.ai.loom.agent.file.deleteConfirmToken`, supports recursive directory removal, and cleans up temporary `file_info` records).
 
 The "File" entry provides unified browsing, previewing, downloading, and deleting for all non-knowledge-base files (including tool uploads and git repositories).
 

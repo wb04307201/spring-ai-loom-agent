@@ -121,7 +121,7 @@ spring:
 | `getFileInfo`             | Metadata (size, mtime, type) of a file/directory                        |
 | `downloadFileUrl`         | Get a download URL (auto-creates a temporary `file_info` record, `usage="temp"`) |
 | `viewFileUrl`             | Get a preview URL (auto-creates a temporary `file_info` record)         |
-| `deleteFileOrDirectory`   | Delete with explicit `Y/y/Yes/yes` confirmation; supports recursive directory removal; cleans up `file_info` records for deleted files |
+| `deleteFileOrDirectory`   | Delete with explicit `I_CONFIRM_DELETE` confirmation (token configurable via `spring.ai.loom.agent.file.deleteConfirmToken`); supports recursive directory removal; cleans up `file_info` records for deleted files |
 
 ---
 
@@ -200,7 +200,7 @@ spring:
 | `branch`         | no       | Branch to clone (defaults to remote HEAD)                                                                            |
 | `port`           | yes      | Host port the container publishes (the URL the caller accesses: `http://localhost:{port}/{healthPath}`)             |
 | `containerPort`  | yes      | Port the application listens on inside the container (no yml fallback; reference `server.port` in application.yml)  |
-| `subDir`         | no       | Subdirectory of a multi-module repo; required when root has no `pom.xml` and the right module is ambiguous           |
+| `subDir`         | no       | Subdirectory of a multi-module repo; **required** when root has no `pom.xml` — tool returns `fail` otherwise           |
 | `imageName`      | no       | Docker image name (default derived from timestamp)                                                                   |
 | `containerName`  | no       | Docker container name (default derived from timestamp)                                                               |
 | `healthPath`     | no       | Health-check path **and** access URL path (e.g. `healthPath=sql-forge-demo` → `http://localhost:{port}/sql-forge-demo`; pass `/` when there is no context-path) |
@@ -217,6 +217,12 @@ All settings live under `spring.ai.loom.agent.compile.*`.
 | `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`                           | Whether to register the end-to-end deploy tool (default enabled)                                            |
 | `spring.ai.loom.agent.compile.mavenHome`          | string   | auto-discover                    | Optional Maven install dir; falls back to `maven.mavenHome` and PATH                                         |
 | `spring.ai.loom.agent.compile.dockerCmd`          | string   | `docker`                         | Optional override for the docker CLI binary                                                                  |
+| `spring.ai.loom.agent.compile.mavenTimeoutMs`     | long     | `600000`                         | Maven build timeout (10 minutes)                                                                             |
+| `spring.ai.loom.agent.compile.dockerBuildTimeoutMs`| long    | `600000`                         | `docker build` timeout (10 minutes)                                                                          |
+| `spring.ai.loom.agent.compile.dockerRunTimeoutMs`  | long     | `60000`                          | `docker run` startup timeout (1 minute)                                                                      |
+| `spring.ai.loom.agent.compile.healthCheckMaxWaitMs`| long     | `60000`                          | Total wait for the post-startup health check (1 minute)                                                      |
+| `spring.ai.loom.agent.compile.healthCheckIntervalMs`| long    | `2000`                           | Health-check poll interval (2 seconds)                                                                       |
+| `spring.ai.loom.agent.compile.keepWorkspace`      | boolean  | `false`                          | Keep the per-call workspace after deployment finishes (default: delete; set `true` to debug)                  |
 | `spring.ai.loom.agent.compile.imageTemplates`     | map      | (6 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
 | `spring.ai.loom.agent.compile.extraRunArgs`       | string[] | `[]`                             | Extra `docker run` args injected between `--name` and the image name                                         |
 
@@ -266,36 +272,18 @@ Pass the alias to `baseImage` to select a template, or pass a full image name (e
 
 ### 8.5 End-to-End Conversation Examples
 
-Below are three complete walkthroughs showing how a user describes a deployment in chat, how the LLM extracts and asks clarifying questions, and how it finally invokes `@compileAndDeploy`.
+Below are three complete walkthroughs showing how a user describes a deployment in chat, how the LLM extracts and asks clarifying questions, and how it finally invokes the end-to-end deployment tool (`ICompileAndDeployTool` — the actual registered tool name is auto-derived from the method by Spring AI; do not hardcode it in skill templates).
 
 #### Scenario A: Maven multi-module Spring Boot project
 
 **User prompt**:
 
 ```text
-Please deploy my project with @compileAndDeploy:
-
-- Repo URL: https://gitee.com/wb04307201/sql-forge-demo.git
-- Username: wb04307201
-- Password: •••••••• (placeholder; see Security Note below)
-- Sub-directory: sql-forge-demo (multi-module repo, deploy this submodule)
-- Host port: 8081 (I want to access it at http://localhost:8081)
-- Container app port: 8081 (server.port in application.yml is 8081)
-- Health-check path: /sql/forge/web
+Help me deploy https://gitee.com/wb04307201/sql-forge-demo.git — I want to deploy the sql-forge-demo submodule. It's a private repo: username `wb04307201`, password `••••••••`.
+Use port 8081 for both host and container. Health-check path: `/sql/forge/web`
 ```
 
-**LLM clarifying question** (multi-module repos with `buildTool` ambiguity fail fast):
-
-> The repo root has no `pom.xml`, and the submodule `sql-forge-demo` contains both `pom.xml` and `package.json` — `buildTool` cannot be auto-detected. Which build stack do you want?
->
-> - `maven` (Java / Spring Boot)
-> - `npm` (Node backend, runs `node dist/index.js`)
-> - `npm-frontend` (Node static frontend, build output served by nginx)
-> - `pip` (Python, `pip install -r requirements.txt`)
-
-**User answer**: `maven`
-
-**LLM-final tool invocation**:
+**LLM-extracted tool invocation** (`buildTool` auto-detected from the `pom.xml` in the submodule — no need for the user to spell it out):
 
 ```json
 {

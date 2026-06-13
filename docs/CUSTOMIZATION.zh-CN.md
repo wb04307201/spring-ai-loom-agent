@@ -194,7 +194,7 @@ spring:
 
 | 属性                | 类型     | 默认值   | 说明                                                                 |
 |-------------------|--------|-------|--------------------------------------------------------------------|
-| `git.enabled`     | boolean | `false` | 是否启用 Git 工具（IGitTool）。**默认禁用**（opt-in）—— 端到端部署请走 `ICompileAndDeployTool`（始终启用）。设为 `true` 时再暴露 31 个 git 命令给 LLM。 |
+| `git.enabled`     | boolean | `false` | 是否启用 Git 工具（IGitTool）。**默认禁用**（opt-in）—— 端到端部署请走 `ICompileAndDeployTool`（始终启用）。设为 `true` 时再暴露 28 个 git 命令给 LLM。 |
 | `git.username`    | String  | —     | HTTP(S) git 认证用户名（clone/pull/push）                               |
 | `git.token`       | String  | —     | HTTP(S) git 认证令牌/密码                                              |
 | `gitUsername`     | String  | —     | **兼容** 顶层字段，等价于 `git.username`                                  |
