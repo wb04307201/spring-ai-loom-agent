@@ -82,6 +82,12 @@
       ],
       "command": "jbang.cmd"
     },
+    "mcp-server-docker": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-docker"
+      ]
+    },
     "desktop-commander": {
       "command": "npx.cmd",
       "args": ["-y", "@wonderwhy-er/desktop-commander@latest"]

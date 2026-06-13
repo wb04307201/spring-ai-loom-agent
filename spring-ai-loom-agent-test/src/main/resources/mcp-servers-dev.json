@@ -52,12 +52,6 @@
         "io.github.wb04307201:http-mcp:1.0.0"
       ],
       "command": "jbang.cmd"
-    },
-    "mcp-server-docker": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-docker"
-      ]
     }
   }
 }

@@ -153,7 +153,7 @@ spring:
           - name: spring-ai-mcp-client - desktop-commander
         skills:
           - name: 网络月度事件报告
-            description: 围绕一个主题，按月梳理当年的重要事件并产出 HTML 洞察报告（主题 {topic} 来自用户当前对话）
+            description: 围绕 {topic} 按月梳理当年的重要事件，做跨月因果关联与下一年趋势预判，产出 HTML 报告并返回预览链接（{topic} 来自用户当前对话）
             content: classpath:skills/news-watch.st
           - name: http测试
             description: 自定义http服务测试
@@ -167,8 +167,8 @@ spring:
             description: 测试保存、下载、预览2
             content: 你能说明微积分么？并保存成html，并给我下载和和预览地址
             load: false
-          - name: 部署仓库
-            description: 使用 @compileAndDeploy 部署项目：使用git拉取代码，maven编译，构建docker镜像并创建容器运行
+          - name: 部署项目
+            description: 从 Git 仓库拉取代码 → 本地编译打包 → 构建 Docker 镜像 → 启动容器 → 返回访问链接（支持 maven / npm / npm-frontend / pip 多栈）
             content: classpath:skills/package-docker.st
           - name: 测试自动E2E功能验证
             description: 测试使用浏览器对功能进行E2E测试，并生成验证报告
