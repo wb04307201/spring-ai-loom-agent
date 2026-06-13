@@ -15,8 +15,9 @@
 - [5. Knowledge Base Management](#5-knowledge-base-management)
 - [6. Skill Management](#6-skill-management)
 - [7. MCP Tools](#7-mcp-tools)
-- [8. Data Models](#8-data-models)
-- [9. Configuration Properties](#9-configuration-properties)
+- [8. Terminal Management](#8-terminal-management)
+- [9. Data Models](#9-data-models)
+- [10. Configuration Properties](#10-configuration-properties)
 
 ---
 
@@ -246,46 +247,85 @@ Content-Type: multipart/form-data
 
 ---
 
-### 4.2 List Files
+### 4.2 List File Tree
 
 ```
 GET /spring/ai/loom/file
+GET /spring/ai/loom/file/tree
 ```
 
-**Response**: `FileRecord[]`
+**Response**: Directory tree JSON (recursive structure).
 
-| Field         | Type   | Description                                              |
-|---------------|--------|----------------------------------------------------------|
-| `id`          | string | File ID                                                  |
-| `username`    | string | Uploader username                                        |
-| `knowledgeId` | string | Associated knowledge base ID (null if not associated)    |
-| `fileName`    | string | File name                                                |
-| `size`        | number | File size in bytes                                       |
-| `uploadTime`  | string | Upload time (ISO 8601)                                   |
-| `path`        | string | File path                                                |
+| Field      | Type   | Description                          |
+|------------|--------|--------------------------------------|
+| `name`     | string | File or directory name               |
+| `type`     | string | `"file"` or `"directory"`            |
+| `size`     | number | File size in bytes (files only)      |
+| `children` | array  | Child items (directories only)       |
 
 **Example**:
 
 ```json
-[
-  {
-    "id": "file-abc123",
-    "username": "admin",
-    "knowledgeId": null,
-    "fileName": "report.pdf",
-    "size": 102400,
-    "uploadTime": "2026-05-10T10:30:00",
-    "path": "/files/report.pdf"
-  }
-]
+{
+  "name": ".",
+  "type": "directory",
+  "children": [
+    {
+      "name": "report.pdf",
+      "type": "file",
+      "size": 102400
+    },
+    {
+      "name": "docs",
+      "type": "directory",
+      "children": [
+        { "name": "guide.md", "type": "file", "size": 4096 }
+      ]
+    }
+  ]
+}
 ```
 
 ---
 
-### 4.3 Delete File
+### 4.3 View File by Path
 
 ```
-DELETE /spring/ai/loom/file/{id}
+GET /spring/ai/loom/file/by-path/view?path=report.pdf
+```
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description                                          |
+|-----------|--------|----------|------------------------------------------------------|
+| `path`    | string | Yes      | File path relative to user's file directory          |
+
+**Response**: `307 Temporary Redirect` → `/file/view/{fileId}` (WOPI file viewer).
+
+> If the file is not yet registered in `file_info`, a temporary record (`usage="temp"`) is auto-created to obtain a `fileId`.
+
+---
+
+### 4.4 Download File by Path
+
+```
+GET /spring/ai/loom/file/by-path/download?path=report.pdf
+```
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description                                          |
+|-----------|--------|----------|------------------------------------------------------|
+| `path`    | string | Yes      | File path relative to user's file directory          |
+
+**Response**: `307 Temporary Redirect` → `/wopi/files/{fileId}/contents`.
+
+---
+
+### 4.5 Download File by ID
+
+```
+GET /spring/ai/loom/file/{id}/download
 ```
 
 **Path Parameters**:
@@ -294,7 +334,7 @@ DELETE /spring/ai/loom/file/{id}
 |-----------|--------|-------------|
 | `id`      | string | File ID     |
 
-**Response**: `number` — Number of deleted records.
+**Response**: File binary stream, `Content-Disposition` header includes original filename.
 
 ---
 
@@ -449,59 +489,41 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 ### 6.1 List Skills
 
 ```
-GET /spring/ai/chat/skill
+GET /spring/ai/loom/skill
 ```
 
-**Response**: `SkillDocument[]`
+**Response**: `SkillRecord[]` (see model fields below)
 
-| Field            | Type             | Description                                                      |
-|------------------|------------------|------------------------------------------------------------------|
-| `name`           | string           | Skill name                                                       |
-| `description`    | string           | Skill description                                                |
-| `defaultPreload` | boolean          | Whether preloaded by default                                     |
-| `tools`          | string[]         | List of associated tool names                                    |
-| `content`        | string             | Skill content (supports `classpath:` prefix to load from classpath) |
-| `params`         | SkillParamProperty[] | Skill parameter definitions                                  |
-| `source`         | string           | Skill source (`configuration` or `database`)                     |
+| Field         | Type    | Description                                                                                  |
+|---------------|---------|----------------------------------------------------------------------------------------------|
+| `name`        | string  | Skill name                                                                                   |
+| `description` | string  | Skill description                                                                            |
+| `load`        | boolean | Whether the LLM preloads this skill into the system prompt (`true` for embedded skills)      |
+| `content`     | string  | Skill content (prompt template; supports `classpath:` prefix to load from the classpath)     |
+| `source`      | string  | Skill source — `configuration` (from yml) or `database` (user-created via API)               |
 
 ---
 
 ### 6.2 Create/Update Skill
 
 ```
-PUT /spring/ai/chat/skill
+PUT /spring/ai/loom/skill
 Content-Type: application/json
 ```
 
 **Request Body** (`SkillProperty`):
 
-| Field            | Type                 | Required | Description                                              |
-|------------------|----------------------|----------|----------------------------------------------------------|
-| `name`           | string               | Yes      | Skill name                                               |
-| `description`    | string               | Yes      | Skill description                                        |
-| `defaultPreload` | boolean              | No       | Whether preloaded by default, defaults to `true`         |
-| `tools`          | string[]             | No       | List of associated tool names                            |
-| `content`        | string               | No       | Skill content (supports `classpath:` prefix)         |
-| `params`         | SkillParamProperty[] | No       | Skill parameter definitions                              |
+| Field         | Type    | Required | Description                                                                              |
+|---------------|---------|----------|------------------------------------------------------------------------------------------|
+| `name`        | string  | Yes      | Skill name                                                                               |
+| `description` | string  | No       | Skill description                                                                        |
+| `load`        | boolean | No       | Whether the LLM preloads this skill; defaults to `true`                                  |
+| `content`     | string  | No       | Skill content / prompt template (supports `classpath:` prefix to load from the classpath) |
 
-**SkillParamProperty**:
-
-| Field            | Type     | Required | Description                                            |
-|------------------|----------|----------|--------------------------------------------------------|
-| `name`           | string   | Yes      | Parameter name                                         |
-| `label`          | string   | Yes      | Parameter display label                                |
-| `type`           | string   | No       | Parameter type: `TEXT` / `SELECT` / `TEXT_AREA`        |
-| `required`       | boolean  | No       | Whether required                                       |
-| `defaultValue`   | string   | No       | Default value                                          |
-| `placeholder`    | string   | No       | Placeholder text                                       |
-| `options`        | Option[] | No       | Dropdown options (used when `type=SELECT`)             |
-
-**Option**:
-
-| Field   | Type   | Description       |
-|---------|--------|-------------------|
-| `label` | string | Option label text |
-| `value` | string | Option value      |
+> **Note:** The body shape matches the `SkillRecord` model (`name` / `description` / `load` / `content`).
+> There is no `params`, `tools`, or `defaultPreload` field — `{param}` placeholders inside `content`
+> are LLM-interpreted at runtime, not declared as structured form fields. MCP tool references
+> inside `content` use `@tool_name` and resolve to the MCPs configured in `mcps:`.
 
 **Example**:
 
@@ -509,36 +531,8 @@ Content-Type: application/json
 {
   "name": "email_writer",
   "description": "Professional email writing assistant",
-  "defaultPreload": true,
-  "tools": [],
-  "params": [
-    {
-      "name": "recipient",
-      "label": "Recipient",
-      "type": "TEXT",
-      "required": true,
-      "placeholder": "Enter recipient email"
-    },
-    {
-      "name": "tone",
-      "label": "Tone",
-      "type": "SELECT",
-      "required": false,
-      "defaultValue": "formal",
-      "options": [
-        { "label": "Formal", "value": "formal" },
-        { "label": "Friendly", "value": "friendly" },
-        { "label": "Concise", "value": "concise" }
-      ]
-    },
-    {
-      "name": "content",
-      "label": "Email Content",
-      "type": "TEXT_AREA",
-      "required": true,
-      "placeholder": "Enter main content of the email"
-    }
-  ]
+  "load": true,
+  "content": "You are an email assistant. The recipient is {recipient}, the tone should be {tone}, and the main points are: {content}. Generate the email body now."
 }
 ```
 
@@ -549,7 +543,7 @@ Content-Type: application/json
 ### 6.3 Get Single Skill
 
 ```
-GET /spring/ai/chat/skill/{name}
+GET /spring/ai/loom/skill/{name}
 ```
 
 **Path Parameters**:
@@ -558,14 +552,14 @@ GET /spring/ai/chat/skill/{name}
 |-----------|--------|-------------|
 | `name`    | string | Skill name  |
 
-**Response**: `SkillDocument`
+**Response**: `SkillRecord`
 
 ---
 
 ### 6.4 Delete Skill
 
 ```
-DELETE /spring/ai/chat/skill/{name}
+DELETE /spring/ai/loom/skill/{name}
 ```
 
 **Path Parameters**:
@@ -626,7 +620,142 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 8. Data Models
+## 8. Terminal Management
+
+### 8.1 Start Process
+
+```
+@Tool: startProcess
+```
+
+Start a terminal process or REPL session. Supports two modes: **Shell mode** (one-shot command like `ls`, `cat`) and **REPL mode** (long-running interactive session like `python`, `node`). REPL mode uses PTY (pseudo-terminal) when available for full terminal interaction.
+
+| Parameter    | Type    | Required | Description                                                                                     |
+|--------------|---------|----------|-------------------------------------------------------------------------------------------------|
+| `command`    | string  | Yes      | Command to execute. Shell mode: any shell command. REPL mode: interpreter (e.g. `python`, `node`) |
+| `workingDir` | string  | No       | Working directory (default: `.local/file/{username}/`)                                          |
+| `repl`       | boolean | No       | Whether REPL mode. `true` = long interactive session; `false`/omitted = one-shot command        |
+| `timeout`    | long    | No       | Wait timeout in milliseconds (default 30000ms)                                                   |
+
+---
+
+### 8.2 Interact with Process
+
+```
+@Tool: interactWithProcess
+```
+
+Send input to a running REPL session and wait for response.
+
+| Parameter    | Type    | Required | Description                                  |
+|--------------|---------|----------|----------------------------------------------|
+| `sessionId`  | string  | Yes      | Session ID (returned by `startProcess`)      |
+| `input`      | string  | Yes      | Input to send (newline auto-appended)        |
+| `timeout`    | long    | No       | Response wait timeout in ms (default 10000)  |
+
+---
+
+### 8.3 Read Process Output
+
+```
+@Tool: readProcessOutput
+```
+
+Read output from a running process. Supports three modes: `new` (unread content since last read, default), `tail` (last N lines), `absolute` (from character position N).
+
+| Parameter    | Type    | Required | Description                                                                |
+|--------------|---------|----------|----------------------------------------------------------------------------|
+| `sessionId`  | string  | Yes      | Session ID                                                                 |
+| `mode`       | string  | No       | Read mode: `new` / `tail` / `absolute`                                     |
+| `position`   | int     | No       | Absolute character position (only when `mode=absolute`)                    |
+| `lines`      | int     | No       | Number of lines (only when `mode=tail`, default 50)                        |
+
+---
+
+### 8.4 Force Terminate
+
+```
+@Tool: forceTerminate
+```
+
+Force-terminate a managed terminal session.
+
+| Parameter    | Type    | Required | Description    |
+|--------------|---------|----------|----------------|
+| `sessionId`  | string  | Yes      | Session ID     |
+
+---
+
+### 8.5 List Sessions
+
+```
+@Tool: listSessions
+```
+
+List all active terminal sessions for the current user.
+
+---
+
+### 8.6 Get Process Info
+
+```
+@Tool: getProcessInfo
+```
+
+Get detailed info for a single session, including full output, process state, working directory, PTY mode, etc.
+
+| Parameter    | Type    | Required | Description    |
+|--------------|---------|----------|----------------|
+| `sessionId`  | string  | Yes      | Session ID     |
+
+---
+
+### 8.7 Send Signal
+
+```
+@Tool: sendSignal
+```
+
+Send a control signal to a terminal session. PTY mode supports: `interrupt` (Ctrl+C), `eof` (Ctrl+D), `quit` (Ctrl+\\). Non-PTY mode only supports `interrupt` via `destroy`.
+
+| Parameter    | Type    | Required | Description                                              |
+|--------------|---------|----------|----------------------------------------------------------|
+| `sessionId`  | string  | Yes      | Session ID                                               |
+| `signal`     | string  | Yes      | Signal type: `interrupt` / `eof` / `quit`                |
+
+---
+
+### 8.8 List System Processes
+
+```
+@Tool: listProcesses
+```
+
+List all running OS processes (like `ps` or Task Manager). Supports pagination.
+
+| Parameter     | Type   | Required | Description                              |
+|---------------|--------|----------|------------------------------------------|
+| `maxResults`  | int    | No       | Max results per page (default 50, max 200) |
+| `page`        | int    | No       | Page number, 0-based (default 0)          |
+
+---
+
+### 8.9 Kill Process
+
+```
+@Tool: killProcess
+```
+
+Force-terminate a system process by PID.
+
+| Parameter | Type    | Required | Description                                      |
+|-----------|---------|----------|--------------------------------------------------|
+| `pid`     | long    | Yes      | Process ID                                       |
+| `force`   | boolean | No       | Whether to use forceful termination (default true) |
+
+---
+
+## 9. Data Models
 
 ### ChatRequestRecord
 
@@ -683,12 +812,13 @@ GET /spring/ai/chat/loom/mcp
 ```json
 {
   "id": "string",
-  "username": "string",
   "knowledgeId": "string",
   "fileName": "string",
   "size": 0,
   "uploadTime": "2026-05-10T10:30:00",
-  "path": "string"
+  "path": "string",
+  "usage": "conversation",
+  "mimeType": "application/pdf"
 }
 ```
 
@@ -720,9 +850,19 @@ GET /spring/ai/chat/loom/mcp
 }
 ```
 
-### SkillDocument
+### SkillRecord
 
-Inherits `SkillProperty`, with an additional `source` field indicating the origin.
+```json
+{
+  "name": "string",
+  "description": "string",
+  "load": true,
+  "content": "string",
+  "source": "configuration"
+}
+```
+
+> The response shape is the same as the PUT request body (the `SkillProperty` yml model is a strict subset — `name` / `description` / `load` / `content` — plus a `source` field set by the server to indicate where the skill was loaded from).
 
 ---
 
@@ -784,6 +924,82 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.auth.cookie.name` | string  | `loom-agent-session`   | Session cookie name                                  |
 | `spring.ai.loom.agent.auth.cookie.maxAge` | int    | `86400`                | Cookie max age in seconds (24 hours)                 |
 
+### 9.7 File Storage Configuration
+
+| Property                              | Type    | Default                | Description                                          |
+|---------------------------------------|---------|------------------------|------------------------------------------------------|
+| `spring.ai.loom.agent.fileBasePath`   | string  | `.local/file`          | Root directory for uploaded files                    |
+| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge`    | Root directory for knowledge base files              |
+
+> Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
+
+### 9.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
+
+`ICompileAndDeployTool` performs the full deployment pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. Supports Maven, Node.js (backend and static-frontend → nginx), and Python projects. All settings live under `spring.ai.loom.agent.compile.*`.
+
+| Property                                          | Type     | Default                          | Description                                                                                                  |
+|---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`                           | Whether to register the end-to-end deploy tool (default enabled)                                            |
+| `spring.ai.loom.agent.compile.mavenHome`          | string   | auto-discover                    | Optional Maven install dir; falls back to `maven.mavenHome` and PATH                                         |
+| `spring.ai.loom.agent.compile.dockerCmd`          | string   | `docker`                         | Optional override for the docker CLI binary                                                                  |
+| `spring.ai.loom.agent.compile.imageTemplates`     | map      | (6 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
+| `spring.ai.loom.agent.compile.extraRunArgs`       | string[] | `[]`                             | Extra `docker run` args injected between `--name` and the image name                                         |
+
+**Base-image templates** (built-in):
+
+| Alias      | Image                                    | Default ENTRYPOINT                          |
+|------------|------------------------------------------|---------------------------------------------|
+| `java17`   | `eclipse-temurin:17-jre-alpine`          | `["java","-jar","app.jar"]`                 |
+| `java21`   | `eclipse-temurin:21-jre-alpine`          | `["java","-jar","app.jar"]`                 |
+| `nginx`    | `nginx:1.27-alpine`                      | `["nginx","-g","daemon off;"]`              |
+| `python3`  | `python:3.12-slim`                       | `["python","app.py"]`                       |
+| `node20`   | `node:20-alpine`                         | `["node","dist/index.js"]`                   |
+| `node20-serve` | `nginx:1.27-alpine`                  | `["nginx","-g","daemon off;"]`              |
+
+Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port`, and `containerPort`):
+
+- `gitUrl` (required) — git repository URL
+- `gitUsername` / `gitPassword` — credentials for private repos
+- `branch` — branch to clone (defaults to remote HEAD)
+- `port` — host port the container will publish (the port the caller accesses via `http://localhost:{port}/{healthPath}`)
+- `containerPort` — Container port the application listens on inside the container (required, no yml fallback; reference `server.port` in application.yml)
+- `subDir` — Subdirectory of a multi-module repo to deploy (optional; without it, multi-module resolution may pick the wrong module)
+- `buildTool` — Build tool / project type: `maven` / `npm` / `npm-frontend` / `pip` (optional; auto-detected from `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`)
+- `imageName` / `containerName` — Docker image and container names (defaults derived from timestamp)
+- `healthPath` — both the health-check path and the access URL path (e.g. `healthPath=sql-forge-demo` → `http://localhost:8080/sql-forge-demo`)
+- `baseImage` — template alias (`java17`/`java21`/`nginx`/`python3`/`node20`/`node20-serve`) or full image name (e.g. `openjdk:17-slim`)
+- `runCommand` — string array overriding the template's default ENTRYPOINT (rare)
+
+Example yml overriding the default templates:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        compile:
+          image-templates:
+            java17:
+              image: eclipse-temurin:17-jre-alpine
+              command: [java, -jar, app.jar]
+            nginx:
+              image: nginx:1.27-alpine
+              command: [nginx, -g, "daemon off;"]
+```
+
+Example tool invocation:
+
+```json
+{
+  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+  "port": 8081,
+  "containerPort": 8080,
+  "subDir": "sql-forge-web",
+  "baseImage": "java17",
+  "healthPath": "sql-forge-demo"
+}
+```
+
 ---
 
 ## Appendix: Endpoint Summary
@@ -798,18 +1014,11 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | 5  | `DELETE` | `/spring/ai/loom/conversation/{id}`                     | Delete conversation                  |
 | 6  | `POST`   | `/spring/ai/loom/stream`                                | SSE streaming chat                   |
 | 7  | `POST`   | `/spring/ai/loom/file/upload`                           | Upload file                          |
-| 8  | `GET`    | `/spring/ai/loom/file`                                  | List files                           |
-| 9  | `DELETE` | `/spring/ai/loom/file/{id}`                             | Delete file                          |
-| 10 | `GET`    | `/spring/ai/loom/knowledge/checkKnowledgeUpload`        | Check knowledge base status          |
-| 11 | `GET`    | `/spring/ai/loom/knowledge`                             | List knowledge bases                 |
-| 12 | `PUT`    | `/spring/ai/loom/knowledge`                             | Create knowledge base                |
-| 13 | `DELETE` | `/spring/ai/loom/knowledge/{id}`                        | Delete knowledge base (cascade)      |
-| 14 | `POST`   | `/spring/ai/loom/knowledge/{id}/upload`                 | Upload file to knowledge base        |
-| 15 | `GET`    | `/spring/ai/loom/knowledge/{id}/file`                   | List files in knowledge base         |
-| 16 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}`          | Delete file from knowledge base      |
-| 17 | `GET`    | `/spring/ai/chat/loom/mcp`                              | List MCP tools                       |
-| 18 | `GET`    | `/spring/ai/chat/skill`                                 | List skills                          |
-| 19 | `PUT`    | `/spring/ai/chat/skill`                                 | Create/update skill                  |
-| 20 | `GET`    | `/spring/ai/chat/skill/{name}`                          | Get single skill                     |
-| 21 | `DELETE` | `/spring/ai/chat/skill/{name}`                          | Delete skill                         |
-| —  | `GET`    | `/spring/ai/loom`                                       | Redirect to UI home page             |
+| 8  | `GET`    | `/spring/ai/loom/file` or `/spring/ai/loom/file/tree` | List file tree (directory tree JSON) |
+| 8a | `GET`    | `/spring/ai/loom/file/by-path/view`                     | View file by path (redirects)        |
+| 8b | `GET`    | `/spring/ai/loom/file/by-path/download`                 | Download file by path (redirects)    |
+| 8c | `GET`    | `/spring/ai/loom/file/{id}/download`                    | Download file by ID (binary stream)  |
+| 9  | `GET`    | `/spring/ai/loom/knowledge/checkKnowledgeUpload`        | Check knowledge base status          |
+| 10 | `GET`    | `/spring/ai/loom/knowledge`                             | List knowledge bases                 |
+| 11 | `PUT`    | `/spring/ai/loom/knowledge`                             | Create knowledge base                |
+| 12 | `DELETE` | `/spring/ai/loom/knowledge/{id}`                        | Delete knowledge base (cascade)      |

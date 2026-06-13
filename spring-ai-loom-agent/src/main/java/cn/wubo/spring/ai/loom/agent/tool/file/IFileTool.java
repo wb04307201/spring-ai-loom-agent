@@ -8,25 +8,35 @@ import java.util.Map;
 
 public interface IFileTool extends IEmbedTool {
 
-    String readTextFile(String fileId, Integer head, Integer tail, String gitRelativePath, ToolContext toolContext);
+    String readTextFile(String path, Integer head, Integer tail, ToolContext toolContext);
 
-    String readMediaFile(String fileId, ToolContext toolContext, String gitRelativePath);
+    String readMediaFile(String path, ToolContext toolContext);
 
-    String readMultipleFiles(List<String> fileIds, ToolContext toolContext);
+    String readMultipleFiles(List<String> paths, ToolContext toolContext);
 
-    String writeFile(String path, String content, String gitRepoFileId, ToolContext toolContext);
+    String writeFile(String path, String content, ToolContext toolContext);
 
-    String editFile(String fileId, List<Map<String, String>> edits, String gitRelativePath, ToolContext toolContext);
+    String editFile(String path, List<Map<String, String>> edits, ToolContext toolContext);
 
-    String createDirectory(String path, String gitRepoFileId, ToolContext toolContext);
+    String createDirectory(String path, ToolContext toolContext);
 
-    String moveFile(String fileId, String destination, String targetGitRepoFileId, ToolContext toolContext);
+    String moveFile(String source, String destination, ToolContext toolContext);
 
-    String searchFiles(String keyword, String gitRepoFileId, ToolContext toolContext);
+    String searchFiles(String pattern, ToolContext toolContext);
 
     String listAllowedDirectories(ToolContext toolContext);
 
-    String downloadFileUrl(String fileId, ToolContext toolContext);
+    String listDirectory(String path, Integer depth, ToolContext toolContext);
 
-    String viewFileUrl(String fileId, ToolContext toolContext);
+    String listDirectoryWithSizes(String path, ToolContext toolContext);
+
+    String directoryTree(String path, ToolContext toolContext);
+
+    String getFileInfo(String path, ToolContext toolContext);
+
+    String downloadFileUrl(String path, ToolContext toolContext);
+
+    String viewFileUrl(String path, ToolContext toolContext);
+
+    String deleteFileOrDirectory(String path, String confirm, ToolContext toolContext);
 }

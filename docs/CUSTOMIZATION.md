@@ -20,7 +20,8 @@ spring-ai-loom-agent/
 │   │   ├── time/      ITimeTool / DefaultTimeTool  # Time tools
 │   │   ├── skill/     ISkillTool / DefaultSkillTool # Skill tools
 │   │   ├── file/      IFileTool / DefaultFileTool  # File tools
-│   │   └── git/       IGitTool / DefaultGitTool    # Git tools (JGit)
+│   │   ├── git/       IGitTool / DefaultGitTool    # Git tools (JGit)
+│   │   └── maven/     IMavenTool / DefaultMavenTool # Maven build tools (maven-invoker)
 │   ├── document/      IDocumentRead / IFileDocument # Document parsing
 │   └── model/         *Record / LoomAgentProperties # Models & config
 ├── spring-ai-loom-agent-spring-boot-autoconfigure/  # Auto-configuration
@@ -99,23 +100,8 @@ YAML array configuration. Each skill entry contains:
 |------------------|----------|---------|---------------------------------------------------|
 | `name`           | String   | —       | Skill name                                        |
 | `description`    | String   | —       | Skill description                                 |
-| `defaultPreload` | boolean  | `true`  | Whether preloaded into conversations by default   |
-| `tools`          | String[] | —       | List of associated tool names                     |
+| `load`           | boolean  | `true`  | Whether preloaded into conversations by default   |
 | `content`        | String   | —       | Skill content text (supports `classpath:` prefix to read from files) |
-| `params[]`       | Array    | —       | Parameter definitions (see below)                 |
-
-**SkillParamProperty**:
-
-| Field             | Type    | Default | Description                                    |
-|-------------------|---------|---------|------------------------------------------------|
-| `name`            | String  | —       | Parameter identifier                           |
-| `label`           | String  | —       | Parameter display label                        |
-| `type`            | Enum    | —       | Type: `TEXT`, `SELECT`, `TEXT_AREA`            |
-| `required`        | boolean | —       | Whether required                               |
-| `defaultValue`    | String  | —       | Default value                                  |
-| `placeholder`     | String  | —       | Placeholder hint text                          |
-| `options[].label` | String  | —       | Dropdown option label (`type=SELECT` only)     |
-| `options[].value` | String  | —       | Dropdown option value (`type=SELECT` only)     |
 
 **Example Configuration**:
 
@@ -139,21 +125,8 @@ spring:
         skills:
           - name: email_writer
             description: Professional email writing assistant
-            defaultPreload: false
+            load: false
             content: "classpath:skills/email-writer.md"
-            params:
-              - name: recipient
-                label: Recipient
-                type: TEXT
-                required: true
-                placeholder: "Enter recipient email"
-              - name: tone
-                label: Tone
-                type: SELECT
-                defaultValue: formal
-                options:
-                  - { label: Formal, value: formal }
-                  - { label: Friendly, value: friendly }
 ```
 
 ### 1.6 Authentication Configuration (`auth.*`)
@@ -208,13 +181,24 @@ spring:
 
 **Session Storage**: Uses Spring Cache (default Caffeine) with TTL matching `auth.cookie.maxAge`. Replace the `sessionCache` bean for custom storage (e.g., Redis).
 
-### 1.7 Git Configuration (`git.*`)
+### 1.7 File Storage Configuration
 
-| Property                   | Type    | Default | Description                                                                 |
-|----------------------------|---------|---------|-----------------------------------------------------------------------------|
-| `git.enabled`              | boolean | `false` | Whether to enable Git tool (IGitTool); set to `true` to activate            |
-| `git.gitUsername`          | String  | —       | Username for HTTP(S) git authentication (clone/pull/push)                   |
-| `git.gitToken`             | String  | —       | Token/password for HTTP(S) git authentication                               |
+| Property                   | Type    | Default        | Description                                                                 |
+|----------------------------|---------|----------------|-----------------------------------------------------------------------------|
+| `fileBasePath`             | String  | `.local/file`  | Root directory for uploaded files (chat attachments, file tool operations)  |
+| `knowledgeBasePath`        | String  | `.local/knowledge` | Root directory for knowledge base files                                  |
+
+Files with duplicate names in the same directory are auto-renamed: `file.txt` → `file(1).txt` → `file(2).txt`.
+
+### 1.8 Git Configuration (`git.*`)
+
+| Property            | Type    | Default | Description                                                                              |
+|---------------------|---------|---------|------------------------------------------------------------------------------------------|
+| `git.enabled`       | boolean | `false` | Whether to enable Git tool (IGitTool); opt-in. End-to-end deployment uses `ICompileAndDeployTool` (always on) instead. Set to `true` to expose 31 git commands to the LLM. |
+| `git.username`      | String  | —       | Username for HTTP(S) git authentication (clone/pull/push)                                |
+| `git.token`         | String  | —       | Token/password for HTTP(S) git authentication                                            |
+| `gitUsername`       | String  | —       | **Legacy** top-level alias for `git.username`                                            |
+| `gitToken`          | String  | —       | **Legacy** top-level alias for `git.token`                                               |
 
 **Example Configuration**:
 
@@ -224,12 +208,27 @@ spring:
     loom:
       agent:
         git:
-          enabled: true
-          gitUsername: your-git-username
-          gitToken: your-git-token
+          enabled: true   # default; set to false to disable
+          username: your-git-username
+          token: your-git-token
 ```
 
 > Git credentials can also be passed per-request via `ToolContext` (`gitUsername` / `gitToken` keys), which override the configured defaults.
+
+### 1.9 Tool Group Switches (`{time,file,skill,git,maven,compile}.enabled`)
+
+For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
+
+A quick summary of the switches:
+
+| Property           | Type    | Default | Description                                                       |
+|--------------------|---------|---------|-------------------------------------------------------------------|
+| `time.enabled`     | boolean | `true`  | `ITimeTool` — time and timezone tools                              |
+| `file.enabled`     | boolean | `true`  | `IFileTool` — 16 path-based file tools                             |
+| `skill.enabled`    | boolean | `true`  | `ISkillTool` — list skills, get skill details                     |
+| `git.enabled`      | boolean | `false` | `IGitTool` (JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
+| `maven.enabled`    | boolean | `false` | `IMavenTool` (maven-invoker required). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
+| `compile.enabled`  | boolean | `true`  | `ICompileAndDeployTool` — end-to-end `git clone → build → docker run → health check` |
 
 ---
 
@@ -352,7 +351,7 @@ public IChat customChat(
 | **Override**    | Custom `@Bean IUpload`                            |
 | **Controls**    | File upload (plain/knowledge-base), file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
 
-**Default behavior**: Chat-uploaded files saved to `.local/file/{username}/upload/{fileId}/{fileName}`, knowledge-base files to `.local/file/{username}/knowledge/{knowledgeId}/{fileId}/{fileName}`. Documents are parsed via `IDocumentRead` and stored in `VectorStore`.
+**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `.local/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `.local/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` and stored in `VectorStore`.
 
 **Common use case**: Upload to cloud storage (S3/OSS), integrate third-party OCR, async document parsing.
 
@@ -415,58 +414,11 @@ public IChat customChat(
 - Default: `SyncMcp` (based on `McpSyncClient`)
 - Set `spring.ai.mcp.client.stdio=ASYNC` to switch to `ASyncMcp` (based on `McpAsyncClient`)
 
-### 2.11 `IEmbedTool` — Embed Tools (Time / Skill / File / Git)
+### 2.11 `IEmbedTool` — Embed Tools (Time / Skill / File / Git / Maven / Compile)
 
-`IEmbedTool` is an aggregate marker interface. Four sub-interfaces each provide independent `@Tool` methods to the LLM. Each sub-tool can be replaced independently via `@ConditionalOnMissingBean`.
+`IEmbedTool` is an aggregate marker interface. Sub-interfaces (`ITimeTool`, `ISkillTool`, `IFileTool`, `IGitTool`, `IMavenTool`, `ICompileAndDeployTool`) each contribute independent `@Tool` methods to the LLM. Each can be replaced independently via `@ConditionalOnMissingBean`.
 
-#### `ITimeTool` — Time Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool`                                    |
-| **Default**     | `DefaultTimeTool`                                                                     |
-| **Override**    | Custom `@Bean ITimeTool`                                                              |
-| **Controls**    | `@Tool` methods: `getCurrentTime` (get current time by timezone) and `convertTime` (convert between timezones) |
-
-#### `ISkillTool` — Skill Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool`                                  |
-| **Default**     | `DefaultSkillTool`                                                                    |
-| **Override**    | Custom `@Bean ISkillTool`                                                             |
-| **Controls**    | `@Tool` methods: `skillContents` (list all skills) and `getSkill` (get skill details) |
-
-#### `IFileTool` — File Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                                    |
-| **Default**     | `DefaultFileTool`                                                                     |
-| **Override**    | Custom `@Bean IFileTool`                                                              |
-| **Controls**    | `@Tool` methods: `readTextFile`, `readMediaFile`, `readMultipleFiles`, `writeFile`, `editFile`, `createDirectory`, `moveFile`, `searchFiles`, `listAllowedDirectories`, `downloadFileUrl`, `viewFileUrl`. Note: `writeFile` stores files under `.local/file/{username}/file/`; `createDirectory` and `listAllowedDirectories` accept `ToolContext` to resolve per-user paths. |
-
-#### `IGitTool` — Git Tools
-
-| Item            | Details                                                                               |
-|-----------------|---------------------------------------------------------------------------------------|
-| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool`                                      |
-| **Default**     | `DefaultGitTool` (based on Eclipse JGit 7.2.1)                                        |
-| **Override**    | Custom `@Bean IGitTool`                                                               |
-| **Condition**   | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — disabled by default |
-| **Controls**    | 28 `@Tool` methods: `gitInit`, `gitClone`, `gitDeleteRepo`, `gitStatus`, `gitAdd`, `gitCommit`, `gitDiff`, `gitLog`, `gitBranch`, `gitCheckout`, `gitPull`, `gitPush`, `gitFetch`, `gitMerge`, `gitRebase`, `gitReset`, `gitStash`, `gitTag`, `gitRemote`, `gitBlame`, `gitShow`, `gitReflog`, `gitClean`, `gitCherryPick`, `gitWorktree`, `gitSetWorkingDir`, `gitChangelogAnalyze`, `gitWrapupInstructions` |
-
-Git repositories are stored under `.local/file/{username}/git/{repoName}/`. Clone and init operations automatically register a `FileRecord` (usage=`"git"`); `gitDeleteRepo` removes both the directory and the `FileRecord`.
-
-**Customization Example** (replace only the file tool, keep default time and skill tools):
-
-```java
-@Bean
-public IFileTool customFileTool(IFile file) {
-    return new MyCustomFileTool(file);
-}
-// DefaultTimeTool and DefaultSkillTool remain active
-```
+For the full reference (all `@Tool` method signatures, configuration properties, base-image templates, end-to-end deployment parameters, and replacement examples) see **[TOOLS.md](./TOOLS.md)**.
 
 ### 2.12 `AuthenticationFilter` — Authentication Filter
 
@@ -616,28 +568,18 @@ skills:
     content: "classpath:skills/email-writer.md"
 ```
 
-### 5.2 Skill Parameter Types
+### 5.2 Skill Properties
 
-Three UI control types are supported:
+Each skill has four configurable fields:
 
-| Type        | Description      | Use Case                         |
-|-------------|------------------|----------------------------------|
-| `TEXT`      | Single-line text | Short text (name, email, etc.)   |
-| `TEXT_AREA` | Multi-line text  | Long text (description, content) |
-| `SELECT`    | Dropdown         | Fixed options (tone, format, language) |
+| Field         | Type    | Default | Description                                               |
+|---------------|---------|---------|-----------------------------------------------------------|
+| `name`        | String  | —       | Skill name (unique identifier)                            |
+| `description` | String  | —       | Skill description (used by LLM for matching)              |
+| `load`        | boolean | `true`  | Whether preloaded into conversations by default           |
+| `content`     | String  | —       | Skill content text or `classpath:` prefix to load from file |
 
-### 5.3 Skill-Tool Association
-
-Link MCP tools via the `tools` field. When a skill is activated, the associated tools are automatically enabled:
-
-```yaml
-skills:
-  - name: data_analysis
-    description: Data analysis assistant
-    tools:
-      - python_interpreter
-      - chart_generator
-```
+> **Note**: Skills no longer support `tools` or `params` fields in YAML configuration. MCP tool binding and skill parameters are managed at runtime via the Skill Library API (`PUT /spring/ai/loom/skill`).
 
 ---
 
@@ -649,7 +591,7 @@ skills:
 |---------------------|--------------------------------|---------------------------------|
 | `knowledge`         | Knowledge base metadata        | `id`                            |
 | `knowledge_file`    | Knowledge base — file mapping  | `(knowledge_id, file_id)`       |
-| `file_info`         | File metadata and storage path (`usage` column: `conversation` / `knowledge` / `tool` / `git`) | `id` |
+| `file_info`         | File metadata and storage path (`usage` column: `conversation` / `knowledge` / `tool` / `git` / `temp`) | `id` |
 | `file_document`     | File — vector document mapping | `(file_id, document_id)`        |
 | `user_conversation` | User — conversation mapping    | `(username, conversation_id)`   |
 
@@ -714,7 +656,8 @@ Place same-named static resources in your own project to override the defaults, 
 | No `VectorStore` bean provided       | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, `loomAgentFileRouter`, and `loomAgentKnowledgeRouter` are not created; knowledge base and file upload features unavailable |
 | No `EmbeddingModel` bean provided    | Do not add EmbeddingModel Starter | `JVectorStore` is not created; vector storage unavailable                                        |
 | Custom bean of the same type         | Java `@Bean` configuration   | The corresponding `@ConditionalOnMissingBean` bean will not be created                           |
-| `spring.ai.loom.agent.git.enabled=true` | application.yml           | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.2.1); without this, no Git tool methods are available to the LLM |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml           | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.6.0); without this, no Git tool methods are available to the LLM |
+| `maven-invoker` on classpath         | Provided dependency          | Enables `IMavenTool` bean creation; without it, Maven tool is not available |
 
 ### 8.1 Quick Feature Disablement Guide
 
@@ -724,6 +667,7 @@ Place same-named static resources in your own project to override the defaults, 
 | RAG / Knowledge Base | Do not add any `VectorStore` or `EmbeddingModel` Starter               |
 | MCP functionality  | Set `spring.ai.mcp.client.enabled=false`                               |
 | Git tool           | Do not set `spring.ai.loom.agent.git.enabled=true` (default is disabled) |
+| Maven tool         | Set `spring.ai.loom.agent.maven.enabled=false`                         |
 | Auth filter        | Set `spring.ai.loom.agent.auth.enabled=false`                          |
 | Auto-login         | Override `IUser.isAutoLogin()` to return `false`                       |
 

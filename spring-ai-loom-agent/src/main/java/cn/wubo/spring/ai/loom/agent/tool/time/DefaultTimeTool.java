@@ -22,7 +22,7 @@ public class DefaultTimeTool implements ITimeTool {
     @Tool(description = "获取指定时区的当前时间")
     @Override
     public String getCurrentTime(
-            @ToolParam(description = "IANA 时区名称，如 America/New_York、Europe/London、Asia/Shanghai。不传则使用默认时区") String timezone) {
+            @ToolParam(description = "IANA 时区名称，如 America/New_York、Europe/London、Asia/Shanghai。不传则使用默认时区", required = false) String timezone) {
         try {
             ZoneId zone = (timezone == null || timezone.isBlank()) ? ZoneId.of(defaultTimezone) : ZoneId.of(timezone);
             ZonedDateTime now = ZonedDateTime.now(zone);

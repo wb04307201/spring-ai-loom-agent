@@ -50,9 +50,19 @@ public class DefaultChat implements IChat {
     @Override
     public Flux<ChatResponse> stream(ChatRequestRecord chatRequestRecord, String username, HttpServletRequest request) {
         log.info("Chat request: message={}, fileIds={}", chatRequestRecord.message(), chatRequestRecord.fileIds());
-        boolean exists = userConversation.exists(new UserConversationRecord(username, chatRequestRecord.conversationId()));
+        // 前端可能在用户还没点过任何对话时直接发消息，
+        // 此时 conversationId=null，会让 user_conversation 写入触发
+        // H2 NOT NULL 约束并抛出 500。这里兜底生成一个会话 id。
+        String requested = chatRequestRecord.conversationId();
+        final String conversationId = (requested == null || requested.isBlank())
+                ? java.util.UUID.randomUUID().toString()
+                : requested;
+        if (requested == null || requested.isBlank()) {
+            log.debug("Auto-generated conversationId={} (client did not supply one)", conversationId);
+        }
+        boolean exists = userConversation.exists(new UserConversationRecord(username, conversationId));
         if (!exists) {
-            userConversation.insert(new UserConversationRecord(username, chatRequestRecord.conversationId()));
+            userConversation.insert(new UserConversationRecord(username, conversationId));
         }
 
         ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt();
@@ -105,7 +115,7 @@ public class DefaultChat implements IChat {
         props.put("baseUrl", scheme + "://" + serverName + ":" + serverPort);
         requestSpec.toolContext(props);
 
-        requestSpec.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, chatRequestRecord.conversationId()));
+        requestSpec.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId));
 
         if (retrievalAugmentationAdvisor.isPresent() && StringUtils.hasText(chatRequestRecord.knowledgeId())) {
             requestSpec.advisors(retrievalAugmentationAdvisor.get());

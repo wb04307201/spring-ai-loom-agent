@@ -18,6 +18,7 @@ import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -29,25 +30,44 @@ public class DefaultUpload implements IUpload {
     private final IDocumentRead documentRead;
     private final VectorStore vectorStore;
     private final IKnowledge knowledge;
-    private static final String BASE_PATH = ".local/file";
+    private final String fileBasePath;
+    private final String knowledgeBasePath;
 
-    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge) {
+    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, String fileBasePath, String knowledgeBasePath) {
         this.file = file;
         this.fileDocument = fileDocument;
         this.documentRead = documentRead;
         this.vectorStore = vectorStore;
         this.knowledge = knowledge;
+        this.fileBasePath = fileBasePath;
+        this.knowledgeBasePath = knowledgeBasePath;
     }
 
-    private Path saveFile(InputStream is, Path filePath) throws IOException {
-        Files.createDirectories(filePath.getParent());
-        if (Files.exists(filePath)) Files.delete(filePath);
-        Files.copy(is, filePath);
-        return filePath;
-    }
-
-    private void removeFile(Path path) throws IOException {
-        Files.deleteIfExists(path);
+    /**
+     * 获取不重复的文件路径。如果目标文件已存在，则在文件名后追加 (1)、(2) 等序号。
+     * 例如：test.txt → test(1).txt → test(2).txt
+     */
+    private Path getUniquePath(Path targetDir, String fileName) {
+        Path resolved = targetDir.resolve(fileName);
+        if (!Files.exists(resolved)) {
+            return resolved;
+        }
+        String name = fileName;
+        String ext = "";
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            name = fileName.substring(0, dotIndex);
+            ext = fileName.substring(dotIndex);
+        }
+        int counter = 1;
+        while (true) {
+            String newName = name + "(" + counter + ")" + ext;
+            resolved = targetDir.resolve(newName);
+            if (!Files.exists(resolved)) {
+                return resolved;
+            }
+            counter++;
+        }
     }
 
     private String resolveMimeType(String fileName, String mimeType) {
@@ -83,19 +103,22 @@ public class DefaultUpload implements IUpload {
     public String upload(InputStream is, String fileName, String mimeType) {
         String username = UserContextHolder.getCurrentUser();
         try {
+            Path userDir = Paths.get(fileBasePath, username);
+            Files.createDirectories(userDir);
+            Path filePath = getUniquePath(userDir, fileName);
+            Files.copy(is, filePath, StandardCopyOption.REPLACE_EXISTING);
             String fileId = UUID.randomUUID().toString();
-            Path filePath = saveFile(is, Paths.get(BASE_PATH, username, "upload", fileId, fileName));
             FileRecord fileRecord = new FileRecord(
                     fileId,
                     null,
-                    fileName,
+                    filePath.getFileName().toString(),
                     filePath.toFile().length(),
                     LocalDateTime.now(),
                     filePath.toString(),
                     "conversation",
-                    resolveMimeType(fileName, mimeType)
+                    resolveMimeType(filePath.getFileName().toString(), mimeType)
             );
-            file.insert(fileRecord,username);
+            file.insert(fileRecord, username);
             return fileId;
         } catch (IOException e) {
             throw new LoomAgentRuntimeException(e);
@@ -106,21 +129,24 @@ public class DefaultUpload implements IUpload {
     public String uploadWithKnowledge(InputStream is, String fileName, String mimeType, String knowledgeId) {
         String username = UserContextHolder.getCurrentUser();
         try {
+            Path knowledgeDir = Paths.get(knowledgeBasePath, username, knowledgeId);
+            Files.createDirectories(knowledgeDir);
+            Path filePath = getUniquePath(knowledgeDir, fileName);
+            Files.copy(is, filePath, StandardCopyOption.REPLACE_EXISTING);
             String fileId = UUID.randomUUID().toString();
-            Path filePath = saveFile(is, Paths.get(BASE_PATH, username, "knowledge", knowledgeId, fileId, fileName));
             FileRecord fileRecord = new FileRecord(
                     fileId,
                     knowledgeId,
-                    fileName,
+                    filePath.getFileName().toString(),
                     filePath.toFile().length(),
                     LocalDateTime.now(),
                     filePath.toString(),
                     "knowledge",
-                    resolveMimeType(fileName, mimeType)
+                    resolveMimeType(filePath.getFileName().toString(), mimeType)
             );
-            file.insert(fileRecord,username);
+            file.insert(fileRecord, username);
 
-            Resource resource = file.getResourceById(fileId,username);
+            Resource resource = file.getResourceById(fileId, username);
             List<Document> documents = documentRead.read(resource, knowledgeId);
             vectorStore.add(documents);
 
@@ -139,14 +165,14 @@ public class DefaultUpload implements IUpload {
     @Override
     public int delete(String fileId) {
         String username = UserContextHolder.getCurrentUser();
-        FileRecord fileRecord = file.getById(fileId,username);
-        if (StringUtils.hasText(fileRecord.knowledgeId())){
+        FileRecord fileRecord = file.getById(fileId, username);
+        if (StringUtils.hasText(fileRecord.knowledgeId())) {
             List<FileDocumentRecord> fileDocumentRecords = fileDocument.getListByFileId(fileId);
             vectorStore.delete(fileDocumentRecords.stream().map(FileDocumentRecord::documentId).toList());
             fileDocument.deleteByFileId(fileId);
         }
         try {
-            removeFile(Paths.get(fileRecord.path()));
+            Files.deleteIfExists(Paths.get(fileRecord.path()));
         } catch (IOException e) {
             throw new LoomAgentRuntimeException(e);
         }

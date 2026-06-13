@@ -4,12 +4,12 @@ spring:
       api-key: ${DASHSCOPE_API_KEY}
       chat:
         options:
-          model: qwen3.6-plus
+          model: qwen3.7-plus
           multi_model: true
           enable_thinking: true
       embedding:
         options:
-          model: text-embedding-v2
+          model: text-embedding-v4
 server:
   port: 8089
 logging:

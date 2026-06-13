@@ -20,12 +20,12 @@ spring:
       api-key: ${DASHSCOPE_API_KEY}
       chat:
         options:
-          model: qwen3.6-plus
+          model: qwen3.7-plus
           multi_model: true
           enable_thinking: true
       embedding:
         options:
-          model: text-embedding-v2
+          model: text-embedding-v4
 #    ollama:
 #      chat:
 #        options:
@@ -50,6 +50,22 @@ spring:
           servers-configuration: classpath:mcp-servers-dev.json
     loom:
       agent:
+        # 单点 git / maven 工具默认 disabled —— 编译/部署请走 ICompileAndDeployTool（始终 enabled）。
+        # 需要时显式开启：
+        #   git: { enabled: true }   # 暴露 31 个 git 命令
+        #   maven: { enabled: true } # 暴露 6 个 mvn 命令
+        #
+        # 可选：Maven 工具配置（enabled=true 后才生效）
+        # mavenHome 可省略，工具会自动从 MAVEN_HOME / M2_HOME 环境变量或
+        # Windows 常见路径 (C:\developer\apache-maven-*, C:\Program Files\Apache Maven 等) 探测。
+        # 自动探测会避开系统 PATH 上损坏的 mvn 包装脚本（如 npm 全局 mvn）。
+        # 若自动探测失败，再显式配置：
+        #   maven:
+        #     enabled: true
+        #     mavenHome: C:\developer\apache-maven-3.9.16
+        #     localRepository: C:\Users\wb043\.m2\repository
+        #     maxOutputLines: 200
+        #     defaultTimeoutMs: 300000
         rag:
           similarityThreshold: 0.50
           top-k: 4
@@ -137,19 +153,8 @@ spring:
           - name: spring-ai-mcp-client - desktop-commander
         skills:
           - name: 网络月度事件报告
-            description: 通过网络搜索采集指定主题的月度事件，通过深度分析生成月度事件洞察报告
-            content: |
-              通过网络搜索获取{param}当前年每月的重要的事件，通过深度分析生成洞察报告，要求：
-              - 使用 @get_current_time 获取当前时间
-              - 使用 @sequentialthinking 来规划所有的步骤，思考和分支
-              - 可以使用 @bing_search 按照当前年逐月进行一汽的重要的事件搜索，每一轮Thinking之前都先搜索验证
-              - 可以用 @crawl_webpage 来查看搜索到的网页详情
-              - 思考轮数不低于5轮，且需要有发散脑暴意识，需要有思考分支
-              - 每一轮需要根据查询的信息结果，反思自己的决策是否正确
-              - 进行事件关联分析与结论形成 网络月度事件报告
-              - 使用 @writeFile保存为html文件，并使用 @viewFileUrl返回预览地址
-              
-              > {param}为事件主题
+            description: 围绕 {topic} 按月梳理当年的重要事件，做跨月因果关联与下一年趋势预判，产出 HTML 报告并返回预览链接（{topic} 来自用户当前对话）
+            content: classpath:skills/news-watch.st
           - name: http测试
             description: 自定义http服务测试
             content: classpath:skills/http.st
@@ -162,8 +167,8 @@ spring:
             description: 测试保存、下载、预览2
             content: 你能说明微积分么？并保存成html，并给我下载和和预览地址
             load: false
-          - name: 测试自动编译
-            description: 测试自动编译，使用git拉取代码，maven编译，构建docker镜像并创建容器运行
+          - name: 部署项目
+            description: 从 Git 仓库拉取代码 → 本地编译打包 → 构建 Docker 镜像 → 启动容器 → 返回访问链接（支持 maven / npm / npm-frontend / pip 多栈）
             content: classpath:skills/package-docker.st
           - name: 测试自动E2E功能验证
             description: 测试使用浏览器对功能进行E2E测试，并生成验证报告
@@ -183,4 +188,3 @@ logging:
     org:
       springframework:
         ai: DEBUG
-server:

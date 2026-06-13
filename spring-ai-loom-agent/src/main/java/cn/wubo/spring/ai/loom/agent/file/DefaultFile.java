@@ -51,15 +51,6 @@ public class DefaultFile implements IFile {
     }
 
     @Override
-    public List<FileRecord> listForManager(String username) {
-        return jdbcTemplate.query(
-                "SELECT * FROM file_info WHERE usage != 'knowledge' AND username = ?",
-                this::mapFileRecord,
-                username
-        );
-    }
-
-    @Override
     public int insert(FileRecord fileInfo, String username) {
         return jdbcTemplate.update(
                 "INSERT INTO file_info (id, username, knowledge_id, file_name, size, upload_time, path, usage, mime_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -108,17 +99,6 @@ public class DefaultFile implements IFile {
                 path, username
         );
         return records.isEmpty() ? null : records.get(0);
-    }
-
-    @Override
-    public List<FileRecord> search(String keyword, String username) {
-        return jdbcTemplate.query(
-                "SELECT * FROM file_info WHERE (file_name LIKE ? OR path LIKE ?) AND username = ? AND knowledge_id IS NULL",
-                this::mapFileRecord,
-                "%" + keyword + "%",
-                "%" + keyword + "%",
-                username
-        );
     }
 
     @Override
