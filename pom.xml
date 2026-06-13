@@ -149,6 +149,17 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
                 <version>3.6.0</version>
+                <configuration>
+                    <!--
+                        Disable doclint "missing" category (no comment / no @param / no @return / no @throws).
+                        Rationale: Spring AI tool documentation is carried by @Tool(description = "...") on the
+                        implementation methods (DefaultXxxTool), not by Java Javadoc on the interface. The
+                        Javadoc tool's "missing" warnings are noise here and add ~100 warnings per build.
+                        Other doclint categories (reference / html / syntax) remain enabled — those catch
+                        real errors like {@link X#y} failing to resolve.
+                    -->
+                    <additionalJOption>-Xdoclint:-missing</additionalJOption>
+                </configuration>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>

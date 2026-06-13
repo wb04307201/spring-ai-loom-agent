@@ -11,7 +11,7 @@ import java.util.List;
  * 构建策略：定义一种栈（Java / Node / Python）的"找项目 → 编译 → 找产物 → 写 Dockerfile"全流程。
  * <p>
  * 每个实现是一个 record（无状态），由 {@link BuildStrategyFactory} 选中后由
- * {@link DefaultCompileAndDeployTool} 调用。
+ * {@link cn.wubo.spring.ai.loom.agent.tool.compile.DefaultCompileAndDeployTool} 调用。
  */
 public sealed interface BuildStrategy
         permits MavenBuildStrategy, NpmBackendBuildStrategy, NpmFrontendBuildStrategy, PythonBuildStrategy {
