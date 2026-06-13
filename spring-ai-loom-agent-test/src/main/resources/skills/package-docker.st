@@ -33,15 +33,15 @@
 2. 把上述参数传给 @compileAndDeploy 工具，不要在工具外做任何额外的 shell / mvn / docker 操作：
    {
      "gitUrl": "用户提供的 URL",
-     "gitUsername": "用户名（可省略）",
-     "gitPassword": "密码（可省略）",
+     "gitUsername": "<可选，私有仓库填>",
+     "gitPassword": "<可选，私有仓库填>",
      "port": <port>,
      "containerPort": <containerPort>,
      "subDir": "<可选>",
      "buildTool": "<可选>",
      "baseImage": "<可选>",
      "runCommand": [<可选>],
-     "healthPath": "/"
+     "healthPath": "<可选，默认 '/'; 有 context-path 时填实际路径如 sql-forge-demo>"
    }
 
 3. 工具返回结果后：

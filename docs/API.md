@@ -963,7 +963,7 @@ Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port
 - `branch` — branch to clone (defaults to remote HEAD)
 - `port` — host port the container will publish (the port the caller accesses via `http://localhost:{port}/{healthPath}`)
 - `containerPort` — Container port the application listens on inside the container (required, no yml fallback; reference `server.port` in application.yml)
-- `subDir` — Subdirectory of a multi-module repo to deploy (optional; without it, multi-module resolution may pick the wrong module)
+- `subDir` — Subdirectory of a multi-module repo to deploy (**required** when root has no `pom.xml` — tool returns `fail` otherwise)
 - `buildTool` — Build tool / project type: `maven` / `npm` / `npm-frontend` / `pip` (optional; auto-detected from `pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`)
 - `imageName` / `containerName` — Docker image and container names (defaults derived from timestamp)
 - `healthPath` — both the health-check path and the access URL path (e.g. `healthPath=sql-forge-demo` → `http://localhost:8080/sql-forge-demo`)

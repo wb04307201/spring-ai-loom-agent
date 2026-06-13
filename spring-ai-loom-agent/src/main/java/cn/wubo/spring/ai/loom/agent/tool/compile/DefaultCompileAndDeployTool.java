@@ -224,7 +224,11 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
 
             // Step 4: write Dockerfile (委托给 strategy) —— 必须写到 effectiveDir，否则 COPY 路径对不上
             // EXPOSE 端口用 effectiveContainerPort（容器内应用端口），与 effectivePort（宿主机对外端口）解耦
-            File dockerfile = strategy.writeDockerfile(effectiveDir, resolvedImage, effectiveContainerPort, artifact.toString());
+            // ⚠️ artifact 来自 Path.relativize()，Windows 下用 \。但 Dockerfile 是 Linux 上下文，
+            //    Docker 会把 \ 当转义字符（target\foo.jar → targetfoo.jar），必须归一化为 /。
+            //    只在这一处归一化 —— line 223 的 steps 日志保留平台原生分隔符方便用户对照。
+            String artifactForDocker = artifact.toString().replace(File.separatorChar, '/');
+            File dockerfile = strategy.writeDockerfile(effectiveDir, resolvedImage, effectiveContainerPort, artifactForDocker);
             steps.add("✅ Dockerfile：" + dockerfile.getName());
 
             // Step 5: docker build —— 必须在 effectiveDir 下执行，构建上下文才能找到 target/
