@@ -620,18 +620,9 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
-        @ConditionalOnBean(IUpload.class)
         @Bean("loomAgentFileRouter")
-        public RouterFunction<ServerResponse> loomAgentFileRouter(IUpload upload, IFile file, LoomAgentProperties properties) {
+        public RouterFunction<ServerResponse> loomAgentFileRouter(IFile file, LoomAgentProperties properties) {
             RouterFunctions.Builder builder = RouterFunctions.route();
-            builder.POST("/spring/ai/loom/file/upload", request -> {
-                Part part = request.multipartData().getFirst("file");
-                if (part == null) {
-                    throw new IllegalArgumentException("上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件");
-                }
-                String fileId = upload.upload(part.getInputStream(), part.getSubmittedFileName(), part.getContentType());
-                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(java.util.Map.of("fileId", fileId, "status", "success"));
-            });
             // 返回目录树（前端文件管理器用）
             builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok()
                     .contentType(MediaType.APPLICATION_JSON)
@@ -665,21 +656,46 @@ public class LoomAgentConfiguration {
                 }
                 return ServerResponse.temporaryRedirect(URI.create("/wopi/files/" + fileId + "/contents")).build();
             });
-            // 按 fileId 下载（WOPI 兼容端点，仍保留）
+            // 按 fileId 下载：直接读磁盘，不依赖 IUpload（@Tool downloadFileUrl 用此端点）
             builder.GET("/spring/ai/loom/file/{id}/download", request -> {
                 String id = request.pathVariable("id");
                 FileRecord fileRecord = file.getById(id, UserContextHolder.getCurrentUser());
+                // 选 Content-Type：优先 FileRecord.mimeType（写入时 Tika 探测过），没有再按扩展名猜，最后兜底 octet-stream
+                MediaType contentType = resolveContentType(fileRecord);
+                // 拼 Content-Disposition：中文文件名按 RFC 5987 用 filename*=UTF-8''<urlencoded>，
+                // 同时给一个 ASCII 兜底（去掉非 ASCII 字符 + 保留扩展名），老浏览器/curl 也能用
                 return ServerResponse.ok()
-                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .contentType(contentType)
                         .contentLength(fileRecord.size())
-                        .header("Content-Disposition", "attachment; filename=\"" + fileRecord.fileName() + "\"")
+                        .header("Content-Disposition", buildContentDisposition(fileRecord.fileName()))
                         .build((res, req) -> {
                             try (OutputStream os = req.getOutputStream()) {
-                                os.write(upload.getContentByLocation(fileRecord.path()));
+                                os.write(Files.readAllBytes(Path.of(fileRecord.path())));
                                 os.flush();
                             }
                             return new ModelAndView();
                         });
+            });
+            return builder.build();
+        }
+
+        /**
+         * 上传路由：依赖 IUpload（默认实现需要 VectorStore + IDocumentRead + IKnowledge）。
+         * 与 {@link #loomAgentFileRouter(IFile, LoomAgentProperties)} 拆开，是因为下载/列表类路由
+         * 只需要 IFile，不应该被 VectorStore 等知识库组件的可用性拖累——没有 RAG 的纯聊天场景
+         * 也能正常下载/列出文件。
+         */
+        @ConditionalOnBean(IUpload.class)
+        @Bean("loomAgentUploadRouter")
+        public RouterFunction<ServerResponse> loomAgentUploadRouter(IUpload upload) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.POST("/spring/ai/loom/file/upload", request -> {
+                Part part = request.multipartData().getFirst("file");
+                if (part == null) {
+                    throw new IllegalArgumentException("上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件");
+                }
+                String fileId = upload.upload(part.getInputStream(), part.getSubmittedFileName(), part.getContentType());
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(java.util.Map.of("fileId", fileId, "status", "success"));
             });
             return builder.build();
         }
@@ -830,5 +846,58 @@ public class LoomAgentConfiguration {
             cookie.setAttribute("SameSite", cookieProp.getSameSite());
             return cookie;
         }
+    }
+
+    /**
+     * 选下载响应的 Content-Type：
+     * - 优先用 FileRecord.mimeType（writeFile 时 Tika 探测过，比较准）
+     * - 缺失时按扩展名兜底（覆盖 .md / .txt / .json 等常见类型，markdown 给 text/markdown 让浏览器内联渲染）
+     * - 都没有就 octet-stream
+     */
+    private static MediaType resolveContentType(FileRecord fileRecord) {
+        if (fileRecord.mimeType() != null && !fileRecord.mimeType().isBlank()) {
+            return MediaType.parseMediaType(fileRecord.mimeType());
+        }
+        String name = fileRecord.fileName() == null ? "" : fileRecord.fileName().toLowerCase();
+        if (name.endsWith(".md") || name.endsWith(".markdown")) return MediaType.parseMediaType("text/markdown;charset=UTF-8");
+        if (name.endsWith(".txt")) return MediaType.parseMediaType("text/plain;charset=UTF-8");
+        if (name.endsWith(".json")) return MediaType.parseMediaType("application/json;charset=UTF-8");
+        if (name.endsWith(".html") || name.endsWith(".htm")) return MediaType.parseMediaType("text/html;charset=UTF-8");
+        if (name.endsWith(".csv")) return MediaType.parseMediaType("text/csv;charset=UTF-8");
+        if (name.endsWith(".pdf")) return MediaType.APPLICATION_PDF;
+        if (name.endsWith(".png")) return MediaType.IMAGE_PNG;
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
+        if (name.endsWith(".gif")) return MediaType.IMAGE_GIF;
+        if (name.endsWith(".svg")) return MediaType.parseMediaType("image/svg+xml");
+        return MediaType.APPLICATION_OCTET_STREAM;
+    }
+
+    /**
+     * 拼 Content-Disposition 头，处理中文文件名。
+     * 输出形式：
+     * <ul>
+     *   <li>全 ASCII：{@code attachment; filename="report.md"}</li>
+     *   <li>含非 ASCII：{@code attachment; filename="report.md"; filename*=UTF-8''%E5%95%86%E5%93%81...md}
+     *       ——RFC 5987 双键，filename 是把非 ASCII 字符替换成 _ 后的 ASCII 兜底</li>
+     * </ul>
+     * 不做这层编码时，浏览器只能拿到原始 UTF-8 字节序列，文件名会乱码或变成 UUID。
+     */
+    private static String buildContentDisposition(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            return "attachment";
+        }
+        // 1. ASCII 兜底：把非 ASCII / 不可打印字符替换成 _
+        String asciiFallback = fileName.replaceAll("[^\\x20-\\x7E]", "_").replaceAll("\"", "_");
+        if (asciiFallback.isEmpty()) {
+            asciiFallback = "download";
+        }
+        // 2. 全 ASCII 时单键即可
+        if (fileName.chars().allMatch(c -> c >= 0x20 && c <= 0x7E)) {
+            return "attachment; filename=\"" + asciiFallback + "\"";
+        }
+        // 3. 含中文等非 ASCII 时双键：ASCII 兜底 + RFC 5987 urlencoded
+        String encoded = java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''" + encoded;
     }
 }
