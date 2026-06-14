@@ -660,7 +660,7 @@ public class DefaultFileTool implements IFileTool {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "错误：上下文缺少 baseUrl，无法生成下载链接";
         }
-        String url = baseUrl + "/wopi/files/" + fileId + "/contents";
+        String url = baseUrl + "/spring/ai/loom/file/" + fileId + "/download";
         String fileName = filePath.getFileName().toString();
         return "文件名:" + fileName + "\n" +
                 "下载链接:" + url + "\n" +
