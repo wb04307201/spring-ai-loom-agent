@@ -62,6 +62,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -96,6 +97,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @AutoConfiguration
+@AutoConfigureBefore(cn.wubo.file.view.autoconfigure.FileViewConfiguration.class)
 @AutoConfigureAfter(name = {
         // ChatModel
         "org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration",
