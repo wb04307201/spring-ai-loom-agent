@@ -10,6 +10,8 @@ import cn.wubo.spring.ai.loom.agent.file.DefaultFile;
 import cn.wubo.spring.ai.loom.agent.file.DefaultUpload;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.file.IUpload;
+import cn.wubo.spring.ai.loom.agent.file.view.LoomAgentFileStorageImpl;
+import cn.wubo.file.view.storage.IFileStorage;
 import cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledge;
 import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.ASyncMcp;
@@ -465,6 +467,18 @@ public class LoomAgentConfiguration {
         @Bean
         public IFile defaultFile(JdbcTemplate jdbcTemplate) {
             return new DefaultFile(jdbcTemplate);
+        }
+
+        /**
+         * 显式注册 file-view 的 IFileStorage 桥接实现，避免 file-view 默认的内存版
+         * {@code LocalFileStorageImpl} 覆盖本实现（{@code @Service} 在跨包扫描时不会生效）。
+         * 没有这一项，{@code /file/view/{id}} 与 {@code /wopi/files/{id}/contents}
+         * 永远查不到 {@code file_info} 表中的记录。
+         */
+        @ConditionalOnMissingBean(IFileStorage.class)
+        @Bean
+        public IFileStorage loomAgentFileStorage(JdbcTemplate jdbcTemplate) {
+            return new LoomAgentFileStorageImpl(jdbcTemplate);
         }
 
         @ConditionalOnMissingBean(IFileDocument.class)
