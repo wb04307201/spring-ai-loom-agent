@@ -75,6 +75,31 @@
             <groupId>org.apache.maven.shared</groupId>
             <artifactId>maven-invoker</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-file-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-process-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-git-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-maven-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-compile-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
     </dependencies>
 
 </project>

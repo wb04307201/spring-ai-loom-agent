@@ -4,7 +4,7 @@
   <a href="README.zh-CN.md">中文</a> | English
 </div>
 
-> A Spring Boot auto-configuration library that injects RAG knowledge base, MCP tool calling, and Skill library into Spring AI applications with an out-of-the-box chat UI.
+> Spring Boot AI Agent — an out-of-the-box solution that makes your app **converse**, **remember**, **think**, and **act**.
 
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.wb04307201/spring-ai-loom-agent-spring-boot-starter?style=flat-square)
 [![star](https://gitee.com/wb04307201/spring-ai-loom-agent/badge/star.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-loom-agent)
@@ -12,6 +12,11 @@
 [![star](https://img.shields.io/github/stars/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent)
 [![fork](https://img.shields.io/github/forks/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent)  
 ![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-17+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-3+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-1+-green.svg)
+
+<p style="display: flex">
+  <img src="docs/project-overview-en.png" alt="Spring AI LoomAgent Overview" width="800" />
+  <img src="docs/loom-agent-ui-test.png" alt="Spring AI LoomAgent UI" style="width: 50%" />
+</p>
 
 ---
 
@@ -26,36 +31,31 @@
 - **Built-in Tools** — Time, file, skill, git, maven, and the end-to-end deploy tool. Time/file/skill/compile are enabled by default; git/maven are opt-in. See [TOOLS.md](docs/TOOLS.md) for all `@Tool` method signatures, defaults, and configuration.
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
 
-**Base image templates** (optional): Built-in `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` templates, override or add new ones via yml. Pass the template alias to the tool's `baseImage` parameter to select it; pass a full image name (e.g. `openjdk:17-slim`) to use it directly, with `command` falling back to java17.
+## Built-in Tools
 
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        compile:
-          image-templates:
-            java17:
-              image: eclipse-temurin:17-jre-alpine
-              command: [java, -jar, app.jar]
-            nginx:
-              image: nginx:1.27-alpine
-              command: [nginx, -g, "daemon off;"]
-```
+All tools follow the **interface + default implementation** pattern. Every component is registered with `@ConditionalOnMissingBean`, allowing consumers to replace any piece with a custom implementation.
 
-Example tool parameters:
+| Tool | Interface | Methods | Default | Config Property |
+|------|-----------|---------|---------|-----------------|
+| Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
+| File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
+| Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
+| Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
+| Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
+| Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |
 
-```json
-{
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "port": 8081,
-  "containerPort": 8080,
-  "subDir": "sql-forge-web",
-  "buildTool": "maven",
-  "baseImage": "java17",
-  "healthPath": "sql-forge-demo"
-}
-```
+For full `@Tool` method signatures, parameter details, and configuration reference, see [TOOLS.md](docs/TOOLS.md).
+
+### Standalone MCP Servers
+
+File, Git, Maven, and Compile each have a **standalone MCP server module** — the core layer has no Spring dependency and can be deployed via jbang to any MCP-compatible agent (Claude Desktop, Cursor, etc.):
+
+| MCP Server | Description | README |
+|------------|-------------|--------|
+| `loom-file-mcp` | File system operations — read, write, edit, search, directory browsing, delete (14 tools) | [EN](loom-file-mcp/README.md) · [中文](loom-file-mcp/README.zh-CN.md) |
+| `loom-git-mcp` | Git operations via JGit — clone, commit, push, merge, rebase, and more (14 tools) | [EN](loom-git-mcp/README.md) · [中文](loom-git-mcp/README.zh-CN.md) |
+| `loom-maven-mcp` | Maven build operations — execute, build, package, test, dependency tree, validate (6 tools) | [EN](loom-maven-mcp/README.md) · [中文](loom-maven-mcp/README.zh-CN.md) |
+| `loom-compile-mcp` | End-to-end deploy pipeline — git clone → build → docker build → docker run → health check (1 tool) | [EN](loom-compile-mcp/README.md) · [中文](loom-compile-mcp/README.zh-CN.md) |
 
 ## Quick Start: Add a Chat Interface
 
@@ -64,7 +64,7 @@ Example tool parameters:
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.28</version>
+  <version>1.1.29</version>
 </dependency>
 ```
 
@@ -269,5 +269,6 @@ You can precisely invoke skills through the Skill Library button in the UI. Skil
 ---
 
 - For built-in tool reference (time / skill / file / git / maven / compile), see: [TOOLS.md](docs/TOOLS.md)
+- For standalone MCP server usage (file / git / maven / compile), see the [Built-in Tools → Standalone MCP Servers](#standalone-mcp-servers) section above
 - For more configuration and extension points, see: [Spring AI LoomAgent Customization Guide](docs/CUSTOMIZATION.md)
 - For custom UI integration and API reference, see: [Spring AI LoomAgent API Documentation](docs/API.md)

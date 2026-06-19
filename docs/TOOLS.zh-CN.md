@@ -32,7 +32,7 @@
 | `time.enabled`     | boolean | `true`  | 时间工具（`ITimeTool` — 当前时间、时区转换）                            |
 | `file.enabled`     | boolean | `true`  | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除）                     |
 | `skill.enabled`    | boolean | `true`  | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
-| `git.enabled`      | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
+| `git.enabled`      | boolean | `false` | Git 工具（`IGitTool` — 31 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
 | `maven.enabled`    | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** — 编译/打包走 `ICompileAndDeployTool`。 |
 | `compile.enabled`  | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
 
@@ -62,7 +62,7 @@ spring:
 | `ITimeTool`              | `DefaultTimeTool`                 | 2    | 启用        | 未设 `time.enabled` 时始终开启                     |
 | `ISkillTool`             | `DefaultSkillTool`                | 2    | 启用        | 与 `skills[]` 配置搭配使用                        |
 | `IFileTool`              | `DefaultFileTool`                 | 16   | 启用        | 基于路径；根目录 = `{fileBasePath}/{username}/` |
-| `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 28   | **禁用**    | 通过 `git.enabled=true` 开启                     |
+| `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 31   | **禁用**    | 通过 `git.enabled=true` 开启                     |
 | `IMavenTool`             | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用**    | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
 | `ICompileAndDeployTool`  | `DefaultCompileAndDeployTool`     | 1    | 启用        | 端到端 `git clone → build → docker run → health check` |
 
@@ -135,7 +135,7 @@ spring:
 | **状态**   | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **默认禁用** |
 | **工作目录** | 通过 `gitSetWorkingDir` 设置（绝对路径或相对于 `{fileBasePath}/{username}/` 的相对路径）；`gitInit` / `gitClone` 也接受绝对路径或用户文件目录下的相对路径 |
 
-**方法（28 个）**：
+**方法（31 个）**：
 
 - **仓库生命周期**：`gitInit`、`gitClone`
 - **基础操作**：`gitStatus`、`gitAdd`、`gitCommit`、`gitDiff`、`gitLog`

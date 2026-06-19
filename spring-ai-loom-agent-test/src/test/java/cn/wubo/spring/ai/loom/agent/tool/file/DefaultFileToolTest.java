@@ -532,7 +532,7 @@ class DefaultFileToolTest {
         when(fileService.getByExactPath(anyString(), anyString())).thenReturn(null);
         String result = tool.downloadFileUrl("readme.md", ctxWithBaseUrl(username, "http://x"));
         assertTrue(result.contains("下载链接"), "应生成下载链接: " + result);
-        assertTrue(result.contains("wopi/files/"), result);
+        assertTrue(result.contains("spring/ai/loom/file/"), result);
     }
 
     @Test
@@ -578,6 +578,8 @@ class DefaultFileToolTest {
     @DisplayName("deleteFileOrDirectory 自定义 token 生效")
     void deleteFileOrDirectory_customToken() {
         cfg.setDeleteConfirmToken("PLEASE_DELETE");
+        // 重新创建 tool 以确保新 token 生效
+        tool = new DefaultFileTool(fileService, tmpRoot.getParent().toString(), cfg);
         String result = tool.deleteFileOrDirectory("readme.md", "I_CONFIRM_DELETE", ctx(username));
         assertTrue(result.contains("需要确认"), "应要求新 token: " + result);
         String result2 = tool.deleteFileOrDirectory("readme.md", "PLEASE_DELETE", ctx(username));

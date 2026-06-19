@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8089` (default port for the test environment)
-> **Version**: 1.0.0
+> **Version**: 1.1.29
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -605,7 +605,7 @@ GET /spring/ai/chat/loom/mcp
   {
     "name": "weather-mcp",
     "title": "Weather",
-    "version": "1.0.0",
+    "version": "1.1.29",
     "description": "Provides real-time weather query service",
     "defaultSelected": true,
     "tools": [
@@ -866,18 +866,18 @@ Force-terminate a system process by PID.
 
 ---
 
-## 9. Configuration Properties
+## 10. Configuration Properties
 
 All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
-### 9.1 Basic Configuration
+### 10.1 Basic Configuration
 
 | Property                                  | Type    | Default                 | Description                        |
 |-------------------------------------------|---------|-------------------------|------------------------------------|
 | `spring.ai.loom.agent.defaultSystem`      | string  | Skill discovery prompt  | Default system prompt              |
 | `spring.ai.loom.agent.init`               | boolean | `true`                  | Whether to initialize the ChatClient |
 
-### 9.2 RAG Configuration
+### 10.2 RAG Configuration
 
 | Property                                                  | Type    | Default | Description                                    |
 |-----------------------------------------------------------|---------|---------|------------------------------------------------|
@@ -888,7 +888,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.rag.enabledKeyword`                 | boolean | `false` | Whether to enable keyword retrieval            |
 | `spring.ai.loom.agent.rag.enabledSummary`                 | boolean | `false` | Whether to enable summary generation           |
 
-### 9.3 MCP Configuration
+### 10.3 MCP Configuration
 
 `spring.ai.loom.agent.mcps` is an array. Each entry contains:
 
@@ -901,11 +901,11 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `tools[].name`          | string  | Tool name                            |
 | `tools[].description`   | string  | Tool description                     |
 
-### 9.4 Skill Configuration
+### 10.4 Skill Configuration
 
 `spring.ai.loom.agent.skills` is an array. Each entry contains the fields defined in [SkillProperty](#62-createupdate-skill).
 
-### 9.5 JVector Configuration
+### 10.5 JVector Configuration
 
 | Property                                        | Type   | Default                | Description                  |
 |-------------------------------------------------|--------|------------------------|------------------------------|
@@ -914,7 +914,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.jvector.efConstruction`    | int    | `100`                  | ef parameter at build time   |
 | `spring.ai.loom.agent.jvector.efSearch`          | int    | `10`                   | ef parameter at search time  |
 
-### 9.6 Authentication Configuration
+### 10.6 Authentication Configuration
 
 | Property                              | Type    | Default                | Description                                          |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
@@ -924,7 +924,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.auth.cookie.name` | string  | `loom-agent-session`   | Session cookie name                                  |
 | `spring.ai.loom.agent.auth.cookie.maxAge` | int    | `86400`                | Cookie max age in seconds (24 hours)                 |
 
-### 9.7 File Storage Configuration
+### 10.7 File Storage Configuration
 
 | Property                              | Type    | Default                | Description                                          |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
@@ -933,7 +933,7 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
 
-### 9.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
+### 10.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
 
 `ICompileAndDeployTool` performs the full deployment pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. Supports Maven, Node.js (backend and static-frontend → nginx), and Python projects. All settings live under `spring.ai.loom.agent.compile.*`.
 
@@ -1000,6 +1000,29 @@ Example tool invocation:
 }
 ```
 
+### 10.9 Git Configuration (`IGitTool`)
+
+`IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. **Disabled by default** — opt in with `git.enabled=true`.
+
+| Property                              | Type    | Default                | Description                                          |
+|---------------------------------------|---------|------------------------|------------------------------------------------------|
+| `spring.ai.loom.agent.git.enabled`    | boolean | `false`                | Whether to register the Git tool (default false; set to true to enable) |
+| `spring.ai.loom.agent.git.username`   | string  | —                      | Git username for remote authentication               |
+| `spring.ai.loom.agent.git.token`      | string  | —                      | Git token / password for remote authentication       |
+
+Example:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        git:
+          enabled: true   # default false; set to true to enable
+          username: your-username
+          token: your-token
+```
+
 ---
 
 ## Appendix: Endpoint Summary
@@ -1022,3 +1045,11 @@ Example tool invocation:
 | 10 | `GET`    | `/spring/ai/loom/knowledge`                             | List knowledge bases                 |
 | 11 | `PUT`    | `/spring/ai/loom/knowledge`                             | Create knowledge base                |
 | 12 | `DELETE` | `/spring/ai/loom/knowledge/{id}`                        | Delete knowledge base (cascade)      |
+| 13 | `POST`   | `/spring/ai/loom/knowledge/{id}/upload`                 | Upload file to knowledge base        |
+| 14 | `GET`    | `/spring/ai/loom/knowledge/{id}/file`                   | List files in knowledge base         |
+| 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}`         | Delete file from knowledge base      |
+| 16 | `GET`    | `/spring/ai/chat/loom/mcp`                              | Get MCP servers and tools            |
+| 17 | `GET`    | `/spring/ai/loom/skill`                                 | List all skills                      |
+| 18 | `PUT`    | `/spring/ai/loom/skill`                                 | Create or update a skill             |
+| 19 | `GET`    | `/spring/ai/loom/skill/{name}`                          | Get skill details                    |
+| 20 | `DELETE` | `/spring/ai/loom/skill/{name}`                          | Delete a skill                       |

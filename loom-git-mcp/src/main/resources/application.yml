@@ -1,0 +1,15 @@
+loom:
+  git:
+    mcp:
+      basePath: .local/file
+      gitUsername: ""
+      gitToken: ""
+      remoteTimeoutSeconds: 60
+
+spring:
+  ai:
+    mcp:
+      server:
+        name: loom-git-mcp
+        version: 1.1.29
+        type: SYNC

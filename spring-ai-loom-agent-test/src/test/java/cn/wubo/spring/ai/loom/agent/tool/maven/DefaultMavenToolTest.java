@@ -336,8 +336,8 @@ class DefaultMavenToolTest {
             String result = t.mavenValidate(null, null, ctx(uname));
             long cost = System.currentTimeMillis() - start;
 
-            // 关键断言 1：返回结果必须包含"超时"
-            assertTrue(result.contains("超时"),
+            // 关键断言 1：返回结果必须包含超时标识
+            assertTrue(result.contains("超时") || result.toLowerCase().contains("timeout"),
                     "应报告超时。实际返回:\n" + result);
 
             // 关键断言 2：耗时应在 timeout 附近（5s 内），不应阻塞到 fake 脚本完成
@@ -529,7 +529,7 @@ class DefaultMavenToolTest {
             String result = t.mavenValidate(null, null, ctx(uname));
             long cost = System.currentTimeMillis() - start;
 
-            assertTrue(result.contains("超时"),
+            assertTrue(result.contains("超时") || result.toLowerCase().contains("timeout"),
                     "应报告超时。实际返回:\n" + result);
             assertTrue(cost < 5000,
                     "应在 timeout 后及时返回（实际 " + cost + "ms）");

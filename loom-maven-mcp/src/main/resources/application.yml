@@ -1,0 +1,14 @@
+loom:
+  maven:
+    mcp:
+      basePath: .local/file
+      maxOutputLines: 200
+      defaultTimeoutMs: 300000
+
+spring:
+  ai:
+    mcp:
+      server:
+        name: loom-maven-mcp
+        version: 1.1.29
+        type: SYNC
