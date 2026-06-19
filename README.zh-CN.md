@@ -25,6 +25,32 @@
 - **内置工具** — 时间、文件、技能、Git、Maven 及端到端部署工具。时间/文件/技能/部署默认启用，Git/Maven 需 opt-in 开启。详细方法签名、默认值、配置见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
 
+## 内置工具
+
+所有工具遵循 **接口 + 默认实现** 模式。每个组件均通过 `@ConditionalOnMissingBean` 注册，用户可提供自定义实现替换任意组件。
+
+| 工具 | 接口 | 方法数 | 默认状态 | 配置属性 |
+|------|------|--------|----------|----------|
+| 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
+| 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
+| 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
+| Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
+| Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
+| 编译部署 | `ICompileAndDeployTool` | 1 | ✅ 启用 | `compile.enabled` |
+
+完整的 `@Tool` 方法签名、参数说明和配置参考见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
+
+### 独立 MCP 服务
+
+文件、Git、Maven、编译部署各有**独立 MCP 服务模块** — core 层无 Spring 依赖，可通过 jbang 以 stdio 模式运行，供 Claude Desktop、Cursor 等任何 MCP 兼容 agent 使用：
+
+| MCP 服务 | 说明 | README |
+|----------|------|--------|
+| `loom-file-mcp` | 文件系统操作 — 读写、编辑、搜索、目录浏览、删除（14 个工具） | [EN](loom-file-mcp/README.md) · [中文](loom-file-mcp/README.zh-CN.md) |
+| `loom-git-mcp` | 基于 JGit 的 Git 操作 — clone、commit、push、merge、rebase 等（14 个工具） | [EN](loom-git-mcp/README.md) · [中文](loom-git-mcp/README.zh-CN.md) |
+| `loom-maven-mcp` | Maven 构建操作 — 执行、编译、打包、测试、依赖树、校验（6 个工具） | [EN](loom-maven-mcp/README.md) · [中文](loom-maven-mcp/README.zh-CN.md) |
+| `loom-compile-mcp` | 端到端部署流水线 — git clone → 构建 → docker build → docker run → 健康检查（1 个工具） | [EN](loom-compile-mcp/README.md) · [中文](loom-compile-mcp/README.zh-CN.md) |
+
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
 
 ```yaml
@@ -258,6 +284,8 @@ spring:
 
 ---
 
-- 其他配置和扩展点说明:[Spring AI LoomAgent 自定义能力总览](docs/CUSTOMIZATION.zh-CN.md)
-- 自定义UI界面对接API参考:[Spring AI LoomAgent API 文档](docs/API.zh-CN.md)
+- 内置工具详细说明（时间/技能/文件/Git/Maven/编译部署）：[TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
+- 独立 MCP 服务用法（文件/Git/Maven/编译部署）：见上方 [内置工具 → 独立 MCP 服务](#独立-mcp-服务) 章节
+- 其他配置和扩展点说明：[Spring AI LoomAgent 自定义能力总览](docs/CUSTOMIZATION.zh-CN.md)
+- 自定义UI界面对接API参考：[Spring AI LoomAgent API 文档](docs/API.zh-CN.md)
 

@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.tool.compile;
 
+import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;

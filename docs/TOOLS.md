@@ -32,7 +32,7 @@ Every built-in tool group is gated by a `*.enabled` property under `spring.ai.lo
 | `time.enabled`     | boolean | `true`  | Time tools (`ITimeTool` — current time, timezone conversion)       |
 | `file.enabled`     | boolean | `true`  | File tools (`IFileTool` — 16 path-based read/write/edit/delete)   |
 | `skill.enabled`    | boolean | `true`  | Skill tools (`ISkillTool` — list skills, get skill details)       |
-| `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 28 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
+| `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 31 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
 | `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
 | `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → buildTool build [maven/npm/pip] → docker build → docker run → health check). Supports Spring Boot, Node (backend + static-frontend → nginx), and Python projects. |
 
@@ -62,7 +62,7 @@ spring:
 | `ITimeTool`               | `DefaultTimeTool`           | 2       | enabled       | Always on when `time.enabled` is unset        |
 | `ISkillTool`              | `DefaultSkillTool`          | 2       | enabled       | Pairs with the `skills[]` configuration        |
 | `IFileTool`               | `DefaultFileTool`           | 16      | enabled       | Path-based; root = `{fileBasePath}/{username}/` |
-| `IGitTool`                | `DefaultGitTool` (JGit 7.6) | 28      | **disabled**  | Opt-in via `git.enabled=true`                  |
+| `IGitTool`                | `DefaultGitTool` (JGit 7.6) | 31      | **disabled**  | Opt-in via `git.enabled=true`                  |
 | `IMavenTool`              | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **disabled**  | Opt-in via `maven.enabled=true`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool`   | `DefaultCompileAndDeployTool` | 1     | enabled       | End-to-end `git clone → build → docker run → health check` |
 
@@ -135,7 +135,7 @@ spring:
 | **State**       | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **disabled by default** |
 | **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{fileBasePath}/{username}/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
 
-**Methods (28)**:
+**Methods (31)**:
 
 - **Repository lifecycle**: `gitInit`, `gitClone`
 - **Basic operations**: `gitStatus`, `gitAdd`, `gitCommit`, `gitDiff`, `gitLog`

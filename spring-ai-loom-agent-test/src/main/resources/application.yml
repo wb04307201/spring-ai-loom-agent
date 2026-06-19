@@ -188,3 +188,6 @@ logging:
     org:
       springframework:
         ai: DEBUG
+
+server:
+  port: 8088

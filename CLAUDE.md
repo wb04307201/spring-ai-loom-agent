@@ -107,6 +107,7 @@ All under `spring.ai.loom.agent`:
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
 - `skills` — list of skill templates (name, description, load, content path)
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `cookie` (name, path, domain, secure, sameSite, maxAge)
+- `init` — **Note**: The actual runtime gate for `ChatClient` creation is `spring.ai.chat.ui.init` (not `spring.ai.loom.agent.init`). Set `spring.ai.chat.ui.init=false` to prevent ChatClient auto-creation. Default: `true`
 - `user` — default username, nickname, authentication token (legacy)
 - `time` / `file` / `skill` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group
 - `git` — `enabled` (boolean, default **false** — opt-in), `username` / `token` for remote git authentication. Top-level `gitUsername` / `gitToken` are kept for backward compatibility

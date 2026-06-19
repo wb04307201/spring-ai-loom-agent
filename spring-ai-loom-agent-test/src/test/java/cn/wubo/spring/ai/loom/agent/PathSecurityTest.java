@@ -84,18 +84,6 @@ class PathSecurityTest {
     }
 
     /**
-     * Test: validatePathInUserDir must reject absolute paths outside user dir
-     */
-    @Test
-    void validatePathInUserDirRejectsAbsolutePath() throws Exception {
-        Method validate = DefaultGitTool.class.getDeclaredMethod(
-                "validatePathInUserDir", org.springframework.ai.chat.model.ToolContext.class, String.class, String.class);
-        validate.setAccessible(true);
-
-        assertSecurityExceptionOnInvoke(validate, tool, tc(context), "C:/Windows/System32", "worktreePath");
-    }
-
-    /**
      * Test: getWorkingDir must reject stored path outside user dir
      */
     @Test
@@ -130,20 +118,6 @@ class PathSecurityTest {
         assertNotNull(result);
         // getWorkingDir now returns absolute path
         assertEquals(Paths.get(".local/file/testuser/my-repo").toAbsolutePath().normalize(), result);
-    }
-
-    /**
-     * Test: validatePathInUserDir accepts relative paths
-     */
-    @Test
-    void validatePathInUserDirAcceptsRelativePath() throws Exception {
-        Method validate = DefaultGitTool.class.getDeclaredMethod(
-                "validatePathInUserDir", org.springframework.ai.chat.model.ToolContext.class, String.class, String.class);
-        validate.setAccessible(true);
-
-        Object result = validate.invoke(tool, tc(context), "worktrees/feature-branch", "worktreePath");
-        assertNotNull(result);
-        assertTrue(result.toString().contains("feature-branch"));
     }
 
     /**

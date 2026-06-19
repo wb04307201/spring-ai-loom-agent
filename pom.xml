@@ -34,9 +34,18 @@
     </scm>
 
     <modules>
+        <module>loom-file-core</module>
+        <module>loom-process-core</module>
+        <module>loom-git-core</module>
+        <module>loom-maven-core</module>
+        <module>loom-compile-core</module>
         <module>spring-ai-loom-agent</module>
         <module>spring-ai-loom-agent-spring-boot-autoconfigure</module>
         <module>spring-ai-loom-agent-spring-boot-starter</module>
+        <module>loom-file-mcp</module>
+        <module>loom-git-mcp</module>
+        <module>loom-maven-mcp</module>
+        <module>loom-compile-mcp</module>
         <module>spring-ai-loom-agent-test</module>
     </modules>
 

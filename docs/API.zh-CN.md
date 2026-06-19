@@ -15,10 +15,11 @@
 - [5. 知识库管理](#5-知识库管理)
 - [6. 技能管理](#6-技能管理)
 - [7. MCP 工具](#7-mcp-工具)
-- [8. Maven 构建工具](#8-maven-构建工具)
-  - [8.7 文件工具（@Tool 注解）](#87-文件工具tool-注解)
-- [9. 数据模型](#9-数据模型)
-- [10. 配置属性](#10-配置属性)
+- [8. 终端管理](#8-终端管理)
+- [9. Maven 构建工具](#9-maven-构建工具)
+  - [9.7 文件工具（@Tool 注解）](#97-文件工具tool-注解)
+- [10. 数据模型](#10-数据模型)
+- [11. 配置属性](#11-配置属性)
 
 ---
 
@@ -460,7 +461,7 @@ GET /spring/ai/loom/knowledge/{knowledgeId}/file
 |---|---|---|
 | `knowledgeId` | string | 知识库 ID |
 
-**响应**: `FileRecord[]`（同 [4.2](#42-获取文件列表) 格式）
+**响应**: `FileRecord[]`（同 [4.2](#42-获取文件树) 格式）
 
 ---
 
@@ -615,11 +616,159 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 8. Maven 构建工具
+## 8. 终端管理
+
+通过 `@Tool` 注解暴露的进程管理工具，供 LLM 在对话中启动和管理系统进程。
+
+### 8.1 `startProcess` — 启动进程
+
+```
+@Tool: startProcess
+```
+
+启动一个新的系统进程或 REPL 会话。支持两种模式：**Shell 模式**（一次性命令如 `ls`、`cat`）和 **REPL 模式**（长期交互式会话如 `python`、`node`）。REPL 模式在可用时使用 PTY（伪终端）以实现完整的终端交互。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `command` | `String` | ✅ | 要执行的命令 |
+| `workingDir` | `String` | | 工作目录（默认 `.local/file/{username}/`） |
+| `repl` | `Boolean` | | 是否 REPL 模式（`true`= 长期交互；`false`/省略 = 一次性命令） |
+| `timeout` | `Long` | | 等待超时（毫秒，默认 30000） |
+
+**响应：**
+
+```json
+{
+  "sessionId": "auto-generated-id",
+  "pid": 12345,
+  "status": "RUNNING",
+  "output": "...initial output..."
+}
+```
+
+### 8.2 `interactWithProcess` — 与进程交互
+
+```
+@Tool: interactWithProcess
+```
+
+向运行中的 REPL 会话发送输入并等待响应。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `sessionId` | `String` | ✅ | 会话 ID（`startProcess` 返回） |
+| `input` | `String` | ✅ | 要发送的输入（自动追加换行符） |
+| `timeout` | `Long` | | 等待响应超时（毫秒，默认 10000） |
+
+### 8.3 `readProcessOutput` — 读取进程输出
+
+```
+@Tool: readProcessOutput
+```
+
+读取运行中进程的最新输出。支持三种模式：`new`（自上次读取以来的新内容，默认）、`tail`（最后 N 行）、`absolute`（从字符位置 N 开始）。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `sessionId` | `String` | ✅ | 会话 ID |
+| `mode` | `String` | | 读取模式：`new` / `tail` / `absolute` |
+| `position` | `Integer` | | 绝对字符位置（仅 `mode=absolute` 时） |
+| `lines` | `Integer` | | 行数（仅 `mode=tail` 时，默认 50） |
+
+### 8.4 `forceTerminate` — 强制终止进程
+
+```
+@Tool: forceTerminate
+```
+
+强制终止受管理的终端会话。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `sessionId` | `String` | ✅ | 会话 ID |
+
+### 8.5 `listSessions` — 列出所有会话
+
+```
+@Tool: listSessions
+```
+
+列出当前用户所有活跃的终端会话。
+
+### 8.6 `getProcessInfo` — 获取进程信息
+
+```
+@Tool: getProcessInfo
+```
+
+获取单个会话的详细信息，包括完整输出、进程状态、工作目录、PTY 模式等。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `sessionId` | `String` | ✅ | 会话 ID |
+
+### 8.7 `sendSignal` — 发送信号
+
+```
+@Tool: sendSignal
+```
+
+向终端会话发送控制信号。PTY 模式支持：`interrupt`（Ctrl+C）、`eof`（Ctrl+D）、`quit`（Ctrl+\）。非 PTY 模式仅支持通过 `destroy` 发送 `interrupt`。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `sessionId` | `String` | ✅ | 会话 ID |
+| `signal` | `String` | ✅ | 信号类型：`interrupt` / `eof` / `quit` |
+
+### 8.8 `listProcesses` — 列出系统进程
+
+```
+@Tool: listProcesses
+```
+
+列出所有运行中的操作系统进程（类似 `ps` 或任务管理器）。支持分页。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `maxResults` | `Integer` | | 每页最大结果数（默认 50，最大 200） |
+| `page` | `Integer` | | 页码，从 0 开始（默认 0） |
+
+### 8.9 `killProcess` — 杀死指定进程
+
+```
+@Tool: killProcess
+```
+
+通过 PID 强制终止系统进程。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `pid` | `Long` | ✅ | 进程 ID |
+| `force` | `Boolean` | | 是否使用强制终止（默认 true） |
+
+---
+
+## 9. Maven 构建工具
 
 所有 Maven 工具的操作范围限定在用户文件目录（`{fileBasePath}/{username}/`）内。超出该范围的绝对路径将被拒绝。
 
-### 8.1 通用执行
+### 9.1 通用执行
 
 ```
 @Tool: mavenExecute
@@ -637,7 +786,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 8.2 编译
+### 9.2 编译
 
 ```
 @Tool: mavenBuild
@@ -654,7 +803,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 8.3 打包
+### 9.3 打包
 
 ```
 @Tool: mavenPackage
@@ -671,7 +820,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 8.4 测试
+### 9.4 测试
 
 ```
 @Tool: mavenTest
@@ -688,7 +837,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 8.5 依赖树
+### 9.5 依赖树
 
 ```
 @Tool: mavenDependencyTree
@@ -704,7 +853,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 8.6 验证
+### 9.6 验证
 
 ```
 @Tool: mavenValidate
@@ -719,13 +868,13 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 8.7 文件工具（@Tool 注解）
+## 9.7 文件工具（@Tool 注解）
 
 所有文件工具均限定在用户文件目录（`{fileBasePath}/{username}/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
 
-**资源约束**（详见 [9.7.1](#971-文件工具配置-ifiletool)）：`readTextFile` / `writeFile` / `editFile` 走 `file.maxFileSize`（默认 5 MB）；`readMediaFile` 走 `file.maxMediaSize`（默认 1 MB）；`directoryTree` / `searchFiles` 走 `file.maxWalkDepth` / `file.maxWalkEntries` / `file.excludedDirs`；`searchFiles` 还受 `file.maxSearchResults` 限制。
+**资源约束**（详见 [11.7.1](#1171-文件工具配置ifiletool)）：`readTextFile` / `writeFile` / `editFile` 走 `file.maxFileSize`（默认 5 MB）；`readMediaFile` 走 `file.maxMediaSize`（默认 1 MB）；`directoryTree` / `searchFiles` 走 `file.maxWalkDepth` / `file.maxWalkEntries` / `file.excludedDirs`；`searchFiles` 还受 `file.maxSearchResults` 限制。
 
-### 8.7.1 读取文本
+### 9.7.1 读取文本
 
 ```
 @Tool: readTextFile
@@ -739,7 +888,7 @@ GET /spring/ai/chat/loom/mcp
 | `head`  | integer | 否   | 若提供，仅返回前 N 行            |
 | `tail`  | integer | 否   | 若提供，仅返回后 N 行            |
 
-### 8.7.2 读取媒体文件
+### 9.7.2 读取媒体文件
 
 ```
 @Tool: readMediaFile
@@ -751,7 +900,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是   | 相对于用户文件目录的路径          |
 
-### 8.7.3 批量读取
+### 9.7.3 批量读取
 
 ```
 @Tool: readMultipleFiles
@@ -763,7 +912,7 @@ GET /spring/ai/chat/loom/mcp
 |---------|----------|------|---------------------------------------|
 | `paths` | string[] | 是   | 相对于用户文件目录的路径列表          |
 
-### 8.7.4 写入文件
+### 9.7.4 写入文件
 
 ```
 @Tool: writeFile
@@ -776,7 +925,7 @@ GET /spring/ai/chat/loom/mcp
 | `path`    | string | 是   | 相对于用户文件目录的路径          |
 | `content` | string | 是   | 要写入的文本内容；超过 `file.maxFileSize` 时拒绝写入并返回错误 |
 
-### 8.7.5 编辑文件
+### 9.7.5 编辑文件
 
 ```
 @Tool: editFile
@@ -791,7 +940,7 @@ GET /spring/ai/chat/loom/mcp
 
 **唯一性校验**：`oldText` 在文件中出现 >1 次时**直接拒绝**（避免 LLM 误传导致多处被错误替换），并提示"在文件中出现 N 次，请提供更精确的上下文使其唯一"。空 `oldText` 也被拒绝。
 
-### 8.7.6 创建目录
+### 9.7.6 创建目录
 
 ```
 @Tool: createDirectory
@@ -803,7 +952,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是   | 相对于用户文件目录的路径          |
 
-### 8.7.7 移动文件
+### 9.7.7 移动文件
 
 ```
 @Tool: moveFile
@@ -816,7 +965,7 @@ GET /spring/ai/chat/loom/mcp
 | `source`      | string | 是   | 源路径（相对于用户文件目录）       |
 | `destination` | string | 是   | 目标路径（相对于用户文件目录）     |
 
-### 8.7.8 搜索文件
+### 9.7.8 搜索文件
 
 ```
 @Tool: searchFiles
@@ -828,7 +977,7 @@ GET /spring/ai/chat/loom/mcp
 |-----------|--------|------|---------------------------------|
 | `pattern` | string | 否   | glob 模式，如 `*.txt`           |
 
-### 8.7.9 列出允许目录
+### 9.7.9 列出允许目录
 
 ```
 @Tool: listAllowedDirectories
@@ -836,7 +985,7 @@ GET /spring/ai/chat/loom/mcp
 
 返回当前用户的文件操作目录。其他所有工具的 `path` 参数均相对于此目录。
 
-### 8.7.10 列出目录
+### 9.7.10 列出目录
 
 ```
 @Tool: listDirectory
@@ -849,7 +998,7 @@ GET /spring/ai/chat/loom/mcp
 | `path`  | string  | 是   | 目录路径（空字符串 = 根目录）        |
 | `depth` | integer | 否   | 递归深度（默认 1）                   |
 
-### 8.7.11 列出目录（带大小）
+### 9.7.11 列出目录（带大小）
 
 ```
 @Tool: listDirectoryWithSizes
@@ -861,7 +1010,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|-------------------------------------|
 | `path` | string | 是   | 目录路径（空字符串 = 根目录）        |
 
-### 8.7.12 目录树
+### 9.7.12 目录树
 
 ```
 @Tool: directoryTree
@@ -873,7 +1022,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|-------------------------------------|
 | `path` | string | 是   | 目录路径（空字符串 = 根目录）        |
 
-### 8.7.13 文件信息
+### 9.7.13 文件信息
 
 ```
 @Tool: getFileInfo
@@ -885,7 +1034,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是   | 相对于用户文件目录的路径          |
 
-### 8.7.14 下载链接
+### 9.7.14 下载链接
 
 ```
 @Tool: downloadFileUrl
@@ -897,7 +1046,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是   | 相对于用户文件目录的路径          |
 
-### 8.7.15 预览链接
+### 9.7.15 预览链接
 
 ```
 @Tool: viewFileUrl
@@ -909,7 +1058,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是   | 相对于用户文件目录的路径          |
 
-### 8.7.16 删除文件或目录
+### 9.7.16 删除文件或目录
 
 ```
 @Tool: deleteFileOrDirectory
@@ -933,7 +1082,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 9. 数据模型
+## 10. 数据模型
 
 ### ChatRequestRecord
 
@@ -1044,18 +1193,18 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 9. 配置属性
+## 11. 配置属性
 
 所有配置项在 `application.yml` 中以 `spring.ai.loom.agent` 为前缀。
 
-### 9.1 基础配置
+### 11.1 基础配置
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `spring.ai.loom.agent.defaultSystem` | string | 技能发现提示词 | 默认系统提示词 |
 | `spring.ai.loom.agent.init` | boolean | `true` | 是否初始化 ChatClient |
 
-### 9.2 RAG 配置
+### 11.2 RAG 配置
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -1066,7 +1215,7 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.rag.enabledKeyword` | boolean | `false` | 是否启用关键词检索 |
 | `spring.ai.loom.agent.rag.enabledSummary` | boolean | `false` | 是否启用摘要生成 |
 
-### 9.3 MCP 配置
+### 11.3 MCP 配置
 
 `spring.ai.loom.agent.mcps` 为数组，每项包含：
 
@@ -1079,11 +1228,11 @@ GET /spring/ai/chat/loom/mcp
 | `tools[].name` | string | 工具名称 |
 | `tools[].description` | string | 工具描述 |
 
-### 9.4 技能配置
+### 11.4 技能配置
 
 `spring.ai.loom.agent.skills` 为数组，每项即 [SkillProperty](#62-创建更新技能) 中定义的字段。
 
-### 9.5 JVector 配置
+### 11.5 JVector 配置
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -1092,7 +1241,7 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | 构建时的 ef 参数 |
 | `spring.ai.loom.agent.jvector.efSearch` | int | `10` | 搜索时的 ef 参数 |
 
-### 9.6 鉴权配置
+### 11.6 鉴权配置
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -1101,7 +1250,7 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.auth.cookie.name` | string | `loom-agent-session` | Session Cookie 名称 |
 | `spring.ai.loom.agent.auth.cookie.maxAge` | int | `86400` | Cookie 最大存活时间（秒，24 小时） |
 
-### 9.7 文件存储配置
+### 11.7 文件存储配置
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -1110,7 +1259,7 @@ GET /spring/ai/chat/loom/mcp
 
 > 同目录下同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
-### 9.7.1 文件工具配置（`IFileTool`）
+### 11.7.1 文件工具配置（`IFileTool`）
 
 文件工具（`IFileTool`）走 `spring.ai.loom.agent.file.*`，有一组针对 LLM 工具调用场景的默认安全/资源约束。
 
@@ -1134,7 +1283,7 @@ GET /spring/ai/chat/loom/mcp
 - 原子写：`writeFile` / `editFile` 写 `.tmp` 再 `Files.move(ATOMIC_MOVE)`，避免写到一半断电导致目标文件损坏。跨卷时退化到非原子替换。
 - `editFile` 唯一性校验：`oldText` 在文件中出现 >1 次时拒绝，要求 LLM 提供更精确的上下文。
 
-### 9.8 Maven 构建配置
+### 11.8 Maven 构建配置
 
 | 属性                                              | 类型     | 默认值       | 说明                                                                                                          |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
@@ -1150,7 +1299,7 @@ GET /spring/ai/chat/loom/mcp
 >
 > **排错提示 — Windows 上删除项目目录报"文件被锁定"**：旧版本是因为 `maven-invoker 3.3.0` / `plexus-utils 3.3.0`（a）在异常/取消路径上注册的 JVM shutdown hook 永不释放持有的 `Process` 引用，（b）`Invoker.execute()` 拿不到子进程句柄、无法把取消/超时向下传播给 mvn 子进程。结果是：一次被取消或超时的 Maven 调用会留下 mvn 子进程继续运行，持续对 `target/classes`、`~/.m2/repository/*.jar` 持有 mmap 句柄，在 Windows 上锁住这些文件。**新版本不再用 `Invoker.execute()` 跑进程**——直接用 `ProcessBuilder` fork mvn、用 `Process.waitFor(timeout, unit)` 做干净超时、超时后 `Process.destroyForcibly()` + 显式关闭流。**不再注册任何 JVM shutdown hook，mvn 子进程在超时/取消时一定被杀。** 升级后如果还看到锁，多半是上一次 JVM 留下的孤儿 mvn 进程，用 `tasklist /FI "IMAGENAME eq cmd.exe"` 找到并 `taskkill /F /PID <pid>` 即可。
 
-### 9.9 工具组开关
+### 11.9 工具组开关
 
 所有内置工具组**默认全部启用**（`matchIfMissing=true`）。在 yml 中将下列任一属性设为 `false` 即可关闭对应工具组。
 
@@ -1166,7 +1315,7 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.gitUsername`            | string   | —     | **遗留**顶层别名，等价于 `git.username`                                                            |
 | `spring.ai.loom.agent.gitToken`               | string   | —     | **遗留**顶层别名，等价于 `git.token`                                                               |
 
-**示例 — 关闭 Git 与 Maven**：
+**示例 — 启用 Git 工具**：
 
 ```yaml
 spring:
@@ -1174,14 +1323,12 @@ spring:
     loom:
       agent:
         git:
-          enabled: false
-        maven:
-          enabled: false
+          enabled: true   # 默认 false；设为 true 启用
 ```
 
 > 即便工具组被关闭，你仍可以通过自定义 `@Bean IGitTool` / `@Bean IMavenTool` 重新启用 —— `@ConditionalOnMissingBean` 始终优先采用用户提供的 Bean。
 
-### 9.10 端到端部署配置（`ICompileAndDeployTool`）
+### 11.10 端到端部署配置（`ICompileAndDeployTool`）
 
 `ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → 按 buildTool 打包（maven / npm / pip）→ docker build → docker run → health check` 整条部署流水线。支持 Maven、Node.js（后端 + 静态前端 → nginx）、Python 等多栈项目。所有配置项均在 `spring.ai.loom.agent.compile.*` 下。
 
