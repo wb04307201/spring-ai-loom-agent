@@ -279,7 +279,7 @@ Below are three complete walkthroughs showing how a user describes a deployment 
 **User prompt**:
 
 ```text
-Help me deploy https://gitee.com/wb04307201/sql-forge-demo.git — I want to deploy the sql-forge-demo submodule. It's a private repo: username `wb04307201`, password `••••••••`.
+Help me deploy https://gitee.com/wb04307201/java-brain.git — I want to deploy the oms submodule. It's a private repo: username `wb04307201`, password `••••••••`.
 Use port 8081 for both host and container. Health-check path: `/sql/forge/web`
 ```
 

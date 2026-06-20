@@ -279,8 +279,15 @@ spring:
 **用户提示词**：
 
 ```text
-帮我部署一下 https://gitee.com/wb04307201/sql-forge-demo.git 这个项目，要部署 sql-forge-demo 子模块。私有仓，用户名 wb04307201，密码 ••••••••。
-宿主机和容器内都用 8081 端口，健康检查路径 /sql/forge/web
+帮我部署一下项目
+Git 仓库：https://gitee.com/wb04307201/java-brain.git
+用户名：wb04307201
+密码：••••••••
+子目录 oms 使用 maven 打包
+环境：java17
+宿主机端口：8081
+容器内端口：8081
+健康检查路径：/sql/forge/web
 ```
 
 **LLM 抽取后下发的工具入参**（`buildTool` 由子模块里的 `pom.xml` 自动识别，无需用户显式说明）：

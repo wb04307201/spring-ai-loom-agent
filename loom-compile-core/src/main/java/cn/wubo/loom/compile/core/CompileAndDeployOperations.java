@@ -145,8 +145,21 @@ public class CompileAndDeployOperations {
             }
             steps.add("Build strategy: " + strategy.getClass().getSimpleName());
 
-            String buildLog = buildArtifact(strategy, effectiveDir);
+            String buildLog;
+            try {
+                buildLog = buildArtifact(strategy, effectiveDir);
+            } catch (BuildStageException bse) {
+                // Build command ran but exited non-zero. Surface the tail of the build output
+                // in errorMessage so the LLM can diagnose the failure instead of retrying blindly.
+                String tail = ProcessUtils.tail(bse.buildOutput(), 60);
+                String msg = "Build failed: " + strategy.getClass().getSimpleName()
+                        + (tail.isBlank() ? "" : "\n--- build log (last 60 lines) ---\n" + tail);
+                steps.add("Build failed: " + strategy.getClass().getSimpleName());
+                return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
+                        effectiveContainer, effectivePort, effectiveHealthPath, steps, msg);
+            }
             if (buildLog == null) {
+                // null = build tool not found or timed out (no output to surface)
                 steps.add("Build failed: " + strategy.getClass().getSimpleName());
                 return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
                         effectiveContainer, effectivePort, effectiveHealthPath, steps, "Build failed");
@@ -274,7 +287,7 @@ public class CompileAndDeployOperations {
             if (out.exitCode() != 0) {
                 log.error("npm pipeline failed. exitCode={}, cmd={}, outputTail=\n{}",
                         out.exitCode(), String.join(" ", cmd), ProcessUtils.tail(out.output(), 60));
-                return null;
+                throw new BuildStageException("npm pipeline failed (exitCode=" + out.exitCode() + ", cmd=" + String.join(" ", cmd) + ")", out.output());
             }
         }
         return "npm pipeline ok (" + strategy.buildCommands().size() + " steps)";
@@ -323,7 +336,9 @@ public class CompileAndDeployOperations {
         if (out.exitCode() != 0) {
             log.error("mvn package failed. exitCode={}, outputLen={}, tail=\n{}",
                     out.exitCode(), out.output() == null ? 0 : out.output().length(), ProcessUtils.tail(out.output(), 60));
-            return null;
+            // Throw instead of returning null so the caller can surface the actual Maven output
+            // (compiler errors, dependency resolution failures, etc.) to the LLM.
+            throw new BuildStageException("mvn package failed (exitCode=" + out.exitCode() + ")", out.output());
         }
         return out.output();
     }

@@ -14,7 +14,7 @@
 ![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-17+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-3+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-1+-green.svg)
 
 <p style="display: flex">
-  <img src="docs/project-overview-en.png" alt="Spring AI LoomAgent Overview" width="800" />
+  <img src="docs/project-overview-en.png" alt="Spring AI LoomAgent Overview" style="width: 50%" />
   <img src="docs/loom-agent-ui-test.png" alt="Spring AI LoomAgent UI" style="width: 50%" />
 </p>
 
@@ -46,6 +46,9 @@ All tools follow the **interface + default implementation** pattern. Every compo
 
 For full `@Tool` method signatures, parameter details, and configuration reference, see [TOOLS.md](docs/TOOLS.md).
 
+### Compile & Deploy Tool
+![img_7.png](docs/img_7.png)
+
 ### Standalone MCP Servers
 
 File, Git, Maven, and Compile each have a **standalone MCP server module** — the core layer has no Spring dependency and can be deployed via jbang to any MCP-compatible agent (Claude Desktop, Cursor, etc.):
@@ -64,7 +67,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.29</version>
+  <version>1.1.30</version>
 </dependency>
 ```
 
@@ -85,7 +88,7 @@ spring:
       api-key: ${DASHSCOPE_API_KEY}
     chat:
       options:
-        model: qwen3.6-plus
+        model: qwen3.7-plus
         multi_model: true
         enable_thinking: true
     embedding:
@@ -152,7 +155,7 @@ spring:
       agent:
         rag:
           similarityThreshold: 0.50   # Similarity threshold, default 0.0
-          topK: 4                     # Top-k results, default 4
+          top-k: 4                    # Top-k results, default 4
           defaultPromptTemplate: |
             Context information is below.
 

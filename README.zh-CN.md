@@ -45,6 +45,9 @@
 
 完整的 `@Tool` 方法签名、参数说明和配置参考见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
 
+### 编译部署工具
+![img_7.png](docs/img_7.png)
+
 ### 独立 MCP 服务
 
 文件、Git、Maven、编译部署各有**独立 MCP 服务模块** — core 层无 Spring 依赖，可通过 jbang 以 stdio 模式运行，供 Claude Desktop、Cursor 等任何 MCP 兼容 agent 使用：
@@ -62,7 +65,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.29</version>
+    <version>1.1.30</version>
 </dependency>
 ```
 
@@ -82,7 +85,7 @@ spring:
       api-key: ${DASHSCOPE_API_KEY}
     chat:
       options:
-        model: qwen3.6-plus
+        model: qwen3.7-plus
         multi_model: true
         enable_thinking: true
     embedding:
