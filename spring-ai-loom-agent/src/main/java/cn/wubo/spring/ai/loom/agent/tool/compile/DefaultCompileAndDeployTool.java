@@ -5,6 +5,7 @@ import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.loom.compile.core.CompileConfig;
 import cn.wubo.loom.compile.core.ImageTemplate;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -42,11 +43,12 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     DefaultCompileAndDeployTool(LoomAgentProperties.CompileProperty compile, String mavenHome, String fileBasePath) {
         this.fileBasePath = (fileBasePath != null && !fileBasePath.isBlank()) ? fileBasePath : DEFAULT_FILE_BASE_PATH;
         String configured = compile != null ? compile.getMavenHome() : mavenHome;
+        String resolved = MavenHomeResolver.resolve(configured);
 
         CompileConfig config = toCompileConfig(compile);
-        this.operations = new CompileAndDeployOperations(configured, config);
-        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, fileBasePath={}",
-                compile != null && compile.isEnabled(), configured, this.fileBasePath);
+        this.operations = new CompileAndDeployOperations(resolved, config);
+        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, resolvedMavenHome={}, fileBasePath={}",
+                compile != null && compile.isEnabled(), configured, resolved, this.fileBasePath);
     }
 
     // ==================== Tool Entry ====================

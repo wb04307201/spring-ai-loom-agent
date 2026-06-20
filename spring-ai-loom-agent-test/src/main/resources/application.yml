@@ -190,4 +190,4 @@ logging:
         ai: DEBUG
 
 server:
-  port: 8088
+  port: 8080
