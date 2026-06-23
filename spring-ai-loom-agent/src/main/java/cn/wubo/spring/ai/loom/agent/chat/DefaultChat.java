@@ -6,8 +6,8 @@ import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
+import cn.wubo.spring.ai.loom.agent.util.TikaUtils;
 import jakarta.servlet.http.HttpServletRequest;
-import org.apache.tika.Tika;
 import org.apache.tika.exception.TikaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +22,7 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,9 +76,8 @@ public class DefaultChat implements IChat {
                     if(extraText.isEmpty()){
                         extraText.append("以下是用户上传的文档的内容提取结果:");
                     }
-                    Tika tika = new Tika();
-                    try {
-                        String content = tika.parseToString(file.getResourceById(fileId, username).getInputStream());
+                    try (InputStream in = file.getResourceById(fileId, username).getInputStream()) {
+                        String content = TikaUtils.TIKA.parseToString(in);
                         extraText.append("\n\n--- ").append(fileRecord.fileName()).append(" ---\n\n").append(content);
                     } catch (IOException | TikaException e) {
                         log.error("Failed to parse document: {}", fileRecord.fileName(), e);

@@ -58,7 +58,7 @@
         <lombok.version>1.18.46</lombok.version>
         <flyway.version>12.8.0</flyway.version>
         <jvector.version>3.0.6</jvector.version>
-        <file-view.version>1.4.1.1-sb3</file-view.version>
+        <file-view.version>1.4.2-sb3</file-view.version>
         <jgit.version>7.6.0.202603022253-r</jgit.version>
         <maven.version>3.3.0</maven.version>
     </properties>

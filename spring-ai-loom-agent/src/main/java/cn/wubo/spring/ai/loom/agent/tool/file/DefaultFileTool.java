@@ -4,7 +4,7 @@ import cn.wubo.loom.file.core.FileOperations;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.model.FileRecord;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
-import org.apache.tika.Tika;
+import cn.wubo.spring.ai.loom.agent.util.TikaUtils;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -426,8 +426,7 @@ public class DefaultFileTool implements IFileTool {
                 return existing.id();
             }
 
-            Tika tika = new Tika();
-            String mimeType = tika.detect(filePath.toFile());
+            String mimeType = TikaUtils.TIKA.detect(filePath.toFile());
             if (mimeType == null) mimeType = "application/octet-stream";
             String fileId = UUID.randomUUID().toString();
             BasicFileAttributes attrs = Files.readAttributes(filePath, BasicFileAttributes.class);
