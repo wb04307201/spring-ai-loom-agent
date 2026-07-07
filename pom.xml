@@ -53,8 +53,8 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>3.5.14</spring-boot.version>
-        <spring-ai.version>1.1.7</spring-ai.version>
+        <spring-boot.version>3.5.16</spring-boot.version>
+        <spring-ai.version>1.1.8</spring-ai.version>
         <lombok.version>1.18.46</lombok.version>
         <flyway.version>12.8.0</flyway.version>
         <jvector.version>3.0.6</jvector.version>

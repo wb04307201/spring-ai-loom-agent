@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent;
 
+import cn.wubo.file.view.storage.IFileStorage;
 import cn.wubo.spring.ai.loom.agent.chat.DefaultChat;
 import cn.wubo.spring.ai.loom.agent.chat.IChat;
 import cn.wubo.spring.ai.loom.agent.document.DefaultDocumentRead;
@@ -11,7 +12,6 @@ import cn.wubo.spring.ai.loom.agent.file.DefaultUpload;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.file.IUpload;
 import cn.wubo.spring.ai.loom.agent.file.view.LoomAgentFileStorageImpl;
-import cn.wubo.file.view.storage.IFileStorage;
 import cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledge;
 import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.ASyncMcp;
@@ -27,12 +27,12 @@ import cn.wubo.spring.ai.loom.agent.tool.file.DefaultFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.IFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.DefaultGitTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.IGitTool;
+import cn.wubo.spring.ai.loom.agent.tool.maven.DefaultMavenTool;
+import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.DefaultSkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.DefaultTimeTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
-import cn.wubo.spring.ai.loom.agent.tool.maven.DefaultMavenTool;
-import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
 import cn.wubo.spring.ai.loom.agent.user.*;
 import cn.wubo.spring.ai.loom.agent.vectorstore.JVectorStore;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -285,7 +285,9 @@ public class LoomAgentConfiguration {
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
-                        chatResponseFlux.subscribe(chatResponse -> {
+                        chatResponseFlux
+                                .filter(chatResponse -> chatResponse.getResult() != null)
+                                .subscribe(chatResponse -> {
                             try {
                                 String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
                                 emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
