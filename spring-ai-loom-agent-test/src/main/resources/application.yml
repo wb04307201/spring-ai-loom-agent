@@ -14,18 +14,25 @@ spring:
         repository:
           jdbc:
             initialize-schema: always
-    zhipuai:
-      api-key: ${ZHIPUAI_API_KEY}
-    dashscope:
+    openai:
       api-key: ${DASHSCOPE_API_KEY}
       chat:
         options:
           model: qwen3.7-plus
-          multi_model: true
           enable_thinking: true
       embedding:
         options:
           model: text-embedding-v4
+      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
+#    zhipuai:
+#      api-key: ${ZHIPUAI_API_KEY}
+#    dashscope:
+#      api-key: ${DASHSCOPE_API_KEY}
+#      chat:
+#        options:
+#          model: qwen3.7-plus
+#          multi_model: true
+#          enable_thinking: true
 #    ollama:
 #      chat:
 #        options:
@@ -47,7 +54,7 @@ spring:
     mcp:
       client:
         stdio:
-          servers-configuration: classpath:mcp-servers-dev.json
+          servers-configuration: classpath:mcp-servers.json
     loom:
       agent:
         # 单点 git / maven 工具默认 disabled —— 编译/部署请走 ICompileAndDeployTool（始终 enabled）。
