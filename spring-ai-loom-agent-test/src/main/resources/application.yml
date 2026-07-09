@@ -16,14 +16,21 @@ spring:
             initialize-schema: always
     openai:
       api-key: ${DASHSCOPE_API_KEY}
+      # 百炼（北京）OpenAI 兼容端点：base_url 必须以 /v1 结尾，Spring AI 2.0 的
+      # openai-java 4.x SDK 会自动拼 /chat/completions 与 /embeddings。
+      # 文档：https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions
+      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
       chat:
-        options:
-          model: qwen3.7-plus
+        # qwen3.7-plus 是百炼带推理的多模态通义千问，配合 extra-body.enable_thinking=true
+        # 触发思考模式（reasoning_content 会出现在响应 metadata 里）。
+        # 文生文场景用 qwen-plus；纯多模态（不思考）用 qwen-vl-plus。
+        model: qwen3.7-plus
+        # 通义千问的思考模式开关 enable_thinking 是百炼私有字段（不是 OpenAI 标准字段），
+        # 必须放在 extra-body 里走 OpenAI 兼容层的 extra_body 字段。
+        extra-body:
           enable_thinking: true
       embedding:
-        options:
-          model: text-embedding-v4
-      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
+        model: text-embedding-v4
 #    zhipuai:
 #      api-key: ${ZHIPUAI_API_KEY}
 #    dashscope:
@@ -195,6 +202,7 @@ logging:
     org:
       springframework:
         ai: DEBUG
+    org.springframework.jdbc.core: TRACE
 
 server:
   port: 8080

@@ -21,7 +21,7 @@ import org.springframework.ai.observation.conventions.VectorStoreSimilarityMetri
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.filter.converter.SimpleVectorStoreFilterExpressionConverter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionConverter;
 import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
 import org.springframework.expression.Expression;
@@ -54,11 +54,21 @@ public class JVectorStore extends AbstractObservationVectorStore {
 
     private static final String METADATA_FILE = "docs.json";
 
+    /**
+     * Fallback vector dimension used when {@code EmbeddingModel.dimensions()} can't be probed
+     * at startup (Spring AI 2.0 implements it by issuing a real embedding call which can fail
+     * with 404 / network errors if the endpoint is misconfigured). 1536 matches the OpenAI
+     * {@code text-embedding-3-small/large} family; the graph will be rebuilt at the actual
+     * dimensions on the first successful add.
+     */
+    private static final int DEFAULT_FALLBACK_DIMENSION = 1536;
+
     private final String indexPath;
     private final int m;
     private final int efConstruction;
     private final int efSearch;
     private final VectorSimilarityFunction similarityFunction;
+    private final int fallbackDimension;
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
     private final ConcurrentHashMap<String, Document> documentStore = new ConcurrentHashMap<>();
@@ -70,7 +80,11 @@ public class JVectorStore extends AbstractObservationVectorStore {
     private volatile List<VectorFloat<?>> currentVectors = List.of();
     @SuppressWarnings("rawtypes")
     private volatile GraphIndex graphIndex;
-    private static final SimpleVectorStoreFilterExpressionConverter FILTER_CONVERTER = new SimpleVectorStoreFilterExpressionConverter();
+    // Resolved embedding dimensions; 0 means "not yet determined"
+    private volatile int cachedDimensions = 0;
+    // Set to true when resolveDimensions() fell back to fallbackDimension; cleared on first real rebuild
+    private volatile boolean dimensionsUnresolved = false;
+    private static final FilterExpressionConverter FILTER_CONVERTER = new SpelFilterExpressionConverter();
     private final ObjectMapper objectMapper;
     private final ExpressionParser expressionParser;
     private final VectorizationProvider vectorizationProvider;
@@ -82,6 +96,7 @@ public class JVectorStore extends AbstractObservationVectorStore {
         this.efConstruction = builder.efConstruction;
         this.efSearch = builder.efSearch;
         this.similarityFunction = builder.similarityFunction;
+        this.fallbackDimension = builder.fallbackDimension > 0 ? builder.fallbackDimension : DEFAULT_FALLBACK_DIMENSION;
         this.objectMapper = JsonMapper.builder().build();
         this.expressionParser = new SpelExpressionParser();
         this.vectorizationProvider = VectorizationProvider.getInstance();
@@ -142,25 +157,63 @@ public class JVectorStore extends AbstractObservationVectorStore {
                 documentIds.addAll(documentStore.keySet().stream().sorted().toList());
             }
 
+            // Re-embed each stored doc to rebuild the HNSW index. If a single doc fails to embed
+            // (e.g. the embedding model / endpoint has changed since the docs were written and now
+            // returns 404), drop just that doc rather than aborting startup. Similarly, if the
+            // entire embedding pass fails (model unreachable), fall back to a fresh empty index.
+            int reEmbedded = 0;
+            int reEmbedFailures = 0;
+            List<String> idsToDrop = new ArrayList<>();
             for (String id : documentIds) {
                 Document doc = documentStore.get(id);
-                if (doc != null) {
+                if (doc == null) {
+                    continue;
+                }
+                try {
                     float[] embedding = embeddingModel.embed(doc);
                     VectorFloat<?> vf = toVectorFloat(embedding);
                     embeddingMap.put(id, vf);
+                    reEmbedded++;
                 }
+                catch (Exception embedEx) {
+                    reEmbedFailures++;
+                    logger.warn("[JVector] Failed to re-embed doc id={} on load ({}); dropping it from the index. " +
+                                    "If the embedding model or endpoint has changed, run a re-index to recover.",
+                            id, embedEx.getMessage());
+                    idsToDrop.add(id);
+                }
+            }
+
+            if (reEmbedFailures > 0) {
+                logger.warn("[JVector] Dropped {} docs that could not be re-embedded on load (re-embedded {}).", reEmbedFailures, reEmbedded);
+            }
+
+            for (String id : idsToDrop) {
+                documentStore.remove(id);
+                documentIds.remove(id);
             }
 
             if (!embeddingMap.isEmpty()) {
                 rebuildGraph();
                 logger.info("[JVector] Rebuilt graph from {} loaded embeddings", embeddingMap.size());
             } else {
+                logger.warn("[JVector] No embeddings available after re-embed pass; starting with a fresh empty index.");
                 createNewIndex();
             }
 
             logger.info("Loaded {} documents from disk index at {}", documentStore.size(), indexPath);
         } catch (IOException e) {
             logger.error("Failed to load index from disk, creating new index", e);
+            createNewIndex();
+        }
+        catch (Exception e) {
+            // Defensive: any unexpected failure during load (including embedding API errors that
+            // escape the per-doc try/catch above) must not crash application startup. Fall back
+            // to an empty index and surface the failure in the logs.
+            logger.error("Unexpected error while loading index from disk; falling back to a fresh empty index.", e);
+            documentStore.clear();
+            documentIds.clear();
+            embeddingMap.clear();
             createNewIndex();
         }
     }
@@ -172,23 +225,84 @@ public class JVectorStore extends AbstractObservationVectorStore {
             if (!Files.exists(path)) {
                 Files.createDirectories(path);
             }
-            GraphIndexBuilder builder = createGraphBuilder(List.of());
-            graphIndex = builder.build(new ListRandomAccessVectorValues(List.of(), embeddingModel.dimensions()));
+            int dimensions = resolveDimensions();
+            GraphIndexBuilder builder = createGraphBuilder(List.of(), dimensions);
+            graphIndex = builder.build(new ListRandomAccessVectorValues(List.of(), dimensions));
             try {
                 builder.close();
             } catch (IOException e) {
                 logger.warn("Error closing GraphIndexBuilder", e);
             }
-            logger.info("Created new JVector index at {} with dimensions={}", indexPath, embeddingModel.dimensions());
+            logger.info("Created new JVector index at {} with dimensions={}", indexPath, dimensions);
         } catch (IOException e) {
             throw new RuntimeException("Failed to create JVector index directory", e);
         }
     }
 
     private GraphIndexBuilder createGraphBuilder(List<VectorFloat<?>> vectors) {
-        int dimensions = embeddingModel.dimensions();
+        int dimensions = resolveDimensions();
+        return createGraphBuilder(vectors, dimensions);
+    }
+
+    private GraphIndexBuilder createGraphBuilder(List<VectorFloat<?>> vectors, int dimensions) {
         ListRandomAccessVectorValues ravv = new ListRandomAccessVectorValues(vectors, dimensions);
         return new GraphIndexBuilder(ravv, similarityFunction, m, efConstruction, 1.0f, 1.4f);
+    }
+
+    /**
+     * Resolve embedding vector dimensions.
+     * <p>
+     * Spring AI 2.0's {@code AbstractEmbeddingModel.dimensions()} lazily probes the model by
+     * issuing a real embedding API call. When that probe fails (404, network error, etc.) the
+     * whole Spring context fails to start. To keep startup resilient, this method:
+     * <ol>
+     *   <li>Calls {@code embeddingModel.dimensions()} and caches the result on success.</li>
+     *   <li>On any exception, falls back to {@link #fallbackDimension}
+     *       (default {@value DEFAULT_FALLBACK_DIMENSION}, matching the OpenAI
+     *       {@code text-embedding-3-small/large} family), logs the cause, and marks
+     *       {@link #dimensionsUnresolved} so the graph is rebuilt at real dimensions on the
+     *       first successful {@code doAdd}.</li>
+     * </ol>
+     */
+    private int resolveDimensions() {
+        if (cachedDimensions > 0) {
+            return cachedDimensions;
+        }
+        try {
+            int dimensions = embeddingModel.dimensions();
+            if (dimensions > 0) {
+                cachedDimensions = dimensions;
+                return dimensions;
+            }
+            throw new IllegalStateException("EmbeddingModel.dimensions() returned " + dimensions);
+        }
+        catch (Exception e) {
+            logger.warn("[JVector] Could not resolve embedding dimensions from the model ({}) — using fallback {} " +
+                            "so the application can start. The index will be rebuilt at the actual dimensions on first successful add.",
+                    e.getMessage(), fallbackDimension);
+            cachedDimensions = fallbackDimension;
+            dimensionsUnresolved = true;
+            return fallbackDimension;
+        }
+    }
+
+    /**
+     * Rebuild the graph at the actual embedding dimensions determined from the first successful
+     * {@code doAdd} (only invoked when {@link #dimensionsUnresolved} is set, i.e. the initial
+     * fallback path was taken at startup).
+     */
+    private void rebuildAtActualDimensionsIfNeeded(int actualDimensions) {
+        if (!dimensionsUnresolved || actualDimensions <= 0 || actualDimensions == cachedDimensions) {
+            return;
+        }
+        logger.info("[JVector] Resolved actual embedding dimensions={}; rebuilding graph from fallback {} to actual {}",
+                actualDimensions, fallbackDimension, actualDimensions);
+        cachedDimensions = actualDimensions;
+        dimensionsUnresolved = false;
+        documentIds.clear();
+        embeddingMap.clear();
+        currentVectors = List.of();
+        rebuildGraph();
     }
 
     private VectorFloat<?> toVectorFloat(float[] data) {
@@ -207,6 +321,10 @@ public class JVectorStore extends AbstractObservationVectorStore {
             for (Document document : documents) {
                 logger.debug("[JVector] Embedding document id={}, metadata keys={}", document.getId(), document.getMetadata().keySet());
                 float[] embedding = embeddingModel.embed(document);
+                // If dimensions were unresolved at startup (fallback used), pick up the real
+                // dimensions from the first successful embedding and rebuild the graph at the
+                // actual size before storing anything.
+                rebuildAtActualDimensionsIfNeeded(embedding.length);
                 VectorFloat<?> vf = toVectorFloat(embedding);
                 documentStore.put(document.getId(), document);
                 embeddingMap.put(document.getId(), vf);
@@ -474,7 +592,7 @@ public class JVectorStore extends AbstractObservationVectorStore {
                 ? VectorStoreSimilarityMetric.DOT
                 : VectorStoreSimilarityMetric.COSINE;
         return VectorStoreObservationContext.builder(VectorStoreProvider.SIMPLE.value(), operationName)
-                .dimensions(embeddingModel.dimensions())
+                .dimensions(resolveDimensions())
                 .collectionName("jvector-disk-index")
                 .similarityMetric(metric.value());
     }
@@ -486,6 +604,7 @@ public class JVectorStore extends AbstractObservationVectorStore {
         private int efConstruction = 100;
         private int efSearch = 10;
         private VectorSimilarityFunction similarityFunction = VectorSimilarityFunction.COSINE;
+        private int fallbackDimension = 0;
 
         private JVectorStoreBuilder(EmbeddingModel embeddingModel) {
             super(embeddingModel);
@@ -516,9 +635,173 @@ public class JVectorStore extends AbstractObservationVectorStore {
             return this;
         }
 
+        /**
+         * Override the fallback vector dimension used when {@code EmbeddingModel.dimensions()}
+         * fails at startup (Spring AI 2.0 probes the model via a real embedding call). Default
+         * is {@value DEFAULT_FALLBACK_DIMENSION}, matching OpenAI {@code text-embedding-3-small/large}.
+         */
+        public JVectorStoreBuilder fallbackDimension(int fallbackDimension) {
+            this.fallbackDimension = fallbackDimension;
+            return this;
+        }
+
         @Override
         public JVectorStore build() {
             return new JVectorStore(this);
+        }
+    }
+
+    /**
+     * SpEL-based {@link FilterExpressionConverter} used to evaluate metadata
+     * filter expressions against document metadata.
+     * <p>
+     * Spring AI 2.0 removed {@code SimpleVectorStoreFilterExpressionConverter}
+     * (which produced SpEL output) without shipping a public replacement that
+     * targets SpEL. To keep {@link JVectorStore} working with metadata
+     * filtering we provide our own minimal converter here that walks the
+     * {@link Filter.Expression} tree directly and emits a SpEL expression
+     * consumable by {@code SpelExpressionParser}.
+     */
+    static final class SpelFilterExpressionConverter implements FilterExpressionConverter {
+
+        @Override
+        public String convertExpression(Filter.Expression expression) {
+            StringBuilder sb = new StringBuilder();
+            appendOperand(expression, sb);
+            return sb.toString();
+        }
+
+        private void appendOperand(Filter.Operand operand, StringBuilder sb) {
+            if (operand instanceof Filter.Group group) {
+                appendGroup(group, sb);
+            }
+            else if (operand instanceof Filter.Key key) {
+                appendKey(key, sb);
+            }
+            else if (operand instanceof Filter.Value value) {
+                appendValue(value, sb);
+            }
+            else if (operand instanceof Filter.Expression expression) {
+                appendExpression(expression, sb);
+            }
+        }
+
+        private void appendGroup(Filter.Group group, StringBuilder sb) {
+            sb.append('(');
+            appendOperand(group.content(), sb);
+            sb.append(')');
+        }
+
+        private void appendExpression(Filter.Expression expression, StringBuilder sb) {
+            if (expression.type() == Filter.ExpressionType.NOT) {
+                sb.append("not ");
+                appendOperand(expression.left(), sb);
+                return;
+            }
+            appendOperand(expression.left(), sb);
+            sb.append(switch (expression.type()) {
+                case AND -> " and ";
+                case OR -> " or ";
+                case EQ -> " == ";
+                case NE -> " != ";
+                case LT -> " < ";
+                case LTE -> " <= ";
+                case GT -> " > ";
+                case GTE -> " >= ";
+                case IN -> " in ";
+                case NIN -> " not in ";
+                default -> throw new IllegalStateException("Unsupported expression type: " + expression.type());
+            });
+            appendOperand(expression.right(), sb);
+        }
+
+        private void appendKey(Filter.Key key, StringBuilder sb) {
+            String identifier = key.key();
+            if (identifier.length() >= 2) {
+                char first = identifier.charAt(0);
+                char last = identifier.charAt(identifier.length() - 1);
+                if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                    identifier = identifier.substring(1, identifier.length() - 1);
+                }
+            }
+            sb.append("#metadata['").append(identifier).append("']");
+        }
+
+        private void appendValue(Filter.Value filterValue, StringBuilder sb) {
+            Object value = filterValue.value();
+            if (value instanceof List<?> list) {
+                boolean forInNin = hasInNinSuffix(sb);
+                if (forInNin) {
+                    int metadataStart = sb.lastIndexOf("#metadata");
+                    if (metadataStart == -1) {
+                        throw new IllegalStateException("Wrong SpEL expression: " + sb);
+                    }
+                    int metadataEnd = indexOfSpace(sb, metadataStart);
+                    String metadataRef = metadataEnd == -1
+                            ? sb.substring(metadataStart)
+                            : sb.substring(metadataStart, metadataEnd);
+                    String before = sb.substring(0, metadataStart);
+                    String after = metadataEnd == -1 ? "" : sb.substring(metadataEnd);
+                    sb.setLength(0);
+                    sb.append(before).append("{").append(metadataRef).append(", ");
+                    appendListLiteral(list, sb);
+                    sb.append("}").append(after);
+                }
+                else {
+                    appendListLiteral(list, sb);
+                }
+            }
+            else {
+                appendSingleValue(value, sb);
+            }
+        }
+
+        private static boolean hasInNinSuffix(StringBuilder sb) {
+            String s = sb.toString();
+            return s.endsWith(" in ") || s.endsWith(" not in ");
+        }
+
+        private static int indexOfSpace(StringBuilder sb, int from) {
+            for (int i = from; i < sb.length(); i++) {
+                if (sb.charAt(i) == ' ') {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private static void appendListLiteral(List<?> list, StringBuilder sb) {
+            sb.append('{');
+            for (int i = 0; i < list.size(); i++) {
+                appendSingleValue(list.get(i), sb);
+                if (i < list.size() - 1) {
+                    sb.append(", ");
+                }
+            }
+            sb.append('}');
+        }
+
+        private static void appendSingleValue(Object value, StringBuilder sb) {
+            if (value == null) {
+                sb.append("null");
+            }
+            else if (value instanceof Number || value instanceof Boolean) {
+                sb.append(value);
+            }
+            else {
+                String text = value.toString();
+                sb.append('\'');
+                for (int i = 0; i < text.length(); i++) {
+                    char c = text.charAt(i);
+                    if (c == '\'') {
+                        sb.append("''");
+                    }
+                    else {
+                        sb.append(c);
+                    }
+                }
+                sb.append('\'');
+            }
         }
     }
 }

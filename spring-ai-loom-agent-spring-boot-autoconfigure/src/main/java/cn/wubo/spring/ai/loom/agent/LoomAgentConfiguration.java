@@ -36,6 +36,7 @@ import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
 import cn.wubo.spring.ai.loom.agent.user.*;
 import cn.wubo.spring.ai.loom.agent.vectorstore.JVectorStore;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import jakarta.servlet.http.Cookie;
@@ -64,7 +65,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.*;
-import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer;
+import org.springframework.boot.flyway.autoconfigure.FlywayConfigurationCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.cache.Cache;
 import org.springframework.cache.caffeine.CaffeineCache;
@@ -169,23 +170,26 @@ public class LoomAgentConfiguration {
         private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(InfrastructureConfiguration.class);
 
         /**
-         * 放宽 Spring AI 内部 {@code JsonParser} 使用的 ObjectMapper，
+         * 放宽 Spring AI 内部 {@code JsonParser} 使用的 JSON mapper，
          * 允许 JS 风格注释（{@code //}、{@code /* *}{@code /}）和单引号。
          * <p>
          * 部分 LLM（特别是 qwen 系列）在工具调用时输出的 JSON 会带 JS 注释，
-         * 默认的 Jackson 配置会抛 {@code JsonParseException: Unexpected character ('/') ... maybe a comment}，
-         * 整条工具链直接断掉。开启 {@code ALLOW_COMMENTS} 后这类 LLM 输出能正常解析。
+         * 默认的 Jackson 配置会抛 {@code JsonParseException}，整条工具链直接断掉。
+         * Spring AI 2.0 切到了 Jackson 3（{@code tools.jackson}），配置入口换成
+         * {@code JsonMapper.builder().enable(...)}，这里同步更新。
          */
         @Bean
         public org.springframework.beans.factory.SmartInitializingSingleton springAiJsonParserConfig() {
             return () -> {
                 try {
-                    com.fasterxml.jackson.databind.ObjectMapper om =
-                            org.springframework.ai.util.json.JsonParser.getObjectMapper();
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_YAML_COMMENTS, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
+                    tools.jackson.databind.json.JsonMapper mapper =
+                            org.springframework.ai.util.json.JsonParser.getJsonMapper();
+                    mapper.rebuild()
+                            .enable(tools.jackson.core.json.JsonReadFeature.ALLOW_JAVA_COMMENTS)
+                            .enable(tools.jackson.core.json.JsonReadFeature.ALLOW_YAML_COMMENTS)
+                            .enable(tools.jackson.core.json.JsonReadFeature.ALLOW_SINGLE_QUOTES)
+                            .enable(tools.jackson.core.json.JsonReadFeature.ALLOW_UNQUOTED_PROPERTY_NAMES)
+                            .build();
                 } catch (Throwable t) {
                     // 静默失败 —— Spring AI 内部 API 可能在新版本里被替换
                     LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
@@ -222,6 +226,49 @@ public class LoomAgentConfiguration {
             return new FileViewDefaultsBeanFactoryPostProcessor(environment);
         }
 
+        /**
+         * Spring AI 2.0 在 {@code SPRING_AI_CHAT_MEMORY} 表上自动加了一条
+         * {@code CHECK (type IN ('USER','ASSISTANT','SYSTEM','TOOL'))} 约束，
+         * 但 H2 在某些状态下对这条约束校验会误报（即使 type 字段值是合法的
+         * 'USER'/'ASSISTANT'，仍然抛 {@code CONSTRAINT_A: }），导致每次 chat
+         * 写入记忆时报 HTTP 500。这里在启动后把这条约束直接 drop 掉，让
+         * {@link org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository}
+         * 按 Java enum 名裸写即可。
+         * <p>
+         * Constraint 名不固定：Spring AI schema 初始化时新建表叫 {@code CONSTRAINT_A}，
+         * 重启时复用旧表叫 {@code TYPE_CHECK}，两条 SQL 都要尝试。
+         */
+        @Bean
+        public org.springframework.beans.factory.SmartInitializingSingleton dropBrokenChatMemoryTypeCheck(
+                javax.sql.DataSource dataSource) {
+            return () -> {
+                for (String name : new String[]{"TYPE_CHECK", "CONSTRAINT_A"}) {
+                    try (java.sql.Connection conn = dataSource.getConnection();
+                         java.sql.Statement st = conn.createStatement()) {
+                        int updated = st.executeUpdate(
+                                "ALTER TABLE SPRING_AI_CHAT_MEMORY DROP CONSTRAINT IF EXISTS " + name);
+                        if (updated > 0) {
+                            LOG.info("Dropped broken {} constraint on SPRING_AI_CHAT_MEMORY", name);
+                        }
+                    } catch (Throwable t) {
+                        LOG.warn("Could not drop {} constraint on SPRING_AI_CHAT_MEMORY ({}). " +
+                                "Chat memory inserts may fail. Cause: {}", name, t.getMessage(), t.toString());
+                    }
+                }
+            };
+        }
+
+        /**
+         * Spring Boot 4.x / Spring AI 2.0 默认绑定的是 Jackson 3 的 {@code tools.jackson.databind.json.JsonMapper}
+         * （用作 spring.ai 的 JSON 工具），不再自动配置 Jackson 2 的 {@code ObjectMapper}。
+         * 但 LoomAgent 里前端 SSE 协议用的还是 Jackson 2（{@code ObjectMapper.writeValueAsString}），
+         * 这里显式定义一个 Jackson 2 的 {@code ObjectMapper} Bean 给 SseController 用。
+         */
+        @Bean
+        public ObjectMapper loomAgentJacksonObjectMapper() {
+            return new ObjectMapper();
+        }
+
         @Bean
         public FlywayConfigurationCustomizer myStarterFlywayCustomizer() {
             return configuration -> {
@@ -256,18 +303,23 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IChat.class)
         @Bean
-        public IChat chat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
-            return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file);
+        public IChat chat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file, org.springframework.core.env.Environment environment) {
+            return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file, environment);
         }
 
         @Slf4j
         @Data
-        @RequiredArgsConstructor
         @RestController
         @RequestMapping
         public static class SseController {
 
             private final IChat chat;
+            private final ObjectMapper objectMapper;
+
+            public SseController(IChat chat, ObjectMapper objectMapper) {
+                this.chat = chat;
+                this.objectMapper = objectMapper;
+            }
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
             public SseEmitter stream(@RequestBody ChatRequestRecord chatRecord, HttpServletRequest request) {
@@ -290,7 +342,16 @@ public class LoomAgentConfiguration {
                                 .subscribe(chatResponse -> {
                             try {
                                 String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
-                                emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
+                                // SseEmitter.send(Object, MediaType) does not pick a JSON
+                                // converter for SSE event payloads. Use the typed builder
+                                // API (SseEmitter.event().data(...)) — Spring serializes the
+                                // payload with the configured HTTP message converter and
+                                // prepends the SSE "data: " prefix and trailing blank line
+                                // itself, so the client EventSource parser sees a valid
+                                // JSON per event.
+                                emitter.send(SseEmitter.event()
+                                        .data(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent),
+                                                MediaType.APPLICATION_JSON));
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }

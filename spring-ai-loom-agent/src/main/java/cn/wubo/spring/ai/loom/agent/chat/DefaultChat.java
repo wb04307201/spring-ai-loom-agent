@@ -38,14 +38,16 @@ public class DefaultChat implements IChat {
     private final List<IEmbedTool> embedTools;
     private final IUserConversation userConversation;
     private final IFile file;
+    private final org.springframework.core.env.Environment environment;
 
-    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file, org.springframework.core.env.Environment environment) {
         this.chatClient = chatClient;
         this.retrievalAugmentationAdvisor = retrievalAugmentationAdvisor;
         this.mcp = mcp;
         this.embedTools = embedTools;
         this.userConversation = userConversation;
         this.file = file;
+        this.environment = environment;
     }
 
     @Override
@@ -128,7 +130,39 @@ public class DefaultChat implements IChat {
             requestSpec.toolCallbacks(toolCallbackProvider);
         }
 
+        // Spring AI 2.0's OpenAiChatModel stream() goes through ChunkMerger.chunkToChatConversion
+        // which only reads delta.content() and delta.refusal() — it drops delta._additionalProperties()
+        // where Bailian (and other OpenAI-compat reasoning servers) put reasoning_content.
+        // Result: the streaming ChatResponse always has empty reasoningContent, so the UI can't show
+        // the model's thinking process.
+        // Workaround: when reasoning is enabled (extra-body.enable_thinking=true), use the
+        // non-streaming .call() path which preserves reasoningContent from the full message JSON,
+        // then wrap the result in a Flux so the SSE controller contract is unchanged. Streaming UX
+        // is lost for reasoning models but the user actually sees the thinking.
+        if (isReasoningEnabled(requestSpec)) {
+            return Flux.just(requestSpec.call().chatResponse());
+        }
+
         return requestSpec.stream().chatResponse();
+    }
+
+    /**
+     * Detects whether the upstream chat request is configured for reasoning content. Spring AI
+     * 2.0's OpenAiChatModel stream() goes through ChunkMerger.chunkToChatConversion which drops
+     * delta._additionalProperties() — Bailian's reasoning_content lives there and gets silently
+     * lost. The non-streaming .call() path preserves it. We detect the reasoning flag from the
+     * Spring environment instead of poking into ChatClientRequestSpec via reflection (the spec
+     * field shape differs across Spring AI versions).
+     */
+    private boolean isReasoningEnabled(ChatClient.ChatClientRequestSpec requestSpec) {
+        if (environment != null) {
+            Boolean flag = environment.getProperty(
+                    "spring.ai.openai.chat.extra-body.enable_thinking", Boolean.class);
+            if (flag != null) {
+                return flag;
+            }
+        }
+        return false;
     }
 
     private boolean isImage(String mimeType) {
