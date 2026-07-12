@@ -94,8 +94,10 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
             List<McpToolSystemView> tools = new ArrayList<>();
             if (r.tools() != null) {
                 for (ToolRecord t : r.tools()) {
+                    // 描述优先级：DB 维护 > SDK 默认；没维护就用 SDK 原文
                     String dbDesc = toolDbMap.get(t.name());
-                    tools.add(new McpToolSystemView(t.name(), dbDesc, dbDesc != null));
+                    String desc = dbDesc != null ? dbDesc : t.description();
+                    tools.add(new McpToolSystemView(t.name(), desc, dbDesc != null));
                 }
             }
             out.add(new McpSystemView(r.name(), title, description, maintained, true, tools));
@@ -126,13 +128,35 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
 
     @Override
     public List<McpToolInfo> listTools(String mcpName) {
-        return jdbcTemplate.query(
-                "SELECT id, mcp_name, name, description " +
-                        "FROM mcp_tool WHERE mcp_name = ? ORDER BY name",
-                (rs, n) -> new McpToolInfo(
-                        rs.getLong(1), rs.getString(2), rs.getString(3),
-                        rs.getString(4)),
-                mcpName);
+        // 先查 DB 已有记录（id + 描述）
+        Map<String, McpToolInfo> dbByName = new HashMap<>();
+        try {
+            jdbcTemplate.query(
+                    "SELECT id, mcp_name, name, description " +
+                            "FROM mcp_tool WHERE mcp_name = ?",
+                    (rs, n) -> dbByName.put(rs.getString(3),
+                            new McpToolInfo(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4))),
+                    mcpName);
+        } catch (Exception ignore) {}
+        // 拿 SDK 实时工具列表（保证 mcp_tool 表里没有的也展示出来）
+        List<McpToolInfo> out = new ArrayList<>();
+        for (McpRecord rec : mcp().mcps()) {
+            if (!rec.name().equals(mcpName)) continue;
+            if (rec.tools() == null) continue;
+            for (ToolRecord t : rec.tools()) {
+                McpToolInfo db = dbByName.get(t.name());
+                if (db != null) {
+                    // DB 有 → 描述优先 DB，没有就用 SDK 默认
+                    String desc = db.description() != null ? db.description() : t.description();
+                    out.add(new McpToolInfo(db.id(), db.mcpName(), db.name(), desc));
+                } else {
+                    // DB 没记录 → id=0（前端识别为"未维护"），描述用 SDK 默认
+                    out.add(new McpToolInfo(0L, rec.name(), t.name(), t.description()));
+                }
+            }
+        }
+        out.sort((a, b) -> a.name().compareTo(b.name()));
+        return out;
     }
 
     @Override
@@ -142,6 +166,43 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
                 "UPDATE mcp_tool SET description = ? WHERE id = ?",
                 param, toolId);
         if (n == 0) throw new LoomAgentRuntimeException("工具不存在: id=" + toolId);
+        return jdbcTemplate.queryForObject(
+                "SELECT id, mcp_name, name, description FROM mcp_tool WHERE id = ?",
+                (rs, i) -> new McpToolInfo(
+                        rs.getLong(1), rs.getString(2), rs.getString(3),
+                        rs.getString(4)),
+                toolId);
+    }
+
+    @Override
+    public McpToolInfo upsertTool(Long toolId, String mcpName, String name, String description) {
+        Object param = (description == null || description.isBlank()) ? null : description;
+        if (toolId == null || toolId == 0L) {
+            // 同一 (mcp_name, name) 已存在 → 覆盖；否则 INSERT
+            List<Long> existing = jdbcTemplate.queryForList(
+                    "SELECT id FROM mcp_tool WHERE mcp_name = ? AND name = ?",
+                    Long.class, mcpName, name);
+            if (!existing.isEmpty()) {
+                Long id = existing.get(0);
+                jdbcTemplate.update("UPDATE mcp_tool SET description = ? WHERE id = ?", param, id);
+                toolId = id;
+            } else {
+                jdbcTemplate.update(
+                        "INSERT INTO mcp_tool (mcp_name, name, description, sort_order) VALUES (?, ?, ?, 0)",
+                        mcpName, name, param);
+                List<Long> ids = jdbcTemplate.queryForList(
+                        "SELECT id FROM mcp_tool WHERE mcp_name = ? AND name = ?",
+                        Long.class, mcpName, name);
+                if (ids.isEmpty()) {
+                    throw new LoomAgentRuntimeException("插入后未找到记录: mcpName=" + mcpName + " name=" + name);
+                }
+                toolId = ids.get(0);
+            }
+        } else {
+            Integer n = jdbcTemplate.update(
+                    "UPDATE mcp_tool SET description = ? WHERE id = ?", param, toolId);
+            if (n == 0) throw new LoomAgentRuntimeException("工具不存在: id=" + toolId);
+        }
         return jdbcTemplate.queryForObject(
                 "SELECT id, mcp_name, name, description FROM mcp_tool WHERE id = ?",
                 (rs, i) -> new McpToolInfo(

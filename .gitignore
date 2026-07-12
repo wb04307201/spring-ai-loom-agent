@@ -37,9 +37,9 @@ build/
 /mcp/
 
 *.log
+/.claude/settings.local.json
 /.playwright-mcp/
 /mcp/
-/.claude/
 /.local/
 /spring-ai-loom-agent-test/.local/
 /spring-ai-loom-agent-test/mcp/

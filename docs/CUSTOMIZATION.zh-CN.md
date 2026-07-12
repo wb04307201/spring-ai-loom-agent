@@ -79,55 +79,30 @@ spring-ai-loom-agent/
 
 > 底层还支持 `similarityFunction`（COSINE / DOT_PRODUCT），但未暴露为配置属性，需自定义 `VectorStore` Bean 来修改。
 
-### 1.4 MCP 服务器配置 (`mcps[]`)
+### 1.4 MCP 服务器配置（yml 不再读取）
 
-YAML 数组配置，每个 MCP 服务器包含：
+> ⚠️ MCP 服务器配置**不再通过 yml**。原来的 `mcps[]` 段（在 `spring.ai.loom.agent` 下）已废弃。MCP 元数据现在存 `mcp_server` / `mcp_tool` 表，由以下入口维护：
+>
+> - **管理控制台 → MCP 描述维护**（侧边栏该区块）
+> - REST API `/spring/ai/loom/admin/mcps/{name}` 和 `/spring/ai/loom/admin/mcps/{name}/tools`
+>
+> 用户级别的"是否默认选中"不再是 yml 配置，而是由用户在角色授权中的 `role_mcp.default_enabled` 推导出来。
 
-| 字段                    | 类型      | 默认值    | 说明           |
-|-----------------------|---------|--------|--------------|
-| `name`                | String  | —      | MCP 服务器标识名   |
-| `title`               | String  | —      | 中文显示名称       |
-| `description`         | String  | —      | 描述信息         |
-| `defaultSelected`     | boolean | `true` | 是否在 UI 中默认选中 |
-| `tools[].name`        | String  | —      | 工具名称         |
-| `tools[].description` | String  | —      | 工具描述         |
+### 1.5 技能配置（yml 不再读取）
 
-### 1.5 技能配置 (`skills[]`)
-
-YAML 数组配置，每个技能包含：
-
-| 字段               | 类型       | 默认值    | 说明                             |
-|------------------|----------|--------|--------------------------------|
-| `name`           | String   | —      | 技能名称                           |
-| `description`    | String   | —      | 技能描述                           |
-| `load`           | boolean  | `true` | 是否默认预加载到对话中                    |
-| `content`        | String   | —      | 技能内容文本（支持 `classpath:` 前缀读取文件） |
-
-**示例配置**:
-
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        defaultSystem: |
-          你是一个专业的技术支持助手...
-        rag:
-          similarityThreshold: 0.3
-          topK: 5
-          enabledKeyword: true
-          enabledSummary: true
-        jvector:
-          indexPath: /data/jvector-index
-          m: 32
-          efConstruction: 200
-          efSearch: 50
-        skills:
-          - name: email_writer
-            description: 专业邮件撰写助手
-            load: false
-            content: "classpath:skills/email-writer.md"
-```
+> ⚠️ Skill 配置**不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。init migration 会：
+>
+> 1. 建三张表 —— `market_skill` / `user_skill` / `role_skill`
+> 2. 把旧 `skill` 表的存量数据迁到 `user_skill`（标 `source=USER_CREATED`）
+> 3. Seed 6 个 system skill 进 `market_skill`（author=`system`, status=`APPROVED`, version=`1.0.0`）—— 它们的完整 Prompt 模板内容直接 hardcode 在 init migration 里：
+>    - 网络月度事件报告
+>    - http 测试
+>    - 测试保存、下载、预览 1
+>    - 测试保存、下载、预览 2
+>    - 部署项目
+>    - 测试自动 E2E 功能验证
+>
+> 新增 / 编辑 / 授权 Skill 都在**控制台 → Skill 市场** 页面操作，或调 `/spring/ai/loom/admin/market-skills*` 与 `/spring/ai/loom/admin/roles/{code}/skills` REST API。详见 [./API.zh-CN.md → §6 技能管理](./API.zh-CN.md#6-技能管理)。
 
 ### 1.6 鉴权配置 (`auth.*`)
 
@@ -255,36 +230,54 @@ spring:
 - `getUsernameByToken(token)` — 从 Session Token 解析用户名
 - `getUsernameByAuthentication(authentication)` — 旧版方法（向后兼容）
 
-**默认行为**: `isAutoLogin()` 始终返回 `true`；`login()` 始终返回成功；Session Token 存储在 Spring Cache（默认 Caffeine）中。
+**默认行为**: `isAutoLogin()` 读取 Session Cookie；`login()` 在数据库中校验用户并用 BCrypt 哈希密码；Session Token 存储在 Spring Cache（默认 Caffeine）中。
 
-**自定义示例**:
+**自定义示例**（实现接口所有方法；下方为最小骨架，演示如何对接外部 IdP 并用内存 `ConcurrentMap` 替代 Spring Cache）：
 
 ```java
 @Bean
-public IUser customUser(Cache sessionCache) {
+public IUser customUser() {
     return new IUser() {
+        private final ConcurrentMap<String, String> sessions = new ConcurrentHashMap<>();
+
         @Override public Boolean isAutoLogin() { return false; }
+
         @Override public UserResponseRecord login(UserRequestRecord request) {
-            // 接入真实的 LDAP/OAuth/JWT 认证
-            // 返回 new UserResponseRecord(token, nickname)
+            // 接入 LDAP / OAuth / JWT，校验成功后：
+            String token = createToken(request.getUsername());
+            return new UserResponseRecord(token, request.getUsername());
         }
+
+        @Override public String getUsernameByAuthentication(String authentication) {
+            // 解析 JWT / OAuth token
+            return null;
+        }
+
         @Override public String createToken(String username) {
             String token = UUID.randomUUID().toString();
-            sessionCache.put(token, username);
+            sessions.put(token, username);
             return token;
         }
-        @Override public boolean validateToken(String token) {
-            return sessionCache.get(token) != null;
+
+        @Override public boolean validateToken(String token) { return sessions.containsKey(token); }
+        @Override public void invalidateToken(String token) { sessions.remove(token); }
+        @Override public String getUsernameByToken(String token) { return sessions.get(token); }
+
+        @Override public String getNicknameByUsername(String username) { return username; }
+        @Override public boolean isAdmin(String username) { return false; }
+
+        @Override public void changePassword(String username, String oldPassword, String newPassword) {
+            // 用 BCrypt 校验旧密码，再哈希新密码后落库
         }
-        @Override public void invalidateToken(String token) {
-            sessionCache.evict(token);
+
+        @Override public List<UserInfo> listAllUsers() { return List.of(); }
+
+        @Override public void createUser(String username, String nickname, String password, String type) {
+            // 创建用户（密码先用 BCrypt 哈希再存储）
         }
-        @Override public String getUsernameByToken(String token) {
-            var wrapper = sessionCache.get(token);
-            return wrapper != null ? (String) wrapper.get() : null;
-        }
-        @Override public String getUsernameByAuthentication(String authentication) {
-            // 解析真实的 JWT 或 OAuth token
+
+        @Override public void deleteUser(String username) {
+            // 删除用户；若 username 是最后一个 ADMIN 应拒绝
         }
     };
 }
@@ -394,12 +387,11 @@ public IChat customChat(
 | **接口**   | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage` |
 | **默认实现** | `DefaultSkillStorage`                              |
 | **覆盖方式** | 自定义 `@Bean ISkillStorage`                          |
-| **控制内容** | 技能列表、保存（新增/更新）、按名称查询、删除                            |
+| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）；admin 看到 APPROVED + 自己的 PENDING 合并视图；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
 
-**默认行为**: 技能数据存储在内存 `List<SkillDocument>` 中，初始数据来源为 `LoomAgentProperties.getSkills()`。`save()`
-方法防止覆盖 `source="embed"` 的内置技能。
+**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，含 PENDING / APPROVED / REJECTED / DEPRECATED 四种状态）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `V1.0 / V1.1` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
 
-**常见自定义场景**: 持久化到数据库、从远程 API 加载技能等。
+**常见自定义场景**: 接入第三方技能注册中心（如私有 Nexus / REST 目录），实现 `ISkillStorage` 接口并以 `@Bean` 注册即可替换 `DefaultSkillStorage`。
 
 ### 2.10 `IMcp` — MCP 工具提供者
 
@@ -525,9 +517,7 @@ Spring AI 支持多种模型，通过配置对应 Starter 和 API Key 自动切�
 
 | 项目       | 内容                                                               |
 |----------|------------------------------------------------------------------|
-| **类型**   | `FlywayConfigurationCustomizer`                                  |
-| **覆盖方式** | 自定义 `@Bean FlywayConfigurationCustomizer`                        |
-| **默认配置** | 迁移脚本路径 `classpath:db/loom`，历史表 `loomAgent_schema_history`，自动基线迁移 |
+| **默认配置** | 库自带 `V1.0__init.sql` 在 `classpath:db/migration/`（表结构 + admin seed）。应用模块在同目录下加自己的 `V1__xxx.sql`（或 `V1.1__xxx.sql` 等）；Spring Boot 默认 Flyway 按版本号顺序跑、单一 `flyway_schema_history` 表。库**不**覆盖 Flyway 默认路径和 history 表。 |
 
 ---
 
@@ -542,7 +532,7 @@ Spring AI 支持多种模型，通过配置对应 Starter 和 API Key 自动切�
 
 ### 4.2 MCP 自定义实现
 
-除配置 `mcps[]` 外，还可以完全替换 `IMcp` 接口实现，自定义：
+除通过 `mcp_server` 数据库表配置 MCP 服务器外，还可以完全替换 `IMcp` 接口实现，自定义：
 
 - MCP 服务器的发现逻辑
 - 工具回调的拦截/增强
@@ -552,35 +542,48 @@ Spring AI 支持多种模型，通过配置对应 Starter 和 API Key 自动切�
 
 ## 5. 技能自定义
 
-### 5.1 技能内容注入
+> ⚠️ Skill 数据**完全在数据库里**。`spring.ai.loom.agent.skills[]` yml 段已废弃，配置不再从此读取。详见 [§1.5 技能配置](#15-技能配置yml-不再读取)。
 
-在 YAML 中配置技能内容时支持两种方式：
+### 5.1 技能生命周期（按数据来源分三种来源）
 
-```yaml
-# 方式一：内联文本
-skills:
-  - name: greeting
-    content: |
-      你是一个问候助手，当用户说"你好"时回复"你好！"
+| 来源 (`user_skill.source`) | 描述 | 可改 | 不可改 |
+|---|---|---|---|
+| `USER_CREATED` | 用户在聊天 UI「技能库 → 我的」自建 | name / desc / content / default_loaded | （PK 本身） |
+| `MARKET_PULLED` | 用户从「技能库 → 市场」Tab 拉取 | desc / default_loaded | content（要更新就重新拉取） |
+| `ROLE_GRANTED` | admin 通过角色 → 用户强制注入 | （全部只读） | 全部 |
 
-# 方式二：从类路径读取文件
-skills:
-  - name: email_writer
-    content: "classpath:skills/email-writer.md"
+### 5.2 添加 / 修改 / 授权 Skill 的方式
+
+| 方式 | 适合 | 入口 |
+|---|---|---|
+| 控制台（admin） | demo 数据 / 一次性 seed | 浏览器登录 admin → 控制台 → Skill 市场 |
+| 业务模块 SQL | 业务模块作者 seed 自己的 mcp / skill | `src/main/resources/db/migration/V1__xxx.sql`（V1.0 已被库占用，业务用 V1 或 V1.1+ 即可） |
+| 真实用户 | 用户自建 | 聊天 UI 技能库 → 我的 Tab → + 新建 |
+| REST API | 程序化操作 | [./API.zh-CN.md → §6 技能管理](./API.zh-CN.md#6-技能管理) |
+
+### 5.3 角色授权 Skill（admin 专属）
+
+admin 在控制台「角色管理」编辑某个角色时，可勾选要授权的 market_skill。授权后，**该角色下的所有用户登录时自动获得该 Skill**（`source=ROLE_GRANTED, locked=true`），**用户不能改不能删**。
+
+```sql
+-- role_skill 表（自动管理，不需要手写 SQL）
+-- role_code | market_skill_id | sort_order | default_loaded
+-- '研发'   |  1               | 0          | true
 ```
 
-### 5.2 技能属性
+### 5.4 Skill 内容模板
 
-每个技能有四个可配置字段：
+`content` 字段支持任何字符串（Prompt 模板）。`{param}` 占位由 LLM 在运行时从对话上下文解释，不是结构化表单字段。`@工具名` 引用当前用户角色授权的 MCP 工具。
 
-| 字段            | 类型     | 默认值    | 说明                              |
-|-----------------|----------|---------|-----------------------------------|
-| `name`          | String   | —       | 技能名称（唯一标识符）                  |
-| `description`   | String   | —       | 技能描述（用于 LLM 匹配）               |
-| `load`          | boolean  | `true`  | 是否默认预加载到对话中                   |
-| `content`       | String   | —       | 技能内容文本或 `classpath:` 前缀从文件读取 |
+示例 Prompt 模板（不是 yml，是 SQL 里 INSERT 的 content 字段）：
 
-> **注意**：YAML 配置中技能不再支持 `tools` 或 `params` 字段。MCP 工具绑定和技能参数在运行时通过 Skill Library API（`PUT /spring/ai/loom/skill`）管理。
+```text
+用户希望"梳理 {topic} 月度事件"。
+- 调"获取当前时间"工具拿到当前年/月
+- 调"必应搜索"按月搜索 {topic} 事件
+- 按月分组，输出 HTML 报告
+- 调"生成文件预览链接"工具把报告存为 reports/{topic}-{year}.html
+```
 
 ---
 

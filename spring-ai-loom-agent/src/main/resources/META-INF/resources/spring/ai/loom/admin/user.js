@@ -141,49 +141,31 @@
                 <td>${stateTag}</td>
                 <td>${cleaned}</td>
                 <td>${deleted}</td>
-                <td>${c.contentCleaned ? '-' : '<button class="clean-btn" data-username="' + escapeHtml(c.username) + '" data-conv="' + escapeHtml(c.conversationId) + '">清理内容</button>'}</td>
+                <td>${c.contentCleaned ? '已清理' : '-'}</td>
             </tr>`;
         }).join('');
         listContainer.innerHTML = `
             <table class="user-table">
                 <thead>
-                    <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>内容</th><th>删除时间</th><th>操作</th></tr>
+                    <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>内容</th><th>删除时间</th></tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>`;
-        // 绑定清理按钮
-        listContainer.querySelectorAll('.clean-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const u = btn.getAttribute('data-username');
-                const conv = btn.getAttribute('data-conv');
-                const ok = await confirmDialog({
-                    title: '清理会话内容',
-                    message: `确定要清理用户「${u}」的会话 ${conv.substring(0, 8)}… 的消息内容吗？此操作会删除该会话的所有消息，无法恢复。`,
-                    okText: '清理',
-                });
-                if (!ok) return;
-                try {
-                    const r = await fetch('/spring/ai/loom/admin/conversations/clean-batch', {
-                        method: 'POST', credentials: 'include',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({items: [{username: u, conversationId: conv}]}),
-                    });
-                    if (r.ok) {
-                        showToast('已清理', 'success');
-                        loadConversations();
-                    } else {
-                        showToast('清理失败', 'error');
-                    }
-                } catch (e) {
-                    showToast('网络错误：' + e.message, 'error');
-                }
-            });
-        });
+        // 清理入口整合到控制台顶部"批量清理"按钮（这里不再单独触发清理弹窗）
     }
 
     // 拉用户元信息
     async function loadUserInfo() {
         try {
+            // 顶部右侧渲染当前用户名（统一 header 风格）
+            fetch('/spring/ai/loom/user/currentUser', {method: 'POST', credentials: 'include'})
+                .then(r => r.ok ? r.json() : null)
+                .then(me => {
+                    if (me) {
+                        const el = document.getElementById('admin-username');
+                        if (el) el.textContent = `${me.nickname || me.username}（${me.type === 'ADMIN' ? '管理员' : '用户'}）`;
+                    }
+                }).catch(() => {});
             // 从 list 拉所有用户，匹配
             const r = await fetch('/spring/ai/loom/admin/users', {credentials: 'include'});
             if (!r.ok) return;

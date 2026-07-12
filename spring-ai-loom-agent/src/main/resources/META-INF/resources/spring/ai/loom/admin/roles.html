@@ -1,26 +1,41 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>角色管理 - 灵梭</title>
+    <title>角色管理 - 灵梭管理控制台</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/spring/ai/loom/style.css">
     <link rel="stylesheet" href="console.css">
 </head>
 <body>
-<div class="admin-container">
-    <header class="admin-header">
-        <div class="admin-header-left">
-            <h1>角色管理</h1>
-            <span class="admin-subtitle">RBAC 角色与 mcp 授权</span>
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+            <h2 class="admin-sidebar-title">管理控制台</h2>
+            <span class="admin-sidebar-subtitle">用户 · 角色 · Skill · MCP</span>
         </div>
-        <div class="admin-header-right">
-            <a href="skills-market.html" class="header-link" style="margin-right: 12px;">Skill 市场</a>
-            <a href="console.html" class="header-link">← 返回控制台</a>
-        </div>
-    </header>
+        <nav class="admin-sidebar-nav">
+            <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
+            <a href="roles.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
+            <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>Skill 市场</span></a>
+            <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
+            <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>用量统计</span></a>
+            <div class="admin-sidebar-divider"></div>
+            <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a>
+        </nav>
+    </aside>
+    <div class="admin-main-wrap">
+        <header class="admin-header">
+            <div class="admin-header-left">
+                <h1>角色管理</h1>
+                <span class="admin-subtitle">业务角色 + 给角色授权 MCP / Skill</span>
+            </div>
+            <div class="admin-header-right">
+                <span id="admin-username" class="admin-username"></span>
+            </div>
+        </header>
 
-    <main class="admin-main">
+        <main class="admin-main">
         <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
             <strong>业务角色</strong> —— 这里维护的是给「普通用户」授权 MCP 用的业务角色（如：研发、运营、客服）。
             <strong>不是</strong>用户类型（管理员 / 普通用户）；用户类型在 <a href="console.html" style="color: #1e40af; text-decoration: underline;">用户管理</a>里设置。
@@ -34,6 +49,7 @@
             <div class="loading-indicator">加载中...</div>
         </div>
     </main>
+    </div>
 </div>
 
 <!-- 新建角色模态框 -->

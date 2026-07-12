@@ -8,6 +8,97 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
+/* ===== 布局：5 个列表页（带侧边栏）+ 2 个详情页（满宽）===== */
+
+/* 列表页：左 sidebar + 右主内容 */
+.admin-layout {
+    min-height: 100vh;
+    display: flex;
+}
+
+.admin-sidebar {
+    width: 220px;
+    background: var(--bg-primary, #fff);
+    border-right: 1px solid var(--border-color, #e2e8f0);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.admin-sidebar-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.admin-sidebar-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, #1e293b);
+    margin: 0 0 2px 0;
+}
+
+.admin-sidebar-subtitle {
+    font-size: 11px;
+    color: var(--text-muted, #94a3b8);
+}
+
+.admin-sidebar-nav {
+    flex: 1;
+    padding: 12px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.admin-sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+    text-decoration: none;
+    transition: all 0.1s;
+}
+
+.admin-sidebar-link:hover {
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--primary-color, #6366f1);
+}
+
+.admin-sidebar-link.active {
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color, #6366f1);
+    font-weight: 500;
+}
+
+.admin-sidebar-icon {
+    font-size: 14px;
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.admin-sidebar-divider {
+    height: 1px;
+    background: var(--border-color, #e2e8f0);
+    margin: 8px 12px;
+}
+
+.admin-sidebar-footer {
+    padding: 12px 8px;
+    border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.admin-main-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 详情页：单列布局（沿用旧 .admin-container） */
 .admin-container {
     min-height: 100vh;
     display: flex;

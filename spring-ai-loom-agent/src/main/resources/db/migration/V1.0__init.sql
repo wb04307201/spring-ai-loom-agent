@@ -229,45 +229,14 @@ CREATE INDEX idx_role_skill_code ON role_skill(role_code, sort_order);
 
 
 -- =============================================================
--- 种子数据
+-- 默认管理员
+-- 账号 wb04307201 / 密码 123456（BCrypt cost=10），登录后请立即改密
 -- =============================================================
 
--- 初始管理员：账号 wb04307201 / 密码 123456（BCrypt cost=10），登录后请立即改密
 INSERT INTO user_info (username, nickname, password, type)
 SELECT 'wb04307201', '吴博', '$2a$10$gZ0zgDHCVQrZueMmiiZc4u5aP1SVnjA7sy623noNR4lCqMhr/Edzy', 'ADMIN'
 WHERE NOT EXISTS (SELECT 1 FROM user_info WHERE username = 'wb04307201');
 
 
--- 6 个内嵌系统 Skill seed 进市场（author='system'，version='1.0.0'，status='APPROVED'）
--- content 字段以 "classpath:skills/xxx" 占位；读取时由 SkillContentResolver 解析为真实内容
-
-INSERT INTO market_skill (name, description, content, version, author, status, reviewed_at, reviewed_by) VALUES
-('网络月度事件报告',
- '用户说"梳理 xxx 月度事件/年度时间线/事件复盘/xxx 的网络事件"时触发：围绕 {topic} 按月梳理当年的重要事件，做跨月因果关联与下一年趋势预判，产出 HTML 报告并返回预览链接（{topic} 来自用户当前对话）',
- 'classpath:skills/news-watch.st',
- '1.0.0', 'system', 'APPROVED', CURRENT_TIMESTAMP, 'system'),
-
-('http测试',
- '用户说"测试/调用 xxx 接口/http 探测/服务连通性"时触发：自定义 http 服务测试',
- 'classpath:skills/http.st',
- '1.0.0', 'system', 'APPROVED', CURRENT_TIMESTAMP, 'system'),
-
-('测试保存、下载、预览1',
- '测试保存、下载、预览1',
- '你能说明勾股定理么？并保存成md，并给我下载和和预览地址',
- '1.0.0', 'system', 'APPROVED', CURRENT_TIMESTAMP, 'system'),
-
-('测试保存、下载、预览2',
- '测试保存、下载、预览2',
- '你能说明微积分么？并保存成html，并给我下载和和预览地址',
- '1.0.0', 'system', 'APPROVED', CURRENT_TIMESTAMP, 'system'),
-
-('部署项目',
- '用户说"部署/上线/跑起来/启动 xxx 项目"时触发：从 git 仓库拉取代码 → 编译 → 构建 Docker 镜像 → 启动容器 → 返回访问链接，支持 maven / npm / npm-frontend / pip 多栈',
- 'classpath:skills/package-docker.st',
- '1.0.0', 'system', 'APPROVED', CURRENT_TIMESTAMP, 'system'),
-
-('测试自动E2E功能验证',
- '测试使用浏览器对功能进行E2E测试，并生成验证报告',
- 'classpath:skills/e2e.st',
- '1.0.0', 'system', 'APPROVED', CURRENT_TIMESTAMP, 'system');
+-- 业务数据（mcp_server / mcp_tool / market_skill / role）由业务模块 seed。
+-- test 模块演示在 spring-ai-loom-agent-test/src/main/resources/db/migration/V1__init_app_data.sql。

@@ -52,7 +52,7 @@
                 return;
             }
             const me = await postJson('/spring/ai/loom/user/currentUser');
-            adminUsername.textContent = `你好，${me.nickname || me.username}（管理员）`;
+            adminUsername.textContent = `${me.nickname || me.username}（${me.type === 'ADMIN' ? '管理员' : '用户'}）`;
             await loadUsers();
         } catch (e) {
             // 网络错误 / JSON 解析错误 = 强制跳走
@@ -206,7 +206,6 @@
         html += `<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
             <strong>${escapeHtml(username)}</strong>
             <span style="font-size: 12px; color: var(--text-muted);">共 ${list.length} 条</span>
-            ${cleanable.length > 0 ? `<button class="clean-btn" id="clean-user-${escapeHtml(username)}" style="margin-left: auto;">一键清理此用户全部 (${cleanable.length})</button>` : ''}
         </div>`;
         const renderItem = (c) => {
             const state = c.deletedAt ? '已软删' : '正常';
@@ -231,14 +230,7 @@
         }
         html += '</tbody></table></div>';
         detailTr.innerHTML = `<td colspan="5" style="padding: 0;">${html}</td>`;
-        // 绑定一键清理按钮
-        const btn = document.getElementById('clean-user-' + username);
-        if (btn) {
-            btn.addEventListener('click', () => {
-                const items = cleanable.map(c => ({username, conversationId: c.conversationId}));
-                window._confirmBatchClean(items, '一键清理「' + username + '」的 ' + cleanable.length + ' 条会话？未软删的会先软删再清理内容。token 用量记录会保留。');
-            });
-        }
+        // 清理入口：整合到控制台顶部"批量清理"按钮（user.html / conversation.html / 这里都不再单独触发清理弹窗）
     }
 
     async function deleteUser(username) {

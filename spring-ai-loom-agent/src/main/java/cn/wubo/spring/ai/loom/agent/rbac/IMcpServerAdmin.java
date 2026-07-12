@@ -18,4 +18,7 @@ public interface IMcpServerAdmin {
     List<McpToolInfo> listTools(String mcpName);
 
     McpToolInfo updateTool(Long toolId, String description);
+
+    /** id=null 时 INSERT 新记录，返回带 id 的对象 */
+    McpToolInfo upsertTool(Long toolId, String mcpName, String name, String description);
 }

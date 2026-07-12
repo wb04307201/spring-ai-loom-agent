@@ -21,14 +21,22 @@
 ---
 
 ## 功能特性
-- **对话交互** — SSE 流式聊天，多轮对话，模型推理过程折叠展示，消息复制/下载
+- **对话交互** — SSE 流式聊天，多轮对话，模型推理过程折叠展示，消息复制/下载。**多模态输入**：图片（`+` 上传 + 缩略图预览）和文档（Tika 解析的文本）可混合在同一条消息中。
 - **RAG 知识库** — 多知识库管理，Tika 文档解析 + 向量化，可选 LLM 元数据增强，JVector 本地向量存储
-- **MCP 服务集成** — 同步/异步双模式，运行时按会话启用/禁用
-- **Skill 技能库** — Markdown 风格 prompt 模板，LLM 自主发现与调用，运行时动态管理。技能通过 `content` 里的 `@工具名` 引用 MCP 工具，可用 MCP 由 `mcps:` 配置块决定。
+- **MCP 服务集成** — 同步/异步双模式。每次会话可用的 MCP 工具来自**角色授权**（`role_mcp` 表）—— admin 给角色授权 MCP，用户在聊天时按需勾选启用。
+- **Skill 库 + 市场** — Prompt 模板全部存数据库。**3 种来源**：`USER_CREATED`（自建，完全可改）、`MARKET_PULLED`（从已审批市场拉取，内容锁定）、`ROLE_GRANTED`（角色授权自动注入，完全只读）。Skill 市场支持版本号（`author, name, version` 三元组唯一）、admin 审批流程、批量 CRUD。技能通过 `content` 里的 `@工具名` 引用 MCP 工具。
+- **RBAC + 用户类型** — 两级权限：`user_info.type`（ADMIN / USER，建用户时定）+ 动态 `role`（admin 维护，按用户分配）。admin 自动绕过角色检查、看到全部 MCP；普通用户看到的是其所有角色授权 MCP 的并集。
+- **管理控制台** — 侧边栏风格的 SPA shell。5 个独立区块：
+  - **用户管理** — 用户列表 + 分配角色 + 批量清理会话
+  - **角色管理** — RBAC 业务角色 + 给角色授权 MCP / Skill
+  - **Skill 市场** — 审批 / 拒绝 / 直接 CRUD Skill（带版本控制）
+  - **MCP 描述维护** — 给 SDK MCP 工具 / 工具参数维护中文描述
+  - **用量统计** — 所有用户月度 Token 用量，按年 / 月筛选
+  - 未登录访问 302 重定向到 login。所有 admin 路径都要求 `user_info.type = ADMIN`。
 - **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
 - **内置工具** — 时间、文件、技能、Git、Maven 及端到端部署工具。时间/文件/技能/部署默认启用，Git/Maven 需 opt-in 开启。详细方法签名、默认值、配置见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
-- **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移，广泛支持多种聊天/嵌入/向量存储后端
+- **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移（双版本：库 `V1.0` + 应用模块 `V1.1`，共用 Spring Boot 默认的 `flyway_schema_history`），广泛支持多种聊天/嵌入/向量存储后端
 
 ## 内置工具
 
@@ -65,32 +73,34 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.32</version>
+    <version>1.1.33</version>
 </dependency>
 ```
 
 ### 2. 添加Spring AI模型依赖
-下面以阿里qwen大模型为例进行说明，可以按需替换成其它大语言模型依赖与配置：
+测试应用使用 Spring AI 的 OpenAI 兼容模式对接阿里百炼的 `compatible-mode` 端点（即同时提供 `qwen-image` 和 `wan2.7-image` 的同一入口）。可按需替换 `base-url` 和 `model`：
 ```xml
+<!-- pom.xml：使用标准 OpenAI starter；test/pom.xml 里同时引入了 dashscope starter 但被注释 -->
 <dependency>
-    <groupId>com.alibaba.cloud.ai</groupId>
-    <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
-    <version>1.1.2.3</version>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-openai</artifactId>
 </dependency>
 ```
 ```yaml
 spring:
   ai:
-    dashscope:
+    openai:
       api-key: ${DASHSCOPE_API_KEY}
-    chat:
-      options:
-        model: qwen3.7-plus
-        multi_model: true
-        enable_thinking: true
-    embedding:
-      options:
-        model: text-embedding-v2
+      base-url: https://<your-workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: qwen3.7-plus
+          enable-thinking: true
+          stream-options:
+            include-usage: true
+      embedding:
+        options:
+          model: text-embedding-v4
 ```
 
 > [使用其他模型可参考](https://docs.spring.io/spring-ai/reference/api/chatmodel.html)
@@ -228,34 +238,80 @@ spring:
                 description: 在不同时区之间转换时间
 ```
 
-## 技能库
-可以编写技能加入技能库。一个技能只有 4 个字段：`name` / `description` / `load`（是否预加载到 LLM，默认 `true`） / `content`（prompt 模板，支持 `classpath:` 前缀从 classpath 加载）。`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由上文 `mcps:` 配置块决定。
+## 技能库 & Skill 市场
 
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        skills:
-          - name: 网络月度事件报告
-            description: 围绕一个主题，按月梳理当年的重要事件并产出 HTML 洞察报告（主题 {topic} 来自用户当前对话）
-            content: classpath:skills/news-watch.st
-```
+技能是给 LLM 用的 prompt 模板，描述固定的工作流。**数据完全在数据库里**（不再读 yml 的 `skills[]` 段），分三张表：
 
-技能内容文件 `classpath:skills/news-watch.st`（保持简短、聚焦操作，LLM 把 `{topic}` 解释为"用户当前对话里聊的主题"，不是字面替换）：
+| 表             | 作用                                                                                       |
+|----------------|--------------------------------------------------------------------------------------------|
+| `market_skill` | 公共 **Skill 市场** — 每次提交都带版本号，需 admin 审批通过（`APPROVED`）后才能被使用 |
+| `user_skill`   | 用户本地的 Skill 副本（`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`）            |
+| `role_skill`   | 角色 → market_skill 的授权关系（给某个角色下放哪些 Skill）                                |
 
-```text
-用户当前对话的主题暂记为 {topic}。注意：{topic} 不是字面替换变量，是「用户最近在问的那个主题」的代称。
-先判断它属于哪一类，决定搜索策略：
-- 思考轮数 ≥ 5，每轮反思"是否覆盖到位"
-- 每一轮需要根据查询的信息结果，反思自己的决策是否正确
-- 进行事件关联分析与结论形成 网络月度事件报告
-```
+### 6 个系统种子技能
 
-可以通过技能库按钮精准使用技能 ，
-技能默认设置了预加载，也通过对话直接使用
+首次启动时 init migration 会 seed 6 个 system skill（author=`system`, status=`APPROVED`），让新装环境开箱即用 — 包括 **网络月度事件报告**、**HTTP 测试**、**部署项目**、**自动 E2E** 等。admin 可随时在 **Skill 市场** 管理页编辑/删除。
 
-![img_4.png](docs/img_4.png)
+### 普通用户的技能生命周期
+
+1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`。写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）。
+2. **提交到市场** — 技能库 → **提交** Tab，选自己的 Skill + 填版本号（如 `1.0.0`）。写入 `market_skill`，`status=PENDING`。
+3. **等待审批** — admin 在 **控制台 → Skill 市场** 审。`PENDING` → `APPROVED` 后才对全员可见。
+4. **从市场拉取** — 技能库 → **市场** Tab，点 **拉取**。写入 `user_skill`，`source=MARKET_PULLED`。可改 `description` 和 `default_loaded`，**不能改 content**（要更新就重新拉取）。
+5. **通过角色授权获得** — admin 在角色管理里给某角色授权某 market_skill，登录后自动注入到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是具体版本）。
+
+### admin 的额外能力
+
+- 直接 **create / edit / delete** 任意 `market_skill`（绕过审批，admin 提交直接 `APPROVED`）
+- 审批 / 拒绝 PENDING 提交（可填备注）
+- 给任意角色授权任意 APPROVED 的 market_skill（`role_skill`）
+- 聊天界面用 **union view** —— 同时看到所有 APPROVED + 自己的 PENDING，带 `市` 角标，admin 可立刻测试自己管理的技能
+
+### 权限矩阵
+
+| 操作        | USER_CREATED | MARKET_PULLED | ROLE_GRANTED |
+|-------------|--------------|---------------|--------------|
+| 改 name    | ✗（PK）     | ✗             | ✗            |
+| 改 description | ✅        | ✅            | ✗            |
+| 改 content | ✅           | ✗（重新拉取）| ✗            |
+| 改 default_loaded | ✅   | ✅            | ✗            |
+| 删除        | ✅           | ✅            | ✗            |
+| 提交到市场  | ✅（新版本）| ✗             | ✗            |
+
+### 聊天 UI 用法
+
+点 **🧠 技能库** 按钮打开 —— 三个 Tab：
+
+- **我的** — 你的 `user_skill`（admin 还会看到 union view）。点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）。
+- **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下。
+- **提交** — 选自建 skill + 填版本号，提交到 PENDING。
+
+`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）。
+
+完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
+
+---
+
+## 管理控制台
+
+管理控制台采用**侧边栏导航的 SPA 风格**。admin 登录后，所有 admin 页面共享固定的左侧 sidebar：
+
+| 区块           | 路径                              | 用途                              |
+|--------------|-----------------------------------|---------------------------------|
+| 用户管理        | `admin/console.html`              | 用户列表 + 分配角色 + 批量清理会话内容 |
+| 角色管理        | `admin/roles.html`                | 业务角色 + 给角色授权 MCP / Skill |
+| Skill 市场    | `admin/skills-market.html`         | 审批 / 拒绝 / 直接 CRUD Skill    |
+| MCP 描述维护    | `admin/mcps.html`                  | 给 SDK MCP 工具维护中文描述       |
+| 用量统计        | `admin/stats.html`                 | 月度 Token 用量（年 + 月筛选）   |
+| 返回主页        | `/`                                | 回到聊天首页                    |
+
+- **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护。未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401。
+- **"清理聊天内容" 唯一入口**: 只保留 `控制台 → 批量清理` 按钮。原 user 行 / conversation 行的"清理内容"/"一键清理"按钮已整合删除。
+- **Role gating**: 所有 admin 路径都要求 `user_info.type = 'ADMIN'`。非 admin 访问 admin URL 被重定向回聊天首页。
+
+---
+
+
 
 
 ---

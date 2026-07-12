@@ -5,8 +5,9 @@
     const API = {
         list: '/spring/ai/loom/admin/mcp-system',
         update: (name) => `/spring/ai/loom/admin/mcps/${encodeURIComponent(name)}`,
-        tools: (name) => `/spring/ai/loom/admin/mcps/${encodeURIComponent(name)}/tools`,
-        updateTool: (name, id) => `/spring/ai/loom/admin/mcps/${encodeURIComponent(name)}/tools/${id}`,
+        // 工具列表 / 更新改用 query string + 独立路径，避免 mcp 名含 @ / / 等特殊字符触发 Tomcat 400
+        tools: (name) => `/spring/ai/loom/admin/mcps/tools?name=${encodeURIComponent(name)}`,
+        updateTool: (id) => `/spring/ai/loom/admin/mcp-tools/${id}`,
     };
 
     let currentEdit = null;
@@ -119,13 +120,49 @@
             document.getElementById('em-tools').innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 8px;">此服务无工具</div>';
             return;
         }
-        document.getElementById('em-tools').innerHTML = tools.map(t => `
-            <div style="padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 8px;">
-                <div style="font-weight: 600; font-size: 13px; color: var(--primary-color); margin-bottom: 6px;">${escapeHtml(t.name)}</div>
-                <textarea data-tool-id="${t.id}" data-original="${escapeHtml(t.description || '')}" class="form-input" rows="2"
+        document.getElementById('em-tools').innerHTML = tools.map(t => {
+            // id=0 表示 DB 还没维护记录（仍展示 SDK 默认描述）
+            const unmaintained = !t.id;
+            const statusTag = unmaintained
+                ? '<span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">(未维护，显示 SDK 默认)</span>'
+                : '';
+            const deleteBtn = unmaintained ? '' :
+                `<button class="secondary-btn delete-tool-btn" data-tool-id="${t.id}" style="padding: 2px 8px; font-size: 11px; color: var(--error-color, #ef4444);">删除维护</button>`;
+            return `<div style="padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                    <span style="font-weight: 600; font-size: 13px; color: var(--primary-color);">${escapeHtml(t.name)}</span>
+                    ${statusTag}
+                    <span style="margin-left: auto;">${deleteBtn}</span>
+                </div>
+                <textarea data-tool-id="${t.id}" data-mcp-name="${escapeHtml(t.mcpName)}" data-tool-name="${escapeHtml(t.name)}" data-original="${escapeHtml(t.description || '')}" class="form-input" rows="2"
                     style="font-size: 12px;">${escapeHtml(t.description || '')}</textarea>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
+
+        // 绑定删除按钮
+        document.querySelectorAll('.delete-tool-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-tool-id');
+                const ok = await confirmDialog({
+                    title: '删除工具维护',
+                    message: '确认删除该工具的自定义描述？删除后回退到 SDK 默认描述。',
+                    okText: '删除',
+                });
+                if (!ok) return;
+                try {
+                    const r = await fetch(API.updateTool(id), {method: 'DELETE', credentials: 'include'});
+                    if (!r.ok) {
+                        showToast('删除失败：HTTP ' + r.status, 'error');
+                        return;
+                    }
+                    showToast('已删除', 'success');
+                    // 重新加载该 mcp 的工具列表
+                    if (currentEdit) await openEdit(currentEdit.name);
+                } catch (e) {
+                    showToast('网络错误：' + e.message, 'error');
+                }
+            });
+        });
     }
 
     function closeEdit() {
@@ -157,15 +194,21 @@
         const toolEls = document.querySelectorAll('#em-tools textarea[data-tool-id]');
         const toolUpdates = [];
         toolEls.forEach(el => {
-            const id = el.getAttribute('data-tool-id');
+            const id = el.getAttribute('data-tool-id') || '0';
+            const mcpName = el.getAttribute('data-mcp-name') || name;
+            const toolName = el.getAttribute('data-tool-name') || '';
             const original = el.getAttribute('data-original') || '';
             const current = el.value;
             if (current !== original) {
                 toolUpdates.push(
-                    fetch(API.updateTool(name, id), {
+                    fetch(API.updateTool(id), {
                         method: 'PUT', credentials: 'include',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({description: current || null}),
+                        body: JSON.stringify({
+                            mcpName: mcpName,
+                            name: toolName,
+                            description: current || null,
+                        }),
                     })
                 );
             }
@@ -190,4 +233,14 @@
     } else {
         loadList();
     }
+
+    // 顶部右侧渲染当前用户名（统一 header 风格）
+    fetch('/spring/ai/loom/user/currentUser', {method: 'POST', credentials: 'include'})
+        .then(r => r.ok ? r.json() : null)
+        .then(me => {
+            if (me) {
+                const el = document.getElementById('admin-username');
+                if (el) el.textContent = `${me.nickname || me.username}（${me.type === 'ADMIN' ? '管理员' : '用户'}）`;
+            }
+        }).catch(() => {});
 })();

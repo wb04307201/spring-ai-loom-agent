@@ -32,7 +32,7 @@ Every built-in tool group is gated by a `*.enabled` property under `spring.ai.lo
 | `time.enabled`     | boolean | `true`  | Time tools (`ITimeTool` — current time, timezone conversion)       |
 | `file.enabled`     | boolean | `true`  | File tools (`IFileTool` — 16 path-based read/write/edit/delete)   |
 | `skill.enabled`    | boolean | `true`  | Skill tools (`ISkillTool` — list skills, get skill details)       |
-| `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 31 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
+| `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 28 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
 | `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
 | `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → buildTool build [maven/npm/pip] → docker build → docker run → health check). Supports Spring Boot, Node (backend + static-frontend → nginx), and Python projects. |
 
@@ -60,9 +60,9 @@ spring:
 | Sub-Interface             | Default Impl                | Methods | Default State | Notes                                          |
 |---------------------------|-----------------------------|---------|---------------|------------------------------------------------|
 | `ITimeTool`               | `DefaultTimeTool`           | 2       | enabled       | Always on when `time.enabled` is unset        |
-| `ISkillTool`              | `DefaultSkillTool`          | 2       | enabled       | Pairs with the `skills[]` configuration        |
+| `ISkillTool`              | `DefaultSkillTool`          | 2       | enabled       | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read |
 | `IFileTool`               | `DefaultFileTool`           | 16      | enabled       | Path-based; root = `{fileBasePath}/{username}/` |
-| `IGitTool`                | `DefaultGitTool` (JGit 7.6) | 31      | **disabled**  | Opt-in via `git.enabled=true`                  |
+| `IGitTool`                | `DefaultGitTool` (JGit 7.6) | 28      | **disabled**  | Opt-in via `git.enabled=true`                  |
 | `IMavenTool`              | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **disabled**  | Opt-in via `maven.enabled=true`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool`   | `DefaultCompileAndDeployTool` | 1     | enabled       | End-to-end `git clone → build → docker run → health check` |
 
@@ -88,7 +88,8 @@ spring:
 | **Default**     | `DefaultSkillTool`                                                                    |
 | **Override**    | Custom `@Bean ISkillTool`                                                             |
 | **State**       | Enabled by default; toggle with `spring.ai.loom.agent.skill.enabled`                   |
-| **Methods**     | `skillContents` — list all skills; `getSkill` — get skill details                     |
+| **Methods**     | `skillContents` — list available skills for current user; `getSkill` — get one skill's content |
+| **Data source** | `user_skill` (DB). On every call, `DefaultSkillStorage` auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries). For admins, also includes a **union view** of all `APPROVED` market skills + own PENDING (source=`MARKET_VIEW`). |
 
 ---
 
@@ -135,7 +136,7 @@ spring:
 | **State**       | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **disabled by default** |
 | **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{fileBasePath}/{username}/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
 
-**Methods (31)**:
+**Methods (28)**:
 
 - **Repository lifecycle**: `gitInit`, `gitClone`
 - **Basic operations**: `gitStatus`, `gitAdd`, `gitCommit`, `gitDiff`, `gitLog`
@@ -390,8 +391,8 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 >
 > 1. **Public repos**: simply omit `gitUsername` / `gitPassword`.
 > 2. **Private repos** (in order of preference):
->    - Configure `spring.ai.loom.agent.git.username` / `git.token` in `application.yml` — the tool injects them implicitly; the LLM never sees the credentials.
->    - Use your CI/CD platform's **Secret / Credential variables** (GitHub Actions, GitLab CI, Jenkins Credentials, etc.) and inject at runtime.
+     >    - Configure `spring.ai.loom.agent.git.username` / `git.token` in `application.yml` — the tool injects them implicitly; the LLM never sees the credentials.
+     >    - Use your CI/CD platform's **Secret / Credential variables** (GitHub Actions, GitLab CI, Jenkins Credentials, etc.) and inject at runtime.
 >    - Use an **SSH key** (mount `id_rsa` + `config` into the container or `~/.ssh/` on the host); the git URL becomes `git@…` and the LLM does not need a password.
 > 3. **Ad-hoc debugging**: store the password outside the LLM (env var, temp file) and say "password is in place" in the chat.
 
@@ -404,7 +405,7 @@ Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a cus
 ```java
 @Bean
 public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
-    return new MyCustomFileTool(file, properties.getFileBasePath());
+  return new MyCustomFileTool(file, properties.getFileBasePath());
 }
 // DefaultTimeTool and DefaultSkillTool remain active
 ```
@@ -414,7 +415,7 @@ You can also re-enable a disabled group by registering your own bean:
 ```java
 @Bean
 public IGitTool customGitTool() {
-    return new MyCliGitTool();   // enabled regardless of git.enabled
+  return new MyCliGitTool();   // enabled regardless of git.enabled
 }
 ```
 

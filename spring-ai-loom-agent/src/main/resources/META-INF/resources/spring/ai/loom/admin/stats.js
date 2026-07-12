@@ -104,5 +104,15 @@
     document.getElementById('reload-btn').addEventListener('click', load);
     document.getElementById('refresh-btn').addEventListener('click', load);
 
+    // 顶部右侧渲染当前用户名（统一 header 风格）
+    fetch('/spring/ai/loom/user/currentUser', {method: 'POST', credentials: 'include'})
+        .then(r => r.ok ? r.json() : null)
+        .then(me => {
+            if (me) {
+                const el = document.getElementById('admin-username');
+                if (el) el.textContent = `${me.nickname || me.username}（${me.type === 'ADMIN' ? '管理员' : '用户'}）`;
+            }
+        }).catch(() => {});
+
     load();
 })();

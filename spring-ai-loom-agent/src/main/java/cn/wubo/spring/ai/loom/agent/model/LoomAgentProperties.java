@@ -127,18 +127,9 @@ public class LoomAgentProperties {
                 "/spring/ai/loom/login.html",
                 "/spring/ai/loom/login.js",
                 "/spring/ai/loom/login.css",
-                "/spring/ai/loom/admin/console.html",
-                "/spring/ai/loom/admin/console.js",
-                "/spring/ai/loom/admin/console.css",
-                "/spring/ai/loom/admin/user.html",
-                "/spring/ai/loom/admin/user.js",
-                "/spring/ai/loom/admin/user.css",
-                "/spring/ai/loom/admin/conversation.html",
-                "/spring/ai/loom/admin/conversation.js",
-                "/spring/ai/loom/admin/conversation.css",
-                "/spring/ai/loom/admin/stats.html",
-                "/spring/ai/loom/admin/stats.js",
-                "/spring/ai/loom/admin/stats.css",
+                // admin 静态资源（js / css / 字体等）不鉴权，让未登录也能加载前端资源
+                "/spring/ai/loom/admin/**/*.js",
+                "/spring/ai/loom/admin/**/*.css",
                 "/spring/ai/loom/favicon.ico"
         );
         /**

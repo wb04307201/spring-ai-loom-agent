@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Spring AI LoomAgent** — A Spring Boot auto-configuration library that provides an out-of-the-box chat UI with RAG knowledge base, MCP tool calling, and Skill library for Spring AI applications.
+**Spring AI LoomAgent** — A Spring Boot auto-configuration library that provides an out-of-the-box chat UI with RAG knowledge base, MCP tool calling, **Skill library + Skill market**, and role-based access (RBAC) for Spring AI applications.
 
 - **JDK**: 17+
 - **Framework**: Spring Boot 3.x + Spring AI 1.x
@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Module | Purpose |
 |--------|---------|
-| `spring-ai-loom-agent` | Core library — chat, knowledge base, file, MCP, skill, user interfaces + default implementations, JVector vector store, H2 schema, static frontend resources |
+| `spring-ai-loom-agent` | Core library — chat, knowledge base, file, MCP, skill (market + role auth), RBAC (user/role/mcp), user interfaces + default implementations, JVector vector store, H2 schema, static frontend resources |
 | `spring-ai-loom-agent-spring-boot-autoconfigure` | `LoomAgentConfiguration` with 7 nested static `@Configuration` classes (Infrastructure, Chat, Rag, Mcp, Tool, Storage, Web) — `@AutoConfiguration` with `@ConditionalOnMissingBean` on all beans for full replaceability |
 | `spring-ai-loom-agent-spring-boot-starter` | Empty JAR that depends on autoconfigure — the one dependency users add |
 | `spring-ai-loom-agent-test` | Test application with `application.yml` — run locally to verify changes |
@@ -24,16 +24,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build all modules (skip GPG signing for local dev)
-./mvnw clean install -Dgpg.skip=true
+mvn clean install -Dgpg.skip=true
 
 # Run the test application
-./mvnw spring-boot:run -pl spring-ai-loom-agent-test
+mvn spring-boot:run -pl spring-ai-loom-agent-test
 
 # Run a single test
-./mvnw test -pl spring-ai-loom-agent-test -Dtest=ChatTest
+mvn test -pl spring-ai-loom-agent-test -Dtest=ChatTest
 
 # Package for release (includes GPG signing)
-./mvnw clean deploy
+mvn clean deploy
 ```
 
 ## Architecture
@@ -47,7 +47,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IChat` | `DefaultChat` | Chat streaming (SSE), MCP tool orchestration, RAG augmentation. `stream(record, username, request)` — username injected by filter |
 | `IKnowledge` | `DefaultKnowledge` | Knowledge base CRUD (stored in H2) |
 | `IMcp` | `SyncMcp` / `ASyncMcp` | MCP client wrapper (sync or async), tool discovery & invocation |
-| `ISkillStorage` | `DefaultSkillStorage` | Skill template storage, parameter forms, MCP tool binding |
+| `ISkillStorage` | `DefaultSkillStorage` | Per-user `user_skill` storage (DB). Auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Admins get a union view (APPROVED + own PENDING). Pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
 | `IFile` | `DefaultFile` | File metadata storage (H2) — 仅用于知识空间文件、文件预览/下载桥接、聊天附件 |
 | `IUpload` | `DefaultUpload` | File upload pipeline: 上传文件存储到 `fileBasePath/{username}/`，知识库文件存储到 `knowledgeBasePath/{username}/{knowledgeId}/`，重名自动追加序号 |
 | `IUser` | `DefaultUser` | BFF + HttpOnly cookie session auth + auto-login |
@@ -88,9 +88,12 @@ Organized into 7 nested static `@Configuration` classes:
 
 ### Data Layer
 
-- **Schema**: `db/loom/V1__db_init.sql` — Flyway migration creates `knowledge`, `knowledge_file`, `file_info`, `file_document`, `user_conversation` tables
+- **Schema** (库自带的 schema + admin seed)：
+  - 库 `src/main/resources/db/migration/V1.0__init.sql` — 建表（knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp）+ 默认 admin 账号
+  - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据：12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill
+  - 两套 Flyway 用小数版本号（V1.0 / V1.1）在同一 Flyway 实例里按字典序执行
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
-- **Custom Flyway table**: `loomAgent_schema_history`
+- **Flyway table**: `flyway_schema_history`（Spring Boot 默认，库不覆盖）
 
 ### File System Storage
 
@@ -105,8 +108,8 @@ All under `spring.ai.loom.agent`:
 - `rag` — similarity threshold, top-k, prompt templates
 - `jvector` — index path, HNSW params (m, efConstruction, efSearch)
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
-- `skills` — list of skill templates (name, description, load, content path)
-- `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `cookie` (name, path, domain, secure, sameSite, maxAge)
+- ~~`skills`~~ — **no longer read from yml**. Skill data lives in the database now (tables `market_skill` / `user_skill` / `role_skill`); 6 system skills are seeded by the init migration. Manage via the admin console → **Skill Market** page.
+- `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `init` — **Note**: The actual runtime gate for `ChatClient` creation is `spring.ai.chat.ui.init` (not `spring.ai.loom.agent.init`). Set `spring.ai.chat.ui.init=false` to prevent ChatClient auto-creation. Default: `true`
 - `user` — default username, nickname, authentication token (legacy)
 - `time` / `file` / `skill` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group

@@ -1,40 +1,57 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>Skill 市场管理 - 灵梭</title>
+    <title>Skill 市场 - 灵梭管理控制台</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/spring/ai/loom/style.css">
     <link rel="stylesheet" href="console.css">
 </head>
 <body>
-<div class="admin-container">
-    <header class="admin-header">
-        <div class="admin-header-left">
-            <h1>Skill 市场</h1>
-            <span class="admin-subtitle">管理审批中的提交 + 直接 CRUD 市场 Skill</span>
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+            <h2 class="admin-sidebar-title">管理控制台</h2>
+            <span class="admin-sidebar-subtitle">用户 · 角色 · Skill · MCP</span>
         </div>
-        <div class="admin-header-right">
-            <a href="console.html" class="header-link">← 返回控制台</a>
-        </div>
-    </header>
+        <nav class="admin-sidebar-nav">
+            <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
+            <a href="roles.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
+            <a href="skills-market.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🏪</span><span>Skill 市场</span></a>
+            <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
+            <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>用量统计</span></a>
+            <div class="admin-sidebar-divider"></div>
+            <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a>
+        </nav>
+    </aside>
+    <div class="admin-main-wrap">
+        <header class="admin-header">
+            <div class="admin-header-left">
+                <h1>Skill 市场</h1>
+                <span class="admin-subtitle">管理审批中的提交 + 直接 CRUD 市场 Skill</span>
+            </div>
+            <div class="admin-header-right">
+                <span id="admin-username" class="admin-username"></span>
+            </div>
+        </header>
 
-    <main class="admin-main">
-        <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
-            <strong>admin 特权</strong> —— 可直接新增 / 编辑 / 删除市场 Skill（绕过审批，立即生效），也可审批其他用户的 PENDING 提交。
-            任何用户在自己聊天界面「提交」Tab 提交的 Skill 都需要先在这里审批通过。
-        </div>
+        <main class="admin-main">
+            <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+                <strong>admin 特权</strong> —— 可直接新增 / 编辑 / 删除市场 Skill（绕过审批，立即生效），也可审批其他用户的 PENDING 提交。
+                任何用户在自己聊天界面「提交」Tab 提交的 Skill 都需要先在这里审批通过。
+            </div>
 
-        <div class="admin-toolbar">
-            <button id="create-skill-btn" class="primary-btn">+ 新建 Skill</button>
-            <button id="refresh-btn" class="secondary-btn">刷新</button>
-            <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="pending-count-label"></span>
-        </div>
+            <div class="admin-toolbar">
+                <button id="create-skill-btn" class="primary-btn">+ 新建 Skill</button>
+                <button id="refresh-btn" class="secondary-btn">刷新</button>
+                <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="pending-count-label"></span>
+            </div>
 
-        <div id="skill-table-container" class="table-container">
-            <div class="loading-indicator">加载中...</div>
-        </div>
-    </main>
+            <div id="skill-table-container" class="table-container">
+                <div class="loading-indicator">加载中...</div>
+            </div>
+        </main>
+    </div>
 </div>
 
 <!-- 编辑/创建 Skill 模态框 -->

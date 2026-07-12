@@ -1458,43 +1458,34 @@ const mcp = {
         html += `<div class="detail-section">
             <div class="detail-section-title">基本信息</div>
             <div style="line-height: 1.8; color: var(--text-primary);">
-                <div style="margin-bottom: 12px;"><strong>名称：</strong>${m.name}</div>
-                <div><strong>描述：</strong>${m.description || '无描述'}</div>
+                <div style="margin-bottom: 12px;"><strong>名称：</strong>${escapeHtml(m.name)}</div>
+                <div><strong>描述：</strong>${escapeHtml(m.description || '无描述')}</div>
             </div>
         </div>`;
+        // 工具数据已经在 /mcps 列表接口里（带 tools 字段），
+        // 这里直接用 m.tools 渲染，不再二次请求 —— 避免 mcp 名含 @ 等特殊字符触发 Tomcat 400。
+        const tools = m.tools || [];
         html += `<div class="detail-section">
-            <div class="detail-section-title">包含工具 (加载中...)</div>
-            <div id="mcp-tools-list">加载中...</div>
-        </div>`;
-        detail.innerHTML = html;
-        // 异步加载工具描述
-        try {
-            const r = await fetch(API.mcpTools(m.name), {credentials: 'include'});
-            if (r.ok) {
-                const tools = await r.json();
-                const listEl = document.getElementById('mcp-tools-list');
-                if (!tools || tools.length === 0) {
-                    listEl.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">无可用工具</span>';
-                    // 更新标题里的计数
-                    const titleEl = detail.querySelector('.detail-section-title');
-                    if (titleEl) titleEl.textContent = '包含工具 (0)';
-                    return;
-                }
-                listEl.innerHTML = '<div style="display: flex; flex-direction: column; gap: 12px;">' +
-                    tools.map(tool => `
-                        <div style="padding: 16px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px;">
-                            <div style="font-weight: 600; font-size: 14px; color: var(--primary-color); margin-bottom: 8px;">${escapeHtml(tool.name)}</div>
-                            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap;">${escapeHtml(tool.description || '无描述')}</div>
-                        </div>`).join('') + '</div>';
-                const titleEl = detail.querySelector('.detail-section-title');
-                if (titleEl) titleEl.textContent = '包含工具 (' + tools.length + ')';
-            } else {
-                document.getElementById('mcp-tools-list').innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">加载失败：HTTP ' + r.status + '</span>';
-            }
-        } catch (e) {
-            const listEl = document.getElementById('mcp-tools-list');
-            if (listEl) listEl.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">加载失败</span>';
+            <div class="detail-section-title">包含工具 (${tools.length})</div>
+            <div id="mcp-tools-list">`;
+        if (tools.length === 0) {
+            html += '<span style="color: var(--text-muted); font-size: 13px;">无可用工具</span>';
+        } else {
+            html += '<div style="display: flex; flex-direction: column; gap: 12px;">' +
+                tools.map(tool => {
+                    // 直接展示 SDK 原文（含已维护的覆盖）。空字符串就不显示 description 行
+                    const descHtml = tool.description && tool.description.trim()
+                        ? `<div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap;">${escapeHtml(tool.description)}</div>`
+                        : '';
+                    return `
+                    <div style="padding: 16px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px;">
+                        <div style="font-weight: 600; font-size: 14px; color: var(--primary-color); margin-bottom: 8px;">${escapeHtml(tool.name)}</div>
+                        ${descHtml}
+                    </div>`;
+                }).join('') + '</div>';
         }
+        html += '</div></div>';
+        detail.innerHTML = html;
     },
 
     async loadList() {

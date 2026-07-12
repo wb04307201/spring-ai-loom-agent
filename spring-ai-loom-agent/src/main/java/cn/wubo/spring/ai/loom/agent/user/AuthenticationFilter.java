@@ -57,7 +57,14 @@ public class AuthenticationFilter implements Filter {
         // 4. 从 Cookie 中读取 session token
         String sessionToken = extractTokenFromCookie(request);
         if (sessionToken == null || !user.validateToken(sessionToken)) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            // HTML 请求 → 302 重定向到 login（让浏览器跳到登录页）
+            // API 请求 → 401 状态码（前端 fetch 处理）
+            String accept = request.getHeader("Accept");
+            if (accept != null && accept.contains("text/html")) {
+                response.sendRedirect(request.getContextPath() + "/spring/ai/loom/login.html");
+            } else {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            }
             return;
         }
 
