@@ -62,7 +62,7 @@ spring:
       agent:
         # 单点 git / maven 工具默认 disabled —— 编译/部署请走 ICompileAndDeployTool（始终 enabled）。
         # 需要时显式开启：
-        #   git: { enabled: true }   # 暴露 31 个 git 命令
+        #   git: { enabled: true }   # 暴露 28 个 git 命令
         #   maven: { enabled: true } # 暴露 6 个 mvn 命令
         #
         # 可选：Maven 工具配置（enabled=true 后才生效）
