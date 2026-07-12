@@ -15,27 +15,27 @@ spring:
         repository:
           jdbc:
             initialize-schema: always
-    openai:
-      api-key: ${DASHSCOPE_API_KEY}
-      chat:
-        options:
-          model: qwen3.7-plus
-          enable_thinking: true
-          stream-options:
-            include_usage: true
-      embedding:
-        options:
-          model: text-embedding-v4
-      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
-#    zhipuai:
-#      api-key: ${ZHIPUAI_API_KEY}
-#    dashscope:
+#    openai:
 #      api-key: ${DASHSCOPE_API_KEY}
 #      chat:
 #        options:
 #          model: qwen3.7-plus
-#          multi_model: true
 #          enable_thinking: true
+#          stream-options:
+#            include_usage: true
+#      embedding:
+#        options:
+#          model: text-embedding-v4
+#      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
+#    zhipuai:
+#      api-key: ${ZHIPUAI_API_KEY}
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen3.7-plus
+          multi_model: true
+          enable_thinking: true
 #    ollama:
 #      chat:
 #        options:
@@ -62,7 +62,7 @@ spring:
       agent:
         # 单点 git / maven 工具默认 disabled —— 编译/部署请走 ICompileAndDeployTool（始终 enabled）。
         # 需要时显式开启：
-        #   git: { enabled: true }   # 暴露 31 个 git 命令
+        #   git: { enabled: true }   # 暴露 28 个 git 命令
         #   maven: { enabled: true } # 暴露 6 个 mvn 命令
         #
         # 可选：Maven 工具配置（enabled=true 后才生效）
