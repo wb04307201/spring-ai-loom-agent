@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>会话详情 - 灵梭</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/spring/ai/loom/style.css">
+    <link rel="stylesheet" href="console.css">
+</head>
+<body>
+<div class="admin-container">
+    <header class="admin-header">
+        <div class="admin-header-left">
+            <h1 id="conv-title">会话详情</h1>
+            <span class="admin-subtitle" id="conv-meta">-</span>
+        </div>
+        <div class="admin-header-right">
+            <a id="back-link" href="console.html" class="header-link">← 返回控制台</a>
+        </div>
+    </header>
+
+    <main class="admin-main">
+        <div class="stats-card">
+            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">会话用量统计</h3>
+            <div id="conv-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+                <div class="usage-stat"><div class="usage-stat-label">总 Token</div><div class="usage-stat-value" id="stat-total">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">调用次数</div><div class="usage-stat-value" id="stat-calls">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">平均输入</div><div class="usage-stat-value" id="stat-avg-prompt">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">平均输出</div><div class="usage-stat-value" id="stat-avg-completion">-</div></div>
+            </div>
+        </div>
+
+        <div class="admin-toolbar">
+            <button id="refresh-btn" class="secondary-btn">刷新</button>
+        </div>
+
+        <div id="turns-container" class="table-container">
+            <div class="loading-indicator">加载中...</div>
+        </div>
+    </main>
+</div>
+
+<div id="toast-notification" class="toast"></div>
+
+<script src="conversation.js"></script>
+</body>
+</html>

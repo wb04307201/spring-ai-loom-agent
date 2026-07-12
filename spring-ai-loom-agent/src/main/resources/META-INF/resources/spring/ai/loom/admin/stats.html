@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>用量统计 - 灵梭</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/spring/ai/loom/style.css">
+    <link rel="stylesheet" href="console.css">
+</head>
+<body>
+<div class="admin-container">
+    <header class="admin-header">
+        <div class="admin-header-left">
+            <h1>用量统计</h1>
+            <span class="admin-subtitle">所有用户月度 Token 用量</span>
+        </div>
+        <div class="admin-header-right">
+            <label style="font-size: 12px; color: var(--text-muted);">
+                年：
+                <input type="number" id="year-input" style="width: 80px; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 4px; margin-left: 4px;">
+                月：
+                <input type="number" id="month-input" min="1" max="12" style="width: 60px; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 4px; margin-left: 4px;">
+                <button id="reload-btn" class="primary-btn" style="margin-left: 8px; padding: 4px 12px;">查询</button>
+            </label>
+            <a href="console.html" class="header-link">← 返回控制台</a>
+        </div>
+    </header>
+
+    <main class="admin-main">
+        <div class="stats-card">
+            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;" id="month-label">当月用量</h3>
+            <div class="bar-chart" id="bar-chart">
+                <div class="empty-state">加载中...</div>
+            </div>
+        </div>
+
+        <div class="admin-toolbar">
+            <button id="refresh-btn" class="secondary-btn">刷新</button>
+        </div>
+
+        <div id="stats-table" class="table-container">
+            <div class="loading-indicator">加载中...</div>
+        </div>
+    </main>
+</div>
+
+<script src="stats.js"></script>
+</body>
+</html>

@@ -65,10 +65,21 @@ public class AuthenticationFilter implements Filter {
         String username = user.getUsernameByToken(sessionToken);
         UserContextHolder.setCurrentUser(username);
         try {
+            // 6. 管理员路径二次校验
+            if (isAdminPath(path) && !user.isAdmin(username)) {
+                response.sendRedirect(request.getContextPath() + "/spring/ai/loom/index.html");
+                return;
+            }
             chain.doFilter(request, response);
         } finally {
             UserContextHolder.clear();
         }
+    }
+
+    private boolean isAdminPath(String path) {
+        if (authProperty.getAdminPathPatterns() == null) return false;
+        return authProperty.getAdminPathPatterns().stream()
+                .anyMatch(p -> pathMatcher.match(p, path));
     }
 
     private String extractTokenFromCookie(HttpServletRequest request) {
