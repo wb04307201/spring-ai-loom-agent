@@ -49,7 +49,7 @@ All properties under `loom.file.mcp`:
 | `excludedDirs` | `.git, node_modules, .idea, target, .vscode` | Directories to skip |
 | `deleteConfirmToken` | `I_CONFIRM_DELETE` | Confirmation token for delete operations |
 
-## Available Tools (16)
+## Available Tools (14)
 
 ### Read Operations
 | Tool | Description |

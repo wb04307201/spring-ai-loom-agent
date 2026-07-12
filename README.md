@@ -80,35 +80,30 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 ```
 
 ### 2. Add a Spring AI Model Dependency
-The test application uses Spring AI's OpenAI-compatible mode against Alibaba Bailian's `compatible-mode` endpoint (the same surface that serves `qwen-image` and `wan2.7-image`). Swap `base-url` / `model` for any other OpenAI-compatible provider:
+The test application uses Alibaba's Qwen (DashScope) via Spring AI Alibaba. Swap the dependency and config for any other provider:
 ```xml
-<!-- pom.xml: standard OpenAI starter; the dashscope starter is also wired but commented out in test/pom.xml -->
 <dependency>
-    <groupId>org.springframework.ai</groupId>
-    <artifactId>spring-ai-starter-model-openai</artifactId>
+    <groupId>com.alibaba.cloud.ai</groupId>
+    <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+    <version>1.1.2.3</version>
 </dependency>
 ```
 
 ```yaml
 spring:
   ai:
-    openai:
+    dashscope:
       api-key: ${DASHSCOPE_API_KEY}
-      base-url: https://<your-workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode
       chat:
         options:
           model: qwen3.7-plus
-          enable-thinking: true
-          stream-options:
-            include-usage: true
-      embedding:
-        options:
-          model: text-embedding-v4
+          multi_model: true
+          enable_thinking: true
 ```
 
 > [For other models, see the Spring AI docs](https://docs.spring.io/spring-ai/reference/api/chatmodel.html).
 
-> **Note**: For document-based Q&A, ensure the chat model supports multimodal input (image + text). Document text is extracted via Apache Tika and injected as System Prompt.
+> **Note**: For document-based Q&A, ensure the model supports multimodal input (e.g., `multi_model: true`). Document content is injected via System Prompt.
 
 ### 3. Start the Project
 Visit `http://localhost:8080/spring/ai/loom`

@@ -49,7 +49,7 @@ java -jar target/loom-file-mcp-1.0-SNAPSHOT.jar
 | `excludedDirs` | `.git, node_modules, .idea, target, .vscode` | 遍历时跳过的目录 |
 | `deleteConfirmToken` | `I_CONFIRM_DELETE` | 删除操作的确认令牌 |
 
-## 可用工具（16 个）
+## 可用工具（14 个）
 
 ### 读取操作
 | 工具 | 说明 |

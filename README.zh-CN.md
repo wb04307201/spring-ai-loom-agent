@@ -78,29 +78,22 @@
 ```
 
 ### 2. 添加Spring AI模型依赖
-测试应用使用 Spring AI 的 OpenAI 兼容模式对接阿里百炼的 `compatible-mode` 端点（即同时提供 `qwen-image` 和 `wan2.7-image` 的同一入口）。可按需替换 `base-url` 和 `model`：
+测试应用使用 Spring AI 的 对接阿里百炼：
 ```xml
-<!-- pom.xml：使用标准 OpenAI starter；test/pom.xml 里同时引入了 dashscope starter 但被注释 -->
 <dependency>
-    <groupId>org.springframework.ai</groupId>
-    <artifactId>spring-ai-starter-model-openai</artifactId>
+  <groupId>com.alibaba.cloud.ai</groupId>
+  <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+  <version>1.1.2.3</version>
 </dependency>
 ```
 ```yaml
-spring:
-  ai:
-    openai:
+    dashscope:
       api-key: ${DASHSCOPE_API_KEY}
-      base-url: https://<your-workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode
       chat:
         options:
           model: qwen3.7-plus
-          enable-thinking: true
-          stream-options:
-            include-usage: true
-      embedding:
-        options:
-          model: text-embedding-v4
+          multi_model: true
+          enable_thinking: true
 ```
 
 > [使用其他模型可参考](https://docs.spring.io/spring-ai/reference/api/chatmodel.html)

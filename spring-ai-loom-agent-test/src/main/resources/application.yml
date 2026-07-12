@@ -15,27 +15,27 @@ spring:
         repository:
           jdbc:
             initialize-schema: always
-    openai:
-      api-key: ${DASHSCOPE_API_KEY}
-      chat:
-        options:
-          model: qwen3.7-plus
-          enable_thinking: true
-          stream-options:
-            include_usage: true
-      embedding:
-        options:
-          model: text-embedding-v4
-      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
-#    zhipuai:
-#      api-key: ${ZHIPUAI_API_KEY}
-#    dashscope:
+#    openai:
 #      api-key: ${DASHSCOPE_API_KEY}
 #      chat:
 #        options:
 #          model: qwen3.7-plus
-#          multi_model: true
 #          enable_thinking: true
+#          stream-options:
+#            include_usage: true
+#      embedding:
+#        options:
+#          model: text-embedding-v4
+#      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
+#    zhipuai:
+#      api-key: ${ZHIPUAI_API_KEY}
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen3.7-plus
+          multi_model: true
+          enable_thinking: true
 #    ollama:
 #      chat:
 #        options:
