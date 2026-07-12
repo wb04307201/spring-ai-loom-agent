@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API 文档
 
 > **Base URL**: `http://localhost:8080`（测试环境默认端口）
-> **版本**: 1.1.32
+> **版本**: 1.1.33
 > **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
@@ -484,42 +484,55 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ## 6. 技能管理
 
-### 6.1 获取技能列表
+> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 改为 6 个 system seed 进 `market_skill`，加一套 admin 管理的市场流程。
+>
+> `user_skill.source` 字段反映 Skill 三个来源：
+> - `USER_CREATED` — 用户通过 API 或聊天 UI 自己创建；**完全可编辑**（name/desc/content/default_loaded）
+> - `MARKET_PULLED` — 用户从已审批的市场拉取；**只能改 desc / default_loaded**（content 锁定为市场快照，要更新就重新拉取）
+> - `ROLE_GRANTED` — admin 通过角色授权自动注入；**只读**（locked=true；不能改不能删）
+> - `MARKET_VIEW` — 仅 admin：把"全部 APPROVED + 自己的 PENDING"虚拟展示在聊天界面（带 `市` 角标），不写 `user_skill`
+>
+> 每次 list/get 接口都会自动跑 `role_skill` → `user_skill` 同步，所以新授权的 Skill 在下次 list 时立刻可见。
+
+---
+
+### 6.1 获取当前用户技能列表
 
 ```
 GET /spring/ai/loom/skill
 ```
 
-**响应**: `SkillRecord[]`（模型字段见下表）
+**响应**: `SkillRecord[]`（LLM 视角的视图）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `name` | string | 技能名称 |
 | `description` | string | 技能描述 |
-| `load` | boolean | 是否预加载到 LLM 系统提示（内嵌技能固定为 `true`） |
-| `content` | string | 技能内容 / prompt 模板（支持 `classpath:` 前缀从类路径加载） |
-| `source` | string | 技能来源（`configuration` yml 注入 / `database` 用户通过 API 创建） |
+| `load` | boolean | 是否预加载到 LLM 系统提示 |
+| `content` | string | 技能内容（如果存的是 `classpath:xxx`，会在读时自动 resolve 成真实文本） |
+| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` /（仅 admin）`MARKET_VIEW` |
+
+admin 还会附带 `MARKET_VIEW` union（全部 APPROVED + 自己的 PENDING）。
 
 ---
 
-### 6.2 创建/更新技能
+### 6.2 创建/覆盖一个 Skill（USER_CREATED）
 
 ```
 PUT /spring/ai/loom/skill
 Content-Type: application/json
 ```
 
-**请求体** (`SkillProperty`):
+**请求体** (`SkillRecord`):
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `name` | string | 是 | 技能名称 |
 | `description` | string | 否 | 技能描述 |
 | `load` | boolean | 否 | 是否预加载到 LLM 系统提示，默认 `true` |
-| `content` | string | 否 | 技能内容 / prompt 模板（支持 `classpath:` 前缀从类路径加载） |
+| `content` | string | 是 | 技能内容 / prompt 模板（支持 `classpath:` 前缀，读时 resolve） |
 
-> **注意：** 请求体形态与 `SkillRecord` 模型一致（`name` / `description` / `load` / `content`）。
-> 没有 `params` / `tools` / `defaultPreload` 字段。`content` 里的 `{param}` 占位符由 LLM 在运行时从对话上下文解释，不是结构化表单字段。`content` 里通过 `@工具名` 引用 MCP 工具，可用工具由 `mcps:` 配置块决定。
+> `content` 里的 `{param}` 占位符由 LLM 在运行时从对话上下文解释，不是结构化表单字段。`content` 里通过 `@工具名` 引用 MCP 工具，可用工具由角色授权决定。
 
 **示例**:
 
@@ -528,15 +541,33 @@ Content-Type: application/json
   "name": "email_writer",
   "description": "专业邮件撰写助手",
   "load": true,
-  "content": "你是一名邮件助手。收件人是 {recipient}，语气是 {tone}，要点是：{content}。请生成邮件正文。"
+  "content": "你是一名邮件助手。收件人是 {recipient}..."
 }
 ```
 
-**响应**: `true` (boolean)
+**响应**: `true` (boolean) — 若同名 `ROLE_GRANTED` 锁定则抛 `400`。
 
 ---
 
-### 6.3 获取单个技能
+### 6.3 修改描述 / 默认加载
+
+```
+PATCH /spring/ai/loom/skill/{name}
+Content-Type: application/json
+```
+
+`MARKET_PULLED` 和 `USER_CREATED` 可改 `description` 和/或 `defaultLoaded`（不改 content）。`ROLE_GRANTED` 锁定时返回 `400`。
+
+**请求体** (`UserSkillPatchRequest`):
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `description` | string | 新描述（省略则不变） |
+| `defaultLoaded` | boolean | 新默认加载标志（省略则不变） |
+
+---
+
+### 6.4 获取单个技能（LLM 视角）
 
 ```
 GET /spring/ai/loom/skill/{name}
@@ -548,23 +579,132 @@ GET /spring/ai/loom/skill/{name}
 |---|---|---|
 | `name` | string | 技能名称 |
 
-**响应**: `SkillRecord`
+**响应**: `SkillRecord`。admin 若本地无副本，会 fallback 到市场视图。
 
 ---
 
-### 6.4 删除技能
+### 6.5 删除技能
 
 ```
 DELETE /spring/ai/loom/skill/{name}
 ```
 
-**路径参数**:
+`ROLE_GRANTED` 锁定时返回 `400`。成功返回 `true`。
 
-| 参数 | 类型 | 说明 |
+---
+
+### 6.6 手动触发角色同步
+
+```
+POST /spring/ai/loom/skill/sync
+```
+
+对当前用户重跑 `role_skill` → `user_skill` 同步。主要用于排查问题 —— 实际上每次 list/get 都会自动跑。
+
+---
+
+### 6.7 Skill 市场 — 浏览（任意用户）
+
+```
+GET /spring/ai/loom/market-skills
+```
+
+返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name, version DESC` 排序。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `version` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
+
+---
+
+### 6.8 Skill 市场 — 查看单个
+
+```
+GET /spring/ai/loom/market-skills/{id}
+```
+
+**路径参数**: `id` = `market_skill.id`（Long）
+
+---
+
+### 6.9 Skill 市场 — 拉取到我的 user_skill
+
+```
+POST /spring/ai/loom/market-skills/{id}/pull
+```
+
+从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。抛 `400` 条件：
+- 市场 Skill 状态不是 `APPROVED`
+- 同名已有 `ROLE_GRANTED` 锁定
+- 同名已存在（静默刷新 content）
+
+---
+
+### 6.10 提交我的 Skill 到市场
+
+```
+POST /spring/ai/loom/user/market-skills
+Content-Type: application/json
+```
+
+新建一条 `market_skill`，`status=PENDING`，`author=currentUser`。
+
+**请求体** (`MarketSkillSubmitRequest`):
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 是 | 技能名称 |
+| `description` | string | 否 | 技能描述 |
+| `content` | string | 是 | prompt 模板 |
+| `version` | string | 是 | 语义化版本号 |
+
+约束：`(author, name, version)` 三元组必须唯一。重复的 PENDING 需用新版本号重新提交。
+
+---
+
+### 6.11 管理员 — 市场 CRUD
+
+> 仅 admin。路由层校验 `auth.adminPathPatterns`，handler 内二次校验 `isAdmin()`。
+
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `name` | string | 技能名称 |
+| GET    | `/spring/ai/loom/admin/market-skills`             | 列出**所有**（PENDING/APPROVED/REJECTED） |
+| GET    | `/spring/ai/loom/admin/market-skills/pending`     | 只列 PENDING                                |
+| POST   | `/spring/ai/loom/admin/market-skills`             | 直接以 `status=APPROVED` 创建（绕过审批） |
+| PUT    | `/spring/ai/loom/admin/market-skills/{id}`        | 改任意字段                                  |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}`        | 级联删除 user_skill / role_skill 引用        |
+| POST   | `/spring/ai/loom/admin/market-skills/{id}/approve`| 审批通过 PENDING                              |
+| POST   | `/spring/ai/loom/admin/market-skills/{id}/reject` | 拒绝 PENDING；body: `{comment}`              |
 
-**响应**: `true` (boolean)
+`MarketSkillUpsertRequest`（POST/PUT 通用）:
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 是 | 技能名称 |
+| `description` | string | 否 | 技能描述 |
+| `content` | string | 是 | prompt 模板 |
+| `version` | string | 是 | 版本号 |
+| `status` | string | 否 | 默认 `APPROVED`（admin 提交/编辑时） |
+
+---
+
+### 6.12 管理员 — 给角色授权 Skill
+
+```
+GET /spring/ai/loom/admin/roles/{code}/skills
+PUT /spring/ai/loom/admin/roles/{code}/skills
+```
+
+`GET` 返回该角色已授权的 `RoleSkillItem[]`（每条 `marketSkillId` + `defaultLoaded`）。
+
+`PUT` 覆盖式设置整张清单：
+
+```json
+{
+  "items": [
+    {"marketSkillId": 1, "defaultLoaded": true},
+    {"marketSkillId": 5, "defaultLoaded": false}
+  ]
+}
+```
+
+`defaultLoaded` 缺省 `true`。角色下的用户在下一次 list/sync 时会看到这些 Skill 注入到自己的 `user_skill`（`source=ROLE_GRANTED`，`locked=true`）。
 
 ---
 
@@ -601,7 +741,7 @@ GET /spring/ai/chat/loom/mcp
   {
     "name": "weather-mcp",
     "title": "天气查询",
-    "version": "1.1.32",
+    "version": "1.1.33",
     "description": "提供实时天气查询服务",
     "defaultSelected": true,
     "tools": [
@@ -1185,11 +1325,11 @@ GET /spring/ai/chat/loom/mcp
   "description": "string",
   "load": true,
   "content": "string",
-  "source": "configuration"
+  "source": "USER_CREATED | MARKET_PULLED | ROLE_GRANTED | MARKET_VIEW"
 }
 ```
 
-> 响应形态与 PUT 请求体一致（yml 配置的 `SkillProperty` 模型是子集——`name` / `description` / `load` / `content`，由服务端在响应里补一个 `source` 字段标识数据来源）。
+> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` / `MARKET_VIEW`。
 
 ---
 
@@ -1228,9 +1368,9 @@ GET /spring/ai/chat/loom/mcp
 | `tools[].name` | string | 工具名称 |
 | `tools[].description` | string | 工具描述 |
 
-### 11.4 技能配置
+### 11.4 技能配置（yml 不再读取）
 
-`spring.ai.loom.agent.skills` 为数组，每项即 [SkillProperty](#62-创建更新技能) 中定义的字段。
+`spring.ai.loom.agent.skills[]` yml 段**不再读取**。参见 [§6 技能管理](#6-技能管理) 了解新的数据库流程。首次启动时会 seed 6 个 system skill。
 
 ### 11.5 JVector 配置
 

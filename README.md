@@ -22,14 +22,22 @@
 
 ## Features
 
-- **Chat Interface** — SSE streaming, multi-turn conversations, collapsible model reasoning, message copy/download
+- **Chat Interface** — SSE streaming, multi-turn conversations, collapsible model reasoning, message copy/download. **Multimodal input**: images (`+` upload with thumbnail preview) and documents (Tika-extracted text) can be mixed in a single message.
 - **RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, optional LLM metadata enrichment, JVector local vector store
-- **MCP Service Integration** — Sync/async dual mode, per-session tool enable/disable at runtime
-- **Skill Library** — Markdown-style prompt templates, autonomous LLM discovery and invocation, runtime dynamic management. Skills reference MCP tools by `@tool_name` inside their `content`; available MCP tools come from the `mcps:` configuration block.
+- **MCP Service Integration** — Sync/async dual mode. The available MCP tools per session come from **role-based authorization** (`role_mcp` table) — admin assigns MCPs to roles, users enable the tools they want per chat.
+- **Skill Library + Market** — Prompt templates stored in the database. **3 sources**: `USER_CREATED` (self-built, fully editable), `MARKET_PULLED` (pulled from the approved market, content locked), `ROLE_GRANTED` (auto-injected from role auth, fully read-only). The Skill Market supports versioning (`author, name, version` unique), admin approval workflow, and bulk CRUD. Skills reference MCP tools by `@tool_name` inside their `content`.
+- **RBAC + User Type** — Two-level permission: `user_info.type` (ADMIN / USER, set at creation) + dynamic `role` (admin-managed, assigned per user). Admin auto-bypasses role checks and sees all MCPs; regular users see MCPs that come from the union of their assigned roles.
+- **Admin Console** — Sidebar-styled SPA shell. Five independent sections:
+  - **User Management** — user list, role assignment, batch content cleanup
+  - **Role Management** — RBAC business roles + grant MCP / Skill to a role
+  - **Skill Market** — approve / reject / directly CRUD Skill (with version control)
+  - **MCP Description Maintenance** — maintain Chinese descriptions for SDK MCP tools / tool args
+  - **Usage Statistics** — monthly Token usage for all users, filterable by year / month
+  - Unauthenticated access 302-redirects to login. All admin paths require `user_info.type = ADMIN`.
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
 - **Built-in Tools** — Time, file, skill, git, maven, and the end-to-end deploy tool. Time/file/skill/compile are enabled by default; git/maven are opt-in. See [TOOLS.md](docs/TOOLS.md) for all `@Tool` method signatures, defaults, and configuration.
-- **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations, broad support for chat/embedding/vector store backends
+- **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations (dual-version: library `V1.0` + app module `V1.1` sharing the standard `flyway_schema_history`), broad support for chat/embedding/vector store backends
 
 ## Built-in Tools
 
@@ -67,38 +75,40 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.32</version>
+  <version>1.1.33</version>
 </dependency>
 ```
 
 ### 2. Add a Spring AI Model Dependency
-The following example uses Alibaba's Qwen (DashScope). Replace with any other LLM as needed:
+The test application uses Spring AI's OpenAI-compatible mode against Alibaba Bailian's `compatible-mode` endpoint (the same surface that serves `qwen-image` and `wan2.7-image`). Swap `base-url` / `model` for any other OpenAI-compatible provider:
 ```xml
+<!-- pom.xml: standard OpenAI starter; the dashscope starter is also wired but commented out in test/pom.xml -->
 <dependency>
-    <groupId>com.alibaba.cloud.ai</groupId>
-    <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
-    <version>1.1.2.3</version>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-openai</artifactId>
 </dependency>
 ```
 
 ```yaml
 spring:
   ai:
-    dashscope:
+    openai:
       api-key: ${DASHSCOPE_API_KEY}
-    chat:
-      options:
-        model: qwen3.7-plus
-        multi_model: true
-        enable_thinking: true
-    embedding:
-      options:
-        model: text-embedding-v2
+      base-url: https://<your-workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: qwen3.7-plus
+          enable-thinking: true
+          stream-options:
+            include-usage: true
+      embedding:
+        options:
+          model: text-embedding-v4
 ```
 
 > [For other models, see the Spring AI docs](https://docs.spring.io/spring-ai/reference/api/chatmodel.html).
 
-> **Note**: For document-based Q&A, ensure the model supports multimodal input (e.g., `multi_model: true`). Document content is injected via System Prompt.
+> **Note**: For document-based Q&A, ensure the chat model supports multimodal input (image + text). Document text is extracted via Apache Tika and injected as System Prompt.
 
 ### 3. Start the Project
 Visit `http://localhost:8080/spring/ai/loom`
@@ -241,33 +251,82 @@ spring:
                 description: Convert time between different time zones
 ```
 
-## Skill Library
+## Skill Library & Skill Market
 
-You can write skills and add them to the skill library. A skill has four fields: `name`, `description`, `load` (whether the LLM should preload it; defaults to `true`), and `content` (the prompt template; supports `classpath:` prefix to load from the classpath). Inside `content` you can reference MCP tools by `@tool_name` — the available tools are those declared in the `mcps:` block above.
+Skills are prompt templates that the LLM uses for recurring workflows. The data is **fully managed in the database** (no more yml `skills[]` block) and lives in three tables:
 
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        skills:
-          - name: Monthly Event Report
-            description: Generate an HTML insight report of important events on a topic, month by month, for the current year (topic {topic} comes from the user's current conversation)
-            content: classpath:skills/news-watch.st
-```
+| Table          | Purpose                                                                                       |
+|----------------|-----------------------------------------------------------------------------------------------|
+| `market_skill` | Public **Skill Market** — every submission gets a version; admin must `APPROVE` before it can be used |
+| `user_skill`   | A user's local copy of a skill (`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`)      |
+| `role_skill`   | Role → market_skill authorization (which skills a role unlocks for its users)                |
 
-Skill content file (`classpath:skills/news-watch.st`) — keep it short and operational; the LLM interprets `{topic}` from the current conversation, not as a literal substitution:
+### 6 seeded system skills
 
-```text
-The user's current topic is {topic}. Note: {topic} is NOT a literal substitution variable — it's a stand-in for "whatever topic the user is currently asking about". First classify the topic and decide the search strategy:
-- Thinking rounds should be no less than 5, with divergent brainstorming awareness and thinking branches
-- Each round needs to reflect on whether decisions are correct based on query results
-- Perform event correlation analysis and form conclusions. Generate "Monthly Event Report"
-```
+On first launch, the init migration seeds 6 system skills (author=`system`, status=`APPROVED`) so every fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can edit / delete any of them at any time from the **Skill Market** admin page.
 
-You can precisely invoke skills through the Skill Library button in the UI. Skills are preloaded by default and can also be used directly in conversations.
+### Skill lifecycle for a normal user
+
+1. **Create** — In the chat UI's Skill Library → **我的** tab → **+ 新增**, or `PUT /spring/ai/loom/skill`. The skill is stored in `user_skill` with `source=USER_CREATED`. Fully editable (name / desc / content / default-loaded).
+2. **Submit to market** — Library → **提交** tab. Choose your own skill + a version number (e.g. `1.0.0`). Stored in `market_skill` with `status=PENDING`.
+3. **Wait for admin approval** — Admins review on **控制台 → Skill 市场**. `PENDING` → `APPROVED` makes it visible to everyone.
+4. **Pull from market** — Library → **市场** tab. Click **拉取**. Creates a `user_skill` row with `source=MARKET_PULLED`. You can edit `description` and `default_loaded` but **not** the content (to update, re-pull).
+5. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-injected into your `user_skill` on every login with `source=ROLE_GRANTED, locked=true`. **You cannot edit or delete it** (it's the version the role pins).
+
+### What admins can do that normal users cannot
+
+- Directly **create / edit / delete** any `market_skill` (skip the approval flow — admin submissions are auto-`APPROVED`)
+- **Approve / reject** PENDING submissions with a comment
+- Authorize any APPROVED market skill to any role via `role_skill`
+- See the **union view** of all APPROVED + their own PENDING in their chat UI (with a small `市` badge), so admin can immediately test the skills they manage
+
+### Permission matrix
+
+| Operation                              | USER_CREATED | MARKET_PULLED | ROLE_GRANTED |
+|----------------------------------------|--------------|---------------|--------------|
+| Edit `name`                           | ✗ (PK)       | ✗             | ✗            |
+| Edit `description`                    | ✅           | ✅            | ✗            |
+| Edit `content`                         | ✅           | ✗ (re-pull)  | ✗            |
+| Edit `default_loaded`                  | ✅           | ✅            | ✗            |
+| Delete                                 | ✅           | ✅            | ✗            |
+| Submit to market                       | ✅ (new ver.)| ✗             | ✗            |
+
+### Using skills in the chat UI
+
+Open the Skill Library button (🧠) — three tabs:
+
+- **我的** — your local `user_skill` (plus admin's union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
+- **市场** — browse all `APPROVED` market skills and **拉取** them into your `user_skill`.
+- **提交** — submit a `USER_CREATED` skill to the market with a version number.
+
+Inside `content` you can reference MCP tools by `@tool_name` — the available tools come from the role-based `mcps` authorization, not from yml.
+
+For the full REST API, see [docs/API.md → §6 Skill Management](docs/API.md#6-skill-management).
 
 ![img_4.png](docs/img_4.png)
+
+---
+
+## Admin Console
+
+The admin console is a sidebar-navigated single-page-app shell. After admin login, all admin pages share a fixed left sidebar:
+
+| Section         | Path                          | Purpose                              |
+|-----------------|-------------------------------|--------------------------------------|
+| 用户管理         | `admin/console.html`          | User list + role assignment + batch content cleanup |
+| 角色管理         | `admin/roles.html`            | RBAC roles + grant MCP / Skill      |
+| Skill 市场       | `admin/skills-market.html`     | Approve / reject / directly CRUD Skill |
+| MCP 描述维护     | `admin/mcps.html`              | Maintain Chinese descriptions for SDK MCP tools |
+| 用量统计         | `admin/stats.html`             | Monthly Token usage (year + month filter) |
+| 返回主页         | `/`                            | Back to chat home page              |
+
+- **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.
+- **"清理聊天内容" 唯一入口**: Only `控制台 → 批量清理` button. The duplicate "清理内容" / "一键清理" buttons in user row / conversation row were consolidated.
+- **Role gating**: All admin paths require `user_info.type = 'ADMIN'`. Non-admin attempting admin URL is redirected back to chat home.
+
+---
+
+
 
 ---
 

@@ -74,6 +74,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -203,14 +205,13 @@ public class LoomAgentConfiguration {
                 properties.setDefaultSystem(bound.getDefaultSystem());
                 properties.setInit(bound.isInit());
                 properties.setRag(bound.getRag());
-                properties.setMcps(bound.getMcps());
-                properties.setSkills(bound.getSkills());
+                // mcps 已迁移到数据库，配置不再需要
+                // skills 已迁移到 DB（V10），不从 yml 读
                 properties.setJvector(bound.getJvector());
                 properties.setTimezone(bound.getTimezone());
                 properties.setGitUsername(bound.getGitUsername());
                 properties.setGitToken(bound.getGitToken());
                 properties.setAuth(bound.getAuth());
-                properties.setUser(bound.getUser());
                 properties.setMaven(bound.getMaven());
                 properties.setCompile(bound.getCompile());
             }
@@ -222,11 +223,16 @@ public class LoomAgentConfiguration {
             return new FileViewDefaultsBeanFactoryPostProcessor(environment);
         }
 
+        /**
+         * 库的 SQL 用 V1.0 版本号（与业务的 V1.1 区分），走 Spring Boot 默认 Flyway 实例
+         * （classpath:db/migration + flyway_schema_history）。这样库和业务模块都在 db/migration，
+         * 业务模块开发者按 Flyway 默认规则写 SQL 即可。
+         * 版本号字典序：V1.0 < V1.1，库 SQL 先建表 + admin，业务的 V1.1 后 seed mcp / skill。
+         */
         @Bean
-        public FlywayConfigurationCustomizer myStarterFlywayCustomizer() {
+        public org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer libraryFlywayCustomizer() {
             return configuration -> {
-                configuration.locations("classpath:db/loom");
-                configuration.table("loomAgent_schema_history");
+                // baseline-on-migrate 让空 schema 也能跑（V1.0 库 + V1.1 业务都能跑）
                 configuration.baselineOnMigrate(true);
                 configuration.baselineVersion("0");
             };
@@ -268,19 +274,64 @@ public class LoomAgentConfiguration {
         public static class SseController {
 
             private final IChat chat;
+            private final cn.wubo.spring.ai.loom.agent.token.ITokenUsage tokenUsage;
+            private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
             public SseEmitter stream(@RequestBody ChatRequestRecord chatRecord, HttpServletRequest request) {
                 SseEmitter emitter = new SseEmitter(0L);
 
+                String username = UserContextHolder.getCurrentUser();
+                final long startMs = System.currentTimeMillis();
+                final String conversationId = chatRecord.conversationId();
+                // DashScope 流式每个 chunk 都带累计 usage（最后 chunk 是最终值）。
+                // 用 holder 记录最后一次，stream 结束时统一入库（避免一条对话记 N 行）。
+                final int[] finalPrompt = {0};
+                final int[] finalCompletion = {0};
+                final int[] finalTotal = {0};
+                final String[] finalModel = {null};
+                final boolean[] hasUsage = {false};
+
+                // 注册到 registry：disposable 暂存 wrapper；onStop 回调用于在停止时记录累积 usage
+                final java.util.concurrent.atomic.AtomicReference<reactor.core.Disposable> subRef = new java.util.concurrent.atomic.AtomicReference<>();
+                emitterRegistry.register(username, conversationId, emitter,
+                        new reactor.core.Disposable() {
+                            @Override public void dispose() {
+                                reactor.core.Disposable d = subRef.get();
+                                if (d != null && !d.isDisposed()) d.dispose();
+                            }
+                            @Override public boolean isDisposed() {
+                                reactor.core.Disposable d = subRef.get();
+                                return d == null || d.isDisposed();
+                            }
+                        },
+                        () -> {
+                            // 用户主动 stop 时触发：把已经累积的 usage 入库（避免丢数据）
+                            if (hasUsage[0]) {
+                                try {
+                                    tokenUsage.record(
+                                            conversationId, username, "ASSISTANT",
+                                            finalPrompt[0], finalCompletion[0], finalTotal[0],
+                                            finalModel[0],
+                                            (int) (System.currentTimeMillis() - startMs));
+                                } catch (Exception ignore) { /* 重复记录不阻塞 */ }
+                            }
+                        });
+
+                // 注册 lifecycle 自动清理
                 emitter.onTimeout(() -> {
-                    log.debug("SSE 链接超时");
+                    log.debug("SSE 链接超时: user={} conv={}", username, conversationId);
+                    emitterRegistry.autoCleanup(username, conversationId);
                     emitter.complete();
                 });
-                emitter.onCompletion(() -> log.debug("SSE 链接完成"));
-                emitter.onError(e -> log.debug("SSE 链接错误：{}", e.getMessage()));
-
-                String username = UserContextHolder.getCurrentUser();
+                emitter.onCompletion(() -> {
+                    log.debug("SSE 链接完成: user={} conv={}", username, conversationId);
+                    emitterRegistry.autoCleanup(username, conversationId);
+                });
+                emitter.onError(e -> {
+                    log.debug("SSE 链接错误: user={} conv={} err={}", username, conversationId, e.getMessage());
+                    emitterRegistry.autoCleanup(username, conversationId);
+                });
                 CompletableFuture.runAsync(() -> {
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
@@ -291,16 +342,68 @@ public class LoomAgentConfiguration {
                             try {
                                 String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
                                 emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
+                                // 累计 usage：每个 chunk 都返累计值，只保留最后
+                                try {
+                                    var respMeta = chatResponse.getMetadata();
+                                    if (respMeta != null && respMeta.getUsage() != null) {
+                                        var usage = respMeta.getUsage();
+                                        Integer pt = usage.getPromptTokens();
+                                        Integer ct = usage.getCompletionTokens();
+                                        Integer tt = usage.getTotalTokens();
+                                        if (tt != null && tt > 0) {
+                                            if (pt != null) finalPrompt[0] = pt;
+                                            if (ct != null) finalCompletion[0] = ct;
+                                            finalTotal[0] = tt;
+                                            finalModel[0] = respMeta.getModel();
+                                            hasUsage[0] = true;
+                                        }
+                                    }
+                                } catch (Exception ignore) {
+                                    // 抓 usage 失败不阻塞流
+                                }
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }
-                        }, emitter::completeWithError, emitter::complete);
+                        }, emitter::completeWithError, () -> {
+                            // 流结束：把累计的 usage 一次性入库
+                            if (hasUsage[0]) {
+                                try {
+                                    tokenUsage.record(
+                                            conversationId, username, "ASSISTANT",
+                                            finalPrompt[0], finalCompletion[0], finalTotal[0],
+                                            finalModel[0],
+                                            (int) (System.currentTimeMillis() - startMs));
+                                } catch (Exception e) {
+                                    log.debug("记录 token usage 失败：{}", e.getMessage());
+                                }
+                            }
+                            emitterRegistry.autoCleanup(username, conversationId);
+                            emitter.complete();
+                        });
                     } catch (Exception e) {
                         emitter.completeWithError(e);
                     }
                 });
 
                 return emitter;
+            }
+
+            /** 主动停止某个会话的 AI 流（前端"停止"按钮调用） */
+            @PostMapping(value = "/spring/ai/loom/stream/{conversationId}/stop")
+            public java.util.Map<String, Object> stopStream(@PathVariable("conversationId") String conversationId) {
+                String username = UserContextHolder.getCurrentUser();
+                boolean stopped = emitterRegistry.stop(username, conversationId);
+                return java.util.Map.of("stopped", stopped, "conversationId", conversationId);
+            }
+
+            /** 调试用：当前用户的活跃流 */
+            @GetMapping("/spring/ai/loom/stream/active")
+            public java.util.Map<String, Object> activeStreams() {
+                String username = UserContextHolder.getCurrentUser();
+                return java.util.Map.of(
+                        "user", username,
+                        "conversations", emitterRegistry.activeSnapshot().getOrDefault(username, java.util.Set.of()),
+                        "totalActive", emitterRegistry.activeCount());
             }
         }
     }
@@ -381,16 +484,34 @@ public class LoomAgentConfiguration {
     @Configuration
     static class McpConfiguration {
 
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.rbac.IRoleService.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.rbac.IRoleService defaultRoleService(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                                                                               cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin) {
+            return new cn.wubo.spring.ai.loom.agent.rbac.DefaultRoleService(jdbcTemplate, mcpServerAdmin);
+        }
+
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin defaultMcpServerAdmin(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                                                                                       org.springframework.beans.factory.ObjectProvider<cn.wubo.spring.ai.loom.agent.mcp.IMcp> mcpProvider) {
+            return new cn.wubo.spring.ai.loom.agent.rbac.DefaultMcpServerAdmin(jdbcTemplate, mcpProvider);
+        }
+
         @ConditionalOnProperty(name = "spring.ai.mcp.client.stdio", havingValue = "ASYNC")
         @Bean
-        public IMcp aSyncMcp(LoomAgentProperties properties, List<McpAsyncClient> mcpAsyncClients) {
-            return new ASyncMcp(properties.getMcps(), mcpAsyncClients);
+        public IMcp aSyncMcp(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                              List<McpAsyncClient> mcpAsyncClients,
+                              cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService) {
+            return new ASyncMcp(jdbcTemplate, mcpAsyncClients, roleService);
         }
 
         @ConditionalOnMissingBean
         @Bean
-        public IMcp syncMcp(LoomAgentProperties properties, List<McpSyncClient> mcpSyncClients) {
-            return new SyncMcp(properties.getMcps(), mcpSyncClients);
+        public IMcp syncMcp(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                            List<McpSyncClient> mcpSyncClients,
+                            cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService) {
+            return new SyncMcp(jdbcTemplate, mcpSyncClients, roleService);
         }
     }
 
@@ -450,21 +571,39 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IUser.class)
         @Bean
-        public IUser defaultUser(LoomAgentProperties properties, Cache sessionCache) {
-            LoomAgentProperties.UserProperty userProp = properties.getUser();
-            return new DefaultUser(userProp.getUsername(), userProp.getNickname(), userProp.getAuthentication(), sessionCache);
+        public IUser defaultUser(JdbcTemplate jdbcTemplate, org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder passwordEncoder, Cache sessionCache) {
+            return new DefaultUser(jdbcTemplate, passwordEncoder, sessionCache);
         }
+
+        @Bean
+        public org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder passwordEncoder() {
+            return new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder();
+        }
+
+        /**
+         * 初始管理员账户的种子数据已迁移到 V3__seed_default_admin.sql
+         * （硬编码 BCrypt hash "123456"）。这样不再依赖 Java runner，
+         * 也方便 DBA 在 SQL 里直接管理。
+         */
 
         @ConditionalOnMissingBean(IUserConversation.class)
         @Bean
-        public IUserConversation defaultUserConversation(JdbcTemplate jdbcTemplate, ChatMemoryRepository chatMemoryRepository) {
-            return new DefaultUserConversation(jdbcTemplate, chatMemoryRepository);
+        public IUserConversation defaultUserConversation(JdbcTemplate jdbcTemplate, ChatMemory chatMemory, org.springframework.cache.Cache sessionCache) {
+            return new DefaultUserConversation(jdbcTemplate, chatMemory, sessionCache);
+        }
+
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.token.ITokenUsage.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.token.ITokenUsage defaultTokenUsage(JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.token.DefaultTokenUsage(jdbcTemplate);
         }
 
         @ConditionalOnMissingBean(ISkillStorage.class)
         @Bean
-        public ISkillStorage defaultSkillStorage(JdbcTemplate jdbcTemplate, LoomAgentProperties properties, ResourceLoader resourceLoader) {
-            return new DefaultSkillStorage(jdbcTemplate, properties.getSkills(), resourceLoader);
+        public ISkillStorage defaultSkillStorage(JdbcTemplate jdbcTemplate, ResourceLoader resourceLoader,
+                                                  cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin roleAdmin,
+                                                  IUser user) {
+            return new DefaultSkillStorage(jdbcTemplate, resourceLoader, roleAdmin, user);
         }
 
         @ConditionalOnMissingBean(IFile.class)
@@ -523,32 +662,34 @@ public class LoomAgentConfiguration {
         }
 
         @Bean("loomAgentBaseRouter")
-        public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties) {
+        public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties,
+                                                                 IUserConversation userConversation,
+                                                                 cn.wubo.spring.ai.loom.agent.token.ITokenUsage tokenUsage,
+                                                                 cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService,
+                                                                 cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin,
+                                                                 JdbcTemplate jdbcTemplate) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom", request -> ServerResponse.temporaryRedirect(URI.create("/spring/ai/loom/index.html")).build());
 
-            // isAutoLogin: check if there's a valid session cookie, or always return true to allow auto-login
+            // isAutoLogin: 仅根据 session cookie 判断是否已登录
             builder.POST("spring/ai/loom/user/isAutoLogin", request -> {
                 String token = extractTokenFromCookies(request, properties.getAuth().getCookie().getName());
                 boolean hasValidSession = token != null && user.validateToken(token);
-                return ServerResponse.ok().body(hasValidSession || user.isAutoLogin());
+                return ServerResponse.ok().body(hasValidSession);
             });
 
-            // login: validate credentials, create session token, set cookie
+            // login: 校验 username + password，成功设 cookie
             builder.POST("spring/ai/loom/user/login", request -> {
                 UserRequestRecord body = request.body(UserRequestRecord.class);
                 UserResponseRecord response = user.login(body);
-                String username = body.username() != null && !body.username().isEmpty()
-                        ? body.username()
-                        : properties.getUser().getUsername();
-                String token = user.createToken(username);
+                String token = user.createToken(body.username());
                 LoomAgentProperties.AuthProperty.CookieProperty cookieProp = properties.getAuth().getCookie();
                 return ServerResponse.ok()
                         .cookie(createSessionCookie(token, cookieProp))
                         .body(new UserResponseRecord(token, response.nickname()));
             });
 
-            // logout: invalidate token and clear cookie
+            // logout: 清除 token 和 cookie
             builder.POST("spring/ai/loom/user/logout", request -> {
                 String token = extractTokenFromCookies(request, properties.getAuth().getCookie().getName());
                 if (token != null) {
@@ -567,6 +708,192 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok()
                         .cookie(clearCookie)
                         .body(true);
+            });
+
+            // currentIsAdmin: 当前用户是否管理员（需登录）
+            builder.POST("spring/ai/loom/user/currentIsAdmin", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().body(user.isAdmin(username));
+            });
+
+            // currentUser: 返回当前用户信息（昵称 + 类型）
+            builder.POST("spring/ai/loom/user/currentUser", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (username == null) {
+                    return ServerResponse.ok().body(java.util.Map.of("username", "", "nickname", "", "type", ""));
+                }
+                String nickname = user.getNicknameByUsername(username);
+                String type = user.isAdmin(username) ? "ADMIN" : "USER";
+                return ServerResponse.ok().body(java.util.Map.of(
+                        "username", username,
+                        "nickname", nickname == null ? username : nickname,
+                        "type", type));
+            });
+
+            // changePassword: 当前用户改密（需登录）
+            builder.POST("spring/ai/loom/user/changePassword", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                ChangePasswordRequest body = request.body(ChangePasswordRequest.class);
+                user.changePassword(username, body.oldPassword(), body.newPassword());
+                return ServerResponse.ok().body(true);
+            });
+
+            // 当前用户可见的 mcp（按角色过滤；admin 全可见）
+            builder.GET("spring/ai/loom/mcps", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().body(roleService.getVisibleMcpsForUser(username));
+            });
+
+            // 当前用户角色允许的 mcp 的工具列表
+            builder.GET("/spring/ai/loom/mcps/{name}/tools", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                String mcpName = request.pathVariable("name");
+                boolean allowed = roleService.getVisibleMcpsForUser(username).stream()
+                        .anyMatch(m -> m.name().equals(mcpName));
+                if (!allowed) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                return ServerResponse.ok().body(mcpServerAdmin.listTools(mcpName));
+            });
+
+            // 当前用户的角色列表
+            builder.GET("spring/ai/loom/user/roles", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().body(roleService.getUserRoles(username));
+            });
+
+            // 管理员：用户列表
+            builder.GET("spring/ai/loom/admin/users", request -> {
+                return ServerResponse.ok().body(user.listAllUsers());
+            });
+
+            // 管理员：创建用户
+            builder.POST("spring/ai/loom/admin/users", request -> {
+                CreateUserRequest body = request.body(CreateUserRequest.class);
+                user.createUser(body.username(), body.nickname(), body.password(), body.type());
+                return ServerResponse.ok().body(true);
+            });
+
+            // 管理员：删除用户
+            builder.DELETE("spring/ai/loom/admin/users/{username}", request -> {
+                String username = request.pathVariable("username");
+                user.deleteUser(username);
+                return ServerResponse.ok().body(true);
+            });
+
+            // 管理员：列出某用户全部会话（含已软删 + content_cleaned 标记）
+            builder.GET("spring/ai/loom/admin/users/{username}/conversations", request -> {
+                String username = request.pathVariable("username");
+                return ServerResponse.ok().body(userConversation.adminListByUsername(username));
+            });
+
+            // 管理员：列出会话每 turn 的 token + 内容
+            builder.GET("spring/ai/loom/admin/conversations/{conversationId}/turns", request -> {
+                String conversationId = request.pathVariable("conversationId");
+                return ServerResponse.ok().body(tokenUsage.byConversation(conversationId));
+            });
+
+            // 管理员：全局月度统计（按用户聚合）
+            builder.GET("spring/ai/loom/admin/stats/tokens/monthly", request -> {
+                int year = java.time.LocalDate.now().getYear();
+                int month = java.time.LocalDate.now().getMonthValue();
+                String y = request.param("year").orElse(null);
+                String m = request.param("month").orElse(null);
+                if (y != null) year = Integer.parseInt(y);
+                if (m != null) month = Integer.parseInt(m);
+                return ServerResponse.ok().body(tokenUsage.monthlyByUser(year, month));
+            });
+
+            // 管理员：批量清理已软删的会话消息
+            builder.POST("spring/ai/loom/admin/conversations/clean-batch", request -> {
+                CleanBatchRequest body = request.body(CleanBatchRequest.class);
+                if (body == null || body.items() == null) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "items 不能为空"));
+                }
+                int ok = 0, fail = 0;
+                java.util.List<String> errors = new java.util.ArrayList<>();
+                for (CleanBatchRequest.CleanItem item : body.items()) {
+                    try {
+                        userConversation.cleanContentForUserConv(item.username(), item.conversationId());
+                        ok++;
+                    } catch (Exception e) {
+                        fail++;
+                        errors.add(item.username() + "/" + item.conversationId() + ": " + e.getMessage());
+                    }
+                }
+                return ServerResponse.ok().body(java.util.Map.of("ok", ok, "fail", fail, "errors", errors));
+            });
+
+            // ===== 角色管理 =====
+            builder.GET("spring/ai/loom/admin/roles", request -> ServerResponse.ok().body(roleService.list()));
+            builder.POST("spring/ai/loom/admin/roles", request -> {
+                cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest.class);
+                return ServerResponse.ok().body(roleService.create(body.code(), body.name(), body.description(), body.mcpNames()));
+            });
+            builder.DELETE("spring/ai/loom/admin/roles/{code}", request -> {
+                roleService.deleteOrThrow(request.pathVariable("code"));
+                return ServerResponse.ok().body(true);
+            });
+            builder.GET("spring/ai/loom/admin/roles/{code}/mcps", request -> {
+                return ServerResponse.ok().body(roleService.getRoleMcpsWithDefault(request.pathVariable("code")));
+            });
+            builder.PUT("spring/ai/loom/admin/roles/{code}/mcps", request -> {
+                cn.wubo.spring.ai.loom.agent.model.SetRoleMcpsRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleMcpsRequest.class);
+                roleService.setRoleMcps(request.pathVariable("code"),
+                        body == null ? null : body.items());
+                return ServerResponse.ok().body(true);
+            });
+            builder.GET("spring/ai/loom/admin/users/{username}/roles", request -> {
+                return ServerResponse.ok().body(roleService.getUserRoles(request.pathVariable("username")));
+            });
+            builder.PUT("spring/ai/loom/admin/users/{username}/roles", request -> {
+                cn.wubo.spring.ai.loom.agent.model.SetUserRolesRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.SetUserRolesRequest.class);
+                roleService.setUserRolesOrSkipAdmin(request.pathVariable("username"), body == null ? null : body.roleCodes());
+                return ServerResponse.ok().body(true);
+            });
+
+            // ===== MCP 元数据管理 =====
+            builder.GET("spring/ai/loom/admin/mcps", request -> ServerResponse.ok().body(mcpServerAdmin.listAll()));
+            // 系统视图：合并 SDK 实时 mcp + DB 元数据（mcps.html 和 roles.html 都用这个）
+            builder.GET("spring/ai/loom/admin/mcp-system", request -> ServerResponse.ok().body(mcpServerAdmin.listSystem()));
+            builder.PUT("spring/ai/loom/admin/mcps/{name}", request -> {
+                cn.wubo.spring.ai.loom.agent.model.UpdateMcpServerRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.UpdateMcpServerRequest.class);
+                return ServerResponse.ok().body(mcpServerAdmin.update(request.pathVariable("name"),
+                        body == null ? null : body.title(),
+                        body == null ? null : body.description()));
+            });
+            // V7 起删除 /active 端点：mcp 是否可用完全由角色授权决定
+            // 工具列表 / 更新改用 query string 或独立路径，避免 mcp 名含 @ / / 等特殊字符触发 Tomcat 400
+            builder.GET("spring/ai/loom/admin/mcps/tools", request -> {
+                String name = request.param("name").orElse(null);
+                return ServerResponse.ok().body(mcpServerAdmin.listTools(name));
+            });
+            // 工具描述保存：toolId=0 表示 DB 没记录 → INSERT；否则 UPDATE
+            // body 里带 mcpName + name（用于 INSERT 时定位）
+            builder.PUT("spring/ai/loom/admin/mcp-tools/{toolId}", request -> {
+                cn.wubo.spring.ai.loom.agent.model.UpsertMcpToolRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.UpsertMcpToolRequest.class);
+                Long toolId = request.pathVariable("toolId").equals("0") ? 0L
+                        : Long.parseLong(request.pathVariable("toolId"));
+                return ServerResponse.ok().body(mcpServerAdmin.upsertTool(
+                        toolId,
+                        body == null ? null : body.mcpName(),
+                        body == null ? null : body.name(),
+                        body == null ? null : body.description()));
+            });
+            // 删除已维护的工具描述记录（删除后回退到 SDK 默认）
+            builder.DELETE("spring/ai/loom/admin/mcp-tools/{toolId}", request -> {
+                Long toolId = Long.parseLong(request.pathVariable("toolId"));
+                int n = jdbcTemplate.update("DELETE FROM mcp_tool WHERE id = ?", toolId);
+                if (n == 0) return ServerResponse.notFound().build();
+                return ServerResponse.ok().body(true);
+            });
+
+            // 当前用户：本月 token 用量
+            builder.GET("/spring/ai/loom/user/tokens/current-month", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (username == null) {
+                    return ServerResponse.ok().body(new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
+                }
+                return ServerResponse.ok().body(tokenUsage.currentMonthForUser(username));
             });
 
             return builder.build();
@@ -617,6 +944,139 @@ public class LoomAgentConfiguration {
                 String name = request.pathVariable("name");
                 String username = UserContextHolder.getCurrentUser();
                 skillStorage.remove(name, username);
+                return ServerResponse.ok().body(true);
+            });
+            // PATCH：改描述 / 默认加载
+            builder.PATCH("spring/ai/loom/skill/{name}", request -> {
+                String name = request.pathVariable("name");
+                String username = UserContextHolder.getCurrentUser();
+                cn.wubo.spring.ai.loom.agent.model.UserSkillPatchRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.UserSkillPatchRequest.class);
+                skillStorage.patch(name, username, body);
+                return ServerResponse.ok().body(true);
+            });
+            // 手动触发同步
+            builder.POST("spring/ai/loom/skill/sync", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                skillStorage.sync(username);
+                return ServerResponse.ok().body(true);
+            });
+            return builder.build();
+        }
+
+        /** Skill 市场（公共浏览 + 用户拉取 + 用户提交） */
+        @Bean("loomAgentSkillMarketRouter")
+        public RouterFunction<ServerResponse> loomAgentSkillMarketRouter(
+                cn.wubo.spring.ai.loom.agent.skill.ISkillMarketService marketService,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            // 任意用户：列出所有 APPROVED
+            builder.GET("spring/ai/loom/market-skills", request -> ServerResponse.ok().body(marketService.listApproved()));
+            // 任意用户：按 id 查
+            builder.GET("spring/ai/loom/market-skills/{id}", request -> {
+                Long id = Long.parseLong(request.pathVariable("id"));
+                return ServerResponse.ok().body(marketService.get(id));
+            });
+            // 任意用户：拉取到自己的 user_skill
+            builder.POST("spring/ai/loom/market-skills/{id}/pull", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                Long id = Long.parseLong(request.pathVariable("id"));
+                return ServerResponse.ok().body(marketService.pull(username, id));
+            });
+            // 任意用户：提交新 Skill（status=PENDING）
+            builder.POST("spring/ai/loom/user/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest.class);
+                return ServerResponse.ok().body(marketService.submit(username, body));
+            });
+            return builder.build();
+        }
+
+        /** Skill 市场管理（仅 admin） */
+        @Bean("loomAgentSkillMarketAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentSkillMarketAdminRouter(
+                cn.wubo.spring.ai.loom.agent.skill.ISkillMarketService marketService,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            // 列出所有（含 PENDING/REJECTED）
+            builder.GET("spring/ai/loom/admin/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                return ServerResponse.ok().body(marketService.listAllForAdmin());
+            });
+            // 列出 PENDING
+            builder.GET("spring/ai/loom/admin/market-skills/pending", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                return ServerResponse.ok().body(marketService.listPending());
+            });
+            // admin 直接新增（绕过审批）
+            builder.POST("spring/ai/loom/admin/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest.class);
+                return ServerResponse.ok().body(marketService.adminCreate(username, body));
+            });
+            // admin 改任意 Skill
+            builder.PUT("spring/ai/loom/admin/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                Long id = Long.parseLong(request.pathVariable("id"));
+                cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest.class);
+                return ServerResponse.ok().body(marketService.adminUpdate(username, id, body));
+            });
+            // admin 删
+            builder.DELETE("spring/ai/loom/admin/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                Long id = Long.parseLong(request.pathVariable("id"));
+                marketService.adminDelete(username, id);
+                return ServerResponse.ok().body(true);
+            });
+            // 审批
+            builder.POST("spring/ai/loom/admin/market-skills/{id}/approve", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                Long id = Long.parseLong(request.pathVariable("id"));
+                cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest.class);
+                String comment = body == null ? null : body.comment();
+                return ServerResponse.ok().body(marketService.approve(username, id, comment));
+            });
+            builder.POST("spring/ai/loom/admin/market-skills/{id}/reject", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                Long id = Long.parseLong(request.pathVariable("id"));
+                cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest.class);
+                String comment = body == null ? null : body.comment();
+                return ServerResponse.ok().body(marketService.reject(username, id, comment));
+            });
+            return builder.build();
+        }
+
+        /** 角色授权 Skill（仅 admin） */
+        @Bean("loomAgentSkillRoleAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentSkillRoleAdminRouter(
+                cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin roleAdmin,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("spring/ai/loom/admin/roles/{code}/skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String code = request.pathVariable("code");
+                return ServerResponse.ok().body(roleAdmin.getRoleSkills(code));
+            });
+            builder.PUT("spring/ai/loom/admin/roles/{code}/skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String code = request.pathVariable("code");
+                cn.wubo.spring.ai.loom.agent.model.SetRoleSkillsRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleSkillsRequest.class);
+                roleAdmin.setRoleSkills(code, body == null ? null : body.items());
                 return ServerResponse.ok().body(true);
             });
             return builder.build();

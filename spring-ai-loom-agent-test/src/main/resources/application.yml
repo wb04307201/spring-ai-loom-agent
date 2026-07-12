@@ -5,6 +5,7 @@ spring:
       password: 123456
   flyway:
     validate-on-migrate: false
+    encoding: UTF-8
   h2:
     console:
       enabled: true
@@ -20,6 +21,8 @@ spring:
         options:
           model: qwen3.7-plus
           enable_thinking: true
+          stream-options:
+            include_usage: true
       embedding:
         options:
           model: text-embedding-v4
@@ -96,90 +99,8 @@ spring:
           defaultEmptyContextPromptTemplate: |
             The user query is outside your knowledge base.
             Politely inform the user that you can't answer it.
-        mcps:
-          - name: spring-ai-mcp-client - bing-search
-            title: 必应搜索
-            description: 一个集成了微软必应搜索API的模型上下文协议服务
-            default-selected: true
-          - name: spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch
-            title: 网页内容抓取
-            description: 一个强大的MCP服务器,可以轻松地将网页内容抓取并转换为各种格式(HTML、JSON、Markdown、纯文本)
-            default-selected: true
-            tools:
-              - name: fetch_html
-                description: 获取网页内容，并以 HTML 格式返回
-              - name: fetch_markdown
-                description: 取网页内容，并以 Markdown 格式返回
-              - name: fetch_txt
-                description: 取网页内容，并以纯文本格式返回（不含 HTML）
-              - name: fetch_json
-                description: 从指定 URL 获取 JSON 文件
-          - name: spring-ai-mcp-client - sequential-thinking
-            title: 顺序思维
-            description: 一种MCP服务器实现，提供动态且反射性的解决问题的工具
-            tools:
-              - name: sequentialthinking
-                description: 本工具通过可适应与演进的灵活思维流程，协助对问题进行深入分析
-          - name: spring-ai-mcp-client - memory
-            title: 记忆
-            description: 使用本地知识图谱实现持久化记忆
-            tools:
-              - name: create_entities
-                description: 在知识图谱中创建多个新实体
-              - name: create_relations
-                description: 在知识图谱的实体之间创建多个新关系
-              - name: add_observations
-                description: 向知识图谱中现有实体添加新的观察信息
-              - name: delete_entities
-                description: 从知识图谱中删除多个实体及其关联的关系
-              - name: delete_observations
-                description: 从知识图谱的实体中删除特定的观察信息
-              - name: delete_relations
-                description: 从知识图谱中删除多个关系
-              - name: read_graph
-                description: 读取整个知识图谱
-              - name: search_nodes
-                description: 基于查询在知识图谱中搜索节点
-              - name: open_nodes
-                description: 通过名称打开知识图谱中的特定节点
-          - name: spring-ai-mcp-client - cn-weather-mcp
-            title: 中国天气
-            description: 自研中国城市实时天气服务
-          - name: spring-ai-mcp-client - http-mcp
-            title: HTTP 客户端
-            description: HTTP客户端MCP服务，提供通用HTTP请求功能
-          - name: spring-ai-mcp-client - playwright
-            title: Playwright
-            description: 通过结构化可访问性快照与网页交互
-          - name: spring-ai-mcp-client - chrome-devtools
-            title: Chrome DevTools
-            description: 控制和检查Chrome浏览器，实现自动化操作和调试
-          - name: spring-ai-mcp-client - context7
-          - name: spring-ai-mcp-client - git-mcp-server
-          - name: spring-ai-mcp-client - mcp-server-docker
-          - name: spring-ai-mcp-client - desktop-commander
-        skills:
-          - name: 网络月度事件报告
-            description: 用户说"梳理 xxx 月度事件/年度时间线/事件复盘/xxx 的网络事件"时触发：围绕 {topic} 按月梳理当年的重要事件，做跨月因果关联与下一年趋势预判，产出 HTML 报告并返回预览链接（{topic} 来自用户当前对话）
-            content: classpath:skills/news-watch.st
-          - name: http测试
-            description: 用户说"测试/调用 xxx 接口/http 探测/服务连通性"时触发：自定义 http 服务测试
-            content: classpath:skills/http.st
-            load: false
-          - name: 测试保存、下载、预览1
-            description: 测试保存、下载、预览1
-            content: 你能说明勾股定理么？并保存成md，并给我下载和和预览地址
-            load: false
-          - name: 测试保存、下载、预览2
-            description: 测试保存、下载、预览2
-            content: 你能说明微积分么？并保存成html，并给我下载和和预览地址
-            load: false
-          - name: 部署项目
-            description: 用户说"部署/上线/跑起来/启动 xxx 项目"时触发：从 git 仓库拉取代码 → 编译 → 构建 Docker 镜像 → 启动容器 → 返回访问链接，支持 maven / npm / npm-frontend / pip 多栈
-            content: classpath:skills/package-docker.st
-          - name: 测试自动E2E功能验证
-            description: 测试使用浏览器对功能进行E2E测试，并生成验证报告
-            content: classpath:skills/e2e.st
+        # mcp 元数据已迁移到数据库（V5__add_roles_and_mcp_metadata.sql 默认种子 + admin 控制台可改）
+        # skills 已迁移到数据库（V10__skill_market.sql 默认 seed 6 个 system skill + admin 控制台管理市场）
   servlet:
     multipart:
       max-file-size: 10MB

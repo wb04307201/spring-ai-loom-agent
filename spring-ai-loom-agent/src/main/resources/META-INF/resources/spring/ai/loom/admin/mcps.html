@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>MCP 描述维护 - 灵梭管理控制台</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/spring/ai/loom/style.css">
+    <link rel="stylesheet" href="console.css">
+</head>
+<body>
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+            <h2 class="admin-sidebar-title">管理控制台</h2>
+            <span class="admin-sidebar-subtitle">用户 · 角色 · Skill · MCP</span>
+        </div>
+        <nav class="admin-sidebar-nav">
+            <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
+            <a href="roles.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
+            <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>Skill 市场</span></a>
+            <a href="mcps.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
+            <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>用量统计</span></a>
+            <div class="admin-sidebar-divider"></div>
+            <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a>
+        </nav>
+    </aside>
+    <div class="admin-main-wrap">
+        <header class="admin-header">
+            <div class="admin-header-left">
+                <h1>MCP 描述维护</h1>
+                <span class="admin-subtitle">SDK 系统所有 mcp 服务（合并 DB 元数据）</span>
+            </div>
+            <div class="admin-header-right">
+                <span id="admin-username" class="admin-username"></span>
+            </div>
+        </header>
+
+        <main class="admin-main">
+            <div class="admin-toolbar">
+                <button id="refresh-btn" class="secondary-btn">刷新</button>
+            </div>
+
+            <div id="mcp-table-container" class="table-container">
+                <div class="loading-indicator">加载中...</div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<!-- 编辑 MCP 模态框 -->
+<div id="edit-mcp-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 720px; max-height: 85vh;">
+        <div class="modal-header">
+            <h3 id="edit-mcp-title">编辑 MCP</h3>
+            <div class="close-button" id="edit-mcp-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px; overflow-y: auto; max-height: 70vh;">
+            <div class="form-group">
+                <label>服务名（code，不可改）</label>
+                <input type="text" id="em-name" class="form-input" disabled>
+            </div>
+            <div class="form-group">
+                <label>显示标题</label>
+                <input type="text" id="em-title" class="form-input" placeholder="如 必应搜索（留空 = 用 SDK 默认）">
+            </div>
+            <div class="form-group">
+                <label>描述</label>
+                <textarea id="em-desc" class="form-input" rows="3" placeholder="功能描述（留空 = 用 SDK 默认）"></textarea>
+            </div>
+            <div style="margin-top: 16px;">
+                <strong>工具描述（留空 = 用 SDK 默认）</strong>
+                <div id="em-tools" style="margin-top: 8px; max-height: 280px; overflow-y: auto;">
+                    加载中...
+                </div>
+            </div>
+            <div id="em-error" class="error-msg" style="display: none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="em-cancel">取消</button>
+            <button class="primary-btn" id="em-save">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 通用确认模态框 -->
+<div id="confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 440px;">
+        <div class="modal-header">
+            <h3 id="confirm-title">确认</h3>
+            <div class="close-button" id="confirm-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px;">
+            <div id="confirm-message" style="font-size: 14px; line-height: 1.7;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="confirm-cancel">取消</button>
+            <button class="primary-btn" id="confirm-ok" style="background: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444);">确定</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast-notification" class="toast"></div>
+
+<script src="mcps.js"></script>
+</body>
+</html>

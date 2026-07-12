@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.32
+> **Version**: 1.1.33
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -486,44 +486,55 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ## 6. Skill Management
 
-### 6.1 List Skills
+> All skills live in the database (tables `market_skill` / `user_skill` / `role_skill`). The yml `skills[]` block is no longer read — it was replaced by 6 system-seeded `market_skill` rows plus an admin-controlled market workflow.
+>
+> Three sources show up in the `source` field of `user_skill`:
+> - `USER_CREATED` — created by the user via API or chat UI; **fully editable** (name/desc/content/default_loaded)
+> - `MARKET_PULLED` — pulled from the approved market; **editable desc / default_loaded only** (content is locked to the market snapshot; re-pull to update)
+> - `ROLE_GRANTED` — auto-injected from a role authorization; **read-only** (locked=true; cannot edit or delete)
+> - `MARKET_VIEW` — admin-only union view that bundles all `APPROVED` market skills + admin's own `PENDING`; shown with a `市` badge in the chat UI; not actually written to `user_skill`
+>
+> Every list/get call auto-syncs `role_skill` → `user_skill` for the current user, so a freshly authorized skill is visible immediately on next list.
+
+---
+
+### 6.1 List Current User's Skills
 
 ```
 GET /spring/ai/loom/skill
 ```
 
-**Response**: `SkillRecord[]` (see model fields below)
+**Response**: `SkillRecord[]` (the LLM-facing view)
 
-| Field         | Type    | Description                                                                                  |
-|---------------|---------|----------------------------------------------------------------------------------------------|
-| `name`        | string  | Skill name                                                                                   |
-| `description` | string  | Skill description                                                                            |
-| `load`        | boolean | Whether the LLM preloads this skill into the system prompt (`true` for embedded skills)      |
-| `content`     | string  | Skill content (prompt template; supports `classpath:` prefix to load from the classpath)     |
-| `source`      | string  | Skill source — `configuration` (from yml) or `database` (user-created via API)               |
+| Field         | Type    | Description                                                                                                |
+|---------------|---------|------------------------------------------------------------------------------------------------------------|
+| `name`        | string  | Skill name                                                                                                 |
+| `description` | string  | Skill description                                                                                          |
+| `load`        | boolean | Whether the LLM preloads this skill into the system prompt                                                  |
+| `content`     | string  | Skill content (resolved: if stored as `classpath:xxx`, the resource is read at this point)                 |
+| `source`      | string  | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` / (admin only) `MARKET_VIEW`                              |
+
+For admins, this list also includes the `MARKET_VIEW` union (all approved + own PENDING).
 
 ---
 
-### 6.2 Create/Update Skill
+### 6.2 Create / Overwrite a Skill (USER_CREATED)
 
 ```
 PUT /spring/ai/loom/skill
 Content-Type: application/json
 ```
 
-**Request Body** (`SkillProperty`):
+**Request Body** (`SkillRecord`):
 
 | Field         | Type    | Required | Description                                                                              |
 |---------------|---------|----------|------------------------------------------------------------------------------------------|
 | `name`        | string  | Yes      | Skill name                                                                               |
 | `description` | string  | No       | Skill description                                                                        |
 | `load`        | boolean | No       | Whether the LLM preloads this skill; defaults to `true`                                  |
-| `content`     | string  | No       | Skill content / prompt template (supports `classpath:` prefix to load from the classpath) |
+| `content`     | string  | Yes      | Skill content / prompt template (supports `classpath:` prefix which is resolved on read) |
 
-> **Note:** The body shape matches the `SkillRecord` model (`name` / `description` / `load` / `content`).
-> There is no `params`, `tools`, or `defaultPreload` field — `{param}` placeholders inside `content`
-> are LLM-interpreted at runtime, not declared as structured form fields. MCP tool references
-> inside `content` use `@tool_name` and resolve to the MCPs configured in `mcps:`.
+> `{param}` placeholders inside `content` are LLM-interpreted at runtime, not declared as structured form fields. MCP tool references inside `content` use `@tool_name` and resolve to the role-authorized MCPs.
 
 **Example**:
 
@@ -532,15 +543,33 @@ Content-Type: application/json
   "name": "email_writer",
   "description": "Professional email writing assistant",
   "load": true,
-  "content": "You are an email assistant. The recipient is {recipient}, the tone should be {tone}, and the main points are: {content}. Generate the email body now."
+  "content": "You are an email assistant. The recipient is {recipient}..."
 }
 ```
 
-**Response**: `true` (boolean)
+**Response**: `true` (boolean) — `false` if a `ROLE_GRANTED` skill with the same name is locked.
 
 ---
 
-### 6.3 Get Single Skill
+### 6.3 Patch Description / Default-Loaded
+
+```
+PATCH /spring/ai/loom/skill/{name}
+Content-Type: application/json
+```
+
+For `MARKET_PULLED` and `USER_CREATED` skills — change `description` and/or `default_loaded` without overwriting content. Returns `400` if the skill is `ROLE_GRANTED` (locked).
+
+**Request Body** (`UserSkillPatchRequest`):
+
+| Field           | Type    | Description                                       |
+|-----------------|---------|---------------------------------------------------|
+| `description`   | string  | New description (omit to leave unchanged)         |
+| `defaultLoaded` | boolean | New default-loaded flag (omit to leave unchanged) |
+
+---
+
+### 6.4 Get a Single Skill (LLM-facing)
 
 ```
 GET /spring/ai/loom/skill/{name}
@@ -552,23 +581,132 @@ GET /spring/ai/loom/skill/{name}
 |-----------|--------|-------------|
 | `name`    | string | Skill name  |
 
-**Response**: `SkillRecord`
+**Response**: `SkillRecord`. For admins, falls back to the market view if no local copy exists.
 
 ---
 
-### 6.4 Delete Skill
+### 6.5 Delete a Skill
 
 ```
 DELETE /spring/ai/loom/skill/{name}
 ```
 
-**Path Parameters**:
+Returns `400` if the skill is `ROLE_GRANTED` (locked). Returns `true` on success.
 
-| Parameter | Type   | Description |
-|-----------|--------|-------------|
-| `name`    | string | Skill name  |
+---
 
-**Response**: `true` (boolean)
+### 6.6 Trigger Role Sync Manually
+
+```
+POST /spring/ai/loom/skill/sync
+```
+
+Re-runs the `role_skill` → `user_skill` sync for the current user. Mostly for debugging — the same sync runs automatically on every list/get.
+
+---
+
+### 6.7 Skill Market — Browse (any user)
+
+```
+GET /spring/ai/loom/market-skills
+```
+
+Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name, version DESC`. Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `version`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
+
+---
+
+### 6.8 Skill Market — View One
+
+```
+GET /spring/ai/loom/market-skills/{id}
+```
+
+**Path Parameters**: `id` = `market_skill.id` (Long)
+
+---
+
+### 6.9 Skill Market — Pull into My `user_skill`
+
+```
+POST /spring/ai/loom/market-skills/{id}/pull
+```
+
+Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `400` if:
+- The market skill isn't `APPROVED`
+- A `ROLE_GRANTED` lock with the same name already exists
+- The same name is already in your `user_skill` (refreshes content silently)
+
+---
+
+### 6.10 Submit My Skill to Market
+
+```
+POST /spring/ai/loom/user/market-skills
+Content-Type: application/json
+```
+
+Submits a new `market_skill` row with `status=PENDING` and `author=currentUser`.
+
+**Request Body** (`MarketSkillSubmitRequest`):
+
+| Field        | Type   | Required | Description                                        |
+|--------------|--------|----------|----------------------------------------------------|
+| `name`       | string | Yes      | Skill name                                         |
+| `description`| string | No       | Description                                        |
+| `content`    | string | Yes      | Prompt template                                    |
+| `version`    | string | Yes      | SemVer-ish version string                          |
+
+Constraint: `(author, name, version)` must be unique. Pending duplicates require re-submitting under a new version.
+
+---
+
+### 6.11 Admin — Market CRUD (any status)
+
+> Admin-only. Auth-gated by `auth.adminPathPatterns` and double-checked in the handler.
+
+| Method | Path                                              | Description                                       |
+|--------|---------------------------------------------------|---------------------------------------------------|
+| GET    | `/spring/ai/loom/admin/market-skills`             | List **all** (PENDING/APPROVED/REJECTED)        |
+| GET    | `/spring/ai/loom/admin/market-skills/pending`     | List only `PENDING`                              |
+| POST   | `/spring/ai/loom/admin/market-skills`             | Create directly with `status=APPROVED` (skip review). Body: `MarketSkillUpsertRequest` |
+| PUT    | `/spring/ai/loom/admin/market-skills/{id}`        | Edit any field of any market skill                |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}`        | Cascade-deletes from `user_skill` and `role_skill` |
+| POST   | `/spring/ai/loom/admin/market-skills/{id}/approve`| Approve a PENDING submission                     |
+| POST   | `/spring/ai/loom/admin/market-skills/{id}/reject` | Reject a PENDING submission. Body: `{comment}`    |
+
+`MarketSkillUpsertRequest`:
+
+| Field      | Type   | Required | Description                                          |
+|------------|--------|----------|------------------------------------------------------|
+| `name`     | string | Yes      | Skill name                                           |
+| `description`| string| No       | Description                                          |
+| `content`  | string | Yes      | Prompt template                                      |
+| `version`  | string | Yes      | Version string                                       |
+| `status`   | string | No       | Defaults to `APPROVED` if omitted                     |
+
+---
+
+### 6.12 Admin — Authorize a Skill to a Role
+
+```
+GET /spring/ai/loom/admin/roles/{code}/skills
+PUT /spring/ai/loom/admin/roles/{code}/skills
+```
+
+`GET` returns the role's currently authorized `market_skill` list as `RoleSkillItem[]` (each item has `marketSkillId` + `defaultLoaded`).
+
+`PUT` replaces the whole list. Request body:
+
+```json
+{
+  "items": [
+    {"marketSkillId": 1, "defaultLoaded": true},
+    {"marketSkillId": 5, "defaultLoaded": false}
+  ]
+}
+```
+
+`defaultLoaded` defaults to `true` if omitted. The role's users will see these skills injected into their `user_skill` (source=`ROLE_GRANTED`, locked=true) on their next list/sync.
 
 ---
 
@@ -605,7 +743,7 @@ GET /spring/ai/chat/loom/mcp
   {
     "name": "weather-mcp",
     "title": "Weather",
-    "version": "1.1.32",
+    "version": "1.1.33",
     "description": "Provides real-time weather query service",
     "defaultSelected": true,
     "tools": [
@@ -858,11 +996,11 @@ Force-terminate a system process by PID.
   "description": "string",
   "load": true,
   "content": "string",
-  "source": "configuration"
+  "source": "USER_CREATED | MARKET_PULLED | ROLE_GRANTED | MARKET_VIEW"
 }
 ```
 
-> The response shape is the same as the PUT request body (the `SkillProperty` yml model is a strict subset — `name` / `description` / `load` / `content` — plus a `source` field set by the server to indicate where the skill was loaded from).
+> The response shape is the same as the PUT request body (`name` / `description` / `load` / `content`), plus a `source` field set by the server to indicate where the skill was loaded from. `source` is one of `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` / `MARKET_VIEW`.
 
 ---
 
@@ -901,9 +1039,9 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `tools[].name`          | string  | Tool name                            |
 | `tools[].description`   | string  | Tool description                     |
 
-### 10.4 Skill Configuration
+### 10.4 Skill Configuration (no longer read from yml)
 
-`spring.ai.loom.agent.skills` is an array. Each entry contains the fields defined in [SkillProperty](#62-createupdate-skill).
+The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Skill Management](#6-skill-management) for the database-driven flow. 6 system skills are seeded on first launch.
 
 ### 10.5 JVector Configuration
 
@@ -932,6 +1070,30 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge`    | Root directory for knowledge base files              |
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
+
+### 10.7.1 File Tool Configuration (`IFileTool`)
+
+The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with a set of default safety/resource limits tailored for LLM tool-call scenarios.
+
+| Property                                          | Type     | Default                                                                                                | Description                                                                                                                                                                                                                                                                              |
+|---------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `spring.ai.loom.agent.file.enabled`               | boolean  | `true`                                                                                                 | Whether to enable the file tool                                                                                                                                                                                                                                                          |
+| `spring.ai.loom.agent.file.maxFileSize`           | long     | `5242880` (5 MB)                                                                                       | Per-call upper bound on file read/write size (bytes). Exceeding this is rejected outright, **to avoid OOM and LLM context overflow**.                                                                                                                                                   |
+| `spring.ai.loom.agent.file.maxMediaSize`          | long     | `1048576` (1 MB)                                                                                       | Upper bound on media files (images / audio). Base64-encoded size ≈ 4/3 of the original, so the limit is stricter than for text.                                                                                                                                                          |
+| `spring.ai.loom.agent.file.maxWalkDepth`          | int      | `5`                                                                                                    | Upper bound on depth for `directoryTree` / recursive listing / search.                                                                                                                                                                                                                   |
+| `spring.ai.loom.agent.file.maxWalkEntries`        | int      | `1000`                                                                                                 | Upper bound on entries returned per `listDirectory` / `directoryTree` call.                                                                                                                                                                                                              |
+| `spring.ai.loom.agent.file.maxSearchResults`      | int      | `500`                                                                                                 | Upper bound on `searchFiles` hit count.                                                                                                                                                                                                                                                  |
+| `spring.ai.loom.agent.file.deleteConfirmToken`    | string   | `I_CONFIRM_DELETE`                                                                                     | The `deleteFileOrDirectory` tool requires this exact string as an explicit argument before it executes (**guards against accidental LLM deletions**). Can be replaced with a shorter token (e.g. `YES`) to save tokens.                                                                     |
+| `spring.ai.loom.agent.file.excludedDirs`          | string[] | `[".git", "node_modules", "target", "build", "dist", ".idea", ".vscode", ".gradle", "out", "bin"]`     | Directory names skipped during traversal (exact match, not glob). Keeps `directoryTree` / `searchFiles` from dumping tens of thousands of `target/classes/*.class` entries on a Spring Boot project.                                                                                  |
+
+**Safety mechanisms**:
+
+- All path resolution is delegated to `PathSecurityUtils.assertInsideUserDir(resolved, userDir, mustExist)`, which uniformly handles:
+  - `..` traversal (a single `Path.normalize` defeats it)
+  - **Symlink escape** (`Path.toRealPath` follows the chain) — even if the user drops a symlink inside `userDir` pointing at `C:\Windows`, the tool will not read through it
+  - Size-bypass on case-insensitive filesystems (Windows / macOS)
+- Atomic writes: `writeFile` / `editFile` write to a `.tmp` file and then `Files.move(ATOMIC_MOVE)` it into place, so a mid-write power loss won't corrupt the target. Falls back to non-atomic replacement across volumes.
+- `editFile` uniqueness check: if `oldText` matches more than once in the file the call is rejected, forcing the LLM to provide more precise surrounding context.
 
 ### 10.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
 
@@ -1022,6 +1184,51 @@ spring:
           username: your-username
           token: your-token
 ```
+
+### 10.10 Maven Build Configuration
+
+| Property                                          | Type     | Default    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+|---------------------------------------------------|----------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `spring.ai.loom.agent.maven.enabled`              | boolean  | `false`    | Whether to register the Maven tool (**opt-in**) — compile/package for deployment scenarios is handled by `ICompileAndDeployTool`                                                                                                                                                                                                                                                                                                                                                                              |
+| `spring.ai.loom.agent.maven.mavenHome`            | string   | —          | Maven install directory. **When empty, the tool auto-discovers**: it tries the `MAVEN_HOME` / `M2_HOME` environment variables first, then scans common Windows paths (e.g. `C:\developer\apache-maven-*`, `C:\Program Files\Apache Maven`). Auto-discovery does **not** rely on the system `PATH`, so a broken or shadowing `mvn` wrapper (e.g. a global npm `mvn`) won't cause `maven-invoker` to throw `Error configuring command line`.                                                                    |
+| `spring.ai.loom.agent.maven.localRepository`      | string   | —          | Local repository path (uses the default path when empty)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `spring.ai.loom.agent.maven.maxOutputLines`       | int      | `200`      | Maximum output lines (truncated when exceeded)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `spring.ai.loom.agent.maven.defaultTimeoutMs`     | long     | `300000`   | Default execution timeout in milliseconds (5 minutes)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+> All Maven tool operations are scoped to `{fileBasePath}/{username}/`; paths outside that range are rejected.
+>
+> **Troubleshooting tip — `MavenInvocationException: Error configuring command line`**: this means `maven-invoker` could not find a usable `mvn` / `mvn.cmd`. The tool startup log prints the resolved `mavenHome` together with a diagnostic hint listing every path it searched, the environment variables it looked at, and how to fix it. The most common cause is a broken or shadowing `mvn` on `PATH` (e.g. a global npm `mvn` wrapper); in that case, explicitly set `spring.ai.loom.agent.maven.mavenHome` in `application.yml` to point at the real Maven install directory to bypass it.
+>
+> **Troubleshooting tip — "file is locked" errors when deleting the project directory on Windows**: in older versions this was caused by `maven-invoker 3.3.0` / `plexus-utils 3.3.0` because (a) the JVM shutdown hook they register on the exception/cancel path never releases the held `Process` reference, and (b) `Invoker.execute()` does not expose the child-process handle, so it cannot propagate cancel/timeout down to the mvn child process. The result: a cancelled or timed-out Maven call would leave the mvn child running and continuing to hold mmap handles on `target/classes` and `~/.m2/repository/*.jar`, locking those files on Windows. **The new version no longer uses `Invoker.execute()` to run the process** — it forks mvn directly with `ProcessBuilder`, does a clean timeout via `Process.waitFor(timeout, unit)`, then calls `Process.destroyForcibly()` and explicitly closes the streams on timeout. **No JVM shutdown hook is registered any more, so the mvn child is always killed on timeout/cancel.** If you still see locks after upgrading, it is most likely an orphan mvn process left behind by a previous JVM — find it with `tasklist /FI "IMAGENAME eq cmd.exe"` and `taskkill /F /PID <pid>` it.
+
+### 10.11 Tool Group Switches
+
+All built-in tool groups are **enabled by default** (`matchIfMissing=true`). Set any of the following properties to `false` in yml to turn off the corresponding tool group.
+
+| Property                                | Type     | Default | Description                                                                                                                                                                       |
+|-----------------------------------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `spring.ai.loom.agent.time.enabled`     | boolean  | `true`  | Time tool (`ITimeTool` — get current time, convert between timezones)                                                                                                            |
+| `spring.ai.loom.agent.file.enabled`     | boolean  | `true`  | File tool (`IFileTool` — 16 path-based read/write/edit/search/delete operations)                                                                                                 |
+| `spring.ai.loom.agent.skill.enabled`    | boolean  | `true`  | Skill tool (`ISkillTool` — list skills, get skill details)                                                                                                                       |
+| `spring.ai.loom.agent.git.enabled`      | boolean  | `false` | Git tool (`IGitTool` — 28 git operations). **Opt-in** — end-to-end deployment goes through `ICompileAndDeployTool`.                                                              |
+| `spring.ai.loom.agent.maven.enabled`    | boolean  | `false` | Maven tool (also requires `maven-invoker` on the classpath). **Opt-in** — compile/package for deployment scenarios goes through `ICompileAndDeployTool`.                        |
+| `spring.ai.loom.agent.git.username`     | string   | —       | HTTP(S) Git auth username (clone/pull/push)                                                                                                                                      |
+| `spring.ai.loom.agent.git.token`        | string   | —       | HTTP(S) Git auth token / password                                                                                                                                                |
+| `spring.ai.loom.agent.gitUsername`      | string   | —       | **Legacy** top-level alias, equivalent to `git.username`                                                                                                                         |
+| `spring.ai.loom.agent.gitToken`         | string   | —       | **Legacy** top-level alias, equivalent to `git.token`                                                                                                                            |
+
+**Example — enable the Git tool**:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        git:
+          enabled: true   # default false; set to true to enable
+```
+
+> Even when a tool group is turned off, you can still re-enable it by providing your own `@Bean IGitTool` / `@Bean IMavenTool` — `@ConditionalOnMissingBean` always takes precedence over the auto-configured bean.
 
 ---
 

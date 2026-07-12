@@ -49,7 +49,7 @@ java -jar target/loom-file-mcp-1.0-SNAPSHOT.jar
 | `excludedDirs` | `.git, node_modules, .idea, target, .vscode` | 遍历时跳过的目录 |
 | `deleteConfirmToken` | `I_CONFIRM_DELETE` | 删除操作的确认令牌 |
 
-## 可用工具（14 个）
+## 可用工具（16 个）
 
 ### 读取操作
 | 工具 | 说明 |
@@ -94,7 +94,7 @@ java -jar target/loom-file-mcp-1.0-SNAPSHOT.jar
 
 | MCP 服务 | 说明 |
 |----------|------|
-| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | 基于 JGit 的 Git 操作（14 个工具） |
+| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | 基于 JGit 的 Git 操作（28 个工具） |
 | [loom-maven-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-maven-mcp) | Maven 构建操作（6 个工具） |
 | [loom-compile-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-compile-mcp) | 端到端部署流水线（1 个工具） |
 

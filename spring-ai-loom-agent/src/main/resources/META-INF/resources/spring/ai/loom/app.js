@@ -11,16 +11,28 @@ const API_PREFIX = '';
 const API = {
     autoLogin: '/spring/ai/loom/user/isAutoLogin',
     login: '/spring/ai/loom/user/login',
+    logout: '/spring/ai/loom/user/logout',
+    currentUser: '/spring/ai/loom/user/currentUser',
+    currentIsAdmin: '/spring/ai/loom/user/currentIsAdmin',
+    changePassword: '/spring/ai/loom/user/changePassword',
+    listUsers: '/spring/ai/loom/admin/users',
+    createUser: '/spring/ai/loom/admin/users',
+    deleteUser: (username) => `/spring/ai/loom/admin/users/${encodeURIComponent(username)}`,
     listConversations: '/spring/ai/loom/conversation',
     getConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     deleteConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     stream: '/spring/ai/loom/stream',
-    listMcps: '/spring/ai/chat/loom/mcp',
+    listMcps: '/spring/ai/loom/mcps',
+    mcpTools: (name) => `/spring/ai/loom/mcps/${encodeURIComponent(name)}/tools`,
     listSkills: '/spring/ai/loom/skill',
     getSkill: (name) => `/spring/ai/loom/skill/${name}`,
     createSkill: '/spring/ai/loom/skill',
     updateSkill: '/spring/ai/loom/skill',
+    patchSkill: (name) => `/spring/ai/loom/skill/${name}`,
     deleteSkill: (name) => `/spring/ai/loom/skill/${name}`,
+    listMarketSkills: '/spring/ai/loom/market-skills',
+    pullMarketSkill: (id) => `/spring/ai/loom/market-skills/${id}/pull`,
+    submitMarketSkill: '/spring/ai/loom/user/market-skills',
     listKnowledge: '/spring/ai/loom/knowledge',
     createKnowledge: '/spring/ai/loom/knowledge',
     deleteKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
@@ -38,6 +50,8 @@ const API = {
 // Browser automatically sends HttpOnly session cookie with each request.
 const state = {
     username: null,
+    nickname: null,
+    userType: null, // 'ADMIN' / 'USER'
     conversationId: null,
     selectedMcps: [],
     selectedKnowledgeId: null,
@@ -91,6 +105,104 @@ async function apiFetch(url, options = {}) {
     return resp;
 }
 
+// ===================== §3.5 Generic Confirm / Prompt Modal =====================
+/**
+ * Replaces window.confirm / window.prompt with in-app modal dialogs.
+ * - dialog.confirm({ title, message, okText, cancelText, danger }) -> Promise<boolean>
+ * - dialog.prompt({ title, message, placeholder, okText, defaultValue }) -> Promise<string|null>
+ */
+const dialog = {
+    _overlay: null,
+    _titleEl: null,
+    _msgEl: null,
+    _formEl: null,
+    _inputEl: null,
+    _okBtn: null,
+    _cancelBtn: null,
+    _closeBtn: null,
+
+    init() {
+        this._overlay = document.getElementById('confirm-modal-overlay');
+        if (!this._overlay) return;
+        this._titleEl = document.getElementById('confirm-modal-title');
+        this._msgEl = document.getElementById('confirm-modal-message');
+        this._formEl = document.getElementById('confirm-modal-form');
+        this._inputEl = document.getElementById('confirm-modal-input');
+        this._okBtn = document.getElementById('confirm-modal-ok');
+        this._cancelBtn = document.getElementById('confirm-modal-cancel');
+        this._closeBtn = document.getElementById('confirm-modal-close');
+
+        const hide = () => this._hide();
+        this._cancelBtn.addEventListener('click', hide);
+        this._closeBtn.addEventListener('click', hide);
+        this._overlay.addEventListener('click', (e) => { if (e.target === this._overlay) hide(); });
+        // ESC to close
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this._overlay.style.display !== 'none') hide();
+        });
+        this._inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); this._okBtn.click(); }
+        });
+    },
+
+    _show({ title, message, okText = '确定', cancelText = '取消', danger = false, withInput = false, placeholder = '', defaultValue = '' }) {
+        this._titleEl.textContent = title || '确认';
+        this._msgEl.textContent = message || '';
+        this._formEl.style.display = withInput ? 'block' : 'none';
+        if (withInput) {
+            this._inputEl.placeholder = placeholder;
+            this._inputEl.value = defaultValue;
+        }
+        this._okBtn.textContent = okText;
+        this._cancelBtn.textContent = cancelText;
+        this._okBtn.style.background = danger ? 'var(--error-color, #ef4444)' : 'var(--primary-color)';
+        this._okBtn.style.borderColor = danger ? 'var(--error-color, #ef4444)' : 'var(--primary-color)';
+        this._overlay.style.display = 'flex';
+        if (withInput) setTimeout(() => this._inputEl.focus(), 0);
+    },
+
+    _hide() {
+        this._overlay.style.display = 'none';
+    },
+
+    confirm(opts) {
+        return new Promise((resolve) => {
+            this._show({ ...opts, withInput: false });
+            const onOk = () => { this._cleanup(onOk, onCancel); this._hide(); resolve(true); };
+            const onCancel = () => { this._cleanup(onOk, onCancel); this._hide(); resolve(false); };
+            this._okBtn.addEventListener('click', onOk);
+            this._cancelBtn.addEventListener('click', onCancel);
+        });
+    },
+
+    prompt(opts) {
+        return new Promise((resolve) => {
+            this._show({ ...opts, withInput: true });
+            const onOk = () => {
+                const v = this._inputEl.value.trim();
+                this._cleanup(onOk, onCancel);
+                this._hide();
+                resolve(v || null);
+            };
+            const onCancel = () => { this._cleanup(onOk, onCancel); this._hide(); resolve(null); };
+            this._okBtn.addEventListener('click', onOk);
+            this._cancelBtn.addEventListener('click', onCancel);
+        });
+    },
+
+    _cleanup(onOk, onCancel) {
+        // Replace the elements to drop the listeners (avoids stacking on reuse)
+        const freshOk = this._okBtn.cloneNode(true);
+        const freshCancel = this._cancelBtn.cloneNode(true);
+        this._okBtn.replaceWith(freshOk);
+        this._cancelBtn.replaceWith(freshCancel);
+        this._okBtn = freshOk;
+        this._cancelBtn = freshCancel;
+        // reattach the close-listener references aren't needed — handlers are bound to fresh elements
+        void onOk; void onCancel;
+    },
+};
+
 function formatDate(dateString) {
     if (!dateString) return '未知';
     const date = new Date(dateString);
@@ -134,16 +246,51 @@ function renderMarkdown(text) {
 // No Authorization header is sent from the client.
 const api = {
     async autoLogin() {
-        const r = await fetch(API.autoLogin, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        return r.ok ? r.json() : null;
+        const r = await fetch(API.autoLogin, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include' });
+        if (r.status === 401) return false;
+        return r.ok ? r.json() : false;
     },
     async login(req) {
         const r = await fetch(API.login, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(req),
         });
-        return r.ok ? r.json() : null;
+        if (!r.ok) {
+            let msg = `登录失败：HTTP ${r.status}`;
+            try { const j = await r.json(); if (j.message) msg = j.message; } catch (_) {}
+            throw new Error(msg);
+        }
+        return r.json();
+    },
+    async logout() {
+        const r = await fetch(API.logout, { method: 'POST', credentials: 'include' });
+        return r.ok;
+    },
+    async currentUser() {
+        const r = await fetch(API.currentUser, { method: 'POST', credentials: 'include' });
+        if (!r.ok) return null;
+        return r.json();
+    },
+    async currentIsAdmin() {
+        const r = await fetch(API.currentIsAdmin, { method: 'POST', credentials: 'include' });
+        if (!r.ok) return false;
+        return r.json();
+    },
+    async changePassword(oldPassword, newPassword) {
+        const r = await fetch(API.changePassword, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({oldPassword, newPassword}),
+        });
+        if (!r.ok) {
+            let msg = `修改失败：HTTP ${r.status}`;
+            try { const j = await r.json(); if (j.message) msg = j.message; } catch (_) {}
+            throw new Error(msg);
+        }
+        return true;
     },
     async listConversations() {
         const r = await apiFetch(API.listConversations);
@@ -186,6 +333,33 @@ const api = {
             method: 'DELETE',
         });
         return r.ok ? r.json() : null;
+    },
+    async patchSkill(name, body) {
+        const r = await apiFetch(API.patchSkill(name), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        return r.ok ? r.json() : null;
+    },
+    async listMarketSkills() {
+        const r = await apiFetch(API.listMarketSkills);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async pullMarketSkill(id) {
+        const r = await apiFetch(API.pullMarketSkill(id), {method: 'POST'});
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async submitMarketSkill(body) {
+        const r = await apiFetch(API.submitMarketSkill, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
     },
     async listKnowledge() {
         const r = await apiFetch(API.listKnowledge);
@@ -270,146 +444,247 @@ const api = {
 // ===================== §5 Auth Module =====================
 const auth = {
 
-    /** Initialize auth state on page load.
-     *  BFF pattern: browser automatically sends session cookie.
-     *  1. Call isAutoLogin → checks server-side session validity
-     *  2. If true (supports auto-login or has valid session) → auto-login
-     *  3. Else show "未登录"
+    /** 页面加载时初始化。
+     *  1. 调 isAutoLogin 检查 session cookie
+     *  2. 没登录就跳 login.html
+     *  3. 登录了则拉取 currentUser 渲染右上角用户菜单
      */
     async init() {
         try {
-            const autoLogin = await api.autoLogin();
-            if (autoLogin === true) {
-                const data = await api.login({username: '', verified: ''});
-                if (data) {
-                    state.username = data.nickname || '用户';
-                    this.renderUserState(data.nickname || '用户');
-                    return true;
-                }
+            const loggedIn = await api.autoLogin();
+            if (loggedIn !== true) {
+                window.location.replace('/spring/ai/loom/login.html');
+                return false;
             }
-            this.renderLoggedOut();
+            const me = await api.currentUser();
+            if (!me || !me.username) {
+                window.location.replace('/spring/ai/loom/login.html');
+                return false;
+            }
+            state.username = me.username;
+            state.nickname = me.nickname;
+            state.userType = me.type;
+            this.renderUserMenu();
+            return true;
         } catch (e) {
-            this.renderLoggedOut();
+            window.location.replace('/spring/ai/loom/login.html');
+            return false;
         }
-        return false;
     },
 
-    /** Render the user state in the top-right corner */
-    renderUserState(nickname) {
-        let el = document.getElementById('user-info-display');
-        if (!el) {
-            el = document.createElement('div');
-            el.id = 'user-info-display';
-            const headerActions = document.querySelector('.header-actions');
-            if (headerActions) {
-                headerActions.prepend(el);
-            }
+    /** 渲染右上角用户菜单（昵称 + 下拉） */
+    renderUserMenu() {
+        const container = document.getElementById('user-menu');
+        if (!container) return;
+        const isAdmin = state.userType === 'ADMIN';
+        container.innerHTML = `
+            <div class="user-menu-wrapper" id="user-menu-wrapper">
+                <button class="user-menu-trigger" id="user-menu-trigger">
+                    <span class="user-menu-avatar">${(state.nickname || state.username || '?').charAt(0).toUpperCase()}</span>
+                    <span class="user-menu-name">${escapeHtml(state.nickname || state.username)}</span>
+                    ${isAdmin ? '<span class="user-menu-badge">管理员</span>' : ''}
+                    <span class="user-menu-caret">▾</span>
+                </button>
+                <div class="user-menu-dropdown" id="user-menu-dropdown" style="display: none;">
+                    ${isAdmin ? '<a class="user-menu-item" href="/spring/ai/loom/admin/console.html">控制台</a>' : ''}
+                    <a class="user-menu-item" id="user-menu-usage">我的用量</a>
+                    <a class="user-menu-item" id="user-menu-change-password">修改密码</a>
+                    <a class="user-menu-item user-menu-item-danger" id="user-menu-logout">登出</a>
+                </div>
+            </div>
+        `;
+        const trigger = document.getElementById('user-menu-trigger');
+        const dropdown = document.getElementById('user-menu-dropdown');
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        });
+        document.addEventListener('click', () => { dropdown.style.display = 'none'; });
+        const changePwd = document.getElementById('user-menu-change-password');
+        if (changePwd) {
+            changePwd.addEventListener('click', (e) => {
+                e.preventDefault();
+                dropdown.style.display = 'none';
+                this.showChangePasswordModal();
+            });
         }
-        el.textContent = nickname;
-        el.className = 'user-info-display';
-        el.onclick = () => this.showLoggedOutMessage();
+        const usage = document.getElementById('user-menu-usage');
+        if (usage) {
+            usage.addEventListener('click', (e) => {
+                e.preventDefault();
+                dropdown.style.display = 'none';
+                this.showUsageModal();
+            });
+        }
+        const logout = document.getElementById('user-menu-logout');
+        if (logout) {
+            logout.addEventListener('click', async (e) => {
+                e.preventDefault();
+                dropdown.style.display = 'none';
+                await this.logout();
+            });
+        }
     },
 
-    /** Show "未登录" in the top-right corner */
-    renderLoggedOut() {
-        let el = document.getElementById('user-info-display');
-        if (!el) {
-            el = document.createElement('div');
-            el.id = 'user-info-display';
-            const headerActions = document.querySelector('.header-actions');
-            if (headerActions) {
-                headerActions.prepend(el);
-            }
-        }
-        el.textContent = '未登录';
-        el.className = 'user-info-display user-logged-out';
-        el.onclick = () => this.showLoggedOutMessage();
-    },
-
-    /** Show login modal when clicking "未登录" */
-    showLoggedOutMessage() {
-        if (state.username) return; // already logged in
-        let modal = document.getElementById('login-modal');
+    /** 显示修改密码模态框 */
+    showChangePasswordModal() {
+        let modal = document.getElementById('change-password-modal');
         if (!modal) {
             modal = document.createElement('div');
-            modal.id = 'login-modal';
+            modal.id = 'change-password-modal';
             modal.className = 'modal-overlay';
             modal.innerHTML = `
-                <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-content" style="max-width: 440px;">
                     <div class="modal-header">
-                        <h3>登录</h3>
-                        <div class="close-button" id="login-modal-close">&times;</div>
+                        <h3>修改密码</h3>
+                        <div class="close-button" id="change-pwd-close">&times;</div>
                     </div>
-                    <div class="modal-body">
+                    <div class="modal-body" style="padding: 24px 32px;">
                         <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--text-secondary);">用户名</label>
-                            <input type="text" id="login-username-input" placeholder="请输入用户名" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; box-sizing: border-box;" />
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px;">旧密码</label>
+                            <input type="password" id="change-pwd-old" class="param-input" style="width: 100%;" />
                         </div>
-                        <div style="margin-bottom: 24px;">
-                            <label style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--text-secondary);">验证码</label>
-                            <input type="password" id="login-verified-input" placeholder="请输入验证码" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; box-sizing: border-box;" />
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px;">新密码（至少 6 位）</label>
+                            <input type="password" id="change-pwd-new" class="param-input" style="width: 100%;" />
                         </div>
-                        <button id="login-submit-btn" style="width: 100%; padding: 10px; background: var(--primary-color); color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">登录</button>
+                        <div style="margin-bottom: 8px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 13px;">确认新密码</label>
+                            <input type="password" id="change-pwd-confirm" class="param-input" style="width: 100%;" />
+                        </div>
+                        <div id="change-pwd-error" class="error-msg" style="display: none; margin-top: 8px;"></div>
+                    </div>
+                    <div class="modal-footer" style="padding: 14px 32px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px;">
+                        <button class="modal-action-btn" id="change-pwd-cancel">取消</button>
+                        <button class="modal-action-btn" id="change-pwd-submit" style="background: var(--primary-color); color: #fff; border-color: var(--primary-color);">确定</button>
                     </div>
                 </div>
             `;
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) modal.style.display = 'none';
-            });
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
             document.body.appendChild(modal);
+            document.getElementById('change-pwd-close').addEventListener('click', () => { modal.style.display = 'none'; });
+            document.getElementById('change-pwd-cancel').addEventListener('click', () => { modal.style.display = 'none'; });
+            document.getElementById('change-pwd-submit').addEventListener('click', () => this.submitChangePassword(modal));
+        }
+        // 重置
+        document.getElementById('change-pwd-old').value = '';
+        document.getElementById('change-pwd-new').value = '';
+        document.getElementById('change-pwd-confirm').value = '';
+        document.getElementById('change-pwd-error').style.display = 'none';
+        modal.style.display = 'flex';
+        setTimeout(() => document.getElementById('change-pwd-old')?.focus(), 50);
+    },
 
-            // Bind events
-            modal.querySelector('#login-modal-close').addEventListener('click', () => {
-                modal.style.display = 'none';
-            });
-            modal.querySelector('#login-submit-btn').addEventListener('click', async () => {
-                const username = modal.querySelector('#login-username-input').value.trim();
-                const verified = modal.querySelector('#login-verified-input').value.trim();
-                if (!username) {
-                    showToast('请输入用户名', 'error');
-                    return;
-                }
-                const data = await api.login({username, verified});
-                if (data) {
-                    state.username = data.nickname || username;
-                    this.renderUserState(data.nickname || username);
-                    modal.style.display = 'none';
-                    showToast('登录成功', 'success');
-                    // Reload data after login
-                    await mcp.loadList();
-                    await skills.loadList();
-                    await conversation.loadList();
-                } else {
-                    showToast('登录失败，请检查用户名和验证码', 'error');
-                }
-            });
+    async submitChangePassword(modal) {
+        const oldPwd = document.getElementById('change-pwd-old').value;
+        const newPwd = document.getElementById('change-pwd-new').value;
+        const confirmPwd = document.getElementById('change-pwd-confirm').value;
+        const errEl = document.getElementById('change-pwd-error');
+        errEl.style.display = 'none';
+        if (!oldPwd || !newPwd) {
+            errEl.textContent = '请填写所有字段';
+            errEl.style.display = 'block';
+            return;
+        }
+        if (newPwd.length < 6) {
+            errEl.textContent = '新密码至少 6 位';
+            errEl.style.display = 'block';
+            return;
+        }
+        if (newPwd !== confirmPwd) {
+            errEl.textContent = '两次输入的新密码不一致';
+            errEl.style.display = 'block';
+            return;
+        }
+        const submitBtn = document.getElementById('change-pwd-submit');
+        submitBtn.disabled = true;
+        try {
+            await api.changePassword(oldPwd, newPwd);
+            modal.style.display = 'none';
+            showToast('密码修改成功', 'success');
+        } catch (e) {
+            errEl.textContent = e.message;
+            errEl.style.display = 'block';
+        } finally {
+            submitBtn.disabled = false;
+        }
+    },
 
-            // Enter key to submit
-            modal.querySelector('#login-verified-input').addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    modal.querySelector('#login-submit-btn').click();
-                }
-            });
+    /** 显示"我的用量"模态框（本月 token 用量） */
+    async showUsageModal() {
+        let modal = document.getElementById('usage-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'usage-modal';
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 480px;">
+                    <div class="modal-header">
+                        <h3>本月用量</h3>
+                        <div class="close-button" id="usage-modal-close">&times;</div>
+                    </div>
+                    <div class="modal-body" style="padding: 24px 32px;">
+                        <div id="usage-loading" style="text-align: center; color: var(--text-muted);">加载中...</div>
+                        <div id="usage-content" style="display: none;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                                <div class="usage-stat">
+                                    <div class="usage-stat-label">总 Token</div>
+                                    <div class="usage-stat-value" id="usage-total">-</div>
+                                </div>
+                                <div class="usage-stat">
+                                    <div class="usage-stat-label">调用次数</div>
+                                    <div class="usage-stat-value" id="usage-calls">-</div>
+                                </div>
+                                <div class="usage-stat">
+                                    <div class="usage-stat-label">输入 Token</div>
+                                    <div class="usage-stat-value" id="usage-prompt">-</div>
+                                </div>
+                                <div class="usage-stat">
+                                    <div class="usage-stat-label">输出 Token</div>
+                                    <div class="usage-stat-value" id="usage-completion">-</div>
+                                </div>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-muted); text-align: right; margin-top: 8px;">
+                                平均每次：<span id="usage-avg">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+            document.body.appendChild(modal);
+            document.getElementById('usage-modal-close').addEventListener('click', () => { modal.style.display = 'none'; });
         }
         modal.style.display = 'flex';
-        // Focus username input
-        setTimeout(() => modal.querySelector('#login-username-input')?.focus(), 100);
-    },
-
-    /** Clear auth state — called on 401 or logout.
-     *  Cookie is HttpOnly and managed by browser; clear client-side state only.
-     */
-    clear() {
-        state.username = null;
-        this.renderLoggedOut();
-    },
-
-    /** Logout: call server to invalidate session, then clear client state */
-    async logout() {
+        document.getElementById('usage-loading').style.display = 'block';
+        document.getElementById('usage-content').style.display = 'none';
         try {
-            await fetch(API.login.replace('/login', '/logout'), {method: 'POST'});
-        } catch { /* ignore */ }
-        this.clear();
+            const r = await fetch('/spring/ai/loom/user/tokens/current-month', {
+                credentials: 'include',
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            document.getElementById('usage-total').textContent = data.totalTokens.toLocaleString();
+            document.getElementById('usage-calls').textContent = data.callCount.toLocaleString();
+            document.getElementById('usage-prompt').textContent = data.promptTokens.toLocaleString();
+            document.getElementById('usage-completion').textContent = data.completionTokens.toLocaleString();
+            document.getElementById('usage-avg').textContent = Math.round(data.avgTokensPerCall).toLocaleString();
+            document.getElementById('usage-loading').style.display = 'none';
+            document.getElementById('usage-content').style.display = 'block';
+        } catch (e) {
+            document.getElementById('usage-loading').textContent = '加载失败：' + e.message;
+        }
+    },
+
+    /** Clear auth state — called on 401. Redirect to login. */
+    clear() {
+        window.location.replace('/spring/ai/loom/login.html');
+    },
+
+    /** 登出：服务端失效 session + 清 cookie，跳 login.html */
+    async logout() {
+        try { await api.logout(); } catch { /* ignore */ }
+        window.location.replace('/spring/ai/loom/login.html');
     },
 };
 
@@ -541,6 +816,8 @@ const ui = {
         btn.disabled = false;
         btn.textContent = '发送消息';
         state.isStreaming = false;
+        ui.setToolbarLocked(false);
+        ui.setStopButtonVisible(false);
     },
 
     disableSend() {
@@ -551,6 +828,16 @@ const ui = {
         btn.disabled = true;
         btn.textContent = '发送中...';
         state.isStreaming = true;
+        ui.setToolbarLocked(true);
+        ui.setStopButtonVisible(true);
+    },
+
+    setStopButtonVisible(visible) {
+        const btn = document.getElementById('stop-btn');
+        if (!btn) return;
+        btn.style.display = visible ? 'inline-block' : 'none';
+        btn.disabled = false;
+        btn.textContent = '停止';
     },
 
     showModal(id) {
@@ -566,6 +853,39 @@ const ui = {
         const toggle = document.getElementById('sidebar-toggle');
         const isOpen = sidebar.classList.toggle('open');
         toggle.textContent = isOpen ? '✕' : '☰';
+    },
+
+    /** Lock/unlock the 4 toolbar buttons (knowledge / MCP / skills / file) and the + new chat button during streaming. */
+    setToolbarLocked(locked) {
+        const ids = ['ks-button', 'mcp-button', 'skills-button', 'file-manager-button', 'new-chat-btn'];
+        for (const id of ids) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            btn.disabled = locked;
+            // Set inline styles directly to bypass CSS transition delay (so visual + click-block take effect immediately)
+            if (locked) {
+                btn.style.setProperty('opacity', '0.4', 'important');
+                btn.style.setProperty('pointer-events', 'none', 'important');
+                btn.style.setProperty('cursor', 'not-allowed', 'important');
+                btn.setAttribute('aria-disabled', 'true');
+                btn.title = '请等待 AI 回复完成';
+            } else {
+                btn.style.removeProperty('opacity');
+                btn.style.removeProperty('pointer-events');
+                btn.style.removeProperty('cursor');
+                btn.removeAttribute('aria-disabled');
+                btn.title = '';
+            }
+        }
+        // Lock conversation history items (rendered dynamically, so use class on sidebar)
+        const sidebar = document.getElementById('sidebarList');
+        if (sidebar) {
+            if (locked) {
+                sidebar.classList.add('sidebar-locked');
+            } else {
+                sidebar.classList.remove('sidebar-locked');
+            }
+        }
     },
 };
 
@@ -605,6 +925,10 @@ const conversation = {
     },
 
     createNew() {
+        if (state.isStreaming) {
+            showToast('请等待 AI 回复完成', 'warning');
+            return;
+        }
         state.conversationId = crypto.randomUUID();
         ui.clearChat();
         imageUpload.clear();
@@ -613,6 +937,10 @@ const conversation = {
     },
 
     async switchTo(id) {
+        if (state.isStreaming) {
+            showToast('请等待 AI 回复完成', 'warning');
+            return;
+        }
         // abort any ongoing stream
         chat.abortStream();
 
@@ -627,8 +955,14 @@ const conversation = {
     },
 
     async delete(id) {
-        if (!confirm('确定要删除这个对话吗？')) return;
-        const ok = await api.deleteConversation(id);
+        const ok = await dialog.confirm({
+            title: '删除对话',
+            message: '确定要删除这个对话吗？此操作不可撤销。',
+            okText: '删除',
+            danger: true,
+        });
+        if (!ok) return;
+        const deleted = await api.deleteConversation(id);
         if (ok) {
             if (state.conversationId === id) {
                 this.createNew();
@@ -703,6 +1037,7 @@ const chat = {
                     const actionsEl = document.getElementById('actions-' + id);
                     if (actionsEl) actionsEl.style.display = '';
                     ui.enableSend();
+                    ui.setStopButtonVisible(false);
                     conversation.loadList();
                 },
                 (error) => {
@@ -711,11 +1046,39 @@ const chat = {
                     if (actionsEl) actionsEl.style.display = '';
                     if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + (error.message || '未知错误') + '</span>';
                     ui.enableSend();
+                    ui.setStopButtonVisible(false);
                 }
             );
         } catch (error) {
             if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + error.message + '</span>';
             ui.enableSend();
+            ui.setStopButtonVisible(false);
+        }
+    },
+
+    /** 主动停止 AI 流：调 /stream/{convId}/stop */
+    async stopStream() {
+        if (!state.isStreaming || !state.conversationId) return;
+        const convId = state.conversationId;
+        const btn = document.getElementById('stop-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '停止中...';
+        }
+        try {
+            const r = await fetch(`/spring/ai/loom/stream/${encodeURIComponent(convId)}/stop`, {
+                method: 'POST', credentials: 'include',
+            });
+            const data = await r.json().catch(() => ({}));
+            if (data.stopped) {
+                showToast('已停止生成', 'success');
+            } else {
+                showToast('该会话没有活跃流', 'warning');
+            }
+        } catch (e) {
+            showToast('停止失败：' + e.message, 'error');
+        } finally {
+            ui.setStopButtonVisible(false);
         }
     },
 
@@ -811,9 +1174,15 @@ const knowledge = {
     },
 
     async create() {
-        const name = prompt('请输入知识库名称：');
-        if (!name || !name.trim()) return;
-        const data = await api.createKnowledge(name.trim());
+        const name = await dialog.prompt({
+            title: '创建知识库',
+            message: '请输入知识库名称：',
+            placeholder: '例如：产品手册',
+            okText: '创建',
+            defaultValue: '',
+        });
+        if (!name) return;
+        const data = await api.createKnowledge(name);
         if (data) {
             showToast('知识库创建成功', 'success');
             this.loadList();
@@ -823,9 +1192,15 @@ const knowledge = {
     },
 
     async delete(id) {
-        if (!confirm('确定要删除这个知识库吗？关联文件将被一并移除。')) return;
-        const ok = await api.deleteKnowledge(id);
-        if (ok) {
+        const ok = await dialog.confirm({
+            title: '删除知识库',
+            message: '确定要删除这个知识库吗？关联文件将被一并移除。此操作不可撤销。',
+            okText: '删除',
+            danger: true,
+        });
+        if (!ok) return;
+        const deleted = await api.deleteKnowledge(id);
+        if (deleted) {
             if (this.currentKbId === id) {
                 this.currentKbId = null;
                 document.getElementById('ks-detail').innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
@@ -1076,35 +1451,38 @@ const mcp = {
         showToast(`已${state.selectedMcps.includes(name) ? '选中' : '取消'}MCP服务`, 'success');
     },
 
-    showDetail(m) {
+    async showDetail(m) {
         document.getElementById('mcp-detail-title').textContent = m.title || m.name;
         const detail = document.getElementById('mcp-detail');
         let html = '';
-
-        // Basic info
         html += `<div class="detail-section">
             <div class="detail-section-title">基本信息</div>
             <div style="line-height: 1.8; color: var(--text-primary);">
-                <div style="margin-bottom: 12px;"><strong>名称：</strong>${m.name}</div>
-                <div style="margin-bottom: 12px;"><strong>版本：</strong>${m.version || '1.0.0'}</div>
-                <div><strong>描述：</strong>${m.description || '无描述'}</div>
+                <div style="margin-bottom: 12px;"><strong>名称：</strong>${escapeHtml(m.name)}</div>
+                <div><strong>描述：</strong>${escapeHtml(m.description || '无描述')}</div>
             </div>
         </div>`;
-
-        // Tools
+        // 工具数据已经在 /mcps 列表接口里（带 tools 字段），
+        // 这里直接用 m.tools 渲染，不再二次请求 —— 避免 mcp 名含 @ 等特殊字符触发 Tomcat 400。
         const tools = m.tools || [];
         html += `<div class="detail-section">
             <div class="detail-section-title">包含工具 (${tools.length})</div>
-            <div style="display: flex; flex-direction: column; gap: 12px;">`;
-        if (tools.length > 0) {
-            for (const tool of tools) {
-                html += `<div style="padding: 16px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px;">
-                    <div style="font-weight: 600; font-size: 14px; color: var(--primary-color); margin-bottom: 8px;">${tool.title || tool.name}</div>
-                    <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap;">${tool.description || '无描述'}</div>
-                </div>`;
-            }
-        } else {
+            <div id="mcp-tools-list">`;
+        if (tools.length === 0) {
             html += '<span style="color: var(--text-muted); font-size: 13px;">无可用工具</span>';
+        } else {
+            html += '<div style="display: flex; flex-direction: column; gap: 12px;">' +
+                tools.map(tool => {
+                    // 直接展示 SDK 原文（含已维护的覆盖）。空字符串就不显示 description 行
+                    const descHtml = tool.description && tool.description.trim()
+                        ? `<div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap;">${escapeHtml(tool.description)}</div>`
+                        : '';
+                    return `
+                    <div style="padding: 16px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px;">
+                        <div style="font-weight: 600; font-size: 14px; color: var(--primary-color); margin-bottom: 8px;">${escapeHtml(tool.name)}</div>
+                        ${descHtml}
+                    </div>`;
+                }).join('') + '</div>';
         }
         html += '</div></div>';
         detail.innerHTML = html;
@@ -1125,9 +1503,12 @@ const mcp = {
 // ===================== §10 Skills =====================
 const skills = {
     editingSkill: null, // null = view mode, object = creating/editing
+    currentTab: 'mine', // 'mine' / 'market' / 'submit'
 
     openModal() {
         ui.showModal('skills-modal-overlay');
+        // Tab 绑定（只绑一次）
+        this._bindTabs();
         this.renderModal();
     },
 
@@ -1136,26 +1517,61 @@ const skills = {
         this.editingSkill = null;
     },
 
+    _bindTabs() {
+        if (this._tabsBound) return;
+        document.querySelectorAll('#skills-modal-overlay .skill-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.currentTab = btn.getAttribute('data-tab');
+                document.querySelectorAll('#skills-modal-overlay .skill-tab').forEach(b => {
+                    const active = b.getAttribute('data-tab') === this.currentTab;
+                    b.classList.toggle('active', active);
+                    b.style.borderBottomColor = active ? 'var(--primary-color)' : 'transparent';
+                    b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
+                });
+                this.renderModal();
+            });
+        });
+        this._tabsBound = true;
+    },
+
+    /** source 字段 → 中文标签 + 颜色 */
+    _sourceLabel(source) {
+        switch (source) {
+            case 'USER_CREATED':  return {text: '自建',   bg: '#dbeafe', color: '#1e40af'};
+            case 'MARKET_PULLED': return {text: '市场',   bg: '#d1fae5', color: '#065f46'};
+            case 'ROLE_GRANTED':  return {text: '角色授权', bg: '#fef3c7', color: '#92400e'};
+            case 'MARKET_VIEW':   return {text: '市',     bg: '#ede9fe', color: '#6b21a8'};
+            case 'embed':         return {text: '内置',   bg: '#f1f5f9', color: '#475569'};
+            default:              return {text: source,  bg: '#f1f5f9', color: '#475569'};
+        }
+    },
+
     renderModal() {
         const container = document.getElementById('skills-list');
         const detail = document.getElementById('skills-detail');
         detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情，或点击「新增」创建新技能</p></div>';
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
 
+        if (this.currentTab === 'mine') this._renderMineTab(container);
+        else if (this.currentTab === 'market') this._renderMarketTab(container);
+        else if (this.currentTab === 'submit') this._renderSubmitTab(container, detail);
+    },
+
+    _renderMineTab(container) {
         api.listSkills().then(data => {
             container.innerHTML = '';
             if (!data || data.length === 0) {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">暂无可用技能</div>';
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">暂无可用技能<br><br>点击「+ 新增」自建，或切到「市场」拉取</div>';
                 return;
             }
 
             for (const skill of data) {
                 const item = document.createElement('div');
                 item.className = 'skill-item';
+                const lbl = this._sourceLabel(skill.source);
                 item.innerHTML = `
-                    <div class="skill-item-name">${skill.name}</div>
-                    <div class="skill-item-desc">${skill.description || ''}</div>
-                    ${skill.source === 'embed' ? '<span class="skill-source-tag">内置</span>' : ''}
+                    <div class="skill-item-name">${escapeHtml(skill.name)} <span class="skill-source-tag" style="background:${lbl.bg};color:${lbl.color};">${lbl.text}</span></div>
+                    <div class="skill-item-desc">${escapeHtml(skill.description || '')}</div>
                 `;
                 item.addEventListener('click', () => this.select(skill, item));
                 container.appendChild(item);
@@ -1165,8 +1581,153 @@ const skills = {
         });
     },
 
+    async _renderMarketTab(container) {
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
+        try {
+            const list = await api.listMarketSkills();
+            container.innerHTML = '';
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">市场暂无 Skill</div>';
+                return;
+            }
+            // 拉一次"我的"用来对比哪些已拉过
+            const mine = await api.listSkills();
+            const mineNames = new Set((mine || []).map(s => s.name));
+            for (const m of list) {
+                const item = document.createElement('div');
+                item.className = 'skill-item';
+                const already = mineNames.has(m.name);
+                item.innerHTML = `
+                    <div class="skill-item-name">${escapeHtml(m.name)} <span style="font-size: 11px; color: var(--text-muted);">v${escapeHtml(m.version)} · @${escapeHtml(m.author)}</span></div>
+                    <div class="skill-item-desc">${escapeHtml(m.description || '')}</div>
+                `;
+                item.addEventListener('click', () => this._selectMarketSkill(m, item, already));
+                container.appendChild(item);
+            }
+        } catch (e) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    _selectMarketSkill(marketSkill, element, already) {
+        document.querySelectorAll('#skills-list .skill-item').forEach(i => i.classList.remove('selected'));
+        element.classList.add('selected');
+        document.getElementById('skill-detail-title').textContent = marketSkill.name;
+        const detail = document.getElementById('skills-detail');
+        detail.innerHTML = `
+            <div class="detail-section">
+                <div class="detail-section-title">市场元数据</div>
+                <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
+                    <div>作者：${escapeHtml(marketSkill.author)}</div>
+                    <div>版本：v${escapeHtml(marketSkill.version)}</div>
+                    <div>状态：<span class="type-badge ADMIN">${escapeHtml(marketSkill.status)}</span></div>
+                </div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-title">描述</div>
+                <div class="detail-section-content">${escapeHtml(marketSkill.description || '无')}</div>
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-title">内容</div>
+                <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(marketSkill.content || '')}</div>
+            </div>
+            <div style="margin-top: 24px;">
+                <button class="send-skill-btn" id="pull-skill-btn" style="flex: 1;">${already ? '已拉取（点击更新）' : '拉取到我的 Skill'}</button>
+            </div>
+        `;
+        detail.querySelector('#pull-skill-btn').addEventListener('click', () => this.handlePull(marketSkill));
+    },
+
+    async handlePull(marketSkill) {
+        try {
+            await api.pullMarketSkill(marketSkill.id);
+            showToast(`已${marketSkill.name ? '拉取 / 更新' : '拉取'}「${marketSkill.name}」`, 'success');
+            // 切到"我的" Tab
+            this.currentTab = 'mine';
+            document.querySelectorAll('#skills-modal-overlay .skill-tab').forEach(b => {
+                const active = b.getAttribute('data-tab') === this.currentTab;
+                b.classList.toggle('active', active);
+                b.style.borderBottomColor = active ? 'var(--primary-color)' : 'transparent';
+                b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
+            });
+            this.renderModal();
+        } catch (e) {
+            showToast('拉取失败：' + e.message, 'error');
+        }
+    },
+
+    _renderSubmitTab(container, detail) {
+        // 列出自建的 Skill（source=USER_CREATED）作为"可选提交"
+        api.listSkills().then(mine => {
+            const userCreated = (mine || []).filter(s => s.source === 'USER_CREATED');
+            container.innerHTML = '';
+            if (userCreated.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有自建 Skill。<br>切到「我的」→ 新建一个再来提交</div>';
+                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">请选择要提交到市场的自建 Skill</div>';
+                return;
+            }
+            for (const s of userCreated) {
+                const item = document.createElement('div');
+                item.className = 'skill-item';
+                item.innerHTML = `
+                    <div class="skill-item-name">${escapeHtml(s.name)}</div>
+                    <div class="skill-item-desc">${escapeHtml(s.description || '')}</div>
+                `;
+                item.addEventListener('click', () => this._showSubmitForm(s, detail));
+                container.appendChild(item);
+            }
+            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建 Skill 提交到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后状态为 PENDING，<br>需管理员在控制台「Skill 市场」审批通过后，<br>其他用户才能在「市场」Tab 拉取。</p></div>';
+        });
+    },
+
+    _showSubmitForm(skill, detail) {
+        document.querySelectorAll('#skills-list .skill-item').forEach(i => i.classList.remove('selected'));
+        detail.innerHTML = `
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
+                    提交「<strong>${escapeHtml(skill.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 拉取；<br>
+                    你的本地实例保持不变，提交不影响你的使用。
+                </div>
+                <div>
+                    <label class="param-label">版本号 <span style="color: var(--error-color);">*</span></label>
+                    <input type="text" id="submit-skill-version" class="param-input" placeholder="例如 1.0.0（语义化版本）" value="1.0.0">
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted);">
+                    提交后状态为 PENDING。同名+同版本号不能重复提交。
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">提交到市场</button>
+                </div>
+            </div>
+        `;
+        detail.querySelector('#submit-confirm-btn').addEventListener('click', () => this.handleSubmit(skill));
+    },
+
+    async handleSubmit(skill) {
+        const version = document.getElementById('submit-skill-version')?.value?.trim();
+        if (!version) { showToast('请输入版本号', 'error'); return; }
+        try {
+            await api.submitMarketSkill({
+                name: skill.name,
+                description: skill.description,
+                content: skill.content,
+                version: version,
+            });
+            showToast(`已提交「${skill.name}」v${version}，等待管理员审批`, 'success');
+            this.renderModal();
+        } catch (e) {
+            showToast('提交失败：' + e.message, 'error');
+        }
+    },
+
     select(skill, element) {
-        if (this.editingSkill) return; // don't switch while editing
+        // 切换到其他 skill：自动放弃当前编辑模式（不保存）
+        // 旧行为：if (this.editingSkill) return; —— 用户点列表完全没反应，体验差
+        if (this.editingSkill && this.editingSkill.name === skill.name) {
+            // 点的就是当前正在编辑的 skill，不打断
+        } else if (this.editingSkill) {
+            this.editingSkill = null;
+        }
         state.selectedSkill = skill;
         const allItems = document.querySelectorAll('#skills-list .skill-item');
         allItems.forEach(i => i.classList.remove('selected'));
@@ -1174,72 +1735,82 @@ const skills = {
 
         document.getElementById('skill-detail-title').textContent = skill.name;
         const detail = document.getElementById('skills-detail');
-        const isEmbed = skill.source === 'embed';
+        // 是否可编辑：USER_CREATED 完全可改；MARKET_PULLED 可改 desc + defaultLoaded；ROLE_GRANTED / MARKET_VIEW 只读
+        const isRoleGranted = skill.source === 'ROLE_GRANTED';
+        const isMarketView = skill.source === 'MARKET_VIEW';   // admin 特权视图（市场 APPROVED）
+        const isPulled = skill.source === 'MARKET_PULLED';      // 自取
+        const canEdit = skill.source === 'USER_CREATED' || isPulled;
+        const canDelete = canEdit;
+        const lbl = this._sourceLabel(skill.source);
         let html = '';
+
+        // 来源 + 状态
+        html += `<div class="detail-section">
+            <div class="detail-section-title">来源 / 状态</div>
+            <div class="detail-section-content" style="font-size: 13px;">
+                <span class="skill-source-tag" style="background:${lbl.bg};color:${lbl.color};">${lbl.text}</span>
+                <span style="margin-left: 12px; color: ${skill.load ? 'var(--success-color, #22c55e)' : 'var(--text-muted)'};">
+                    ${skill.load ? '已加载' : '未加载'}
+                </span>
+                ${isRoleGranted ? ' · <span style="color: var(--text-muted)">已被角色授权锁定，不可编辑</span>' : ''}
+                ${isMarketView ? ' · <span style="color: var(--text-muted)">市场视图（admin 特权），可去「市场」Tab 拉取</span>' : ''}
+            </div>
+        </div>`;
 
         // Description
         html += `<div class="detail-section">
-            <div class="detail-section-title">技能说明</div>
+            <div class="detail-section-title">技能说明内容</div>
             <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary);">
                 ${skill.content ? renderMarkdown(skill.content) : '<span style="color: var(--text-muted);">无详细说明</span>'}
             </div>
         </div>`;
 
-        // Status
-        html += `<div class="detail-section">
-            <div class="detail-section-title">状态</div>
-            <div class="detail-section-content">
-                <span style="color: ${skill.load ? 'var(--success-color, #22c55e)' : 'var(--text-muted)'}">
-                    ${skill.load ? '已加载' : '未加载'}
-                </span>
-                ${isEmbed ? ' · <span style="color: var(--text-muted)">内嵌技能，不可编辑</span>' : ''}
-            </div>
-        </div>`;
-
         // Actions
-        if (!isEmbed) {
+        if (canEdit) {
             html += `<div style="margin-top: 24px; display: flex; gap: 12px;">
-                <button class="send-skill-btn" id="edit-skill-btn" style="flex: 1;">编辑技能</button>
+                <button class="send-skill-btn" id="edit-skill-btn" style="flex: 1;">${isPulled ? '编辑描述 / 默认加载' : '编辑技能'}</button>
                 <button class="delete-skill-btn" id="delete-skill-btn" style="flex: 1; background: var(--error-color, #ef4444);">删除技能</button>
             </div>`;
         }
 
-        // Send button (apply skill to chat)
-        html += `<div style="margin-top: 12px;">
-            <button class="send-skill-btn" id="send-skill-btn">应用技能并发送</button>
+        // Action buttons: 应用 / 复制（所有 source 都能用）
+        html += `<div style="margin-top: 12px; display: flex; gap: 12px;">
+            <button class="send-skill-btn" id="apply-skill-btn" style="flex: 1;">应用</button>
+            <button class="send-skill-btn" id="copy-skill-btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary); border: 2px solid var(--border-color);">复制</button>
         </div>`;
 
         detail.innerHTML = html;
 
-        // Edit button
         const editBtn = detail.querySelector('#edit-skill-btn');
         if (editBtn) editBtn.addEventListener('click', () => this.showEditForm(skill));
 
-        // Delete button
         const deleteBtn = detail.querySelector('#delete-skill-btn');
         if (deleteBtn) deleteBtn.addEventListener('click', () => this.handleDelete(skill));
 
-        // Send button
-        detail.querySelector('#send-skill-btn').addEventListener('click', () => this.send(skill, {}));
+        detail.querySelector('#apply-skill-btn').addEventListener('click', () => this.apply(skill, {}));
+        detail.querySelector('#copy-skill-btn').addEventListener('click', () => this.copyToTextarea(skill, {}));
     },
 
     showEditForm(skill) {
         this.editingSkill = skill;
         document.getElementById('skill-detail-title').textContent = '编辑技能';
         const detail = document.getElementById('skills-detail');
+        // MARKET_PULLED 不能改 content（content 来自市场快照），只能改 desc + defaultLoaded
+        const isPulled = skill.source === 'MARKET_PULLED';
+        const contentReadonly = isPulled;
         detail.innerHTML = `
             <div style="display: flex; flex-direction: column; gap: 16px;">
                 <div>
                     <label class="param-label">技能名称</label>
-                    <input type="text" id="edit-skill-name" class="param-input" value="${skill.name}" ${skill.source === 'embed' ? 'disabled' : ''} placeholder="例如：周报生成">
+                    <input type="text" id="edit-skill-name" class="param-input" value="${escapeHtml(skill.name)}" disabled placeholder="例如：周报生成">
                 </div>
                 <div>
                     <label class="param-label">技能描述</label>
-                    <input type="text" id="edit-skill-desc" class="param-input" value="${skill.description || ''}" placeholder="简要描述技能的功能">
+                    <input type="text" id="edit-skill-desc" class="param-input" value="${escapeHtml(skill.description || '')}" placeholder="简要描述技能的功能">
                 </div>
                 <div>
-                    <label class="param-label">技能内容（Prompt 模板）</label>
-                    <textarea id="edit-skill-content" class="param-input param-textarea" style="min-height: 200px; font-family: var(--font-mono, monospace); font-size: 13px;" placeholder="技能内容模板，支持 {param} 占位符">${skill.content || ''}</textarea>
+                    <label class="param-label">技能内容（Prompt 模板）${contentReadonly ? ' <span style="font-size: 11px; color: var(--text-muted);">（市场拉取的 Skill 不可改；想更新请去「市场」Tab 重新拉取）</span>' : ''}</label>
+                    <textarea id="edit-skill-content" class="param-input param-textarea" style="min-height: 200px; font-family: var(--font-mono, monospace); font-size: 13px;" placeholder="技能内容模板，支持 {param} 占位符"${contentReadonly ? ' disabled' : ''}>${escapeHtml(skill.content || '')}</textarea>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <input type="checkbox" id="edit-skill-load" ${skill.load ? 'checked' : ''}>
@@ -1328,7 +1899,14 @@ const skills = {
         if (!name) { showToast('请输入技能名称', 'error'); return; }
         if (!content) { showToast('请输入技能内容', 'error'); return; }
 
-        const result = await api.updateSkill({ name, description, load, content });
+        let result;
+        if (originalSkill.source === 'MARKET_PULLED') {
+            // 自取的 Skill：仅改 desc + defaultLoaded（PATCH）
+            result = await api.patchSkill(name, {description, defaultLoaded: load});
+        } else {
+            // 自建：全字段保存
+            result = await api.updateSkill({ name, description, load, content });
+        }
         if (result !== null) {
             showToast('技能保存成功', 'success');
             this.editingSkill = null;
@@ -1373,6 +1951,57 @@ const skills = {
         }
 
         chat.send();
+    },
+
+    /** "应用" 按钮：覆盖 textarea 内容 + 直接发送给大模型 */
+    apply(skill, skillParams) {
+        const promptContent = this._buildPrompt(skill, skillParams);
+        this.closeModal();
+        const ta = document.getElementById('textarea');
+        ta.value = promptContent;
+        ta.focus();
+        // Auto-select associated MCPs
+        if (skill.tools) {
+            for (const toolName of skill.tools) {
+                if (!state.selectedMcps.includes(toolName)) {
+                    state.selectedMcps.push(toolName);
+                }
+            }
+        }
+        // 立即发送
+        if (typeof chat !== 'undefined' && chat.send) {
+            chat.send();
+        }
+    },
+
+    /** "复制" 按钮：覆盖 textarea 内容（不发送，不追加） */
+    copyToTextarea(skill, skillParams) {
+        const promptContent = this._buildPrompt(skill, skillParams);
+        this.closeModal();
+        const ta = document.getElementById('textarea');
+        ta.value = promptContent;
+        ta.focus();
+        // Scroll cursor to end
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        // Auto-select associated MCPs
+        if (skill.tools) {
+            for (const toolName of skill.tools) {
+                if (!state.selectedMcps.includes(toolName)) {
+                    state.selectedMcps.push(toolName);
+                }
+            }
+        }
+    },
+
+    _buildPrompt(skill, skillParams) {
+        let promptContent = skill.content;
+        if (skill.params && skill.params.length > 0) {
+            for (const param of skill.params) {
+                const regex = new RegExp(`\\{${param.name}\\}`, 'g');
+                promptContent = promptContent.replace(regex, skillParams[param.name] || '');
+            }
+        }
+        return promptContent;
     },
 
     async loadList() {
@@ -1625,6 +2254,7 @@ const imageUpload = {
 // ===================== §14 Initialization =====================
 const init = async () => {
     ui.init();
+    dialog.init();
 
     // Auth check — auto-login via cookie-based session (BFF pattern)
     const loggedIn = await auth.init();
@@ -1671,6 +2301,8 @@ const init = async () => {
     });
 
     sendBtn.addEventListener('click', () => chat.send());
+    const stopBtn = document.getElementById('stop-btn');
+    if (stopBtn) stopBtn.addEventListener('click', () => chat.stopStream());
 
     // Modal overlay click-to-close
     document.getElementById('mcp-modal-overlay').addEventListener('click', (e) => {

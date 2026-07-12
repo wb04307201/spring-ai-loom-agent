@@ -6,6 +6,5 @@ public record McpRecord(String name,
                         String title,
                         String version,
                         String description,
-                        boolean defaultSelected,
                         List<ToolRecord> tools) {
 }

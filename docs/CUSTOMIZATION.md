@@ -79,55 +79,30 @@ All properties are prefixed with `spring.ai.loom.agent`.
 
 > The underlying library also supports `similarityFunction` (COSINE / DOT_PRODUCT), but this is not exposed as a property. Customize the `VectorStore` bean to modify it.
 
-### 1.4 MCP Server Configuration (`mcps[]`)
+### 1.4 MCP Server Configuration (no longer read from yml)
 
-YAML array configuration. Each MCP server entry contains:
+> ⚠️ MCP server configuration is **no longer done via yml**. The old `mcps[]` block (under `spring.ai.loom.agent`) has been removed. MCP metadata now lives in the `mcp_server` / `mcp_tool` database tables, managed via:
+>
+> - **Admin Console → MCP 描述维护** (the "MCP 描述维护" sidebar section)
+> - REST API `/spring/ai/loom/admin/mcps/{name}` and `/spring/ai/loom/admin/mcps/{name}/tools`
+>
+> Per-user "default selected" is no longer a yml-level config; it's derived from the **role authorization** in `role_mcp.default_enabled` for the user's roles.
 
-| Field                 | Type    | Default | Description                   |
-|-----------------------|---------|---------|-------------------------------|
-| `name`                | String  | —       | MCP server identifier         |
-| `title`               | String  | —       | Display label                 |
-| `description`         | String  | —       | Description info              |
-| `defaultSelected`     | boolean | `true`  | Whether selected by default in the UI |
-| `tools[].name`        | String  | —       | Tool name                     |
-| `tools[].description` | String  | —       | Tool description              |
+### 1.5 Skill Configuration (no longer read from yml)
 
-### 1.5 Skill Configuration (`skills[]`)
-
-YAML array configuration. Each skill entry contains:
-
-| Field            | Type     | Default | Description                                       |
-|------------------|----------|---------|---------------------------------------------------|
-| `name`           | String   | —       | Skill name                                        |
-| `description`    | String   | —       | Skill description                                 |
-| `load`           | boolean  | `true`  | Whether preloaded into conversations by default   |
-| `content`        | String   | —       | Skill content text (supports `classpath:` prefix to read from files) |
-
-**Example Configuration**:
-
-```yaml
-spring:
-  ai:
-    loom:
-      agent:
-        defaultSystem: |
-          You are a professional technical support assistant...
-        rag:
-          similarityThreshold: 0.3
-          topK: 5
-          enabledKeyword: true
-          enabledSummary: true
-        jvector:
-          indexPath: /data/jvector-index
-          m: 32
-          efConstruction: 200
-          efSearch: 50
-        skills:
-          - name: email_writer
-            description: Professional email writing assistant
-            load: false
-            content: "classpath:skills/email-writer.md"
-```
+> ⚠️ Skill configuration is **no longer done via yml**. The old `skills[]` block (under `spring.ai.loom.agent`) has been removed. The init migration:
+>
+> 1. Creates three tables — `market_skill`, `user_skill`, `role_skill`
+> 2. Migrates any existing data from the old `skill` table into `user_skill` (`source=USER_CREATED`)
+> 3. Seeds 6 system skills into `market_skill` (author=`system`, status=`APPROVED`, version=`1.0.0`) — these are the demo skills with full Prompt template content hard-coded directly in the init migration:
+>    - `Monthly Event Report` (网络月度事件报告)
+>    - `HTTP Test` (http测试)
+>    - `Save/Download/Preview Demo 1` (测试保存、下载、预览1)
+>    - `Save/Download/Preview Demo 2` (测试保存、下载、预览2)
+>    - `Deploy Project` (部署项目)
+>    - `Auto E2E Functional Test` (测试自动E2E功能验证)
+>
+> To add, edit, or authorize skills, use the **admin console** (Control Panel → Skill Market) or call the REST API at `/spring/ai/loom/admin/market-skills*` and `/spring/ai/loom/admin/roles/{code}/skills`. See [./API.md → §6 Skill Management](./API.md#6-skill-management).
 
 ### 1.6 Authentication Configuration (`auth.*`)
 
@@ -255,36 +230,54 @@ The project uses the `@ConditionalOnMissingBean` pattern. All interfaces support
 - `getUsernameByToken(token)` — resolve username from session token
 - `getUsernameByAuthentication(authentication)` — legacy method (backward compatibility)
 
-**Default behavior**: `isAutoLogin()` always returns `true`; `login()` always succeeds; session tokens are stored in Spring Cache (default Caffeine).
+**Default behavior**: `isAutoLogin()` reads the session cookie; `login()` validates the user against the database and BCrypt-hashes passwords; session tokens are stored in Spring Cache (default Caffeine).
 
-**Customization Example**:
+**Customization Example** (override every method; the sample below is a minimal shell that delegates to an upstream IdP and uses an in-memory `ConcurrentMap` instead of Spring Cache):
 
 ```java
 @Bean
-public IUser customUser(Cache sessionCache) {
+public IUser customUser() {
     return new IUser() {
+        private final ConcurrentMap<String, String> sessions = new ConcurrentHashMap<>();
+
         @Override public Boolean isAutoLogin() { return false; }
+
         @Override public UserResponseRecord login(UserRequestRecord request) {
-            // Integrate real LDAP/OAuth/JWT authentication
-            // Return new UserResponseRecord(token, nickname)
+            // Integrate LDAP / OAuth / JWT here; on success:
+            String token = createToken(request.getUsername());
+            return new UserResponseRecord(token, request.getUsername());
         }
+
+        @Override public String getUsernameByAuthentication(String authentication) {
+            // Parse a real JWT / OAuth token here
+            return null;
+        }
+
         @Override public String createToken(String username) {
             String token = UUID.randomUUID().toString();
-            sessionCache.put(token, username);
+            sessions.put(token, username);
             return token;
         }
-        @Override public boolean validateToken(String token) {
-            return sessionCache.get(token) != null;
+
+        @Override public boolean validateToken(String token) { return sessions.containsKey(token); }
+        @Override public void invalidateToken(String token) { sessions.remove(token); }
+        @Override public String getUsernameByToken(String token) { return sessions.get(token); }
+
+        @Override public String getNicknameByUsername(String username) { return username; }
+        @Override public boolean isAdmin(String username) { return false; }
+
+        @Override public void changePassword(String username, String oldPassword, String newPassword) {
+            // verify oldPassword against store, then update to BCrypt-hashed newPassword
         }
-        @Override public void invalidateToken(String token) {
-            sessionCache.evict(token);
+
+        @Override public List<UserInfo> listAllUsers() { return List.of(); }
+
+        @Override public void createUser(String username, String nickname, String password, String type) {
+            // persist new user (hash password with BCrypt before storing)
         }
-        @Override public String getUsernameByToken(String token) {
-            var wrapper = sessionCache.get(token);
-            return wrapper != null ? (String) wrapper.get() : null;
-        }
-        @Override public String getUsernameByAuthentication(String authentication) {
-            // Parse real JWT or OAuth token
+
+        @Override public void deleteUser(String username) {
+            // delete user; refuse if username is the last remaining ADMIN
         }
     };
 }
@@ -309,9 +302,9 @@ public IUser customUser(Cache sessionCache) {
 | **Default**     | `DefaultChat`                                              |
 | **Override**    | Custom `@Bean IChat`                                       |
 | **Method**      | `Flux<ChatResponse> stream(ChatRequestRecord record, String username, HttpServletRequest request)` |
-| **Controls**    | Streaming chat: user/session management, RAG advisor, MCP tool injection, skill tool injection, image file handling |
+| **Controls**    | Streaming chat: user/session management, RAG advisor, MCP tool injection, skill tool injection, image/file handling, ToolContext cross-thread context propagation |
 
-**Default behavior**: Assembles `ChatClient`, optionally adding `RetrievalAugmentationAdvisor`, `IMcp` tools, all `IEmbedTool` sub-tools (time, skill, file, git), and user session management.
+**Default behavior**: Assembles `ChatClient`, optionally adding `RetrievalAugmentationAdvisor`, `IMcp` tools, all `IEmbedTool` sub-tools (time, skill, file, git), and user session management. Document-type files (PDF/DOCX/XLSX/PPTX/MD etc.) are parsed by Apache Tika into text and injected as a System Prompt; images are passed as Media to the model.
 
 **Customization Example**:
 
@@ -349,9 +342,9 @@ public IChat customChat(
 | **Interface**   | `cn.wubo.spring.ai.loom.agent.file.IUpload`       |
 | **Default**     | `DefaultUpload`                                   |
 | **Override**    | Custom `@Bean IUpload`                            |
-| **Controls**    | File upload (plain/knowledge-base), file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
+| **Controls**    | File upload (plain/knowledge-base), file download, file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
 
-**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `.local/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `.local/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` and stored in `VectorStore`.
+**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `.local/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `.local/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
 
 **Common use case**: Upload to cloud storage (S3/OSS), integrate third-party OCR, async document parsing.
 
@@ -394,11 +387,11 @@ public IChat customChat(
 | **Interface**   | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage`   |
 | **Default**     | `DefaultSkillStorage`                                |
 | **Override**    | Custom `@Bean ISkillStorage`                         |
-| **Controls**    | Skill list, save (create/update), get by name, remove |
+| **Controls**    | Per-user skill list (`user_skill`), save / patch / get / remove; auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get; admin union view (APPROVED + own PENDING); pairs with `ISkillMarketService` and `ISkillRoleAdmin` |
 
-**Default behavior**: Skills stored in an in-memory `List<SkillDocument>`, initialized from `LoomAgentProperties.getSkills()`. `save()` prevents overwriting built-in skills with `source="embed"`.
+**Default behavior**: JDBC-backed storage using three tables — `user_skill` (per-user installed skills), `role_skill` (skills granted to a role, automatically locked in `user_skill` for every user holding that role), and `market_skill` (the Skill Market catalog: PENDING / APPROVED / REJECTED / DEPRECATED status). `DefaultSkillStorage` does not load any yml fallback anymore; the `spring.ai.loom.agent.skills.*` properties were removed in favor of seeding via the `V1.0/V1.1` Flyway migrations and managing through the admin console → Skill Market page.
 
-**Common use case**: Persist to a database, load skills from a remote API.
+**Common use case**: Add a third-party skill registry (e.g., pull from a private Nexus / REST catalog) by implementing `ISkillStorage` and registering it as a `@Bean` to replace `DefaultSkillStorage`.
 
 ### 2.10 `IMcp` — MCP Tool Provider
 
@@ -524,9 +517,7 @@ Spring AI supports multiple model providers. Switch by configuring the correspon
 
 | Item            | Details                                                                         |
 |-----------------|---------------------------------------------------------------------------------|
-| **Type**        | `FlywayConfigurationCustomizer`                                                 |
-| **Override**    | Custom `@Bean FlywayConfigurationCustomizer`                                    |
-| **Default**     | Migration scripts at `classpath:db/loom`, history table `loomAgent_schema_history`, baseline-on-migrate |
+| **Default**     | Library ships `V1.0__init.sql` at `classpath:db/migration/` (schema + admin seed). Application modules add their own `V1__xxx.sql` (or `V1.1__xxx.sql` etc.) in the same `classpath:db/migration/`; Spring Boot's default Flyway runs them in version order on a single `flyway_schema_history` table. Library does **not** override Flyway's default location or history table. |
 
 ---
 
@@ -541,7 +532,7 @@ Spring AI supports multiple model providers. Switch by configuring the correspon
 
 ### 4.2 Custom MCP Implementation
 
-Beyond configuring `mcps[]`, you can fully replace the `IMcp` interface to customize:
+Beyond configuring the MCP servers (via the `mcp_server` table), you can fully replace the `IMcp` interface to customize:
 
 - MCP server discovery logic
 - Tool callback interception/enhancement
@@ -551,35 +542,48 @@ Beyond configuring `mcps[]`, you can fully replace the `IMcp` interface to custo
 
 ## 5. Skill Customization
 
-### 5.1 Skill Content Injection
+> ⚠️ Skill 数据**完全在数据库里**。`spring.ai.loom.agent.skills[]` yml 段已废弃，配置不再从此读取。详见 [§1.5 Skill Configuration](#15-skill-configuration-no-longer-read-from-yml)。
 
-Two ways to configure skill content in YAML:
+### 5.1 Skill 生命周期（按数据来源分三种来源）
 
-```yaml
-# Option 1: Inline text
-skills:
-  - name: greeting
-    content: |
-      You are a greeting assistant. When the user says "hello", reply "Hello!"
+| 来源 (`user_skill.source`) | 描述 | 可改 | 不可改 |
+|---|---|---|---|
+| `USER_CREATED` | 用户在聊天 UI「技能库 → 我的」自建 | name / desc / content / default_loaded | （PK 本身） |
+| `MARKET_PULLED` | 用户从「技能库 → 市场」Tab 拉取 | desc / default_loaded | content（要更新就重新拉取） |
+| `ROLE_GRANTED` | admin 通过角色 → 用户强制注入 | （全部只读） | 全部 |
 
-# Option 2: Read from classpath
-skills:
-  - name: email_writer
-    content: "classpath:skills/email-writer.md"
+### 5.2 添加 / 修改 / 授权 Skill 的方式
+
+| 方式 | 适合 | 入口 |
+|---|---|---|
+| 控制台（admin） | demo 数据 / 一次性 seed | 浏览器登录 admin → 控制台 → Skill 市场 |
+| 业务模块 SQL | 业务模块作者 seed 自己的 mcp / skill | `src/main/resources/db/migration/V1__xxx.sql`（V1.0 已被库占用，业务用 V1 或 V1.1+ 即可） |
+| 真实用户 | 用户自建 | 聊天 UI 技能库 → 我的 Tab → + 新建 |
+| REST API | 程序化操作 | [./API.md → §6 Skill Management](./API.md#6-skill-management) |
+
+### 5.3 角色授权 Skill（admin 专属）
+
+admin 在控制台「角色管理」编辑某个角色时，可勾选要授权的 market_skill。授权后，**该角色下的所有用户登录时自动获得该 Skill**（`source=ROLE_GRANTED, locked=true`），**用户不能改不能删**。
+
+```sql
+-- role_skill 表（自动管理，不需要手写 SQL）
+-- role_code | market_skill_id | sort_order | default_loaded
+-- '研发'   |  1               | 0          | true
 ```
 
-### 5.2 Skill Properties
+### 5.4 Skill 内容模板
 
-Each skill has four configurable fields:
+`content` 字段支持任何字符串（Prompt 模板）。`{param}` 占位由 LLM 在运行时从对话上下文解释，不是结构化表单字段。`@tool_name` 引用当前用户角色授权的 MCP 工具。
 
-| Field         | Type    | Default | Description                                               |
-|---------------|---------|---------|-----------------------------------------------------------|
-| `name`        | String  | —       | Skill name (unique identifier)                            |
-| `description` | String  | —       | Skill description (used by LLM for matching)              |
-| `load`        | boolean | `true`  | Whether preloaded into conversations by default           |
-| `content`     | String  | —       | Skill content text or `classpath:` prefix to load from file |
+示例 Prompt 模板（不是 yml，是 SQL 里 INSERT 的 content 字段）：
 
-> **Note**: Skills no longer support `tools` or `params` fields in YAML configuration. MCP tool binding and skill parameters are managed at runtime via the Skill Library API (`PUT /spring/ai/loom/skill`).
+```text
+用户希望"梳理 {topic} 月度事件"。
+- 调"获取当前时间"工具拿到当前年/月
+- 调"必应搜索"按月搜索 {topic} 事件
+- 按月分组，输出 HTML 报告
+- 调"生成文件预览链接"工具把报告存为 reports/{topic}-{year}.html
+```
 
 ---
 

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>用户管理 - 灵梭管理控制台</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/spring/ai/loom/style.css">
+    <link rel="stylesheet" href="console.css">
+</head>
+<body>
+<div class="admin-layout">
+    <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+            <h2 class="admin-sidebar-title">管理控制台</h2>
+            <span class="admin-sidebar-subtitle">用户 · 角色 · Skill · MCP</span>
+        </div>
+        <nav class="admin-sidebar-nav">
+            <a href="console.html" class="admin-sidebar-link active">
+                <span class="admin-sidebar-icon">📊</span><span>用户管理</span>
+            </a>
+            <a href="roles.html" class="admin-sidebar-link">
+                <span class="admin-sidebar-icon">🛡</span><span>角色管理</span>
+            </a>
+            <a href="skills-market.html" class="admin-sidebar-link">
+                <span class="admin-sidebar-icon">🏪</span><span>Skill 市场</span>
+            </a>
+            <a href="mcps.html" class="admin-sidebar-link">
+                <span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span>
+            </a>
+            <a href="stats.html" class="admin-sidebar-link">
+                <span class="admin-sidebar-icon">📈</span><span>用量统计</span>
+            </a>
+            <div class="admin-sidebar-divider"></div>
+            <a href="/spring/ai/loom/index.html" class="admin-sidebar-link">
+                <span class="admin-sidebar-icon">⬅</span><span>返回主页</span>
+            </a>
+        </nav>
+    </aside>
+    <div class="admin-main-wrap">
+        <header class="admin-header">
+            <div class="admin-header-left">
+                <h1>用户管理</h1>
+                <span class="admin-subtitle">用户列表 + 分配角色</span>
+            </div>
+            <div class="admin-header-right">
+                <span id="admin-username" class="admin-username"></span>
+            </div>
+        </header>
+
+        <main class="admin-main">
+            <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+                <strong>用户类型 ≠ 角色</strong> —— 用户类型（管理员 / 普通用户）由 <code>用户类型</code> 列决定，决定默认权限。
+                角色是 <a href="roles.html" style="color: #1e40af; text-decoration: underline;">角色管理</a> 里维护的业务角色（可任意命名），用于给普通用户授权 MCP 服务。
+            </div>
+            <div class="admin-toolbar">
+                <button id="create-user-btn" class="primary-btn">+ 新建用户</button>
+                <button id="refresh-btn" class="secondary-btn">刷新</button>
+                <button id="batch-clean-btn" class="secondary-btn">批量清理</button>
+                <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="current-month-label"></span>
+            </div>
+
+            <div id="user-table-container" class="table-container">
+                <div class="loading-indicator">加载中...</div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<!-- 新建用户模态框 -->
+<div id="create-user-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3>新建用户</h3>
+            <div class="close-button" id="create-user-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px;">
+            <div class="form-group">
+                <label>用户名 <span style="color: var(--error-color);">*</span></label>
+                <input type="text" id="new-username" class="form-input" placeholder="字母/数字">
+            </div>
+            <div class="form-group">
+                <label>昵称 <span style="color: var(--error-color);">*</span></label>
+                <input type="text" id="new-nickname" class="form-input" placeholder="显示名">
+            </div>
+            <div class="form-group">
+                <label>密码 <span style="color: var(--error-color);">*</span></label>
+                <input type="password" id="new-password" class="form-input" placeholder="至少 6 位">
+            </div>
+            <div class="form-group">
+                <label>类型 <span style="color: var(--error-color);">*</span></label>
+                <select id="new-type" class="form-input">
+                    <option value="USER">普通用户</option>
+                    <option value="ADMIN">管理员</option>
+                </select>
+            </div>
+            <div id="create-error" class="error-msg" style="display: none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="create-cancel-btn">取消</button>
+            <button class="primary-btn" id="create-submit-btn">创建</button>
+        </div>
+    </div>
+</div>
+
+<!-- 批量清理模态框（整合后唯一入口） -->
+<div id="batch-clean-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 720px; max-height: 80vh;">
+        <div class="modal-header">
+            <h3>批量清理已软删会话</h3>
+            <div class="close-button" id="batch-clean-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 0; max-height: 60vh; overflow-y: auto;" id="batch-clean-list">
+            <div class="loading-indicator">加载中...</div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="batch-clean-cancel">取消</button>
+            <button class="primary-btn" id="batch-clean-confirm">清理选中</button>
+        </div>
+    </div>
+</div>
+
+<!-- 分配角色模态框 -->
+<div id="assign-role-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-header">
+            <h3 id="assign-role-title">分配角色</h3>
+            <div class="close-button" id="assign-role-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px; max-height: 60vh; overflow-y: auto;">
+            <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 8px;" id="assign-role-hint"></div>
+            <div id="assign-role-list" style="display: flex; flex-direction: column; gap: 6px;">加载中...</div>
+            <div id="assign-role-error" class="error-msg" style="display: none; margin-top: 8px;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="assign-role-cancel">取消</button>
+            <button class="primary-btn" id="assign-role-save">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 通用确认模态框 -->
+<div id="confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 440px;">
+        <div class="modal-header">
+            <h3 id="confirm-title">确认</h3>
+            <div class="close-button" id="confirm-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px;">
+            <div id="confirm-message" style="font-size: 14px; line-height: 1.7;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="confirm-cancel">取消</button>
+            <button class="primary-btn" id="confirm-ok" style="background: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444);">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-notification" class="toast"></div>
+
+<script src="console.js"></script>
+</body>
+</html>

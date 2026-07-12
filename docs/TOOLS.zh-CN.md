@@ -32,7 +32,7 @@
 | `time.enabled`     | boolean | `true`  | 时间工具（`ITimeTool` — 当前时间、时区转换）                            |
 | `file.enabled`     | boolean | `true`  | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除）                     |
 | `skill.enabled`    | boolean | `true`  | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
-| `git.enabled`      | boolean | `false` | Git 工具（`IGitTool` — 31 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
+| `git.enabled`      | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
 | `maven.enabled`    | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** — 编译/打包走 `ICompileAndDeployTool`。 |
 | `compile.enabled`  | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
 
@@ -60,9 +60,9 @@ spring:
 | 子接口                       | 默认实现                              | 方法数  | 默认状态      | 备注                                          |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool`              | `DefaultTimeTool`                 | 2    | 启用        | 未设 `time.enabled` 时始终开启                     |
-| `ISkillTool`             | `DefaultSkillTool`                | 2    | 启用        | 与 `skills[]` 配置搭配使用                        |
+| `ISkillTool`             | `DefaultSkillTool`                | 2    | 启用        | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
 | `IFileTool`              | `DefaultFileTool`                 | 16   | 启用        | 基于路径；根目录 = `{fileBasePath}/{username}/` |
-| `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 31   | **禁用**    | 通过 `git.enabled=true` 开启                     |
+| `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 28   | **禁用**    | 通过 `git.enabled=true` 开启                     |
 | `IMavenTool`             | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用**    | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
 | `ICompileAndDeployTool`  | `DefaultCompileAndDeployTool`     | 1    | 启用        | 端到端 `git clone → build → docker run → health check` |
 
@@ -88,7 +88,8 @@ spring:
 | **默认实现** | `DefaultSkillTool`                                                     |
 | **覆盖方式** | 自定义 `@Bean ISkillTool`                                                 |
 | **状态**   | 默认启用；通过 `spring.ai.loom.agent.skill.enabled` 切换                      |
-| **方法**   | `skillContents`（列出所有可用技能）、`getSkill`（根据名称获取技能详情） |
+| **方法**   | `skillContents`（列出当前用户可用技能）、`getSkill`（根据名称获取技能详情） |
+| **数据源** | `user_skill`（数据库）。每次调用前 `DefaultSkillStorage` 自动 sync `role_skill` → `user_skill`（locked 的 ROLE_GRANTED 条目）。对 admin 还会附带** union view**：所有 APPROVED + 自己的 PENDING（source=`MARKET_VIEW`）。 |
 
 ---
 
@@ -135,7 +136,7 @@ spring:
 | **状态**   | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **默认禁用** |
 | **工作目录** | 通过 `gitSetWorkingDir` 设置（绝对路径或相对于 `{fileBasePath}/{username}/` 的相对路径）；`gitInit` / `gitClone` 也接受绝对路径或用户文件目录下的相对路径 |
 
-**方法（31 个）**：
+**方法（28 个）**：
 
 - **仓库生命周期**：`gitInit`、`gitClone`
 - **基础操作**：`gitStatus`、`gitAdd`、`gitCommit`、`gitDiff`、`gitLog`

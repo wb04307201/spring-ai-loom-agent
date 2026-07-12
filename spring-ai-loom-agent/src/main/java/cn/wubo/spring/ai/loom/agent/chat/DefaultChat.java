@@ -122,7 +122,7 @@ public class DefaultChat implements IChat {
             requestSpec.advisors(advisor -> advisor.param(VectorStoreDocumentRetriever.FILTER_EXPRESSION, "type == 'knowledge' && knowledgeId == '" + chatRequestRecord.knowledgeId() + "' && username == '" + username + "'"));
         }
 
-        ToolCallbackProvider toolCallbackProvider = mcp.getToolCallbackProvider(chatRequestRecord.mcps());
+        ToolCallbackProvider toolCallbackProvider = mcp.getVisibleToolCallbackProvider(username, chatRequestRecord.mcps());
 
         if (toolCallbackProvider != null) {
             requestSpec.toolCallbacks(toolCallbackProvider);

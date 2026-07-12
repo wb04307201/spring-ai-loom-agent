@@ -47,8 +47,10 @@ public class LoomAgentProperties {
             """;
     private boolean init = true;
     private RagProperty rag = new RagProperty();
-    private List<McpProperty> mcps = new ArrayList<>();
-    private List<SkillProperty> skills = new ArrayList<>();
+    // mcps 数据源已迁移到 V5__add_roles_and_mcp_metadata.sql (mcp_server / mcp_tool 表)
+    // 通过 cn.wubo.spring.ai.loom.agent.rbac 包下的服务管理
+    // skills 已迁移到 V10__skill_market.sql (market_skill / user_skill / role_skill)
+    // 通过 cn.wubo.spring.ai.loom.agent.skill 包下的服务管理
     private JVectorProperties jvector = new JVectorProperties();
     private String timezone = "Asia/Shanghai";
     private String fileBasePath = ".local/file";
@@ -95,28 +97,9 @@ public class LoomAgentProperties {
         private boolean enabledSummary;
     }
 
-    @Data
-    public static class McpProperty {
-        private String name;
-        private String title;
-        private String description;
-        private boolean defaultSelected = true;
-        private List<ToolProperty> tools = new ArrayList<>();
-
-        @Data
-        public static class ToolProperty {
-            private String name;
-            private String description;
-        }
-    }
-
-    @Data
-    public static class SkillProperty {
-        private String name;
-        private String description;
-        private boolean load = true;
-        private String content;
-    }
+    // McpProperty / ToolProperty / SkillProperty 已删除：
+    //   mcp 元数据现由 rbac 包的 IMcpServerAdmin 服务管理（数据库 mcp_server / mcp_tool 表）
+    //   skill 现由 skill 包的 ISkillMarketService / ISkillRoleAdmin / ISkillStorage 管理（数据库 market_skill / user_skill / role_skill 表）
 
     @Data
     public static class JVectorProperties {
@@ -140,7 +123,22 @@ public class LoomAgentProperties {
                 "/spring/ai/loom/user/logout",
                 "/spring/ai/loom/index.html",
                 "/spring/ai/loom/app.js",
-                "/spring/ai/loom/style.css"
+                "/spring/ai/loom/style.css",
+                "/spring/ai/loom/login.html",
+                "/spring/ai/loom/login.js",
+                "/spring/ai/loom/login.css",
+                // admin 静态资源（js / css / 字体等）不鉴权，让未登录也能加载前端资源
+                "/spring/ai/loom/admin/**/*.js",
+                "/spring/ai/loom/admin/**/*.css",
+                "/spring/ai/loom/favicon.ico"
+        );
+        /**
+         * 仅管理员可访问的路径模式（Ant 风格）。匹配时除了登录态，
+         * 还会校验当前用户 type=ADMIN，否则 302 重定向到 /spring/ai/loom/index.html。
+         */
+        private List<String> adminPathPatterns = List.of(
+                "/spring/ai/loom/admin/**",
+                "/spring/ai/loom/user/currentIsAdmin"
         );
         private CookieProperty cookie = new CookieProperty();
 
@@ -156,15 +154,6 @@ public class LoomAgentProperties {
     }
 
     private AuthProperty auth = new AuthProperty();
-
-    @Data
-    public static class UserProperty {
-        private String username = "wb04307201";
-        private String nickname = "用户";
-        private String authentication = "loom-agent-auth";
-    }
-
-    private UserProperty user = new UserProperty();
 
     private MavenProperty maven = new MavenProperty();
 
