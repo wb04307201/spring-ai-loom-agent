@@ -24,8 +24,12 @@ public class DefaultSubTaskTool implements ISubTaskTool {
             + "主对话会同步等待子任务完成,然后拿到最终文本。")
     @Override
     public String startSubTask(String prompt, String systemContext, ToolContext toolContext) {
-        String username = (String) toolContext.getContext().get("username");
-        String parentConvId = (String) toolContext.getContext().get("parentConversationId");
+        // Null-safe context extraction: the tool may be invoked from paths where
+        // the caller forgot to populate `username` / `parentConversationId` (direct
+        // unit tests, scheduler callbacks, custom tool-call wiring). Tolerate and
+        // log instead of NPE-ing through the whole sub-task lifecycle.
+        String username = readContextString(toolContext, "username");
+        String parentConvId = readContextString(toolContext, "parentConversationId");
 
         String subTaskId = registry.register(username, parentConvId, prompt);
         log.info("子任务启动: id={}, user={}, conv={}", subTaskId, username, parentConvId);
@@ -35,7 +39,13 @@ public class DefaultSubTaskTool implements ISubTaskTool {
 
         SubTaskResult result;
         try {
-            result = executor.execute(req);
+            SubTaskResult raw = executor.execute(req);
+            // Defensive: a custom executor could theoretically return null. Synthesize a
+            // FAILED result so the registry transitions to a terminal state instead of
+            // leaving the active record stuck.
+            result = (raw != null) ? raw
+                    : SubTaskResult.failed(req, 0L, System.currentTimeMillis(),
+                            "Executor 返回 null 结果");
         } catch (Exception e) {
             log.error("子任务异常: id={}", subTaskId, e);
             result = SubTaskResult.failed(req, 0L, System.currentTimeMillis(),
@@ -44,6 +54,16 @@ public class DefaultSubTaskTool implements ISubTaskTool {
 
         registry.markFinished(subTaskId, result.status(), result.text(), result.errorMessage());
         return formatForMainConversation(result);
+    }
+
+    /**
+     * Reads a string value from {@code ToolContext.getContext()}, returning the
+     * supplied fallback if the context is null, missing, or non-String.
+     */
+    private static String readContextString(ToolContext toolContext, String key) {
+        if (toolContext == null || toolContext.getContext() == null) return "";
+        Object value = toolContext.getContext().get(key);
+        return (value instanceof String s) ? s : "";
     }
 
     private String formatForMainConversation(SubTaskResult r) {

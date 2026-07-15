@@ -642,24 +642,31 @@ public class LoomAgentConfiguration {
         }
 
         @Bean
-        public cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry(LoomAgentProperties properties) {
+        public cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry(
+                LoomAgentProperties properties,
+                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor) {
+            // Wire the cancel hook so SubTaskRegistry.kill(id) actually interrupts the
+            // worker thread via subTaskExecutor::cancel(id) rather than just marking the
+            // record CANCELLED.
             return new cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry(
                     properties.getSubtask().getMaxConcurrent(),
-                    properties.getSubtask().getMaxHistory());
+                    properties.getSubtask().getMaxHistory(),
+                    subTaskExecutor::cancel);
         }
 
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
                 @Qualifier("loomSubTaskChatClient") ChatClient loomSubTaskChatClient,
                 ObjectProvider<MessageChatMemoryAdvisor> memoryAdvisorProvider,
-                @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor) {
+                @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
+                cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp) {
             // MessageChatMemoryAdvisor is auto-created by Spring AI when ChatMemory is autoconfigured,
             // but it is not guaranteed to be a single primary bean in all setups — use ObjectProvider
             // to safely resolve it. If absent (null), DefaultSubTaskExecutor will NPE only when a
             // sub-task is actually invoked; bean creation still succeeds.
             MessageChatMemoryAdvisor memoryAdvisor = memoryAdvisorProvider.getIfAvailable();
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
-                    loomSubTaskChatClient, memoryAdvisor, loomSubTaskExecutor);
+                    loomSubTaskChatClient, memoryAdvisor, loomSubTaskExecutor, mcp);
         }
 
         /**

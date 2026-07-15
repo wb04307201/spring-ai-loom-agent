@@ -119,4 +119,48 @@ class SubTaskRegistryTest {
         assertThat(registry.get(UUID.randomUUID().toString())).isNull();
         assertThat(registry.kill("nonexistent")).isFalse();
     }
+
+    @Test
+    void killInvokesCancelHookWithSubTaskId() {
+        java.util.concurrent.atomic.AtomicReference<String> captured = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
+        registry = new SubTaskRegistry(8, 100, id -> {
+            captured.set(id);
+            callCount.incrementAndGet();
+        });
+
+        String id = registry.register("alice", "conv-1", "p1");
+        boolean killed = registry.kill(id);
+
+        assertThat(killed).isTrue();
+        assertThat(callCount.get()).isEqualTo(1);
+        assertThat(captured.get()).isEqualTo(id);
+        // After kill(), the record moved to history with status CANCELLED.
+        assertThat(registry.get(id).status())
+                .isEqualTo(cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.CANCELLED);
+    }
+
+    @Test
+    void killFallsBackToAttachFutureWhenNoHookRegistered() {
+        // No cancel hook — uses legacy attachFuture path. Future is not attached here,
+        // so kill() should still mark the record CANCELLED without NPE.
+        registry = new SubTaskRegistry(8, 100);   // 2-arg ctor: no hook
+        String id = registry.register("alice", "conv-1", "p1");
+
+        boolean killed = registry.kill(id);
+
+        assertThat(killed).isTrue();
+        assertThat(registry.get(id).status())
+                .isEqualTo(cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.CANCELLED);
+    }
+
+    @Test
+    void killAllByConversationToleratesNullConversationId() {
+        registry = new SubTaskRegistry(8, 100, id -> {});
+        registry.register("alice", "conv-1", "p1");
+
+        int n = registry.killAllByConversation(null);
+
+        assertThat(n).isZero();   // defensive — no NPE
+    }
 }
