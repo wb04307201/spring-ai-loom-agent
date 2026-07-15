@@ -28,6 +28,7 @@ class DefaultSubTaskExecutorTest {
     private MessageChatMemoryAdvisor memoryAdvisor;
     private ThreadPoolExecutor executor;
     private IMcp mcp;
+    private java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools;
     private DefaultSubTaskExecutor target;
 
     @BeforeEach
@@ -36,7 +37,8 @@ class DefaultSubTaskExecutorTest {
         memoryAdvisor = mock(MessageChatMemoryAdvisor.class);
         executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(2);
         mcp = mock(IMcp.class);
-        target = new DefaultSubTaskExecutor(chatClient, memoryAdvisor, executor, mcp);
+        embedTools = java.util.Collections.emptyList();
+        target = new DefaultSubTaskExecutor(chatClient, memoryAdvisor, executor, mcp, embedTools);
     }
 
     @Test

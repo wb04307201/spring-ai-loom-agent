@@ -73,6 +73,7 @@ import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -264,7 +265,16 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IChat.class)
         @Bean
-        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp,
+                          // @Lazy on the tools list breaks a 3-hop circular dep:
+                          // chat -> List<IEmbedTool> (eagerly resolves defaultSubTaskTool)
+                          //   -> defaultSubTaskExecutor
+                          //     -> loomSubTaskChatClient
+                          //       -> List<IEmbedTool> (would re-enter)
+                          // With @Lazy, the list is materialised on first access (inside
+                          // DefaultChat.stream()) after every bean is fully constructed.
+                          @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
+                          IUserConversation userConversation, IFile file) {
             return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file);
         }
 
@@ -589,33 +599,14 @@ public class LoomAgentConfiguration {
          * 启动时构造一次。RAG / File / MCP 在 Phase 3 通过 ChatRequestComposer 注入；
          * 当前只 bake {@code IEmbedTool} 集合。
          */
-        @Bean(name = "loomSubTaskChatClient")
-        public ChatClient loomSubTaskChatClient(
-                ChatClient.Builder builder,
-                List<IEmbedTool> embedTools,
-                Optional<RetrievalAugmentationAdvisor> rag,
-                IMcp mcp,
-                IFile file,
-                LoomAgentProperties properties) {
-
-            // Copy of the main ChatClient wiring, but with a filtered tool set.
-            // Note: ChatClient.Builder is injected by Spring AI; the chat model +
-            // memory advisor are configured by Spring AI's autoconfig.
-            java.util.List<Object> filteredTools = new java.util.ArrayList<>();
-            for (var t : embedTools) {
-                boolean isRecursive =
-                        t instanceof cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool
-                        || t instanceof cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool;
-                if (!isRecursive) filteredTools.add(t);
-            }
-            // RAG / File / MCP are wired per-call via ChatRequestComposer in Phase 3
-            // when DefaultSubTaskTool is built. Here we just bake the embedTool set.
-            ChatClient built = builder
-                    .defaultTools(filteredTools.toArray())
-                    .build();
-            log.info("Sub-task ChatClient built with {} tools (recursion-filtered)", filteredTools.size());
-            return built;
-        }
+        // NOTE: removed the independent `loomSubTaskChatClient` bean. It was the root
+        // cause of a 3-hop cycle: chat -> List<IEmbedTool> -> defaultSubTaskTool ->
+        // defaultSubTaskExecutor -> loomSubTaskChatClient -> List<IEmbedTool>.
+        //
+        // The sub-task executor now reuses the main `chatClient` bean directly. Tools
+        // (filtered to exclude ISubTaskTool/IScheduleTool) and MCP callbacks are
+        // attached per-call inside `DefaultSubTaskExecutor.doExecute(...)`, after
+        // the bean graph is fully resolved. This avoids eager circular resolution.
 
         /**
          * 子任务专用线程池：bounded queue、corePool = maxPool = maxConcurrent（默认 4）。
@@ -656,21 +647,41 @@ public class LoomAgentConfiguration {
 
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
-                @Qualifier("loomSubTaskChatClient") ChatClient loomSubTaskChatClient,
+                @Qualifier("chatClient") ChatClient chatClient,
                 ObjectProvider<MessageChatMemoryAdvisor> memoryAdvisorProvider,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
-                cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp) {
-            // MessageChatMemoryAdvisor is auto-created by Spring AI when ChatMemory is autoconfigured,
-            // but it is not guaranteed to be a single primary bean in all setups — use ObjectProvider
-            // to safely resolve it. If absent (null), DefaultSubTaskExecutor will NPE only when a
-            // sub-task is actually invoked; bean creation still succeeds.
+                cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
+                // Lazy lookup: the embedTools list is materialized on first use
+                // inside DefaultSubTaskExecutor.doExecute() (a worker thread, after
+                // Spring startup completes). This breaks the cycle where chat ->
+                // List<IEmbedTool> -> defaultSubTaskTool -> defaultSubTaskExecutor ->
+                // [embedTools] would force eager resolution of the still-creating
+                // defaultSubTaskTool bean.
+                @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools) {
             MessageChatMemoryAdvisor memoryAdvisor = memoryAdvisorProvider.getIfAvailable();
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
-                    loomSubTaskChatClient, memoryAdvisor, loomSubTaskExecutor, mcp);
+                    chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools);
         }
 
         /**
          * 子任务 CRUD 路由：active list / history list / kill。
+         * 完整的任务列表 / 详情由后续 phase 补齐。
+         */
+        /**
+         * 默认子任务工具 bean 注册到主对话工具列表。
+         * 因为 {@code ISubTaskTool extends IEmbedTool},此 bean 会被 Spring AI 自动收集到
+         * {@code ChatConfiguration#chat(...)} 注入的 {@code List<IEmbedTool>} 里,无需额外配置。
+         */
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool.class)
+        public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool defaultSubTaskTool(
+                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor executor,
+                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry) {
+            return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskTool(executor, registry);
+        }
+
+        /**
+         * 子任务 CRUD 路由: active list / history list / kill。
          * 完整的任务列表 / 详情由后续 phase 补齐。
          */
         @Bean("loomAgentSubTaskRouter")

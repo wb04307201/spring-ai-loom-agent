@@ -4,6 +4,7 @@ import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
+import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -11,6 +12,7 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.tool.ToolCallbackProvider;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +27,9 @@ import java.util.concurrent.Future;
  * <ul>
  *   <li>Submits the call to a dedicated {@link ExecutorService} bean
  *       {@code loomSubTaskExecutor} so the call is interruptible and bounded.</li>
- *   <li>Uses {@link ChatClient.ChatClientRequestSpec#call()} — synchronous, runs
+ *   <li>Uses the main {@link ChatClient} bean (re-used, not a separate filtered
+ *       ChatClient — see SubTaskConfiguration for the rationale) with
+ *       {@link ChatClient.ChatClientRequestSpec#call()} — synchronous, runs the
  *       full Spring AI tool-call loop to final response.</li>
  *   <li>On interrupt: cancels the future, returns {@link SubTaskStatus#CANCELLED}.</li>
  *   <li>On exception: returns {@link SubTaskStatus#FAILED} with the message.</li>
@@ -35,9 +39,14 @@ import java.util.concurrent.Future;
  *   <li>Tracks each in-flight sub-task in a {@link ConcurrentHashMap} so external
  *       callers (e.g. {@link SubTaskRegistry#kill(String)} via a registered cancel
  *       hook) can interrupt the worker thread via {@link Future#cancel(boolean)}.</li>
+ *   <li>Per-call filters the {@link IEmbedTool} list passed in via constructor
+ *       to drop {@code ISubTaskTool}/{@code IScheduleTool} (recursion guard).
+ *       Lazy {@code @Lazy} resolution of the list breaks the bean-graph cycle that
+ *       would otherwise appear when both this executor and {@code defaultSubTaskTool}
+ *       are part of {@code List<IEmbedTool>} auto-collection.</li>
  *   <li>Propagates the full tool set available to the user: {@link IMcp} callbacks
- *       for every MCP server the user can see, in addition to the {@code embedTools}
- *       baked into the {@link ChatClient} via {@code .defaultTools(...)}.</li>
+ *       for every MCP server the user can see, plus the filtered {@code embedTools}
+ *       list.</li>
  *   <li>Propagates {@code username} + {@code parentConversationId} into the spec's
  *       toolContext so nested tool calls inside the sub-task see the same identity
  *       values the main chat uses.</li>
@@ -47,22 +56,25 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultSubTaskExecutor.class);
 
-    private final ChatClient subTaskChatClient;
+    private final ChatClient chatClient;
     private final MessageChatMemoryAdvisor memoryAdvisor;
     private final ExecutorService executor;
     private final IMcp mcp;
+    private final List<IEmbedTool> embedTools;
 
     /** Active in-flight sub-task futures, keyed by {@code req.subTaskId()}. Cleared in the worker's finally block. */
     private final ConcurrentHashMap<String, Future<?>> activeFutures = new ConcurrentHashMap<>();
 
-    public DefaultSubTaskExecutor(ChatClient subTaskChatClient,
+    public DefaultSubTaskExecutor(ChatClient chatClient,
                                   MessageChatMemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
-                                  IMcp mcp) {
-        this.subTaskChatClient = subTaskChatClient;
+                                  IMcp mcp,
+                                  List<IEmbedTool> embedTools) {
+        this.chatClient = chatClient;
         this.memoryAdvisor = memoryAdvisor;
         this.executor = executor;
         this.mcp = mcp;
+        this.embedTools = embedTools;
     }
 
     @Override
@@ -117,7 +129,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
 
     private SubTaskResult doExecute(SubTaskRequest req, long startedAt) {
         try {
-            ChatClient.ChatClientRequestSpec spec = subTaskChatClient.prompt();
+            ChatClient.ChatClientRequestSpec spec = chatClient.prompt();
             if (req.systemContext() != null) {
                 spec.system(req.systemContext());
             }
@@ -132,10 +144,21 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
             props.put("parentConversationId", req.parentConversationId());
             spec.toolContext(props);
 
-            // Attach MCP callbacks the user has access to. Sub-task has no per-call MCP
-            // selection; we pass an empty list to mean "every MCP visible to this user",
-            // matching the design intent of giving sub-tasks the same tool access as
-            // the main chat.
+            // Attach embedTools (filtered to exclude ISubTaskTool/IScheduleTool so the
+            // sub-task cannot recursively spawn sub-tasks or schedules).
+            List<Object> filtered = new ArrayList<>();
+            for (var t : embedTools) {
+                if (t instanceof cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool) continue;
+                if (t instanceof cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool) continue;
+                filtered.add(t);
+            }
+            if (!filtered.isEmpty()) {
+                spec.tools(filtered.toArray());
+            }
+
+            // Attach MCP callbacks the user has access to. Empty list means "every MCP
+            // visible to this user", mirroring the design intent of giving sub-tasks
+            // the same tool access as the main chat.
             if (mcp != null) {
                 ToolCallbackProvider mcpProvider = mcp.getVisibleToolCallbackProvider(req.username(), List.of());
                 if (mcpProvider != null) {
