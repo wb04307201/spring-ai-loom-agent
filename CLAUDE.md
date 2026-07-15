@@ -11,6 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Build**: Maven (multi-module)
 - **Database**: H2 (default), with Flyway migrations
 
+## Project Overview Images
+
+`docs/project-overview-en.png` and `docs/project-overview-zh.png` (shown at the top of `README.md` / `README.zh-CN.md`) are generated from project source + `README.md` + this `CLAUDE.md` by the project skill at **`.claude/skills/project-overview-image/`** using the latest DashScope image model. Regenerate via the skill trigger phrases ("更新项目概览图", "刷新 README 顶部的 overview 图", "生成 docs/project-overview-{en,zh}.png") whenever the architecture changes meaningfully — never hand-edit the PNGs. Prompt payloads and the API call shape live in `docs/image-generation-prompts.md`.
+
 ## Module Structure
 
 | Module | Purpose |
