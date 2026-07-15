@@ -59,6 +59,8 @@ import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
 import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
@@ -262,7 +264,7 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IChat.class)
         @Bean
-        public IChat chat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
             return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file);
         }
 
@@ -561,6 +563,125 @@ public class LoomAgentConfiguration {
         @Bean
         public ICompileAndDeployTool defaultCompileAndDeployTool(LoomAgentProperties properties) {
             return new DefaultCompileAndDeployTool(properties);
+        }
+    }
+
+    // ==================== Sub-task ====================
+
+    /**
+     * 子任务基础设施：构造过滤版 ChatClient（排除 ISubTaskTool / IScheduleTool 防 LLM 自递归）、
+     * 专用线程池、Registry、Executor 以及 BFF 路由。
+     * <p>
+     * 完整的 LLM 工具（{@code ISubTaskTool} / {@code IScheduleTool} 的实现类）在 Task 3.1/3.2/4.1/4.2
+     * 才加入 —— 本配置只搭骨架。
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(name = "spring.ai.loom.agent.subtask.enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor.class)
+    @Slf4j
+    public static class SubTaskConfiguration {
+
+        /**
+         * 构建子任务专用 ChatClient：复用主对话的 ChatModel + memory，
+         * 但工具集合过滤掉 {@link cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool} 和
+         * {@link cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool}，从源头杜绝 LLM 自递归。
+         * <p>
+         * 启动时构造一次。RAG / File / MCP 在 Phase 3 通过 ChatRequestComposer 注入；
+         * 当前只 bake {@code IEmbedTool} 集合。
+         */
+        @Bean(name = "loomSubTaskChatClient")
+        public ChatClient loomSubTaskChatClient(
+                ChatClient.Builder builder,
+                List<IEmbedTool> embedTools,
+                Optional<RetrievalAugmentationAdvisor> rag,
+                IMcp mcp,
+                IFile file,
+                LoomAgentProperties properties) {
+
+            // Copy of the main ChatClient wiring, but with a filtered tool set.
+            // Note: ChatClient.Builder is injected by Spring AI; the chat model +
+            // memory advisor are configured by Spring AI's autoconfig.
+            java.util.List<Object> filteredTools = new java.util.ArrayList<>();
+            for (var t : embedTools) {
+                boolean isRecursive =
+                        t instanceof cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool
+                        || t instanceof cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool;
+                if (!isRecursive) filteredTools.add(t);
+            }
+            // RAG / File / MCP are wired per-call via ChatRequestComposer in Phase 3
+            // when DefaultSubTaskTool is built. Here we just bake the embedTool set.
+            ChatClient built = builder
+                    .defaultTools(filteredTools.toArray())
+                    .build();
+            log.info("Sub-task ChatClient built with {} tools (recursion-filtered)", filteredTools.size());
+            return built;
+        }
+
+        /**
+         * 子任务专用线程池：bounded queue、corePool = maxPool = maxConcurrent（默认 4）。
+         * <p>
+         * 返回 {@link java.util.concurrent.ExecutorService}（接口）而不是
+         * {@link org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor}
+         * （具体类），因为 Spring 在返回接口类型时只能暴露 {@code getThreadPoolExecutor()}
+         * 这一入口，更便于将来切换实现。
+         */
+        @Bean(name = "loomSubTaskExecutor", destroyMethod = "shutdown")
+        public java.util.concurrent.ExecutorService loomSubTaskExecutor(LoomAgentProperties properties) {
+            int n = Math.max(1, properties.getSubtask().getMaxConcurrent());
+            org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor exec =
+                    new org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor();
+            exec.setCorePoolSize(n);
+            exec.setMaxPoolSize(n);
+            exec.setQueueCapacity(50);
+            exec.setThreadNamePrefix("loom-subtask-");
+            exec.setWaitForTasksToCompleteOnShutdown(true);
+            exec.setAwaitTerminationSeconds(10);
+            exec.initialize();
+            log.info("loomSubTaskExecutor initialized: pool={}, queue=50", n);
+            return exec.getThreadPoolExecutor();
+        }
+
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry(LoomAgentProperties properties) {
+            return new cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry(
+                    properties.getSubtask().getMaxConcurrent(),
+                    properties.getSubtask().getMaxHistory());
+        }
+
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
+                @Qualifier("loomSubTaskChatClient") ChatClient loomSubTaskChatClient,
+                ObjectProvider<MessageChatMemoryAdvisor> memoryAdvisorProvider,
+                @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor) {
+            // MessageChatMemoryAdvisor is auto-created by Spring AI when ChatMemory is autoconfigured,
+            // but it is not guaranteed to be a single primary bean in all setups — use ObjectProvider
+            // to safely resolve it. If absent (null), DefaultSubTaskExecutor will NPE only when a
+            // sub-task is actually invoked; bean creation still succeeds.
+            MessageChatMemoryAdvisor memoryAdvisor = memoryAdvisorProvider.getIfAvailable();
+            return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
+                    loomSubTaskChatClient, memoryAdvisor, loomSubTaskExecutor);
+        }
+
+        /**
+         * 子任务 CRUD 路由：active list / history list / kill。
+         * 完整的任务列表 / 详情由后续 phase 补齐。
+         */
+        @Bean("loomAgentSubTaskRouter")
+        public RouterFunction<ServerResponse> loomAgentSubTaskRouter(
+                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("spring/ai/loom/subtask/list/active",
+                    request -> ServerResponse
+                            .ok().body(registry.listActive(
+                                    cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser())));
+            builder.GET("spring/ai/loom/subtask/list/history",
+                    request -> ServerResponse
+                            .ok().body(registry.listHistory(
+                                    cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser(), 50)));
+            builder.POST("spring/ai/loom/subtask/kill/{id}",
+                    request -> ServerResponse
+                            .ok().body(registry.kill(request.pathVariable("id"))));
+            return builder.build();
         }
     }
 

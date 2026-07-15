@@ -66,6 +66,12 @@ public class LoomAgentProperties {
     private ToolGroupProperty skill = new ToolGroupProperty();
     private GitProperty git = new GitProperty();
     private CompileProperty compile = new CompileProperty();
+    /**
+     * Sub-task feature (main conversation delegates work to a "sub-model").
+     * <p>
+     * yml: {@code spring.ai.loom.agent.subtask.*}。
+     */
+    private SubTaskProperty subtask = new SubTaskProperty();
 
     @Data
     public static class RagProperty {
@@ -316,5 +322,20 @@ public class LoomAgentProperties {
             /** exec 形式启动命令，会被序列化为 Dockerfile 的 ENTRYPOINT JSON 数组。 */
             private List<String> command;
         }
+    }
+
+    /**
+     * 子任务功能配置。yml 通过 {@code spring.ai.loom.agent.subtask.*} 配置。
+     * <ul>
+     *   <li>{@code enabled} — 是否注册子任务相关 bean（默认 true）</li>
+     *   <li>{@code maxConcurrent} — 同时在飞子任务数上限；超过则启动请求被拒（默认 4）</li>
+     *   <li>{@code maxHistory} — 每用户历史保留条数；超出 FIFO 丢弃最旧的（默认 200）</li>
+     * </ul>
+     */
+    @Data
+    public static class SubTaskProperty {
+        private boolean enabled = true;
+        private int maxConcurrent = 4;
+        private int maxHistory = 200;
     }
 }
