@@ -214,6 +214,10 @@ public class LoomAgentConfiguration {
                 // skills 已迁移到 DB（V10），不从 yml 读
                 properties.setJvector(bound.getJvector());
                 properties.setTimezone(bound.getTimezone());
+                properties.setLoomHome(bound.getLoomHome());
+                properties.setFileBasePath(bound.getFileBasePath());
+                properties.setKnowledgeBasePath(bound.getKnowledgeBasePath());
+                properties.setDatasourceDir(bound.getDatasourceDir());
                 properties.setGitUsername(bound.getGitUsername());
                 properties.setGitToken(bound.getGitToken());
                 properties.setAuth(bound.getAuth());

@@ -55,13 +55,34 @@ public class LoomAgentProperties {
     private String timezone = "Asia/Shanghai";
 
     /**
-     * User files root directory. Defaulted to an ABSOLUTE path under the user's
-     * home directory (NOT a cwd-relative path) so the directory the file
-     * manager UI shows is always the same as the directory IUpload writes to —
-     * regardless of whether spring-boot:run is launched from the parent
-     * project root or the test module root. Resolved at field-init time so it
-     * does not depend on {@code ${user.home}} placeholder interpolation in
-     * {@code @ConfigurationProperties} defaults.
+     * Root directory under the user's home that hosts ALL loom-agent local
+     * state (file uploads, knowledge files, H2 DB, jvector index, compile
+     * workspaces). Putting everything under {@code ${user.home}/.loom/} means
+     * a single {@code rm -rf ~/.loom/} wipes a user's complete local
+     * footprint — and means cwd-relative paths no longer fire, so the
+     * "spring-boot:run from test module vs parent module" inconsistency
+     * disappears across the board.
+     *
+     * <p>Sub-paths ({@link #fileBasePath}, {@link #knowledgeBasePath},
+     * {@link #jvector}, etc.) are derived from this root via field defaults,
+     * but Spring's {@code @ConfigurationProperties} does NOT auto-resolve
+     * field-init {@code ${...}} placeholders, so the actual integration
+     * point is in the consumer side: each property either reads the literal
+     * value above OR — when {@code loomHome} is overridden in yml — the
+     * consumer rebuilds the path. Override the sub-paths directly in yml if
+     * you only need to relocate a specific state category.</p>
+     *
+     * <p>Override via {@code spring.ai.loom.agent.loom-home} in
+     * application.yml.</p>
+     */
+    private String loomHome = System.getProperty("user.home") + "/.loom";
+
+    /**
+     * User files root directory. Defaulted to an ABSOLUTE path under the
+     * user's home directory (NOT a cwd-relative path) so the directory the
+     * file manager UI shows is always the same as the directory IUpload
+     * writes to — regardless of whether spring-boot:run is launched from the
+     * parent project root or the test module root.
      *
      * <p>Overrideable via {@code spring.ai.loom.agent.file-base-path} in
      * application.yml.</p>
@@ -73,6 +94,13 @@ public class LoomAgentProperties {
      * {@code spring.ai.loom.agent.knowledge-base-path}.
      */
     private String knowledgeBasePath = System.getProperty("user.home") + "/.loom/knowledge";
+    /**
+     * Absolute root for the H2 file database. Set via yml
+     * {@code spring.datasource.url} as
+     * {@code jdbc:h2:file:${spring.ai.loom-agent.datasource-dir}/db}. Default
+     * value is exposed here so consumers can derive the URL if they want to.
+     */
+    private String datasourceDir = System.getProperty("user.home") + "/.loom/datasource";
     private String gitUsername;
     private String gitToken;
 
@@ -135,7 +163,13 @@ public class LoomAgentProperties {
 
     @Data
     public static class JVectorProperties {
-        private String indexPath = ".local/jvector-index";
+        /**
+         * HNSW index directory. Defaulted to an absolute path under
+         * {@code ~/.loom/jvector-index/} so the vector-store is owned by
+         * the user regardless of cwd. Override via
+         * {@code spring.ai.loom-agent.jvector.index-path} in yml.
+         */
+        private String indexPath = System.getProperty("user.home") + "/.loom/jvector-index";
         private int m = 16;
         private int efConstruction = 100;
         private int efSearch = 10;

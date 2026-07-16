@@ -104,16 +104,26 @@ Organized into 7 nested static `@Configuration` classes:
 
 ### File System Storage
 
-- **用户文件目录**: `{fileBasePath}/{username}/`（默认 `.local/file/{username}/`）— `DefaultUpload.upload()`、`DefaultFileTool` 所有文件操作的根目录
-- **知识库文件目录**: `{knowledgeBasePath}/{username}/{knowledgeId}/`（默认 `.local/knowledge/{username}/{knowledgeId}/`）— `DefaultUpload.uploadWithKnowledge()` 的存储位置
-- **重名处理**: 同名文件自动追加序号，如 `file.txt` → `file(1).txt` → `file(2).txt`
-- **预览/下载桥接**: 路径操作的预览/下载通过 `IFile.getByExactPath()` 查询，不存在时自动插入 `usage='temp'` 记录获取 fileId
+All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wipe):
+
+| 目录 | 内容 | 默认值 |
+|---|---|---|
+| `~/.loom/file/{username}/` | 用户上传的文件（聊天附件、文件管理 UI 列出）| `fileBasePath` 默认 `${user.home}/.loom/file` |
+| `~/.loom/knowledge/{username}/{knowledgeId}/` | 知识库文档原文件 | `knowledgeBasePath` 默认 `${user.home}/.loom/knowledge` |
+| `~/.loom/datasource/` | H2 文件数据库 `db.mv.db` | `datasourceDir` 默认 `${user.home}/.loom/datasource`（yml 通过 `spring.datasource.url` 拼装）|
+| `~/.loom/jvector-index/` | HNSW 向量索引 | `jvector.indexPath` 默认 `${user.home}/.loom/jvector-index` |
+| `~/.loom/compile-deploy-workspaces/{username}/` | 编译部署工具临时 workspace（带 username/timestamp 前缀；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir` |
+
+**重名处理**: 同名文件自动追加序号，如 `file.txt` → `file(1).txt` → `file(2).txt`
+**预览/下载桥接**: 路径操作的预览/下载通过 `IFile.getByExactPath()` 查询，不存在时自动插入 `usage='temp'` 记录获取 fileId
+
+> 历史注意：早期版本把以上全都放在 cwd-relative `.local/` 下，导致 `mvn spring-boot:run -pl test-module` 时路径漂到 test 模块下、UI 列出项目源码而不是用户文件。Fix A/B/C 把路径统一到 `~/.loom/` 之后这种事不再发生。
 
 ### Configuration Properties
 
 All under `spring.ai.loom.agent`:
 - `rag` — similarity threshold, top-k, prompt templates
-- `jvector` — index path, HNSW params (m, efConstruction, efSearch)
+- `jvector` — index path (默认 `${user.home}/.loom/jvector-index`)、HNSW params (m, efConstruction, efSearch)
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
 - ~~`skills`~~ — **no longer read from yml**. Skill data lives in the database now (tables `market_skill` / `user_skill` / `role_skill`); 6 system skills are seeded by the init migration. Manage via the admin console → **Skill Market** page.
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
@@ -124,8 +134,9 @@ All under `spring.ai.loom.agent`:
 - `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
 - `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)
 - `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
-- `fileBasePath` — 用户文件存储根目录，默认 `.local/file`
-- `knowledgeBasePath` — 知识库文件存储根目录，默认 `.local/knowledge`
+- `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative）
+- `knowledgeBasePath` — 知识库文件存储根目录，默认 `${user.home}/.loom/knowledge`
+- `datasourceDir` — H2 文件存储目录，默认 `${user.home}/.loom/datasource`（在 `application.yml` 的 `spring.datasource.url` 里通过 `${user.home}/.loom/datasource/db` 拼接）
 
 ### Frontend
 
@@ -135,7 +146,7 @@ Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring
 - `style.css` — styling
 - Uses marked.js for Markdown rendering, eventsource-parser for SSE
 
-**文件管理模态框**: 显示 `{fileBasePath}/{username}/` 的目录树，支持展开子目录，每个文件有预览/下载按钮
+**文件管理模态框**: 显示 `{fileBasePath}/{username}/`（例如 `C:\Users\<you>\.loom\file\<username>\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/jvector-index/`、`~/.loom/datasource/`、`~/.loom/compile-deploy-workspaces/` 这些工具/系统目录。
 
 ## Extension Points
 

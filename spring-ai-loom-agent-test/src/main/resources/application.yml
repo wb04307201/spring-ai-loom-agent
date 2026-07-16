@@ -1,6 +1,8 @@
 spring:
   datasource:
-      url: jdbc:h2:file:./.local/datasource/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+      # 库文件位置：与 loom-agent 的本地 state 同根 — 都在 $user.home/.loom/。
+      # 这样 `rm -rf ~/.loom/` 一条命令就能清掉所有用户本地状态（库、向量索引、上传、临时工作区）。
+      url: jdbc:h2:file:${user.home}/.loom/datasource/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
       username: sa
       password: 123456
   flyway:
