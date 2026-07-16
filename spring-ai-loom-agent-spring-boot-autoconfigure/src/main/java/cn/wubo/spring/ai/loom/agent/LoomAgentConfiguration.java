@@ -758,6 +758,7 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentScheduleRouter")
         public RouterFunction<ServerResponse> loomAgentScheduleRouter(
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
                 cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             // Structured list for the UI: this user's tasks only (TaskInfo{taskName,taskType,schedule}).
@@ -770,11 +771,15 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().body(list);
             });
             // Frontend posts the FULL task name (already namespaced) in a JSON body {"name": "..."}.
+            // IMPORTANT: also delete the corresponding loom_scheduled_task row — otherwise the
+            // ScheduleRestoreListener would resurrect this task on the next restart. The
+            // LLM-tool path (DefaultScheduleTool.cancelSchedule) was already doing this
+            // twice over; we replicate it here for the REST path that the UI calls directly.
             builder.POST("spring/ai/loom/schedule/cancel", request -> {
                 @SuppressWarnings("unchecked")
                 java.util.Map<String, Object> body = request.body(java.util.Map.class);
                 String name = body != null ? (String) body.get("name") : null;
-                if (name != null) flexService.cancel(name);
+                handleScheduleCancel(name, flexService, loomScheduleTriggerRepository, log);
                 return ServerResponse.ok().body(true);
             });
             builder.GET("spring/ai/loom/schedule/history/{name}",
@@ -888,6 +893,37 @@ public class LoomAgentConfiguration {
                 ? loomScheduleTriggerRepository.deleteAllForConversation(username, conversationId)
                 : 0;
         return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted};
+    }
+
+    /**
+     * Dual-write cancel handler for the REST {@code POST /spring/ai/loom/schedule/cancel}
+     * route. Cancels the in-memory task AND deletes the corresponding
+     * {@code loom_scheduled_task} row so the {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener}
+     * doesn't resurrect it on the next restart. Package-private + static so the
+     * {@code loomAgentScheduleRouterCancelRegressionTest} can drive it without
+     * needing the full Spring Web reactive test apparatus.
+     *
+     * <p>Failure of the repository delete is logged at WARN (and swallowed) so
+     * the user-facing cancel still reports success — the only state that
+     * matters for end users is that the live task is gone; a stuck persistent
+     * row can be cleaned up by an ops tool.</p>
+     *
+     * @return {@code true} if the cancel ran end-to-end; {@code false} if name is null.
+     */
+    public static boolean handleScheduleCancel(String fullName,
+                                         cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                                         cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository repo,
+                                         org.slf4j.Logger log) {
+        if (fullName == null) {
+            return false;
+        }
+        flexService.cancel(fullName);
+        try {
+            repo.delete(fullName);
+        } catch (Exception e) {
+            log.warn("取消定时任务时删除持久化行失败: name={}", fullName, e);
+        }
+        return true;
     }
 
     @Configuration
