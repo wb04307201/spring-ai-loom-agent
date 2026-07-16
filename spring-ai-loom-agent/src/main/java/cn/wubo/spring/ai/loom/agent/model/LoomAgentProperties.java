@@ -53,8 +53,26 @@ public class LoomAgentProperties {
     // 通过 cn.wubo.spring.ai.loom.agent.skill 包下的服务管理
     private JVectorProperties jvector = new JVectorProperties();
     private String timezone = "Asia/Shanghai";
-    private String fileBasePath = ".local/file";
-    private String knowledgeBasePath = ".local/knowledge";
+
+    /**
+     * User files root directory. Defaulted to an ABSOLUTE path under the user's
+     * home directory (NOT a cwd-relative path) so the directory the file
+     * manager UI shows is always the same as the directory IUpload writes to —
+     * regardless of whether spring-boot:run is launched from the parent
+     * project root or the test module root. Resolved at field-init time so it
+     * does not depend on {@code ${user.home}} placeholder interpolation in
+     * {@code @ConfigurationProperties} defaults.
+     *
+     * <p>Overrideable via {@code spring.ai.loom.agent.file-base-path} in
+     * application.yml.</p>
+     */
+    private String fileBasePath = System.getProperty("user.home") + "/.loom/file";
+    /**
+     * Knowledge-base file root. Defaulted to absolute for the same reason as
+     * {@link #fileBasePath}. Override via
+     * {@code spring.ai.loom.agent.knowledge-base-path}.
+     */
+    private String knowledgeBasePath = System.getProperty("user.home") + "/.loom/knowledge";
     private String gitUsername;
     private String gitToken;
 

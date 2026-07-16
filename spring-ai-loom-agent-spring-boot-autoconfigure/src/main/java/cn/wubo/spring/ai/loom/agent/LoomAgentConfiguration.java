@@ -1468,7 +1468,15 @@ public class LoomAgentConfiguration {
         private java.util.Map<String, Object> buildFileTree(String fileBasePath, String username) {
             java.util.Map<String, Object> node = new java.util.LinkedHashMap<>();
             Path baseDir = Paths.get(fileBasePath, username);
-            node.put("name", ".");
+            // Ensure the per-user directory exists so subsequent IUpload writes
+            // (which use the same path) land somewhere — and the UI never sees
+            // a 'directory not found' error on first run.
+            try {
+                Files.createDirectories(baseDir);
+            } catch (java.io.IOException e) {
+                log.warn("Cannot create user file directory {}: {}", baseDir, e.getMessage());
+            }
+            node.put("name", username);
             node.put("type", "directory");
             node.put("children", buildChildren(baseDir));
             return node;
