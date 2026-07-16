@@ -65,6 +65,9 @@ All components follow an **interface + default implementation** pattern. Every b
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → 按 buildTool 打包（maven / npm / npm-frontend / pip）→ Docker 镜像构建 → 容器启动 → 健康检查（**默认 enabled**）。支持 Spring Boot / Node（前后端） / Python 等多栈项目。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
+| `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call()`; tools filtered to exclude self-tools (no `ISubTaskTool`/`IScheduleTool`) to prevent recursion. Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
+| `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` — 主对话把一段任务委派给"子模型"同步执行，拿到最终文本。默认 enabled (`subtask.enabled=true`) |
+| `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。H2 持久化 (`flex_scheduled_task`)；间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
 
@@ -119,6 +122,8 @@ All under `spring.ai.loom.agent`:
 - `time` / `file` / `skill` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group
 - `git` — `enabled` (boolean, default **false** — opt-in), `username` / `token` for remote git authentication. Top-level `gitUsername` / `gitToken` are kept for backward compatibility
 - `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
+- `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)
+- `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to H2 table `flex_scheduled_task` (Flyway `V12`)
 - `fileBasePath` — 用户文件存储根目录，默认 `.local/file`
 - `knowledgeBasePath` — 知识库文件存储根目录，默认 `.local/knowledge`
 

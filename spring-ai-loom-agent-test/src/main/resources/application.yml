@@ -76,6 +76,14 @@ spring:
         #     localRepository: C:\Users\wb043\.m2\repository
         #     maxOutputLines: 200
         #     defaultTimeoutMs: 300000
+        # 子任务：主对话把一段任务委派给"子模型"同步执行（子任务无法再启子任务/定时器）
+        subtask:
+          enabled: true
+          max-concurrent: 4
+          max-history: 200
+        # 定时任务：LLM 创建的定时器，触发时以子任务方式运行（间隔/存活上限见 flex.schedule.limits）
+        schedule:
+          enabled: true
         rag:
           similarityThreshold: 0.50
           top-k: 4
