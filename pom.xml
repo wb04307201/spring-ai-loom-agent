@@ -61,6 +61,7 @@
         <file-view.version>1.4.2-sb3</file-view.version>
         <jgit.version>7.6.0.202603022253-r</jgit.version>
         <maven.version>3.3.0</maven.version>
+        <flex-schedule.version>1.0-SNAPSHOT</flex-schedule.version>
     </properties>
 
     <dependencyManagement>
@@ -113,6 +114,11 @@
                 <groupId>org.apache.maven.shared</groupId>
                 <artifactId>maven-invoker</artifactId>
                 <version>${maven.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.wb04307201</groupId>
+                <artifactId>flex-schedule-spring-boot-starter</artifactId>
+                <version>${flex-schedule.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

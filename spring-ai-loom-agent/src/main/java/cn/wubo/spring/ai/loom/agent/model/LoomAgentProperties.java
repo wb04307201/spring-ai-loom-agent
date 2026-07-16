@@ -73,6 +73,14 @@ public class LoomAgentProperties {
      */
     private SubTaskProperty subtask = new SubTaskProperty();
 
+    /**
+     * Scheduled-task feature (LLM creates timers that fire sub-tasks).
+     * <p>
+     * yml: {@code spring.ai.loom.agent.schedule.*}。Trigger limits (min-interval /
+     * max-lifetime) are configured under {@code flex.schedule.limits.*}.
+     */
+    private ScheduleProperty schedule = new ScheduleProperty();
+
     @Data
     public static class RagProperty {
         private double similarityThreshold = 0.0F;
@@ -337,5 +345,17 @@ public class LoomAgentProperties {
         private boolean enabled = true;
         private int maxConcurrent = 4;
         private int maxHistory = 200;
+    }
+
+    /**
+     * 定时任务功能配置。yml 通过 {@code spring.ai.loom.agent.schedule.*} 配置。
+     * <ul>
+     *   <li>{@code enabled} — 是否注册定时任务相关 bean（默认 true）</li>
+     * </ul>
+     * 触发间隔/存活上限由 flex-schedule 的 {@code flex.schedule.limits.*} 强校验。
+     */
+    @Data
+    public static class ScheduleProperty {
+        private boolean enabled = true;
     }
 }

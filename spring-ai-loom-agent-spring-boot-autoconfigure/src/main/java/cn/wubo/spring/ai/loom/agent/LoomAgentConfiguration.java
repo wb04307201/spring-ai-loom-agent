@@ -163,7 +163,9 @@ import java.util.concurrent.CompletableFuture;
         // MCP
         "org.springframework.ai.mcp.client.common.autoconfigure.McpClientAutoConfiguration",
         "org.springframework.ai.mcp.client.common.autoconfigure.McpToolCallbackAutoConfiguration",
-        "org.springframework.ai.mcp.client.common.autoconfigure.annotations.McpClientAnnotationScannerAutoConfiguration"})
+        "org.springframework.ai.mcp.client.common.autoconfigure.annotations.McpClientAnnotationScannerAutoConfiguration",
+        // flex-schedule (so @ConditionalOnBean(flexScheduledTaskService) in ScheduleConfiguration sees the bean)
+        "cn.wubo.flex.schedule.autoconfigure.FlexScheduleAutoConfiguration"})
 public class LoomAgentConfiguration {
 
     // ==================== Infrastructure ====================
@@ -699,6 +701,51 @@ public class LoomAgentConfiguration {
             builder.POST("spring/ai/loom/subtask/kill/{id}",
                     request -> ServerResponse
                             .ok().body(registry.kill(request.pathVariable("id"))));
+            return builder.build();
+        }
+    }
+
+    // ==================== Schedule ====================
+
+    /**
+     * 定时任务配置：注册 {@link cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool} 及其 BFF 路由。
+     * <p>
+     * 仅当 flex-schedule 在 classpath 且 {@code flexScheduledTaskService} bean 存在时启用。
+     * 触发间隔/存活上限由 flex-schedule 的 {@code flex.schedule.limits.*} 强校验。
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "cn.wubo.flex.schedule.core.FlexScheduledTaskService")
+    @ConditionalOnProperty(name = "spring.ai.loom.agent.schedule.enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool.class)
+    @Slf4j
+    public static class ScheduleConfiguration {
+
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool defaultScheduleTool(
+                @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor) {
+            return new cn.wubo.spring.ai.loom.agent.schedule.DefaultScheduleTool(flexService, subTaskExecutor);
+        }
+
+        @Bean("loomAgentScheduleRouter")
+        public RouterFunction<ServerResponse> loomAgentScheduleRouter(
+                @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("spring/ai/loom/schedule/list",
+                    request -> ServerResponse.ok().body(scheduleTool.listSchedulesRaw(
+                            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser())));
+            // Frontend posts the FULL task name (already namespaced) in a JSON body {"name": "..."}.
+            builder.POST("spring/ai/loom/schedule/cancel", request -> {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                String name = body != null ? (String) body.get("name") : null;
+                if (name != null) flexService.cancel(name);
+                return ServerResponse.ok().body(true);
+            });
+            builder.GET("spring/ai/loom/schedule/history/{name}",
+                    request -> ServerResponse.ok().body(
+                            flexService.getExecutionHistory(request.pathVariable("name"), 50)));
             return builder.build();
         }
     }

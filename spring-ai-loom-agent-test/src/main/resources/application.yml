@@ -111,6 +111,15 @@ spring:
 #      port: 9379
 #      password: 123456
 
+# flex-schedule: 定时任务触发间隔/存活上限（strict = 超限抛异常）
+flex:
+  schedule:
+    pool-size: 8
+    limits:
+      min-interval: 10m
+      max-lifetime: 72h
+      mode: strict
+
 logging:
   level:
     org:
