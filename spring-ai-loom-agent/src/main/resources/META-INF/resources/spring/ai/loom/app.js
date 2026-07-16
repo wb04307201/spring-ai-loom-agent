@@ -414,6 +414,34 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/file/tree');
         return r.ok ? r.json() : { name: '.', type: 'directory', children: [] };
     },
+    async listActiveSubtasks() {
+        const r = await apiFetch('/spring/ai/loom/subtask/list/active');
+        return r.ok ? r.json() : [];
+    },
+    async listSubtaskHistory() {
+        const r = await apiFetch('/spring/ai/loom/subtask/list/history');
+        return r.ok ? r.json() : [];
+    },
+    async killSubtask(id) {
+        const r = await apiFetch('/spring/ai/loom/subtask/kill/' + encodeURIComponent(id), { method: 'POST' });
+        return r.ok;
+    },
+    async listSchedules() {
+        const r = await apiFetch('/spring/ai/loom/schedule/list');
+        return r.ok ? r.json() : [];
+    },
+    async cancelSchedule(fullName) {
+        const r = await apiFetch('/spring/ai/loom/schedule/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: fullName }),
+        });
+        return r.ok;
+    },
+    async scheduleHistory(fullName) {
+        const r = await apiFetch('/spring/ai/loom/schedule/history/' + encodeURIComponent(fullName));
+        return r.ok ? r.json() : [];
+    },
     async streamChat(record, onChunk, onComplete, onError) {
         const resp = await apiFetch(API.stream, {
             method: 'POST',
@@ -1375,6 +1403,174 @@ const fileMgr = {
     download(path) {
         const url = window.location.origin + '/spring/ai/loom/file/by-path/download?path=' + encodeURIComponent(path);
         window.open(url, '_blank', 'noopener,noreferrer');
+    },
+};
+
+/** 子任务面板：打开时轮询 active + history，关闭时停止轮询。 */
+const subtaskPanel = {
+    _timer: null,
+
+    openModal() {
+        ui.showModal('subtask-modal-overlay');
+        this.refresh();
+        this._timer = setInterval(() => this.refresh(), 2000);
+    },
+
+    closeModal() {
+        ui.hideModal('subtask-modal-overlay');
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    },
+
+    async refresh() {
+        const [active, history] = await Promise.all([
+            api.listActiveSubtasks(),
+            api.listSubtaskHistory(),
+        ]);
+        this.render(active || [], history || []);
+    },
+
+    render(active, history) {
+        const body = document.getElementById('subtask-panel-body');
+        if (!body) return;
+        let html = '';
+        html += `<div class="sched-section-title">运行中 (${active.length})</div>`;
+        if (active.length === 0) {
+            html += '<div class="sched-empty">无运行中的子任务</div>';
+        } else {
+            html += '<table class="sched-table"><thead><tr><th>ID</th><th>会话</th><th>Prompt</th><th>开始</th><th>操作</th></tr></thead><tbody>';
+            for (const r of active) {
+                html += `<tr>
+                    <td><code>${escapeHtml((r.subTaskId || '').slice(0, 8))}</code></td>
+                    <td>${escapeHtml(r.conversationId || '')}</td>
+                    <td title="${escapeHtml(r.prompt || '')}">${escapeHtml((r.prompt || '').slice(0, 50))}</td>
+                    <td>${this._rel(r.startedAt)}</td>
+                    <td><button class="sched-btn" data-kill="${escapeHtml(r.subTaskId || '')}">杀死</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        html += `<div class="sched-section-title" style="margin-top:16px;">历史 (最近 ${history.length})</div>`;
+        if (history.length === 0) {
+            html += '<div class="sched-empty">暂无历史</div>';
+        } else {
+            html += '<table class="sched-table"><thead><tr><th>ID</th><th>状态</th><th>完成</th><th>结果/错误</th></tr></thead><tbody>';
+            for (const r of history) {
+                const detail = r.resultText || r.errorMessage || '';
+                html += `<tr>
+                    <td><code>${escapeHtml((r.subTaskId || '').slice(0, 8))}</code></td>
+                    <td>${escapeHtml(r.status || '')}</td>
+                    <td>${this._rel(r.finishedAt)}</td>
+                    <td title="${escapeHtml(detail)}">${escapeHtml(detail.slice(0, 60))}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        body.innerHTML = html;
+        for (const btn of body.querySelectorAll('[data-kill]')) {
+            btn.addEventListener('click', () => this.kill(btn.dataset.kill));
+        }
+    },
+
+    async kill(id) {
+        const ok = await dialog.confirm({
+            title: '杀死子任务',
+            message: '确认杀死子任务 ' + id.slice(0, 8) + ' ?',
+            danger: true,
+        });
+        if (!ok) return;
+        await api.killSubtask(id);
+        this.refresh();
+    },
+
+    _rel(ms) {
+        if (!ms) return '-';
+        const d = Math.floor((Date.now() - ms) / 1000);
+        if (d < 60) return `${d}s 前`;
+        if (d < 3600) return `${Math.floor(d / 60)}m 前`;
+        return `${Math.floor(d / 3600)}h 前`;
+    },
+};
+
+/** 定时任务面板：打开时轮询，关闭时停止。 */
+const schedulePanel = {
+    _timer: null,
+
+    openModal() {
+        ui.showModal('schedule-modal-overlay');
+        this.refresh();
+        this._timer = setInterval(() => this.refresh(), 2000);
+    },
+
+    closeModal() {
+        ui.hideModal('schedule-modal-overlay');
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    },
+
+    async refresh() {
+        const tasks = await api.listSchedules();
+        this.render(tasks || []);
+    },
+
+    render(tasks) {
+        const body = document.getElementById('schedule-panel-body');
+        if (!body) return;
+        let html = `<div class="sched-section-title">活动定时器 (${tasks.length})</div>`;
+        if (tasks.length === 0) {
+            html += '<div class="sched-empty">无定时任务</div>';
+        } else {
+            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>操作</th></tr></thead><tbody>';
+            for (const t of tasks) {
+                const full = t.taskName || '';
+                const shortName = this._shortName(full);
+                html += `<tr>
+                    <td title="${escapeHtml(full)}">${escapeHtml(shortName)}</td>
+                    <td>${escapeHtml(t.taskType || '')}</td>
+                    <td>${escapeHtml(t.schedule || '')}</td>
+                    <td>
+                        <button class="sched-btn" data-cancel="${escapeHtml(full)}">停止</button>
+                        <button class="sched-btn" data-history="${escapeHtml(full)}">历史</button>
+                    </td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        body.innerHTML = html;
+        for (const btn of body.querySelectorAll('[data-cancel]')) {
+            btn.addEventListener('click', () => this.cancel(btn.dataset.cancel));
+        }
+        for (const btn of body.querySelectorAll('[data-history]')) {
+            btn.addEventListener('click', () => this.history(btn.dataset.history));
+        }
+    },
+
+    /** loom-sched-{user}-{conv}-{name} → {name} for display. */
+    _shortName(full) {
+        const parts = (full || '').split('-');
+        return parts.length > 4 ? parts.slice(4).join('-') : full;
+    },
+
+    async cancel(fullName) {
+        const ok = await dialog.confirm({
+            title: '停止定时器',
+            message: '确认停止定时器 ' + this._shortName(fullName) + ' ?',
+            danger: true,
+        });
+        if (!ok) return;
+        await api.cancelSchedule(fullName);
+        this.refresh();
+    },
+
+    async history(fullName) {
+        const records = await api.scheduleHistory(fullName);
+        const lines = (records || []).slice(0, 20).map(r => {
+            const status = r.success ? '成功' : '失败';
+            return `${r.startTime || ''} ${status}${r.error ? '(' + r.error + ')' : ''}`;
+        }).join('  ·  ');
+        await dialog.confirm({
+            title: '执行历史 · ' + this._shortName(fullName),
+            message: lines || '(暂无执行记录)',
+            okText: '关闭',
+        });
     },
 };
 
@@ -2347,6 +2543,10 @@ const init = async () => {
     addIf('#skills-button', () => skills.openModal());
     addIf('#file-manager-button', () => fileMgr.openModal());
     addIf('#file-close-btn', () => fileMgr.closeModal());
+    addIf('#subtask-button', () => subtaskPanel.openModal());
+    addIf('#subtask-close-btn', () => subtaskPanel.closeModal());
+    addIf('#schedule-button', () => schedulePanel.openModal());
+    addIf('#schedule-close-btn', () => schedulePanel.closeModal());
     addIf('#mcp-close-btn', () => mcp.closeModal());
     addIf('#skills-close-btn', () => skills.closeModal());
     addIf('#skill-add-btn', () => skills.showCreateForm());

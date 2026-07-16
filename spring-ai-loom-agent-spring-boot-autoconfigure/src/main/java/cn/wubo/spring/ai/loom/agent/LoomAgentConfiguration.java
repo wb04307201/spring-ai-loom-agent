@@ -732,9 +732,15 @@ public class LoomAgentConfiguration {
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
                 cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
             RouterFunctions.Builder builder = RouterFunctions.route();
-            builder.GET("spring/ai/loom/schedule/list",
-                    request -> ServerResponse.ok().body(scheduleTool.listSchedulesRaw(
-                            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser())));
+            // Structured list for the UI: this user's tasks only (TaskInfo{taskName,taskType,schedule}).
+            builder.GET("spring/ai/loom/schedule/list", request -> {
+                String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                String prefix = "loom-sched-" + user + "-";
+                java.util.List<cn.wubo.flex.schedule.core.TaskInfo> list = flexService.listTasks().stream()
+                        .filter(t -> t.taskName().startsWith(prefix))
+                        .toList();
+                return ServerResponse.ok().body(list);
+            });
             // Frontend posts the FULL task name (already namespaced) in a JSON body {"name": "..."}.
             builder.POST("spring/ai/loom/schedule/cancel", request -> {
                 @SuppressWarnings("unchecked")
