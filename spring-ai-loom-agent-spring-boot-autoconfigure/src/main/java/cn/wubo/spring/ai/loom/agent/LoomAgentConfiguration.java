@@ -712,6 +712,11 @@ public class LoomAgentConfiguration {
      * <p>
      * 仅当 flex-schedule 在 classpath 且 {@code flexScheduledTaskService} bean 存在时启用。
      * 触发间隔/存活上限由 flex-schedule 的 {@code flex.schedule.limits.*} 强校验。
+     * <p>
+     * 该配置同时注册 loom-agent 自有的 H2 持久化层
+     * ({@link cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository})
+     * 以及启动时的恢复监听器 ({@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener}),
+     * 用于在 ApplicationReadyEvent 阶段把持久化的定时任务重新装载回 flex-schedule。
      */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "cn.wubo.flex.schedule.core.FlexScheduledTaskService")
@@ -723,8 +728,31 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool defaultScheduleTool(
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
-                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor) {
-            return new cn.wubo.spring.ai.loom.agent.schedule.DefaultScheduleTool(flexService, subTaskExecutor);
+                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
+            return new cn.wubo.spring.ai.loom.agent.schedule.DefaultScheduleTool(
+                    flexService, subTaskExecutor, loomScheduleTriggerRepository);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository.class)
+        public cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository(
+                JdbcTemplate jdbcTemplate) {
+            cn.wubo.spring.ai.loom.agent.schedule.JdbcLoomScheduleTriggerRepository repo =
+                    new cn.wubo.spring.ai.loom.agent.schedule.JdbcLoomScheduleTriggerRepository(jdbcTemplate);
+            repo.ensureSchema();
+            log.info("JdbcLoomScheduleTriggerRepository wired (table = loom_scheduled_task)");
+            return repo;
+        }
+
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener scheduleRestoreListener(
+                @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
+                cn.wubo.flex.schedule.core.TaskLimits taskLimits) {
+            return new cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener(
+                    flexService, loomScheduleTriggerRepository, subTaskExecutor, taskLimits);
         }
 
         @Bean("loomAgentScheduleRouter")
@@ -835,15 +863,16 @@ public class LoomAgentConfiguration {
      * 删除会话时的资源清理：先杀掉该会话名下所有在飞子任务，再取消该会话名下所有定时任务，
      * 最后由调用方软删 user_conversation 映射。
      * <p>
-     * 两个依赖都可缺省(subtask/schedule 功能可被关闭)，缺省时对应清理跳过。
+     * 三个依赖都可缺省(subtask/schedule 功能可被关闭)，缺省时对应清理跳过。
      *
-     * @return {@code [subtasksKilled, schedulesCancelled]}
+     * @return {@code [subtasksKilled, schedulesCancelled, scheduleRowsDeleted]}
      */
     static int[] cleanupConversationResources(
             String conversationId,
             String username,
             cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
-            cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService) {
+            cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
         int subtasksKilled = registry != null ? registry.killAllByConversation(conversationId) : 0;
         int schedulesCancelled = 0;
         if (flexService != null && username != null && conversationId != null) {
@@ -855,7 +884,10 @@ public class LoomAgentConfiguration {
                 }
             }
         }
-        return new int[]{subtasksKilled, schedulesCancelled};
+        int scheduleRowsDeleted = (loomScheduleTriggerRepository != null && username != null && conversationId != null)
+                ? loomScheduleTriggerRepository.deleteAllForConversation(username, conversationId)
+                : 0;
+        return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted};
     }
 
     @Configuration
@@ -1124,7 +1156,8 @@ public class LoomAgentConfiguration {
                 JdbcChatMemoryRepository chatMemoryRepository,
                 IUserConversation userConversation,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
-                ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService) {
+                ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService,
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/conversation", request -> ServerResponse.ok().body(userConversation.getList()));
             builder.GET("spring/ai/loom/conversation/{conversationId}", request -> {
@@ -1134,12 +1167,14 @@ public class LoomAgentConfiguration {
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
                 String username = UserContextHolder.getCurrentUser();
-                // 先停子任务 + 取消定时任务，再软删会话映射
+                // 先停子任务 + 取消定时任务 + 删除持久化行，再软删会话映射
                 int[] cleaned = cleanupConversationResources(conversationId, username,
-                        subTaskRegistry.getIfAvailable(), flexService.getIfAvailable());
+                        subTaskRegistry.getIfAvailable(),
+                        flexService.getIfAvailable(),
+                        loomScheduleTriggerRepository.getIfAvailable());
                 userConversation.deleteById(conversationId);
-                log.info("会话删除清理: conv={}, user={}, subtasks={}, schedules={}",
-                        conversationId, username, cleaned[0], cleaned[1]);
+                log.info("会话删除清理: conv={}, user={}, subtasks={}, schedules={}, scheduleRowsDeleted={}",
+                        conversationId, username, cleaned[0], cleaned[1], cleaned[2]);
                 return ServerResponse.ok().body(true);
             });
             return builder.build();

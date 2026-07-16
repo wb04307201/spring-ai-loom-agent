@@ -21,13 +21,15 @@ class DefaultScheduleToolTest {
 
     private FlexScheduledTaskService flexService;
     private ISubTaskExecutor executor;
+    private ILoomScheduleTriggerRepository repo;
     private DefaultScheduleTool tool;
 
     @BeforeEach
     void setUp() {
         flexService = mock(FlexScheduledTaskService.class);
         executor = mock(ISubTaskExecutor.class);
-        tool = new DefaultScheduleTool(flexService, executor);
+        repo = mock(ILoomScheduleTriggerRepository.class);
+        tool = new DefaultScheduleTool(flexService, executor, repo);
     }
 
     @Test
