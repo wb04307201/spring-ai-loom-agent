@@ -64,11 +64,36 @@ public class SubTaskRegistry {
                 "已达最大并发子任务数 " + maxConcurrent + ", 请稍后再试");
         }
         String id = UUID.randomUUID().toString();
-        SubTaskRecord rec = new SubTaskRecord(id, safeUsername(username), safeConv(conversationId), prompt,
+        return registerWithId(id, username, conversationId, prompt);
+    }
+
+    /**
+     * Like {@link #register(String, String, String)} but uses a caller-supplied
+     * {@code subTaskId} (so the caller can keep using the {@code SubTaskRequest}
+     * id it already generated instead of having to round-trip through a
+     * registry-returned id). Lets {@link ISubTaskExecutor} consistently
+     * contribute to the same history stream as the LLM-tool path.
+     *
+     * <p>Throws if maxConcurrent is exceeded OR if {@code subTaskId} is
+     * already registered (active or historical) — duplicate ids are rejected
+     * to keep the key space clean.</p>
+     */
+    public String registerWithId(String subTaskId, String username, String conversationId, String prompt) {
+        if (activeCount.get() >= maxConcurrent) {
+            throw new IllegalStateException(
+                "已达最大并发子任务数 " + maxConcurrent + ", 请稍后再试");
+        }
+        if (subTaskId == null || subTaskId.isBlank()) {
+            throw new IllegalArgumentException("subTaskId must be non-blank");
+        }
+        if (active.containsKey(subTaskId) || history.containsKey(subTaskId)) {
+            throw new IllegalStateException("子任务 id 已注册: " + subTaskId);
+        }
+        SubTaskRecord rec = new SubTaskRecord(subTaskId, safeUsername(username), safeConv(conversationId), prompt,
                 SubTaskStatus.RUNNING, System.currentTimeMillis(), 0L, null, null, null);
-        active.put(id, rec);
+        active.put(subTaskId, rec);
         activeCount.incrementAndGet();
-        return id;
+        return subTaskId;
     }
 
     /**

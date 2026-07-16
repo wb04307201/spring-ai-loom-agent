@@ -4,6 +4,8 @@ import cn.wubo.flex.schedule.core.ExecutionRecord;
 import cn.wubo.flex.schedule.core.FlexScheduledTaskService;
 import cn.wubo.flex.schedule.core.TaskInfo;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
+import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
+import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
 import cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -130,10 +132,26 @@ public class DefaultScheduleTool implements IScheduleTool {
     private void runAsSubTask(String username, String convId, String prompt) {
         String id = UUID.randomUUID().toString();
         SubTaskRequest req = new SubTaskRequest(id, convId, null, username, prompt, null, true);
+        SubTaskResult result = null;
         try {
-            subTaskExecutor.execute(req);   // fire and forget — executor handles its own exceptions
+            // execute() returns a SubTaskResult instead of throwing on failure
+            // (it internally catches ExecutionException and reports FAILED via
+            // the result). That contract was originally intended for the
+            // LLM-tool path; here we use the schedule's instrument() outcome
+            // to mark the execution as success/failure, so we re-throw on
+            // FAILED so the schedule's ExecutionRecord.success reflects the
+            // actual sub-task outcome.
+            result = subTaskExecutor.execute(req);
+            if (result.status() == SubTaskStatus.FAILED) {
+                throw new RuntimeException("调度子任务执行失败: " + result.errorMessage());
+            }
         } catch (Exception e) {
             log.error("调度子任务执行失败: id={}", id, e);
+            // Re-throw so FlexScheduledTaskRegistrar.instrument()'s catch block
+            // records an ExecutionRecord with success=false instead of true.
+            // Without this the schedule's "history" UI would show every fire
+            // as successful even when the sub-task itself failed.
+            throw new RuntimeException(e);
         }
     }
 

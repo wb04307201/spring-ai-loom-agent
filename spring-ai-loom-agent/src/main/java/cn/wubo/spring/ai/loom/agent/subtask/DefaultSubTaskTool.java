@@ -31,7 +31,11 @@ public class DefaultSubTaskTool implements ISubTaskTool {
         String username = readContextString(toolContext, "username");
         String parentConvId = readContextString(toolContext, "parentConversationId");
 
-        String subTaskId = registry.register(username, parentConvId, prompt);
+        // Sub-task id is supplied by the tool (we want to log it BEFORE
+        // executor.execute returns). The executor's SubTaskRegistry.register
+        // call uses the same id so LLM-tool and schedule-callback paths
+        // converge on the same history stream.
+        String subTaskId = java.util.UUID.randomUUID().toString();
         log.info("子任务启动: id={}, user={}, conv={}", subTaskId, username, parentConvId);
 
         SubTaskRequest req = new SubTaskRequest(subTaskId, parentConvId, null,
@@ -52,7 +56,10 @@ public class DefaultSubTaskTool implements ISubTaskTool {
                     e.getClass().getSimpleName() + ": " + e.getMessage());
         }
 
-        registry.markFinished(subTaskId, result.status(), result.text(), result.errorMessage());
+        // The executor already calls registry.markFinished on every path
+        // (success / interrupt / failure / cancellation), so this tool does
+        // NOT need to call it again. Calling it twice would either no-op
+        // (best case) or overwrite the recorded error message (worst case).
         return formatForMainConversation(result);
     }
 

@@ -657,6 +657,13 @@ public class LoomAgentConfiguration {
                 ObjectProvider<MessageChatMemoryAdvisor> memoryAdvisorProvider,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
                 cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
+                // Lazy lookup: the executor ALSO passes a cancel hook back to
+                // SubTaskRegistry's constructor (which needs the executor as a
+                // parameter). Direct injection of SubTaskRegistry here would
+                // close a circular bean graph. Deferred resolution breaks
+                // the cycle: by the time the executor's first execute() call
+                // runs, the registry has already been created.
+                @Lazy cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry,
                 // Lazy lookup: the embedTools list is materialized on first use
                 // inside DefaultSubTaskExecutor.doExecute() (a worker thread, after
                 // Spring startup completes). This breaks the cycle where chat ->
@@ -666,7 +673,8 @@ public class LoomAgentConfiguration {
                 @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools) {
             MessageChatMemoryAdvisor memoryAdvisor = memoryAdvisorProvider.getIfAvailable();
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
-                    chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools);
+                    chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools,
+                    subTaskRegistry);
         }
 
         /**

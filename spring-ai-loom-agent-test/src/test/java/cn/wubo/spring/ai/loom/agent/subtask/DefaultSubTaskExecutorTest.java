@@ -29,6 +29,7 @@ class DefaultSubTaskExecutorTest {
     private ThreadPoolExecutor executor;
     private IMcp mcp;
     private java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools;
+    private SubTaskRegistry subTaskRegistry;
     private DefaultSubTaskExecutor target;
 
     @BeforeEach
@@ -38,7 +39,11 @@ class DefaultSubTaskExecutorTest {
         executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(2);
         mcp = mock(IMcp.class);
         embedTools = java.util.Collections.emptyList();
-        target = new DefaultSubTaskExecutor(chatClient, memoryAdvisor, executor, mcp, embedTools);
+        // Pass a real (in-memory) registry now that DefaultSubTaskExecutor
+        // registers/markFinished at every call site.
+        subTaskRegistry = new SubTaskRegistry(8, 100);
+        target = new DefaultSubTaskExecutor(chatClient, memoryAdvisor, executor, mcp,
+                embedTools, subTaskRegistry);
     }
 
     @Test

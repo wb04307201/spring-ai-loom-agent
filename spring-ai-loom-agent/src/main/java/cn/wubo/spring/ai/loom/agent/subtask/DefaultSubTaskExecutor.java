@@ -61,6 +61,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private final ExecutorService executor;
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
+    private final SubTaskRegistry subTaskRegistry;
 
     /** Active in-flight sub-task futures, keyed by {@code req.subTaskId()}. Cleared in the worker's finally block. */
     private final ConcurrentHashMap<String, Future<?>> activeFutures = new ConcurrentHashMap<>();
@@ -69,12 +70,14 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
                                   MessageChatMemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
                                   IMcp mcp,
-                                  List<IEmbedTool> embedTools) {
+                                  List<IEmbedTool> embedTools,
+                                  SubTaskRegistry subTaskRegistry) {
         this.chatClient = chatClient;
         this.memoryAdvisor = memoryAdvisor;
         this.executor = executor;
         this.mcp = mcp;
         this.embedTools = embedTools;
+        this.subTaskRegistry = subTaskRegistry;
     }
 
     @Override
@@ -83,39 +86,78 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         log.info("Sub-task start: id={}, parentConv={}, user={}, fromScheduler={}",
                 req.subTaskId(), req.parentConversationId(), req.username(), req.fromScheduler());
 
+        // Register BEFORE submitting so subTaskRegistry.listActive sees it.
+        // The registry is the single source of truth for both the LLM-tool
+        // path (DefaultSubTaskTool) and the schedule-callback path
+        // (DefaultScheduleTool.runAsSubTask); centralising the write here
+        // means both contribute to the same active/history streams.
+        String subTaskId = safeSubId(req.subTaskId());
+        try {
+            subTaskRegistry.registerWithId(subTaskId, req.username(),
+                    req.parentConversationId(), req.prompt());
+        } catch (IllegalStateException dup) {
+            // Caller already registered (e.g. duplicate LLM-tool invocation
+            // with the same id). Tolerate but log so we can detect bugs.
+            log.warn("Sub-task id {} already registered; re-executing without re-register", subTaskId);
+        } catch (IllegalArgumentException bad) {
+            log.error("Sub-task id missing/invalid — cannot record history: id={}", subTaskId);
+        }
+
         Future<SubTaskResult> future;
         try {
             future = executor.submit(() -> {
                 try {
                     return doExecute(req, startedAt);
                 } finally {
-                    activeFutures.remove(req.subTaskId());
+                    activeFutures.remove(subTaskId);
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException ree) {
-            // Thread pool is shut down — surface as FAILED rather than letting the caller hang.
-            log.error("Sub-task rejected (pool shut down): id={}", req.subTaskId(), ree);
-            return SubTaskResult.failed(req, startedAt, System.currentTimeMillis(),
+            // Thread pool is shut down — surface as FAILED and persist the
+            // failure to the registry so the history isn't left stuck in RUNNING.
+            log.error("Sub-task rejected (pool shut down): id={}", subTaskId, ree);
+            SubTaskResult r = SubTaskResult.failed(req, startedAt, System.currentTimeMillis(),
                     "Executor 已关闭: " + ree.getMessage());
+            subTaskRegistry.markFinished(subTaskId, r.status(), r.text(), r.errorMessage());
+            return r;
         }
-        activeFutures.put(req.subTaskId(), future);
+        activeFutures.put(subTaskId, future);
+        // No attachFuture() call here: registry's cancel-hook mechanism
+        // (wired via the SubTaskRegistry constructor Consumer<String>)
+        // handles kill routing from the REST endpoint to the running worker.
+        // attachFuture only exists for legacy CompletableFuture callers.
         try {
-            return future.get();
+            SubTaskResult result = future.get();
+            subTaskRegistry.markFinished(subTaskId, result.status(), result.text(), result.errorMessage());
+            return result;
         } catch (InterruptedException ie) {
             future.cancel(true);
             SubTaskResult r = SubTaskResult.cancelled(req, startedAt, System.currentTimeMillis());
-            log.info("Sub-task interrupted: id={}", req.subTaskId());
+            log.info("Sub-task interrupted: id={}", subTaskId);
+            subTaskRegistry.markFinished(subTaskId, r.status(), "", "用户取消");
             return r;
         } catch (java.util.concurrent.ExecutionException ee) {
             SubTaskResult r = SubTaskResult.failed(req, startedAt, System.currentTimeMillis(),
                     rootCauseMessage(ee));
-            log.error("Sub-task failed: id={}", req.subTaskId(), ee);
+            log.error("Sub-task failed: id={}", subTaskId, ee);
+            subTaskRegistry.markFinished(subTaskId, r.status(), r.text(), r.errorMessage());
             return r;
         } catch (java.util.concurrent.CancellationException ce) {
             SubTaskResult r = SubTaskResult.cancelled(req, startedAt, System.currentTimeMillis());
-            log.info("Sub-task cancelled: id={}", req.subTaskId());
+            log.info("Sub-task cancelled: id={}", subTaskId);
+            subTaskRegistry.markFinished(subTaskId, r.status(), "", "用户取消");
             return r;
         }
+    }
+
+    /**
+     * The executor contract says {@code req.subTaskId()} is non-null, but in
+     * practice callers have been known to forget. Preserve the old behaviour
+     * of silently synthesizing an id rather than NPE-ing — the registry
+     * accepts the synthetic id just fine.
+     */
+    private static String safeSubId(String s) {
+        return (s == null || s.isBlank()) ? java.util.UUID.randomUUID().toString() : s;
     }
 
     @Override

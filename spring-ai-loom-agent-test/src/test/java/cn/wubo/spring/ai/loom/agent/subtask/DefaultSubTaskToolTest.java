@@ -32,7 +32,10 @@ class DefaultSubTaskToolTest {
 
         assertThat(result).contains("ok-text");
         assertThat(result).contains("conv-1");
-        assertThat(registry.listHistory("alice", 10)).hasSize(1);
+        // Registry writes happen INSIDE DefaultSubTaskExecutor.execute() (moved
+        // out of this wrapper in Fix E). This test mocks the executor, so the
+        // real registry-write path is not exercised here — see
+        // SubTaskAndScheduleHistoryIntegrationTest for an end-to-end version.
         verify(executor).execute(any(SubTaskRequest.class));
     }
 
