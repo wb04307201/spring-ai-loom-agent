@@ -35,7 +35,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 - **最短触发间隔**：`min-interval`（测试应用默认 10 分钟）
 - **最长存活**：`max-lifetime`（测试应用默认 3 天 / 72h）
 - **模式**：`mode=strict` 时超限抛异常（创建失败并返回友好文案）
-- **持久化**：H2 表 `flex_scheduled_task`（Flyway `V12`），重启后仍在
+- **持久化**：loom-agent 自管 H2 表 `loom_scheduled_task`（Flyway `V13`）；见下方「持久化 (Path B — loom-owned)」章节。重启后仍在，且 `createdAt` 保留以便 `max-lifetime` 跨重启累计计时。
 
 任务名命名空间：`loom-sched-{username}-{conversationId}-{name}`，因此不同用户 / 会话下同名任务互不冲突，列表也按此前缀过滤。
 
@@ -61,3 +61,16 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 
 - 设计：[docs/superpowers/specs/2026-07-15-subtask-and-scheduler-design.md](docs/superpowers/specs/2026-07-15-subtask-and-scheduler-design.md)
 - 实施：[docs/superpowers/plans/2026-07-15-subtask-and-scheduler.md](docs/superpowers/plans/2026-07-15-subtask-and-scheduler.md)
+
+## 持久化 (Path B — loom-owned)
+
+定时任务的 H2 持久化由 loom-agent 自管（替代早期借住在 flex-schedule 的方案）：
+
+- **表名**：`loom_scheduled_task`（Flyway V13 取代了旧的 `flex_scheduled_task`）
+- **列**：`task_name` PK + `schedule_type` (`cron` / `fixed_delay` / `fixed_rate` / `one_shot`) + 三种 expression 列（按类型取一）+ `prompt` CLOB + `username` + `conversation_id` + `paused` + `created_at` / `updated_at`
+- **Repository**：`ILoomScheduleTriggerRepository`（`cn.wubo.spring.ai.loom.agent.schedule`）；默认实现 `JdbcLoomScheduleTriggerRepository` 由 `LoomAgentConfiguration.ScheduleConfiguration` 用 `@Bean` + `@ConditionalOnMissingBean` 注册
+- **写入**：每次 `createSchedule` 成功后 `repo.save(...)`；每次 `cancelSchedule` 成功后 `repo.delete(...)`；删除会话时 `repo.deleteAllForConversation(user, conv)`
+- **恢复**：`ScheduleRestoreListener` 监听 `ApplicationReadyEvent`，遍历 `repo.findAll()`，对过期行直接 `repo.delete(...)`（基于 `flex.schedule.limits.max-lifetime`），其余通过 `flexService.task(name).{cron|fixedDelay|fixedRate|oneShot}(...).createdAt(storedCreatedAt).register(lambda)` 重新装载，对 paused 行再调 `flexService.pause(name)`
+- **不再用 flex-schedule 的 `restoreTasks()`**：因为 1) 它要求 `beanName`/`methodName`，而 loom-agent 用 lambda 触发；2) 它的 `scheduleByType` 没有 ONE_SHOT 分支
+
+**为什么是 Path B 而不是路径 A**：flex-schedule 现在只提供 `TaskBuilder.createdAt(Instant)` 这个 hook 和默认内存 `TaskRepository`；持久化层是谁就用谁的（loom-agent 用 H2，集群部署可换 Redis/JDBC）。flex-schedule 不替消费方选引擎。
