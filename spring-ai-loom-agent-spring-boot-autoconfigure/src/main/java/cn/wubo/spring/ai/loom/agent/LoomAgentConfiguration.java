@@ -825,7 +825,35 @@ public class LoomAgentConfiguration {
 
     // ==================== Web ====================
 
+    /**
+     * 删除会话时的资源清理：先杀掉该会话名下所有在飞子任务，再取消该会话名下所有定时任务，
+     * 最后由调用方软删 user_conversation 映射。
+     * <p>
+     * 两个依赖都可缺省(subtask/schedule 功能可被关闭)，缺省时对应清理跳过。
+     *
+     * @return {@code [subtasksKilled, schedulesCancelled]}
+     */
+    static int[] cleanupConversationResources(
+            String conversationId,
+            String username,
+            cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
+            cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService) {
+        int subtasksKilled = registry != null ? registry.killAllByConversation(conversationId) : 0;
+        int schedulesCancelled = 0;
+        if (flexService != null && username != null && conversationId != null) {
+            String prefix = "loom-sched-" + username + "-" + conversationId + "-";
+            for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
+                if (info.taskName().startsWith(prefix)) {
+                    flexService.cancel(info.taskName());
+                    schedulesCancelled++;
+                }
+            }
+        }
+        return new int[]{subtasksKilled, schedulesCancelled};
+    }
+
     @Configuration
+    @Slf4j
     static class WebConfiguration {
 
         @Bean
@@ -1086,7 +1114,11 @@ public class LoomAgentConfiguration {
         }
 
         @Bean("loomAgentConversationRouter")
-        public RouterFunction<ServerResponse> loomAgentConversationRouter(JdbcChatMemoryRepository chatMemoryRepository, IUserConversation userConversation) {
+        public RouterFunction<ServerResponse> loomAgentConversationRouter(
+                JdbcChatMemoryRepository chatMemoryRepository,
+                IUserConversation userConversation,
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
+                ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/conversation", request -> ServerResponse.ok().body(userConversation.getList()));
             builder.GET("spring/ai/loom/conversation/{conversationId}", request -> {
@@ -1095,7 +1127,13 @@ public class LoomAgentConfiguration {
             });
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
+                String username = UserContextHolder.getCurrentUser();
+                // 先停子任务 + 取消定时任务，再软删会话映射
+                int[] cleaned = cleanupConversationResources(conversationId, username,
+                        subTaskRegistry.getIfAvailable(), flexService.getIfAvailable());
                 userConversation.deleteById(conversationId);
+                log.info("会话删除清理: conv={}, user={}, subtasks={}, schedules={}",
+                        conversationId, username, cleaned[0], cleaned[1]);
                 return ServerResponse.ok().body(true);
             });
             return builder.build();
