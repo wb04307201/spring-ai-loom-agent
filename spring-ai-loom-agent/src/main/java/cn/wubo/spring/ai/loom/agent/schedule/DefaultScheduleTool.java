@@ -55,6 +55,16 @@ public class DefaultScheduleTool implements IScheduleTool {
     @Tool(description = "创建一个定时任务。最短 10 分钟执行一次,最长存活 3 天(强校验)。"
             + "类型 cron / fixed_delay / fixed_rate / one_shot。")
     public String createSchedule(String name, String scheduleType, String expression, String prompt, ToolContext toolContext) {
+        // Mirror the prompt validation in DefaultSubTaskTool.startSubTask: an empty
+        // prompt here would otherwise persist to H2 and explode at fire time when
+        // DefaultSubTaskExecutor's `spec.user(req.prompt())` throws "text cannot be
+        // null or empty" — every scheduled run would fail. Reject up-front.
+        if (prompt == null || prompt.isBlank()) {
+            String uname = toolContext != null && toolContext.getContext() != null
+                    ? String.valueOf(toolContext.getContext().get("username")) : "";
+            log.warn("定时任务 prompt 为空,拒绝创建: user={}, name={}", uname, name);
+            return "[定时失败] prompt 不能为空,请提供具体的任务指令再调用 create_scheduled_task。";
+        }
         String username = (String) toolContext.getContext().get("username");
         String convId = (String) toolContext.getContext().get("parentConversationId");
         String full = fullName(username, convId, name);

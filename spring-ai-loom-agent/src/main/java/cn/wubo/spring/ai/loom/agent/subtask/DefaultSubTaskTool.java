@@ -24,6 +24,18 @@ public class DefaultSubTaskTool implements ISubTaskTool {
             + "主对话会同步等待子任务完成,然后拿到最终文本。")
     @Override
     public String startSubTask(String prompt, String systemContext, ToolContext toolContext) {
+        // Validate prompt at the tool boundary. Spring AI's ChatClient throws
+        // IllegalArgumentException("text cannot be null or empty") for empty
+        // prompts deep inside the executor; without this check, every empty
+        // tool-call from the LLM pollutes history with a FAILED row whose only
+        // fault is a missing argument. Returning a clear error here lets the
+        // LLM retry with a real instruction.
+        if (prompt == null || prompt.isBlank()) {
+            String user = readContextString(toolContext, "username");
+            log.warn("子任务 prompt 为空,拒绝执行: user={}", user);
+            return "[子任务失败] prompt 不能为空,请提供具体的任务指令再调用 start_sub_task。";
+        }
+
         // Null-safe context extraction: the tool may be invoked from paths where
         // the caller forgot to populate `username` / `parentConversationId` (direct
         // unit tests, scheduler callbacks, custom tool-call wiring). Tolerate and

@@ -260,13 +260,30 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
-        public ChatClient chatClient(ChatModel chatModel, ChatMemory chatMemory, LoomAgentProperties properties) {
+        public ChatClient chatClient(ChatModel chatModel,
+                                     @Qualifier("messageChatMemoryAdvisor") MessageChatMemoryAdvisor messageChatMemoryAdvisor,
+                                     LoomAgentProperties properties) {
             ChatClient.Builder builder = ChatClient.builder(chatModel);
             if (properties.getDefaultSystem() != null) builder.defaultSystem(properties.getDefaultSystem());
-            builder.defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(), // chat-memory advisor
+            builder.defaultAdvisors(messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
                     new SimpleLoggerAdvisor() // logger advisor
             );
             return builder.build();
+        }
+
+        /**
+         * 暴露 {@link MessageChatMemoryAdvisor} 为独立 bean —— 之前只在
+         * {@code ChatClient.Builder.defaultAdvisors(...)} 里 inline 构造,
+         * 没有暴露,导致 {@code SubTaskConfiguration#defaultSubTaskExecutor} 通过
+         * {@code ObjectProvider.getIfAvailable()} 拿到 null,在
+         * {@code DefaultSubTaskExecutor#doExecute} 第 181 行
+         * {@code spec.advisors(memoryAdvisor)} 抛出
+         * {@code IllegalArgumentException: advisors cannot contain null elements},
+         * 子任务每次都被 fail,history 永远为空。
+         */
+        @Bean
+        public MessageChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
+            return MessageChatMemoryAdvisor.builder(chatMemory).build();
         }
 
         @ConditionalOnMissingBean(IChat.class)
@@ -654,7 +671,7 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
                 @Qualifier("chatClient") ChatClient chatClient,
-                ObjectProvider<MessageChatMemoryAdvisor> memoryAdvisorProvider,
+                @Qualifier("messageChatMemoryAdvisor") MessageChatMemoryAdvisor memoryAdvisor,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
                 cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
                 // Lazy lookup: the executor ALSO passes a cancel hook back to
@@ -671,7 +688,6 @@ public class LoomAgentConfiguration {
                 // [embedTools] would force eager resolution of the still-creating
                 // defaultSubTaskTool bean.
                 @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools) {
-            MessageChatMemoryAdvisor memoryAdvisor = memoryAdvisorProvider.getIfAvailable();
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
                     chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools,
                     subTaskRegistry);
