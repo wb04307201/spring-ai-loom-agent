@@ -656,16 +656,45 @@ public class LoomAgentConfiguration {
         }
 
         @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository.class)
+        public cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository(
+                JdbcTemplate jdbcTemplate) {
+            cn.wubo.spring.ai.loom.agent.subtask.JdbcLoomSubTaskHistoryRepository repo =
+                    new cn.wubo.spring.ai.loom.agent.subtask.JdbcLoomSubTaskHistoryRepository(jdbcTemplate);
+            repo.ensureSchema();
+            log.info("JdbcLoomSubTaskHistoryRepository wired (table = loom_subtask_history)");
+            return repo;
+        }
+
+        @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry(
                 LoomAgentProperties properties,
-                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor) {
+                cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
+                cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository subTaskHistoryRepo) {
             // Wire the cancel hook so SubTaskRegistry.kill(id) actually interrupts the
             // worker thread via subTaskExecutor::cancel(id) rather than just marking the
-            // record CANCELLED.
+            // record CANCELLED. Also wire a write-through hook that mirrors every
+            // terminal record to loom_subtask_history so history survives restarts.
             return new cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry(
                     properties.getSubtask().getMaxConcurrent(),
                     properties.getSubtask().getMaxHistory(),
-                    subTaskExecutor::cancel);
+                    subTaskExecutor::cancel,
+                    subTaskHistoryRepo::save);
+        }
+
+        /**
+         * Cold-start rehydration: on ApplicationReadyEvent, load up to maxHistory
+         * most-recent records per user from H2 into the in-memory registry so the
+         * very first API call after restart already has full history visible
+         * (otherwise the in-memory deque starts empty until something fires).
+         */
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.subtask.SubTaskHistoryPreloader subTaskHistoryPreloader(
+                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
+                cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository repo,
+                LoomAgentProperties properties) {
+            return new cn.wubo.spring.ai.loom.agent.subtask.SubTaskHistoryPreloader(
+                    registry, repo, properties.getSubtask().getMaxHistory());
         }
 
         @Bean
@@ -718,14 +747,28 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentSubTaskRouter(
                 cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry) {
             RouterFunctions.Builder builder = RouterFunctions.route();
+            // active (with optional ?conversationId= filter)
             builder.GET("spring/ai/loom/subtask/list/active",
-                    request -> ServerResponse
-                            .ok().body(registry.listActive(
-                                    cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser())));
+                    request -> {
+                        String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                        String conv = request.param("conversationId").orElse(null);
+                        java.util.List<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord> body =
+                                conv == null
+                                        ? registry.listActive(user)
+                                        : registry.listActiveByConversation(user, conv);
+                        return ServerResponse.ok().body(body);
+                    });
+            // history (with optional ?conversationId= filter)
             builder.GET("spring/ai/loom/subtask/list/history",
-                    request -> ServerResponse
-                            .ok().body(registry.listHistory(
-                                    cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser(), 50)));
+                    request -> {
+                        String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                        String conv = request.param("conversationId").orElse(null);
+                        java.util.List<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord> body =
+                                conv == null
+                                        ? registry.listHistory(user, 50)
+                                        : registry.listHistoryByConversation(user, conv, 50);
+                        return ServerResponse.ok().body(body);
+                    });
             builder.POST("spring/ai/loom/subtask/kill/{id}",
                     request -> ServerResponse
                             .ok().body(registry.kill(request.pathVariable("id"))));
@@ -757,9 +800,12 @@ public class LoomAgentConfiguration {
         public cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool defaultScheduleTool(
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
                 cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
-                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+                cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties execProps) {
             return new cn.wubo.spring.ai.loom.agent.schedule.DefaultScheduleTool(
-                    flexService, subTaskExecutor, loomScheduleTriggerRepository);
+                    flexService, subTaskExecutor, loomScheduleTriggerRepository,
+                    loomScheduleExecutionRepository, execProps.getMaxPerTask());
         }
 
         @Bean
@@ -774,19 +820,55 @@ public class LoomAgentConfiguration {
         }
 
         @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository.class)
+        public cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository(
+                JdbcTemplate jdbcTemplate) {
+            cn.wubo.spring.ai.loom.agent.schedule.JdbcLoomScheduleExecutionRepository repo =
+                    new cn.wubo.spring.ai.loom.agent.schedule.JdbcLoomScheduleExecutionRepository(jdbcTemplate);
+            repo.ensureSchema();
+            log.info("JdbcLoomScheduleExecutionRepository wired (table = loom_schedule_execution)");
+            return repo;
+        }
+
+        @Bean
         public cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener scheduleRestoreListener(
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
                 cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
-                cn.wubo.flex.schedule.core.TaskLimits taskLimits) {
+                cn.wubo.flex.schedule.core.TaskLimits taskLimits,
+                cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties execProps) {
             return new cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener(
-                    flexService, loomScheduleTriggerRepository, subTaskExecutor, taskLimits);
+                    flexService, loomScheduleTriggerRepository, subTaskExecutor, taskLimits,
+                    loomScheduleExecutionRepository, execProps.getMaxPerTask());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties.class)
+        public cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties scheduleExecutionProperties() {
+            return new cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties();
+        }
+
+        /**
+         * Daily cleanup task that prunes {@code loom_schedule_execution} rows older
+         * than the configured retention window (default 30 days). Wired here as a
+         * {@code @Scheduled} method so it runs alongside the rest of the app's
+         * scheduled jobs; on a real production deployment this should be moved
+         * to a dedicated scheduler that survives app restarts, but for the
+         * single-instance loom-agent use case this is fine.
+         */
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionCleanup scheduleExecutionCleanup(
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository repo,
+                cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties props) {
+            return new cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionCleanup(repo, props);
         }
 
         @Bean("loomAgentScheduleRouter")
         public RouterFunction<ServerResponse> loomAgentScheduleRouter(
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
                 cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             // Structured list for the UI: this user's tasks only (TaskInfo{taskName,taskType,schedule}).
@@ -813,7 +895,72 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/schedule/history/{name}",
                     request -> ServerResponse.ok().body(
                             flexService.getExecutionHistory(request.pathVariable("name"), 50)));
+            // Per-conversation schedule history.
+            //   - source-of-truth for "what schedules exist for this conversation" is
+            //     loom_scheduled_task (H2). This covers BOTH still-registered tasks
+            //     (visible in flex-schedule runtime) AND one_shots that already fired
+            //     and were auto-removed from flex-schedule's runtime.
+            //   - execution events come from loom_schedule_execution (H2), which
+            //     survives restarts and is not auto-trimmed on one_shot completion.
+            // The previous implementation walked flexService.listTasks() only, which
+            // silently dropped fired one_shots — fixed here.
+            builder.GET("spring/ai/loom/schedule/history/by-conversation/{conversationId}",
+                    request -> {
+                        String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                        String conv = request.pathVariable("conversationId");
+                        String prefix = "loom-sched-" + user + "-" + conv + "-";
+                        java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord> configs =
+                                loomScheduleTriggerRepository.findByUserAndConv(user, conv);
+                        java.util.Set<String> liveTaskNames = flexService.listTasks().stream()
+                                .map(cn.wubo.flex.schedule.core.TaskInfo::taskName)
+                                .collect(java.util.stream.Collectors.toSet());
+                        java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+                        for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord r : configs) {
+                            if (!r.taskName().startsWith(prefix)) continue;
+                            java.util.Map<String, Object> entry = new java.util.LinkedHashMap<>();
+                            entry.put("taskName", r.taskName());
+                            entry.put("taskType", r.scheduleType());
+                            entry.put("schedule", formatSchedule(r));
+                            entry.put("prompt", r.prompt());
+                            entry.put("createdAt", r.createdAt().toString());
+                            entry.put("paused", r.paused());
+                            entry.put("live", liveTaskNames.contains(r.taskName()));
+                            // Merged execution history: prefer H2 (durable), but include
+                            // any in-memory rows flex-schedule still holds that aren't
+                            // yet persisted (rare race window). For now we just use H2.
+                            java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord> execs =
+                                    loomScheduleExecutionRepository.findByTaskName(r.taskName(), 50);
+                            java.util.List<java.util.Map<String, Object>> execOut = new java.util.ArrayList<>();
+                            for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord e : execs) {
+                                java.util.Map<String, Object> er = new java.util.LinkedHashMap<>();
+                                er.put("executionId", e.executionId());
+                                er.put("fireTime", e.fireTime().toString());
+                                er.put("durationMs", e.durationMs());
+                                er.put("success", e.success());
+                                er.put("errorMessage", e.errorMessage());
+                                er.put("firedBy", e.firedBy());
+                                execOut.add(er);
+                            }
+                            entry.put("executions", execOut);
+                            out.add(entry);
+                        }
+                        return ServerResponse.ok().body(out);
+                    });
             return builder.build();
+        }
+
+        private static String formatSchedule(cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord r) {
+            return switch (r.scheduleType()) {
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_CRON ->
+                        "cron=" + (r.cronExpression() == null ? "?" : r.cronExpression());
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_FIXED_DELAY ->
+                        "fixed_delay=" + (r.intervalSeconds() == null ? "?" : r.intervalSeconds() + "s");
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_FIXED_RATE ->
+                        "fixed_rate=" + (r.intervalSeconds() == null ? "?" : r.intervalSeconds() + "s");
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_ONE_SHOT ->
+                        "one_shot_delay=" + (r.oneShotDelaySeconds() == null ? "?" : r.oneShotDelaySeconds() + "s");
+                default -> r.scheduleType();
+            };
         }
     }
 

@@ -55,15 +55,30 @@ public class ScheduleRestoreListener {
     private final ILoomScheduleTriggerRepository repo;
     private final ISubTaskExecutor subTaskExecutor;
     private final TaskLimits taskLimits;
+    private final ILoomScheduleExecutionRepository executionRepo;
+    /** Per-task execution history cap (newest N kept). Default 1000. */
+    private final int maxExecutionsPerTask;
 
     public ScheduleRestoreListener(FlexScheduledTaskService flexService,
                                    ILoomScheduleTriggerRepository repo,
                                    ISubTaskExecutor subTaskExecutor,
-                                   TaskLimits taskLimits) {
+                                   TaskLimits taskLimits,
+                                   ILoomScheduleExecutionRepository executionRepo,
+                                   int maxExecutionsPerTask) {
         this.flexService = flexService;
         this.repo = repo;
         this.subTaskExecutor = subTaskExecutor;
         this.taskLimits = taskLimits != null ? taskLimits : TaskLimits.DISABLED;
+        this.executionRepo = executionRepo;
+        this.maxExecutionsPerTask = Math.max(10, maxExecutionsPerTask);
+    }
+
+    /** Backward-compatible constructor for callers that haven't wired the execution repo yet. */
+    public ScheduleRestoreListener(FlexScheduledTaskService flexService,
+                                   ILoomScheduleTriggerRepository repo,
+                                   ISubTaskExecutor subTaskExecutor,
+                                   TaskLimits taskLimits) {
+        this(flexService, repo, subTaskExecutor, taskLimits, null, 1000);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -73,6 +88,7 @@ public class ScheduleRestoreListener {
 
         int restored = 0;
         int droppedExpired = 0;
+        int droppedOrphan = 0;
         int failed = 0;
 
         for (LoomScheduleTriggerRecord r : records) {
@@ -82,6 +98,21 @@ public class ScheduleRestoreListener {
                     droppedExpired++;
                     log.info("Dropping expired scheduled task [{}] (createdAt={})",
                             r.taskName(), r.createdAt());
+                    continue;
+                }
+
+                // one_shot that already fired before this restart: do NOT re-register.
+                // Without this guard, every restart would re-fire the one_shot 30s
+                // after the restart (since `b.oneShot(delay).register(...)` always
+                // fires after `delay` regardless of history). The execution log
+                // already records the original fire — that's our durable audit trail.
+                if (LoomScheduleTriggerRecord.TYPE_ONE_SHOT.equals(r.scheduleType())
+                        && executionRepo != null
+                        && executionRepo.countByTaskName(r.taskName()) > 0) {
+                    log.info("Skipping restore of one_shot [{}] — already fired " +
+                                    "(execution rows present in loom_schedule_execution)",
+                            r.taskName());
+                    restored++;   // the row was "restored" in the sense that H2 still has it
                     continue;
                 }
 
@@ -108,6 +139,23 @@ public class ScheduleRestoreListener {
                 restored, droppedExpired, failed);
     }
 
+    /**
+     * Heuristic retained for documentation; no longer used by restore since V16
+     * introduced {@code loom_schedule_execution} (which keeps the audit trail
+     * separate from the schedule declaration). The declaration row is kept across
+     * restarts even for one_shots that already fired — flex-schedule's limits
+     * checker rejects re-registers that violate min-interval / max-lifetime, so
+     * the row is effectively read-only from the runtime's perspective.
+     */
+    @Deprecated
+    private boolean isOneShotOrphan(LoomScheduleTriggerRecord r) {
+        Long delay = r.oneShotDelaySeconds();
+        if (delay == null) return false;
+        Duration expectedWindow = Duration.ofSeconds(delay).plus(Duration.ofMinutes(1));
+        Duration age = Duration.between(r.createdAt(), Instant.now());
+        return age.compareTo(expectedWindow) > 0;
+    }
+
     private static void applySchedule(TaskBuilder b, LoomScheduleTriggerRecord r) {
         switch (r.scheduleType()) {
             case LoomScheduleTriggerRecord.TYPE_CRON -> b.cron(r.cronExpression());
@@ -132,10 +180,56 @@ public class ScheduleRestoreListener {
         String id = UUID.randomUUID().toString();
         SubTaskRequest req = new SubTaskRequest(
                 id, r.conversationId(), null, r.username(), r.prompt(), null, true);
+        long startMs = System.currentTimeMillis();
+        Instant fireTime = Instant.now();
+        boolean success = false;
+        String errorMessage = null;
         try {
             subTaskExecutor.execute(req);
+            success = true;
         } catch (Exception e) {
+            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
             log.error("调度子任务执行失败: task={}, sub={}", r.taskName(), id, e);
+        } finally {
+            long durationMs = System.currentTimeMillis() - startMs;
+            recordExecution(r, fireTime, durationMs, success, errorMessage);
+        }
+    }
+
+    /**
+     * Persist a fire event to {@code loom_schedule_execution} and trim per-task
+     * history to the configured cap. The schedule's <em>declaration</em> row
+     * ({@code loom_scheduled_task}) is left untouched — earlier iterations used
+     * to delete it for {@code one_shot} after firing, but that wiped the audit
+     * trail entirely. The declaration stays; executions accumulate; the daily
+     * cleanup task ({@link ScheduleExecutionCleanup}) prunes old rows.
+     */
+    private void recordExecution(LoomScheduleTriggerRecord r,
+                                 Instant fireTime,
+                                 long durationMs,
+                                 boolean success,
+                                 String errorMessage) {
+        if (executionRepo == null) {
+            log.warn("recordExecution called but executionRepo is null — task [{}]", r.taskName());
+            return;
+        }
+        log.info("Recording schedule execution: task={}, durationMs={}, success={}",
+                r.taskName(), durationMs, success);
+        try {
+            executionRepo.save(new LoomScheduleExecutionRecord(
+                    null,
+                    r.taskName(),
+                    fireTime,
+                    durationMs,
+                    success,
+                    errorMessage,
+                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER));
+            int n = executionRepo.trimTaskHistory(r.taskName(), maxExecutionsPerTask);
+            if (n > 0) {
+                log.debug("Trimmed {} old execution row(s) for task [{}]", n, r.taskName());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to record schedule execution [{}]: {}", r.taskName(), e.getMessage(), e);
         }
     }
 

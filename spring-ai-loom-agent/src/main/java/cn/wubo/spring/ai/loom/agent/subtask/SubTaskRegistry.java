@@ -43,15 +43,28 @@ public class SubTaskRegistry {
      */
     private final Consumer<String> cancelHook;
 
+    /**
+     * Optional hook invoked on {@link #markFinished} with the terminal record.
+     * Production wiring uses this to write-through to {@code loom_subtask_history}
+     * so history survives restarts. May be null (legacy / tests).
+     */
+    private final Consumer<SubTaskRecord> writeHook;
+
     /** Backward-compatible constructor with no cancel hook. */
     public SubTaskRegistry(int maxConcurrent, int maxHistory) {
-        this(maxConcurrent, maxHistory, null);
+        this(maxConcurrent, maxHistory, null, null);
     }
 
+    /** Backward-compatible constructor with cancel hook only. */
     public SubTaskRegistry(int maxConcurrent, int maxHistory, Consumer<String> cancelHook) {
+        this(maxConcurrent, maxHistory, cancelHook, null);
+    }
+
+    public SubTaskRegistry(int maxConcurrent, int maxHistory, Consumer<String> cancelHook, Consumer<SubTaskRecord> writeHook) {
         this.maxConcurrent = maxConcurrent;
         this.maxHistory = maxHistory;
         this.cancelHook = cancelHook;
+        this.writeHook = writeHook;
     }
 
     /**
@@ -125,6 +138,19 @@ public class SubTaskRegistry {
                 null);
         history.put(subTaskId, finished);
         archive(finished);
+        // Write-through persistence — fire-and-forget so H2 latency can't stall the
+        // worker thread. The hook is responsible for its own error handling.
+        if (writeHook != null) {
+            try {
+                writeHook.accept(finished);
+            } catch (Exception e) {
+                // Persistence failures must not undo the in-memory state transition;
+                // log and let the user re-trigger /admin tool reconcile if needed.
+                org.slf4j.LoggerFactory.getLogger(SubTaskRegistry.class)
+                        .warn("Sub-task history write-through failed: id={}, err={}",
+                                finished.subTaskId(), e.getMessage());
+            }
+        }
     }
 
     /**
@@ -188,6 +214,21 @@ public class SubTaskRegistry {
         return out;
     }
 
+    /**
+     * Like {@link #listActive(String)} but also filters by parent {@code conversationId}.
+     * A null {@code conversationId} matches everything (same as the no-filter call).
+     */
+    public List<SubTaskRecord> listActiveByConversation(String username, String conversationId) {
+        if (username == null) return List.of();
+        List<SubTaskRecord> out = new ArrayList<>();
+        active.forEach((id, rec) -> {
+            if (rec.username() == null || !rec.username().equals(username)) return;
+            if (conversationId != null && !conversationId.equals(rec.conversationId())) return;
+            out.add(rec);
+        });
+        return out;
+    }
+
     public List<SubTaskRecord> listHistory(String username, int limit) {
         if (username == null) return List.of();
         Deque<SubTaskRecord> deque = historyByUser.get(username);
@@ -196,6 +237,27 @@ public class SubTaskRegistry {
         List<SubTaskRecord> out = new ArrayList<>(deque);
         java.util.Collections.reverse(out);
         if (out.size() > limit) return out.subList(0, limit);
+        return out;
+    }
+
+    /**
+     * Like {@link #listHistory(String, int)} but also filters by parent
+     * {@code conversationId}. A null {@code conversationId} matches everything.
+     */
+    public List<SubTaskRecord> listHistoryByConversation(String username, String conversationId, int limit) {
+        if (username == null) return List.of();
+        Deque<SubTaskRecord> deque = historyByUser.get(username);
+        if (deque == null) return List.of();
+        List<SubTaskRecord> out = new ArrayList<>();
+        synchronized (deque) {
+            // Walk newest-first and collect matches up to limit.
+            java.util.Iterator<SubTaskRecord> it = deque.descendingIterator();
+            while (it.hasNext() && out.size() < limit) {
+                SubTaskRecord rec = it.next();
+                if (conversationId != null && !conversationId.equals(rec.conversationId())) continue;
+                out.add(rec);
+            }
+        }
         return out;
     }
 
@@ -208,6 +270,21 @@ public class SubTaskRegistry {
                 deque.removeFirst();
             }
         }
+    }
+
+    /**
+     * Re-hydrate an already-terminal record from persistent storage into the
+     * in-memory deque. Used by {@code SubTaskHistoryPreloader} on application
+     * startup so the first API call after a restart already sees prior history.
+     * Does NOT trigger the {@code writeHook} (no point re-persisting what we just
+     * loaded) and skips terminal records that are duplicates of one already in
+     * the deque.
+     */
+    public void rehydrate(SubTaskRecord rec) {
+        if (rec == null || rec.subTaskId() == null || rec.username() == null) return;
+        if (history.containsKey(rec.subTaskId())) return;
+        history.put(rec.subTaskId(), rec);
+        archive(rec);
     }
 
     private static String safeUsername(String s) {

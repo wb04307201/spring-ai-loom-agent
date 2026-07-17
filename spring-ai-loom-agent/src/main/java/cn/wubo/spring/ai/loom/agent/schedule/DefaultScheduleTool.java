@@ -38,13 +38,27 @@ public class DefaultScheduleTool implements IScheduleTool {
     private final FlexScheduledTaskService flexService;
     private final ISubTaskExecutor subTaskExecutor;
     private final ILoomScheduleTriggerRepository loomScheduleTriggerRepository;
+    private final ILoomScheduleExecutionRepository loomScheduleExecutionRepository;
+    /** Per-task execution history cap. Mirrors ScheduleExecutionProperties default. */
+    private final int maxExecutionsPerTask;
 
     public DefaultScheduleTool(FlexScheduledTaskService flexService,
                                ISubTaskExecutor subTaskExecutor,
-                               ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
+                               ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                               ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+                               int maxExecutionsPerTask) {
         this.flexService = flexService;
         this.subTaskExecutor = subTaskExecutor;
         this.loomScheduleTriggerRepository = loomScheduleTriggerRepository;
+        this.loomScheduleExecutionRepository = loomScheduleExecutionRepository;
+        this.maxExecutionsPerTask = Math.max(10, maxExecutionsPerTask);
+    }
+
+    /** Backward-compatible constructor for callers that haven't wired the execution repo yet. */
+    public DefaultScheduleTool(FlexScheduledTaskService flexService,
+                               ISubTaskExecutor subTaskExecutor,
+                               ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
+        this(flexService, subTaskExecutor, loomScheduleTriggerRepository, null, 1000);
     }
 
     static String fullName(String username, String conversationId, String name) {
@@ -73,16 +87,16 @@ public class DefaultScheduleTool implements IScheduleTool {
             switch (scheduleType.toLowerCase()) {
                 case "cron" -> flexService.task(full)
                         .cron(expression)
-                        .register(() -> runAsSubTask(username, convId, prompt));
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
                 case "fixed_delay" -> flexService.task(full)
                         .fixedDelay(Duration.ofSeconds(Long.parseLong(expression)))
-                        .register(() -> runAsSubTask(username, convId, prompt));
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
                 case "fixed_rate" -> flexService.task(full)
                         .fixedRate(Duration.ofSeconds(Long.parseLong(expression)))
-                        .register(() -> runAsSubTask(username, convId, prompt));
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
                 case "one_shot" -> flexService.task(full)
                         .oneShot(Duration.ofSeconds(Long.parseLong(expression)))
-                        .register(() -> runAsSubTask(username, convId, prompt));
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
                 default -> { return "[定时失败] 不支持的类型: " + scheduleType; }
             }
             persistAfterRegister(full, name, scheduleType, expression, prompt, username, convId);
@@ -139,10 +153,13 @@ public class DefaultScheduleTool implements IScheduleTool {
         }
     }
 
-    private void runAsSubTask(String username, String convId, String prompt) {
+    private void runAsSubTask(String taskName, String username, String convId, String prompt) {
         String id = UUID.randomUUID().toString();
         SubTaskRequest req = new SubTaskRequest(id, convId, null, username, prompt, null, true);
-        SubTaskResult result = null;
+        long startMs = System.currentTimeMillis();
+        Instant fireTime = Instant.now();
+        boolean success = false;
+        String errorMessage = null;
         try {
             // execute() returns a SubTaskResult instead of throwing on failure
             // (it internally catches ExecutionException and reports FAILED via
@@ -151,17 +168,51 @@ public class DefaultScheduleTool implements IScheduleTool {
             // to mark the execution as success/failure, so we re-throw on
             // FAILED so the schedule's ExecutionRecord.success reflects the
             // actual sub-task outcome.
-            result = subTaskExecutor.execute(req);
+            SubTaskResult result = subTaskExecutor.execute(req);
             if (result.status() == SubTaskStatus.FAILED) {
+                errorMessage = result.errorMessage();
                 throw new RuntimeException("调度子任务执行失败: " + result.errorMessage());
             }
+            success = true;
         } catch (Exception e) {
-            log.error("调度子任务执行失败: id={}", id, e);
+            log.error("调度子任务执行失败: id={}, task={}", id, taskName, e);
+            if (errorMessage == null) {
+                errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            }
             // Re-throw so FlexScheduledTaskRegistrar.instrument()'s catch block
             // records an ExecutionRecord with success=false instead of true.
             // Without this the schedule's "history" UI would show every fire
             // as successful even when the sub-task itself failed.
             throw new RuntimeException(e);
+        } finally {
+            long durationMs = System.currentTimeMillis() - startMs;
+            recordExecution(taskName, fireTime, durationMs, success, errorMessage);
+        }
+    }
+
+    /**
+     * Persist a fire event to {@code loom_schedule_execution} (mirrors
+     * {@link ScheduleRestoreListener#recordExecution}). Called from the
+     * LLM-tool / createSchedule path — every fire, success or failure.
+     */
+    private void recordExecution(String taskName, Instant fireTime, long durationMs,
+                                  boolean success, String errorMessage) {
+        if (loomScheduleExecutionRepository == null) return;
+        try {
+            loomScheduleExecutionRepository.save(new LoomScheduleExecutionRecord(
+                    null,
+                    taskName,
+                    fireTime,
+                    durationMs,
+                    success,
+                    errorMessage,
+                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER));
+            int n = loomScheduleExecutionRepository.trimTaskHistory(taskName, maxExecutionsPerTask);
+            if (n > 0) {
+                log.debug("Trimmed {} old execution row(s) for task [{}]", n, taskName);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to record schedule execution [{}]: {}", taskName, e.getMessage());
         }
     }
 
