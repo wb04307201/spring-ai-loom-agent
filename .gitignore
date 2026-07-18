@@ -41,6 +41,8 @@ build/
 /.playwright-mcp/
 /mcp/
 /.local/
+.superpowers
+# superpowers plugin working dir (sdd briefs/reports etc.)
 /spring-ai-loom-agent-test/.local/
 /spring-ai-loom-agent-test/mcp/
 /spring-ai-loom-agent-test/.playwright-mcp/
