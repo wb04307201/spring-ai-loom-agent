@@ -2624,41 +2624,67 @@ const init = async () => {
 
     // Auth check — auto-login via cookie-based session (BFF pattern)
     const loggedIn = await auth.init();
+    if (!loggedIn) return; // not logged in; auth.init already redirected
 
-    // Only load protected resources after successful login
-    if (loggedIn) {
-        // Load MCPs
+    // Each "background" load is wrapped so a single failure does NOT abort
+    // the rest of init. Without these try/catch, a flaky /mcps or /conversation
+    // endpoint could leave the page in a state where event listeners never
+    // bind — making the entire UI look "fresh" but non-functional.
+    // (auto-test round-01 / .temp/bugs/round-01-bug-02.md)
+    try {
         await mcp.loadList();
+    } catch (e) {
+        console.warn('[init] mcp.loadList failed, continuing:', e);
     }
 
-    // Feature detection (image upload)
     try {
         const uploadOk = await api.checkKnowledgeUpload();
         if (uploadOk) {
-            document.getElementById('image-add-btn').style.display = 'flex';
+            const ib = document.getElementById('image-add-btn');
+            if (ib) ib.style.display = 'flex';
         }
-    } catch { /* upload not available */
+    } catch (e) {
+        console.warn('[init] checkKnowledgeUpload failed, continuing:', e);
     }
 
-    // Load conversations
-    await conversation.loadList();
+    try {
+        await conversation.loadList();
+    } catch (e) {
+        console.warn('[init] conversation.loadList failed, continuing:', e);
+    }
 
-    // Create initial conversation if none
+    // Create initial conversation if none. Use try/catch so a render failure
+    // does not leave state.conversationId = null (which causes /stream to 500).
     if (!state.conversationId) {
-        conversation.createNew();
+        try {
+            conversation.createNew();
+        } catch (e) {
+            console.warn('[init] conversation.createNew failed, continuing:', e);
+        }
     }
 
-    // Event bindings
-    const textarea = document.getElementById('textarea');
-    const sendBtn = document.getElementById('send-btn');
+    // Bind all events LAST so listeners are guaranteed regardless of what the
+    // background loads did. Each binding is null-checked.
+    bindAllEvents();
+};
 
-    textarea.addEventListener('keydown', (event) => {
+const bindAllEvents = () => {
+    const safeBind = (sel, type, handler) => {
+        const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
+        if (e && handler) e.addEventListener(type, handler);
+    };
+    const safeBindById = (id, type, handler) => {
+        if (id) safeBind(document.getElementById(id), type, handler);
+    };
+
+    const ta = document.getElementById('textarea');
+    safeBind(ta, 'keydown', (event) => {
         if (event.key === 'Enter' && event.ctrlKey) {
             event.preventDefault();
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            textarea.value = textarea.value.substring(0, start) + '\n' + textarea.value.substring(end);
-            textarea.setSelectionRange(start + 1, start + 1);
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            ta.value = ta.value.substring(0, start) + '\n' + ta.value.substring(end);
+            ta.setSelectionRange(start + 1, start + 1);
         }
         if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) {
             event.preventDefault();
@@ -2666,33 +2692,31 @@ const init = async () => {
         }
     });
 
-    sendBtn.addEventListener('click', () => chat.send());
-    const stopBtn = document.getElementById('stop-btn');
-    if (stopBtn) stopBtn.addEventListener('click', () => chat.stopStream());
+    safeBindById('send-btn', 'click', () => chat.send());
+    safeBindById('stop-btn', 'click', () => chat.stopStream());
 
     // Modal overlay click-to-close
-    document.getElementById('mcp-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('mcp-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) mcp.closeModal();
     });
-    document.getElementById('skills-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('skills-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) skills.closeModal();
     });
-    document.getElementById('ks-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('ks-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) knowledge.closePanel();
     });
-    document.getElementById('file-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('file-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) fileMgr.closeModal();
     });
 
     // Image upload
-    imageUpload.init();
+    if (typeof imageUpload.init === 'function') imageUpload.init();
 
-    // Image viewer close handlers
-    document.getElementById('image-viewer-overlay').addEventListener('click', (e) => {
+    safeBindById('image-viewer-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) imageUpload.hideFullscreen();
     });
-    document.getElementById('viewer-close').addEventListener('click', () => imageUpload.hideFullscreen());
-    document.addEventListener('keydown', (e) => {
+    safeBindById('viewer-close', 'click', () => imageUpload.hideFullscreen());
+    safeBind(document, 'keydown', (e) => {
         if (e.key === 'Escape') imageUpload.hideFullscreen();
     });
 
@@ -2700,8 +2724,7 @@ const init = async () => {
     responsive.handleResize();
     window.addEventListener('resize', responsive.handleResize);
 
-    // Event listeners (replaces inline onclick handlers from ES module scope)
-    const el = (sel) => document.querySelector(sel);
+    // Top-level buttons (replace inline onclick handlers from ES module scope)
     const addIf = (sel, handler) => {
         const e = document.querySelector(sel);
         if (e) e.addEventListener('click', handler);
@@ -2724,7 +2747,15 @@ const init = async () => {
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
 };
 
-document.addEventListener('DOMContentLoaded', init);
+// Init trigger — type="module" scripts are deferred, so by the time this
+// module evaluates, DOMContentLoaded may have ALREADY FIRED. In that case the
+// listener below would never trigger and the page would be a static shell.
+// Guard with document.readyState.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
 
 // Expose to global for testing/debugging
 window._loomAgent = {state, api, imageUpload, auth, chat, conversation, ui, fileMgr};
