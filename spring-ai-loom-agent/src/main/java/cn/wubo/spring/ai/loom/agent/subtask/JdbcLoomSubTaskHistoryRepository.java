@@ -120,6 +120,16 @@ public class JdbcLoomSubTaskHistoryRepository implements ILoomSubTaskHistoryRepo
         return out;
     }
 
+    @Override
+    public int deleteAllByConversation(String username, String conversationId) {
+        if (username == null || username.isBlank() || conversationId == null || conversationId.isBlank()) {
+            return 0;
+        }
+        return jdbc.update(
+                "DELETE FROM " + TABLE_NAME + " WHERE username = ? AND conversation_id = ?",
+                username, conversationId);
+    }
+
     private static SubTaskRegistry.SubTaskRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new SubTaskRegistry.SubTaskRecord(
                 rs.getString("subtask_id"),

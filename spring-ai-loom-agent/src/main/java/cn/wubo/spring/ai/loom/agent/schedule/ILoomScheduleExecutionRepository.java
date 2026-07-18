@@ -32,6 +32,13 @@ public interface ILoomScheduleExecutionRepository {
     /** Delete every row with {@code fire_time < cutoff}. Returns affected row count. */
     int deleteOlderThan(Instant cutoff);
 
+    /**
+     * Cascade-delete every execution row whose task_name starts with
+     * {@code loom-sched-{username}-{conversationId}-}. Used when a conversation
+     * is deleted so its schedule audit trail goes with it. Returns affected row count.
+     */
+    int deleteByUserAndConversation(String username, String conversationId);
+
     /** Defensive schema bootstrap (mirrors V16). */
     void ensureSchema();
 }

@@ -201,6 +201,36 @@ public class SubTaskRegistry {
         return n;
     }
 
+    /**
+     * Cascade-clean every per-user history entry belonging to {@code (username, conversationId)}.
+     * Removes from the bounded deque and the global {@code history} map. Does NOT
+     * touch the H2 persistence — that is owned by
+     * {@code ILoomSubTaskHistoryRepository#deleteAllByConversation}, which the
+     * caller should invoke alongside this for consistency.
+     *
+     * @return number of records cleared from the in-memory deque.
+     */
+    public int removeAllByConversation(String username, String conversationId) {
+        if (username == null || username.isBlank() || conversationId == null || conversationId.isBlank()) {
+            return 0;
+        }
+        Deque<SubTaskRecord> deque = historyByUser.get(username);
+        if (deque == null) return 0;
+        int removed = 0;
+        synchronized (deque) {
+            java.util.Iterator<SubTaskRecord> it = deque.iterator();
+            while (it.hasNext()) {
+                SubTaskRecord rec = it.next();
+                if (conversationId.equals(rec.conversationId())) {
+                    it.remove();
+                    history.remove(rec.subTaskId());
+                    removed++;
+                }
+            }
+        }
+        return removed;
+    }
+
     public SubTaskRecord get(String subTaskId) {
         SubTaskRecord r = active.get(subTaskId);
         return r != null ? r : history.get(subTaskId);

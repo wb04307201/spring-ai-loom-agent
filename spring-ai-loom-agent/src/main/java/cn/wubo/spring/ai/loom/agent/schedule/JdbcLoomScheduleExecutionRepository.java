@@ -135,6 +135,21 @@ public class JdbcLoomScheduleExecutionRepository implements ILoomScheduleExecuti
                 Timestamp.from(cutoff));
     }
 
+    @Override
+    public int deleteByUserAndConversation(String username, String conversationId) {
+        if (username == null || username.isBlank()
+                || conversationId == null || conversationId.isBlank()) {
+            return 0;
+        }
+        // task_name format is loom-sched-{user}-{conv}-{friendlyName}; LIKE with
+        // the user/conv prefix narrows to this conversation's tasks without
+        // requiring a denormalized conversation_id column on this table.
+        String prefix = "loom-sched-" + username + "-" + conversationId + "-";
+        return jdbc.update(
+                "DELETE FROM " + TABLE_NAME + " WHERE task_name LIKE ?",
+                prefix + "%");
+    }
+
     private static LoomScheduleExecutionRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new LoomScheduleExecutionRecord(
                 rs.getLong("execution_id"),

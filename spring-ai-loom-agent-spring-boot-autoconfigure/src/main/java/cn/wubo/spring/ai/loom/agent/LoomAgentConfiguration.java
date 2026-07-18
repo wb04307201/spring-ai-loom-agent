@@ -96,6 +96,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -872,14 +873,63 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             // Structured list for the UI: this user's tasks only (TaskInfo{taskName,taskType,schedule}).
+            // Optional ?conversationId= filter so the per-conversation schedule modal
+            // can show just THIS conversation's currently-running tasks without
+            // mixing in tasks from other conversations.
             builder.GET("spring/ai/loom/schedule/list", request -> {
                 String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
-                String prefix = "loom-sched-" + user + "-";
+                String convFilter = request.param("conversationId").orElse(null);
+                String prefix = convFilter != null && !convFilter.isBlank()
+                        ? "loom-sched-" + user + "-" + convFilter + "-"
+                        : "loom-sched-" + user + "-";
                 java.util.List<cn.wubo.flex.schedule.core.TaskInfo> list = flexService.listTasks().stream()
                         .filter(t -> t.taskName().startsWith(prefix))
                         .toList();
                 return ServerResponse.ok().body(list);
             });
+            // Bulk cancel every schedule bound to a conversation. Used by the
+            // schedule modal's "全部停止" button. Goes through handleScheduleCancel
+            // for each live task so the H2 row is deleted too (otherwise the
+            // ScheduleRestoreListener would resurrect it on next restart).
+            builder.POST("spring/ai/loom/schedule/by-conversation/{conversationId}/cancel-all",
+                    request -> {
+                        String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                        String conv = request.pathVariable("conversationId");
+                        String prefix = "loom-sched-" + user + "-" + conv + "-";
+                        int cancelled = 0;
+                        for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
+                            if (info.taskName().startsWith(prefix)) {
+                                if (handleScheduleCancel(info.taskName(),
+                                        flexService, loomScheduleTriggerRepository, log)) {
+                                    cancelled++;
+                                }
+                            }
+                        }
+                        // Also drop the H2 rows that have no live counterpart
+                        // (one_shots that fired and got auto-removed, but config
+                        // rows are kept around for audit).
+                        int rowsDeleted = 0;
+                        try {
+                            rowsDeleted = loomScheduleTriggerRepository.deleteAllForConversation(user, conv);
+                        } catch (Exception e) {
+                            log.warn("cancel-all: H2 cleanup failed: {}", e.getMessage());
+                        }
+                        // And the audit-trail execution rows.
+                        int execRowsDeleted = 0;
+                        try {
+                            execRowsDeleted = loomScheduleExecutionRepository
+                                    .deleteByUserAndConversation(user, conv);
+                        } catch (Exception e) {
+                            log.warn("cancel-all: execution cleanup failed: {}", e.getMessage());
+                        }
+                        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+                        body.put("cancelled", cancelled);
+                        body.put("rowsDeleted", rowsDeleted);
+                        body.put("execRowsDeleted", execRowsDeleted);
+                        log.info("schedule cancel-all: user={}, conv={}, cancelled={}, rowsDeleted={}, execRowsDeleted={}",
+                                user, conv, cancelled, rowsDeleted, execRowsDeleted);
+                        return ServerResponse.ok().body(body);
+                    });
             // Frontend posts the FULL task name (already namespaced) in a JSON body {"name": "..."}.
             // IMPORTANT: also delete the corresponding loom_scheduled_task row — otherwise the
             // ScheduleRestoreListener would resurrect this task on the next restart. The
@@ -1052,8 +1102,12 @@ public class LoomAgentConfiguration {
             String username,
             cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
             cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
-            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+            cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
+        // 1. Stop active sub-tasks (cancels the running workers via the cancel hook).
         int subtasksKilled = registry != null ? registry.killAllByConversation(conversationId) : 0;
+        // 2. Cancel every flex-schedule task bound to this conversation in the runtime.
         int schedulesCancelled = 0;
         if (flexService != null && username != null && conversationId != null) {
             String prefix = "loom-sched-" + username + "-" + conversationId + "-";
@@ -1064,10 +1118,25 @@ public class LoomAgentConfiguration {
                 }
             }
         }
+        // 3. Drop the schedule declarations from H2 (loom_scheduled_task).
         int scheduleRowsDeleted = (loomScheduleTriggerRepository != null && username != null && conversationId != null)
                 ? loomScheduleTriggerRepository.deleteAllForConversation(username, conversationId)
                 : 0;
-        return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted};
+        // 4. Drop the schedule execution-event audit trail from H2 (loom_schedule_execution).
+        int scheduleExecRowsDeleted = (loomScheduleExecutionRepository != null && username != null && conversationId != null)
+                ? loomScheduleExecutionRepository.deleteByUserAndConversation(username, conversationId)
+                : 0;
+        // 5. Drop the sub-task H2 history (loom_subtask_history) and clear the
+        //    in-memory deque for this conversation so the API no longer serves
+        //    ghost records from the dying conversation.
+        int subTaskHistoryRowsDeleted = (loomSubTaskHistoryRepository != null && username != null && conversationId != null)
+                ? loomSubTaskHistoryRepository.deleteAllByConversation(username, conversationId)
+                : 0;
+        int subTaskDequeCleared = (registry != null && username != null && conversationId != null)
+                ? registry.removeAllByConversation(username, conversationId)
+                : 0;
+        return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted,
+                scheduleExecRowsDeleted, subTaskHistoryRowsDeleted, subTaskDequeCleared};
     }
 
     /**
@@ -1368,7 +1437,9 @@ public class LoomAgentConfiguration {
                 IUserConversation userConversation,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
                 ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService,
-                ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository) {
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository,
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository> loomScheduleExecutionRepository,
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository> loomSubTaskHistoryRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/conversation", request -> ServerResponse.ok().body(userConversation.getList()));
             builder.GET("spring/ai/loom/conversation/{conversationId}", request -> {
@@ -1382,13 +1453,123 @@ public class LoomAgentConfiguration {
                 int[] cleaned = cleanupConversationResources(conversationId, username,
                         subTaskRegistry.getIfAvailable(),
                         flexService.getIfAvailable(),
-                        loomScheduleTriggerRepository.getIfAvailable());
+                        loomScheduleTriggerRepository.getIfAvailable(),
+                        loomScheduleExecutionRepository.getIfAvailable(),
+                        loomSubTaskHistoryRepository.getIfAvailable());
                 userConversation.deleteById(conversationId);
-                log.info("会话删除清理: conv={}, user={}, subtasks={}, schedules={}, scheduleRowsDeleted={}",
-                        conversationId, username, cleaned[0], cleaned[1], cleaned[2]);
+                log.info("会话删除清理: conv={}, user={}, subtasks={}, schedules={}, scheduleRowsDeleted={}, " +
+                                "scheduleExecRowsDeleted={}, subTaskHistoryRowsDeleted={}, subTaskDequeCleared={}",
+                        conversationId, username, cleaned[0], cleaned[1], cleaned[2], cleaned[3], cleaned[4], cleaned[5]);
                 return ServerResponse.ok().body(true);
             });
+
+            // ----- Feature 3: aggregated conversation state for the side panel -----
+            // Used by the chat header to render "1 定时在跑, 3 子任务今天跑过" etc.
+            // Cheap aggregation over H2 + the in-memory registry.
+            builder.GET("spring/ai/loom/conversation/{conversationId}/state", request -> {
+                String conversationId = request.pathVariable("conversationId");
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().body(buildConversationState(
+                        conversationId, username,
+                        flexService.getIfAvailable(),
+                        loomScheduleTriggerRepository.getIfAvailable(),
+                        loomScheduleExecutionRepository.getIfAvailable(),
+                        subTaskRegistry.getIfAvailable(),
+                        loomSubTaskHistoryRepository.getIfAvailable()));
+            });
+
             return builder.build();
+        }
+
+        /**
+         * Aggregated, low-cost snapshot of a conversation's automation footprint
+         * for the chat-header side panel. Returns counts only (no record lists);
+         * the actual records still come from /schedule/history/by-conversation
+         * and /subtask/list/history?conversationId=.
+         */
+        static java.util.Map<String, Object> buildConversationState(
+                String conversationId,
+                String username,
+                cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry,
+                cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
+            java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
+            if (username == null || conversationId == null) {
+                state.put("activeSchedules", 0);
+                state.put("executionsLast7d", 0);
+                state.put("executionsFailedLast7d", 0);
+                state.put("activeSubTasks", 0);
+                state.put("subTaskHistoryLast7d", 0);
+                state.put("subTaskFailedLast7d", 0);
+                state.put("hasIssues", false);
+                return state;
+            }
+            String prefix = "loom-sched-" + username + "-" + conversationId + "-";
+
+            // 1. Active schedules = configs registered for this conv AND still
+            //    visible in flex-schedule runtime.
+            java.util.Set<String> liveNames = new java.util.HashSet<>();
+            if (flexService != null) {
+                for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
+                    if (info.taskName().startsWith(prefix)) liveNames.add(info.taskName());
+                }
+            }
+            state.put("activeSchedules", liveNames.size());
+
+            // 2. Executions last 7d / failed last 7d
+            long now = System.currentTimeMillis();
+            long cutoffMs = now - 7L * 24 * 3600 * 1000;
+            Instant cutoff = Instant.ofEpochMilli(cutoffMs);
+            int execLast7d = 0;
+            int execFailedLast7d = 0;
+            if (loomScheduleExecutionRepository != null && loomScheduleTriggerRepository != null) {
+                java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord> configs =
+                        loomScheduleTriggerRepository.findByUserAndConv(username, conversationId);
+                for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord cfg : configs) {
+                    java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord> rows =
+                            loomScheduleExecutionRepository.findByTaskName(cfg.taskName(), 200);
+                    for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord r : rows) {
+                        if (r.fireTime().toEpochMilli() < cutoffMs) continue;
+                        execLast7d++;
+                        if (!r.success()) execFailedLast7d++;
+                    }
+                }
+            }
+            state.put("executionsLast7d", execLast7d);
+            state.put("executionsFailedLast7d", execFailedLast7d);
+
+            // 3. Active sub-tasks (currently RUNNING in this conv).
+            int activeSubTasks = 0;
+            if (subTaskRegistry != null) {
+                for (cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord rec : subTaskRegistry.listActive(username)) {
+                    if (conversationId.equals(rec.conversationId())) activeSubTasks++;
+                }
+            }
+            state.put("activeSubTasks", activeSubTasks);
+
+            // 4. Sub-task history last 7d / failed last 7d (cheap SQL aggregation).
+            int subTaskLast7d = 0;
+            int subTaskFailedLast7d = 0;
+            if (loomSubTaskHistoryRepository != null) {
+                java.util.List<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord> rows =
+                        loomSubTaskHistoryRepository.findByUsernameAndConversation(username, conversationId, 200);
+                for (cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord rec : rows) {
+                    if (rec.finishedAt() < cutoffMs) continue;
+                    subTaskLast7d++;
+                    if (rec.status() == cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.FAILED
+                            || rec.status() == cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.CANCELLED) {
+                        subTaskFailedLast7d++;
+                    }
+                }
+            }
+            state.put("subTaskHistoryLast7d", subTaskLast7d);
+            state.put("subTaskFailedLast7d", subTaskFailedLast7d);
+
+            // 5. Aggregate "issues" flag — anything the user might want to act on.
+            state.put("hasIssues", activeSubTasks > 0 || execFailedLast7d > 0 || subTaskFailedLast7d > 0);
+            return state;
         }
 
         @Bean("loomAgentMcpRouter")

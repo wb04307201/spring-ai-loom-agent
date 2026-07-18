@@ -265,6 +265,8 @@ const api = {
         return r.json();
     },
     async logout() {
+        convStatePanel.stop();
+        schedulePanel.closeModal();
         const r = await fetch(API.logout, { method: 'POST', credentials: 'include' });
         return r.ok;
     },
@@ -426,8 +428,9 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/subtask/kill/' + encodeURIComponent(id), { method: 'POST' });
         return r.ok;
     },
-    async listSchedules() {
-        const r = await apiFetch('/spring/ai/loom/schedule/list');
+    async listSchedules(conversationId) {
+        const q = conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : '';
+        const r = await apiFetch('/spring/ai/loom/schedule/list' + q);
         return r.ok ? r.json() : [];
     },
     async cancelSchedule(fullName) {
@@ -441,6 +444,20 @@ const api = {
     async scheduleHistory(fullName) {
         const r = await apiFetch('/spring/ai/loom/schedule/history/' + encodeURIComponent(fullName));
         return r.ok ? r.json() : [];
+    },
+    async scheduleByConversation(convId) {
+        const r = await apiFetch('/spring/ai/loom/schedule/history/by-conversation/' + encodeURIComponent(convId));
+        return r.ok ? r.json() : [];
+    },
+    async cancelAllSchedulesByConversation(convId) {
+        const r = await apiFetch('/spring/ai/loom/schedule/by-conversation/' + encodeURIComponent(convId) + '/cancel-all', {
+            method: 'POST',
+        });
+        return r.ok ? r.json() : { cancelled: 0 };
+    },
+    async conversationState(convId) {
+        const r = await apiFetch('/spring/ai/loom/conversation/' + encodeURIComponent(convId) + '/state');
+        return r.ok ? r.json() : null;
     },
     async streamChat(record, onChunk, onComplete, onError) {
         const resp = await apiFetch(API.stream, {
@@ -846,6 +863,7 @@ const ui = {
         state.isStreaming = false;
         ui.setToolbarLocked(false);
         ui.setStopButtonVisible(false);
+        convStatePanel.refresh();   // refresh after every stream completion
     },
 
     disableSend() {
@@ -976,6 +994,7 @@ const conversation = {
         try {
             const messages = await api.getConversationMessages(id);
             ui.renderMessages(messages);
+            convStatePanel.start();   // refresh state strip on conversation switch
         } catch (e) {
             showToast('加载对话失败', 'error');
         }
@@ -1491,56 +1510,132 @@ const subtaskPanel = {
     },
 };
 
-/** 定时任务面板：打开时轮询，关闭时停止。 */
+/** 定时任务面板：当前会话的运行中 + 历史,带全部停止按钮。 */
 const schedulePanel = {
     _timer: null,
+    _currentConvId: null,
 
     openModal() {
         ui.showModal('schedule-modal-overlay');
+        this._currentConvId = this._resolveConvId();
         this.refresh();
-        this._timer = setInterval(() => this.refresh(), 2000);
+        this._timer = setInterval(() => this.refresh(), 5000);
     },
 
     closeModal() {
         ui.hideModal('schedule-modal-overlay');
         if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        this._currentConvId = null;
+    },
+
+    _resolveConvId() {
+        // The app keeps `state.conversationId` as the active conversation. We
+        // also try a few window-scoped fallbacks for forward-compat.
+        if (typeof state !== 'undefined' && state.conversationId) return state.conversationId;
+        return (window.currentConversationId
+            || (window.appState && window.appState.currentConversationId)
+            || (window.chatState && window.chatState.currentConversationId)
+            || (location.hash.match(/conv[=:]([\w-]+)/) || [])[1]
+            || '') || '';
     },
 
     async refresh() {
-        const tasks = await api.listSchedules();
-        this.render(tasks || []);
+        const convId = this._currentConvId || this._resolveConvId();
+        this._currentConvId = convId;
+        if (!convId) {
+            this._renderEmpty('请先打开一个对话');
+            return;
+        }
+        const tasks = await api.scheduleByConversation(convId);
+        this.render(tasks || [], convId);
     },
 
-    render(tasks) {
+    _renderEmpty(msg) {
         const body = document.getElementById('schedule-panel-body');
         if (!body) return;
-        let html = `<div class="sched-section-title">活动定时器 (${tasks.length})</div>`;
-        if (tasks.length === 0) {
-            html += '<div class="sched-empty">无定时任务</div>';
+        body.innerHTML = `<div class="sched-empty">${escapeHtml(msg)}</div>`;
+    },
+
+    render(tasks, convId) {
+        const body = document.getElementById('schedule-panel-body');
+        if (!body) return;
+        const live = tasks.filter(t => t.live);
+        const hist = tasks.filter(t => !t.live);
+        let html = '';
+
+        html += `<div class="sched-section-title" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>当前会话: <code style="color:var(--text-muted);font-size:11px;">${escapeHtml(convId)}</code></span>
+            ${live.length > 0
+                ? `<button class="sched-btn" data-cancel-all style="background:var(--danger-color,#c0392b);color:#fff;padding:4px 12px;">全部停止 (${live.length})</button>`
+                : ''}
+        </div>`;
+
+        html += `<div class="sched-section-title">运行中 (${live.length})</div>`;
+        if (live.length === 0) {
+            html += '<div class="sched-empty" style="padding:12px;">无</div>';
         } else {
             html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>操作</th></tr></thead><tbody>';
-            for (const t of tasks) {
-                const full = t.taskName || '';
-                const shortName = this._shortName(full);
-                html += `<tr>
-                    <td title="${escapeHtml(full)}">${escapeHtml(shortName)}</td>
-                    <td>${escapeHtml(t.taskType || '')}</td>
-                    <td>${escapeHtml(t.schedule || '')}</td>
-                    <td>
-                        <button class="sched-btn" data-cancel="${escapeHtml(full)}">停止</button>
-                        <button class="sched-btn" data-history="${escapeHtml(full)}">历史</button>
-                    </td>
-                </tr>`;
+            for (const t of live) {
+                html += this._row(t, true);
             }
             html += '</tbody></table>';
         }
+
+        html += `<div class="sched-section-title">历史 (${hist.length})</div>`;
+        if (hist.length === 0) {
+            html += '<div class="sched-empty" style="padding:12px;">无</div>';
+        } else {
+            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>触发</th></tr></thead><tbody>';
+            for (const t of hist) {
+                html += this._row(t, false);
+            }
+            html += '</tbody></table>';
+            // Inline execution detail for historical tasks (collapsible).
+            for (const t of hist) {
+                const execs = t.executions || [];
+                if (execs.length === 0) continue;
+                const last = execs[0];
+                const ok = last.success ? '✓' : '✗';
+                html += `<div class="sched-empty" style="padding:6px 12px;text-align:left;font-size:11px;">
+                    <code>${escapeHtml(this._shortName(t.taskName))}</code>
+                    最近一次 ${ok} · ${escapeHtml(last.fireTime)} · ${escapeHtml(String(last.durationMs))}ms
+                    ${last.errorMessage ? ' · err=' + escapeHtml(last.errorMessage) : ''}
+                    · 共 ${execs.length} 次
+                </div>`;
+            }
+        }
+
         body.innerHTML = html;
+
+        // Wire up
         for (const btn of body.querySelectorAll('[data-cancel]')) {
             btn.addEventListener('click', () => this.cancel(btn.dataset.cancel));
         }
         for (const btn of body.querySelectorAll('[data-history]')) {
             btn.addEventListener('click', () => this.history(btn.dataset.history));
         }
+        for (const btn of body.querySelectorAll('[data-cancel-all]')) {
+            btn.addEventListener('click', () => this.cancelAll(convId));
+        }
+    },
+
+    _row(t, withCancel) {
+        const full = t.taskName || '';
+        const shortName = this._shortName(full);
+        const prompt = t.prompt ? escapeHtml(t.prompt.slice(0, 80)) + (t.prompt.length > 80 ? '…' : '') : '';
+        return `<tr>
+            <td title="${escapeHtml(full)}">
+                <div>${escapeHtml(shortName)}</div>
+                ${prompt ? `<div style="font-size:11px;color:var(--text-muted);">${prompt}</div>` : ''}
+            </td>
+            <td>${escapeHtml(t.taskType || '')}</td>
+            <td>${escapeHtml(t.schedule || '')}</td>
+            <td>
+                ${withCancel
+                    ? `<button class="sched-btn" data-cancel="${escapeHtml(full)}">停止</button>`
+                    : `<button class="sched-btn" data-history="${escapeHtml(full)}">详细</button>`}
+            </td>
+        </tr>`;
     },
 
     /** loom-sched-{user}-{conv}-{name} → {name} for display. */
@@ -1571,6 +1666,81 @@ const schedulePanel = {
             message: lines || '(暂无执行记录)',
             okText: '关闭',
         });
+    },
+
+    async cancelAll(convId) {
+        const ok = await dialog.confirm({
+            title: '全部停止',
+            message: `确认停止当前对话的所有定时任务(包括未触发的和历史任务的配置)?\n\nconv: ${convId}`,
+            danger: true,
+        });
+        if (!ok) return;
+        const r = await api.cancelAllSchedulesByConversation(convId);
+        await dialog.alert({
+            title: '已停止',
+            message: `运行时取消 ${r.cancelled} 条,删除 H2 配置 ${r.rowsDeleted} 条,删除执行历史 ${r.execRowsDeleted} 条`,
+        });
+        this.refresh();
+    },
+};
+
+/** 对话状态条:在聊天输入框上方显示"运行中 / 触发 / 失败"等可操作的状态。
+ * 颜色:绿色 = 有活动且无失败;红色 = 过去 7 天有失败;灰色 = 全部为 0 / 无活动。
+ * 不发请求时隐藏。
+ */
+const convStatePanel = {
+    _timer: null,
+    _currentConvId: null,
+
+    start() {
+        if (this._timer) return;
+        this.refresh();
+        this._timer = setInterval(() => this.refresh(), 8000);
+    },
+
+    stop() {
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        this._currentConvId = null;
+        this._hide();
+    },
+
+    async refresh() {
+        const convId = (typeof state !== 'undefined' && state.conversationId) || '';
+        if (!convId) { this._hide(); return; }
+        this._currentConvId = convId;
+        const s = await api.conversationState(convId);
+        if (!s) { this._hide(); return; }
+        this._render(s);
+    },
+
+    _hide() {
+        const el = document.getElementById('conv-state-strip');
+        if (el) el.style.display = 'none';
+    },
+
+    _render(s) {
+        const el = document.getElementById('conv-state-strip');
+        if (!el) return;
+        const fields = ['activeSchedules', 'executionsLast7d', 'executionsFailedLast7d',
+            'activeSubTasks', 'subTaskHistoryLast7d', 'subTaskFailedLast7d'];
+        const activityKeys = ['activeSchedules', 'executionsLast7d', 'activeSubTasks', 'subTaskHistoryLast7d'];
+        const failureKeys = ['executionsFailedLast7d', 'subTaskFailedLast7d'];
+        const hasActivity = activityKeys.some(k => (s[k] || 0) > 0);
+        const hasFailures = failureKeys.some(k => (s[k] || 0) > 0);
+        if (!hasActivity && !hasFailures) { el.style.display = 'none'; return; }
+        el.style.display = 'flex';
+        for (const k of fields) {
+            const item = el.querySelector(`[data-key="${k}"]`);
+            if (!item) continue;
+            const n = s[k] || 0;
+            item.querySelector('.conv-state-num').textContent = String(n);
+            item.classList.remove('has-activity', 'has-failures');
+            if (failureKeys.includes(k) && n > 0) item.classList.add('has-failures');
+            else if (activityKeys.includes(k) && n > 0) item.classList.add('has-activity');
+        }
+        // Whole-strip border tint when failures present.
+        el.style.borderTop = hasFailures ? '1px solid rgba(231, 76, 60, 0.4)'
+                                          : '1px solid var(--border-color, rgba(255,255,255,0.06))';
     },
 };
 

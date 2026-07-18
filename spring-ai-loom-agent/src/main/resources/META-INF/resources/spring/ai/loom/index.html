@@ -51,6 +51,60 @@
                 </div>
             </div>
 
+            <!-- Conversation state strip (active schedules / recent failures) -->
+            <div id="conv-state-strip" class="conv-state-strip" style="display:none;">
+                <span class="conv-state-item" data-key="activeSchedules" title="当前会话运行中的定时任务">
+                    <span class="conv-state-icon">⏰</span><span class="conv-state-num">0</span><span class="conv-state-label">定时运行</span>
+                </span>
+                <span class="conv-state-item" data-key="executionsLast7d" title="过去 7 天触发次数">
+                    <span class="conv-state-icon">📊</span><span class="conv-state-num">0</span><span class="conv-state-label">触发 (7d)</span>
+                </span>
+                <span class="conv-state-item" data-key="executionsFailedLast7d" title="过去 7 天失败次数">
+                    <span class="conv-state-icon">✗</span><span class="conv-state-num">0</span><span class="conv-state-label">失败 (7d)</span>
+                </span>
+                <span class="conv-state-item" data-key="activeSubTasks" title="当前会话运行中的子任务">
+                    <span class="conv-state-icon">⚙</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务运行</span>
+                </span>
+                <span class="conv-state-item" data-key="subTaskHistoryLast7d" title="过去 7 天子任务历史">
+                    <span class="conv-state-icon">📋</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务 (7d)</span>
+                </span>
+                <span class="conv-state-item" data-key="subTaskFailedLast7d" title="过去 7 天子任务失败">
+                    <span class="conv-state-icon">⚠</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务失败 (7d)</span>
+                </span>
+            </div>
+            <style>
+                .conv-state-strip {
+                    display: flex;
+                    gap: 16px;
+                    padding: 8px 20px;
+                    background: rgba(255,255,255,0.02);
+                    border-top: 1px solid var(--border-color, rgba(255,255,255,0.06));
+                    font-size: 12px;
+                    color: var(--text-muted, #888);
+                    align-items: center;
+                    overflow-x: auto;
+                }
+                .conv-state-item {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 2px 8px;
+                    border-radius: 12px;
+                    background: rgba(255,255,255,0.03);
+                    cursor: default;
+                }
+                .conv-state-item.has-activity {
+                    background: rgba(46, 204, 113, 0.12);
+                    color: #2ecc71;
+                }
+                .conv-state-item.has-failures {
+                    background: rgba(231, 76, 60, 0.12);
+                    color: #e74c3c;
+                }
+                .conv-state-icon { font-size: 13px; }
+                .conv-state-num { font-weight: 600; }
+            </style>
+
             <!-- Input Area -->
             <div class="input-area">
                 <div class="toolbar">

@@ -26,6 +26,9 @@ public interface ILoomSubTaskHistoryRepository {
     /** Distinct usernames that have at least one history row. Used at startup to enumerate who to rehydrate. */
     Set<String> findAllUsernames();
 
+    /** Cascade-delete every history row for {@code (username, conversationId)}. Returns affected row count. */
+    int deleteAllByConversation(String username, String conversationId);
+
     /** Defensive schema bootstrap (mirrors V15). Used by callers that bypass Flyway. */
     void ensureSchema();
 }
