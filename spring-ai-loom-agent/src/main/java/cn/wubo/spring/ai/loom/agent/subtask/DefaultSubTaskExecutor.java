@@ -172,7 +172,11 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private SubTaskResult doExecute(SubTaskRequest req, long startedAt) {
         try {
             ChatClient.ChatClientRequestSpec spec = chatClient.prompt();
-            if (req.systemContext() != null) {
+            // Treat empty / blank systemContext the same as null — LLMs sometimes
+            // pass an empty string when they mean "no override", and Spring AI's
+            // spec.system() throws IllegalArgumentException("text cannot be null
+            // or empty") for empty input. Empty == absent here.
+            if (req.systemContext() != null && !req.systemContext().isBlank()) {
                 spec.system(req.systemContext());
             }
             spec.user(req.prompt());
