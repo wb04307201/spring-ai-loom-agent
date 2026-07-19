@@ -30,14 +30,17 @@ public class LoomAgentAuth implements IAuth {
             return AuthResult.deny("未登录或会话已过期");
         }
 
-        // 设置用户上下文，供 file-view 内部使用
+        // Refresh the per-request user context. We do NOT clear it on the way
+        // out: AuthenticationFilter (the outer servlet filter) already manages
+        // the UserContextHolder lifecycle via its try/finally over the entire
+        // request. Clearing here would empty the context for downstream
+        // IFileStorage beans (LoomAgentFileStorageImpl#findById), which now
+        // reads the username to enforce per-file ownership (BUG-RBAC-FILE-WOPI
+        // fix). So the policy: outer filter is authoritative, this hook just
+        // ensures the username reflects the cookie just-in-time.
         String username = user.getUsernameByToken(token);
         UserContextHolder.setCurrentUser(username);
-        try {
-            return AuthResult.allow();
-        } finally {
-            UserContextHolder.clear();
-        }
+        return AuthResult.allow();
     }
 
     private String extractTokenFromCookie(HttpServletRequest request) {

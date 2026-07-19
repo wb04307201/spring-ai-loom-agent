@@ -181,8 +181,19 @@ public class LoomAgentProperties {
         /**
          * 需要鉴权的路径模式（Ant 风格）。默认只鉴权 API 路径，
          * 静态资源（index.html/app.js/style.css）和用户登录接口不在此列。
+         *
+         * <p>Includes {@code /wopi/**} and {@code /file/view/**} so the
+         * file-view library's wopi / preview routes also flow through
+         * {@code AuthenticationFilter}. file-view's own
+         * {@code OncePerRequestFilter} uses {@code String.equals} against
+         * its config, so its default {@code [/file/view, /wopi]} never
+         * matches {@code /file/view/{id}} or {@code /wopi/files/{id}}
+         * — authentication falls back to {@code AuthenticationFilter},
+         * which uses Ant matching and sets {@code UserContextHolder}.
+         * Without this entry, downstream {@code IFileStorage.findById}
+         * sees an empty user context (BUG-RBAC-FILE-WOPI surface).
          */
-        private List<String> pathPatterns = List.of("/spring/ai/loom/**");
+        private List<String> pathPatterns = List.of("/spring/ai/loom/**", "/wopi/**", "/file/view/**");
         private List<String> excludePathPatterns = List.of(
                 "/spring/ai/loom/user/login",
                 "/spring/ai/loom/user/isAutoLogin",
