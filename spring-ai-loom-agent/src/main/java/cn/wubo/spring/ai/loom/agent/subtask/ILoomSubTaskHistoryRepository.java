@@ -29,6 +29,12 @@ public interface ILoomSubTaskHistoryRepository {
     /** Cascade-delete every history row for {@code (username, conversationId)}. Returns affected row count. */
     int deleteAllByConversation(String username, String conversationId);
 
+    /** Delete a single history row by sub-task id (scoped to the calling user
+     *  so a USER can't delete another USER's record). Returns true if a row
+     *  was deleted. The matching in-memory record (if any) is also cleared from
+     *  the registry's history deque. */
+    boolean deleteById(String username, String subTaskId);
+
     /** Defensive schema bootstrap (mirrors V15). Used by callers that bypass Flyway. */
     void ensureSchema();
 }

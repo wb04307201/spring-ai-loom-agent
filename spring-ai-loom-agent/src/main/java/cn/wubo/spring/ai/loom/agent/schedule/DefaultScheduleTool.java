@@ -66,8 +66,9 @@ public class DefaultScheduleTool implements IScheduleTool {
     }
 
     @Override
-    @Tool(description = "创建一个定时任务。最短 10 分钟执行一次,最长存活 3 天(强校验)。"
-            + "类型 cron / fixed_delay / fixed_rate / one_shot。")
+    @Tool(description = "创建一个定时任务。one_shot 类型的初始延迟可以从几秒起;"
+            + "fixed_delay/fixed_rate/cron 类型的重复间隔最短由 flex-schedule.limits 配置决定(默认 10 分钟),"
+            + "最长存活 3 天(强校验)。类型 cron / fixed_delay / fixed_rate / one_shot。")
     public String createSchedule(String name, String scheduleType, String expression, String prompt, ToolContext toolContext) {
         // Mirror the prompt validation in DefaultSubTaskTool.startSubTask: an empty
         // prompt here would otherwise persist to H2 and explode at fire time when
@@ -89,13 +90,13 @@ public class DefaultScheduleTool implements IScheduleTool {
                         .cron(expression)
                         .register(() -> runAsSubTask(full, username, convId, prompt));
                 case "fixed_delay" -> flexService.task(full)
-                        .fixedDelay(Duration.ofSeconds(Long.parseLong(expression)))
+                        .fixedDelay(Duration.ofSeconds(parseSeconds(expression)))
                         .register(() -> runAsSubTask(full, username, convId, prompt));
                 case "fixed_rate" -> flexService.task(full)
-                        .fixedRate(Duration.ofSeconds(Long.parseLong(expression)))
+                        .fixedRate(Duration.ofSeconds(parseSeconds(expression)))
                         .register(() -> runAsSubTask(full, username, convId, prompt));
                 case "one_shot" -> flexService.task(full)
-                        .oneShot(Duration.ofSeconds(Long.parseLong(expression)))
+                        .oneShot(Duration.ofSeconds(parseSeconds(expression)))
                         .register(() -> runAsSubTask(full, username, convId, prompt));
                 default -> { return "[定时失败] 不支持的类型: " + scheduleType; }
             }
@@ -150,6 +151,38 @@ public class DefaultScheduleTool implements IScheduleTool {
             return Long.parseLong(expression);
         } catch (NumberFormatException e) {
             return 0L;
+        }
+    }
+
+    /**
+     * Lenient seconds parser for the LLM-driven {@code expression} argument.
+     * Accepts plain integers ("10"), seconds suffix ("10s", "10S", "10secs"),
+     * Chinese seconds ("10秒", "10 秒"), and minutes ("1m", "5min", "5 分钟")
+     * converted to seconds. Anything else returns {@code -1} so the caller can
+     * surface a friendly `[定时失败] expression 格式不对` instead of NFE.
+     */
+    private static long parseSeconds(String expression) {
+        if (expression == null) return -1L;
+        String s = expression.trim().toLowerCase()
+                .replace(" ", "")
+                .replace("秒", "s")
+                .replace("secs", "s")
+                .replace("sec", "s")
+                .replace("minutes", "m")
+                .replace("minute", "m")
+                .replace("mins", "m")
+                .replace("min", "m");
+        // "10m" / "5min" → minutes
+        if (s.endsWith("m")) {
+            String num = s.substring(0, s.length() - 1);
+            try { return Long.parseLong(num) * 60; } catch (NumberFormatException ignored) {}
+        }
+        // "10s" or "10" → seconds
+        if (s.endsWith("s")) s = s.substring(0, s.length() - 1);
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            return -1L;
         }
     }
 
@@ -222,7 +255,21 @@ public class DefaultScheduleTool implements IScheduleTool {
         String username = (String) toolContext.getContext().get("username");
         String convId = (String) toolContext.getContext().get("parentConversationId");
         String full = fullName(username, convId, name);
+        // BUG-13: cross-user schedule cancel. Verify the schedule row is
+        // owned by the current user before letting flex-schedule fire the
+        // cancellation. Without this check a USER could guess the namespaced
+        // name (loom-sched-<admin>-<conv>-<name>) and cancel someone else's
+        // task. We return the same "[取消失败] 未找到任务: <name>" message
+        // the tool path normally surfaces when the row is missing, so the
+        // attacker doesn't learn that the task exists for someone else.
         try {
+            var rec = loomScheduleTriggerRepository.findByName(full);
+            if (rec.isEmpty() || !rec.get().username().equals(username)) {
+                log.warn("拒绝跨用户取消: caller={}, target={} (row owner={})",
+                        username, full,
+                        rec.map(LoomScheduleTriggerRecord::username).orElse("<none>"));
+                return "[取消失败] 未找到任务: " + name;
+            }
             flexService.cancel(full);
             try {
                 loomScheduleTriggerRepository.delete(full);

@@ -130,6 +130,19 @@ public class JdbcLoomSubTaskHistoryRepository implements ILoomSubTaskHistoryRepo
                 username, conversationId);
     }
 
+    @Override
+    public boolean deleteById(String username, String subTaskId) {
+        if (username == null || username.isBlank() || subTaskId == null || subTaskId.isBlank()) {
+            return false;
+        }
+        // Scope by username so a USER can't delete another USER's history row
+        // by guessing its UUID. (BUG-aligned with BUG-12/13 family.)
+        int n = jdbc.update(
+                "DELETE FROM " + TABLE_NAME + " WHERE username = ? AND subtask_id = ?",
+                username, subTaskId);
+        return n > 0;
+    }
+
     private static SubTaskRegistry.SubTaskRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new SubTaskRegistry.SubTaskRecord(
                 rs.getString("subtask_id"),

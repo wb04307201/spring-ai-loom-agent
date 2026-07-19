@@ -97,7 +97,14 @@ function showToast(message, type = 'success') {
 
 /** Wrapper for fetch that clears state on 401 */
 async function apiFetch(url, options = {}) {
-    const resp = await fetch(url, options);
+    let resp;
+    try {
+        resp = await fetch(url, options);
+    } catch (e) {
+        // 网络/中止错误：返回一个合成的 Response，让上层走 r.ok === false 分支
+        console.warn('[apiFetch] network error for', url, e);
+        return new Response(null, { status: 599, statusText: e.message || 'network error' });
+    }
     if (resp.status === 401 && state.username) {
         // Session expired or invalidated — clear client-side state
         auth.clear();
@@ -296,7 +303,8 @@ const api = {
     },
     async listConversations() {
         const r = await apiFetch(API.listConversations);
-        return r.ok ? r.json() : [];
+        if (!r.ok) { try { await r.text(); } catch (_) {} return []; }
+        try { return await r.json(); } catch (_) { return []; }
     },
     async getConversationMessages(id) {
         const r = await apiFetch(API.getConversation(id));
@@ -308,7 +316,12 @@ const api = {
     },
     async listMcps() {
         const r = await apiFetch(API.listMcps);
-        return r.ok ? r.json() : [];
+        if (!r.ok) {
+            // Drain body to release the connection, then return empty
+            try { await r.text(); } catch (_) {}
+            return [];
+        }
+        try { return await r.json(); } catch (_) { return []; }
     },
     async listSkills() {
         const r = await apiFetch(API.listSkills);
@@ -416,16 +429,22 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/file/tree');
         return r.ok ? r.json() : { name: '.', type: 'directory', children: [] };
     },
-    async listActiveSubtasks() {
-        const r = await apiFetch('/spring/ai/loom/subtask/list/active');
+    async listActiveSubtasks(conversationId) {
+        const q = conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : '';
+        const r = await apiFetch('/spring/ai/loom/subtask/list/active' + q);
         return r.ok ? r.json() : [];
     },
-    async listSubtaskHistory() {
-        const r = await apiFetch('/spring/ai/loom/subtask/list/history');
+    async listSubtaskHistory(conversationId) {
+        const q = conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : '';
+        const r = await apiFetch('/spring/ai/loom/subtask/list/history' + q);
         return r.ok ? r.json() : [];
     },
     async killSubtask(id) {
         const r = await apiFetch('/spring/ai/loom/subtask/kill/' + encodeURIComponent(id), { method: 'POST' });
+        return r.ok;
+    },
+    async deleteSubtaskHistory(id) {
+        const r = await apiFetch('/spring/ai/loom/subtask/history/' + encodeURIComponent(id), { method: 'DELETE' });
         return r.ok;
     },
     async listSchedules(conversationId) {
@@ -938,8 +957,13 @@ const ui = {
 // ===================== §6 Conversation Management =====================
 const conversation = {
     async loadList() {
-        const data = await api.listConversations();
-        this.renderSidebar(data);
+        try {
+            const data = await api.listConversations();
+            this.renderSidebar(data);
+        } catch (e) {
+            console.warn('[conversation.loadList] failed:', e);
+            this.renderSidebar([]);
+        }
     },
 
     renderSidebar(list) {
@@ -980,6 +1004,10 @@ const conversation = {
         imageUpload.clear();
         // refresh sidebar highlight
         this.loadList();
+        // Notify panels of the conversation switch so an open sub-task or
+        // schedule modal can re-fetch the per-conversation list.
+        try { subtaskPanel.setConvId(state.conversationId); } catch (_) {}
+        try { schedulePanel.setConvId(state.conversationId); } catch (_) {}
     },
 
     async switchTo(id) {
@@ -991,6 +1019,8 @@ const conversation = {
         chat.abortStream();
 
         state.conversationId = id;
+        try { subtaskPanel.setConvId(id); } catch (_) {}
+        try { schedulePanel.setConvId(id); } catch (_) {}
         try {
             const messages = await api.getConversationMessages(id);
             ui.renderMessages(messages);
@@ -1150,8 +1180,13 @@ const knowledge = {
     },
 
     async loadList() {
-        const data = await api.listKnowledge();
-        this.renderList(data);
+        try {
+            const data = await api.listKnowledge();
+            this.renderList(data);
+        } catch (e) {
+            console.warn('[knowledge.loadList] failed:', e);
+            this.renderList([]);
+        }
     },
 
     renderList(list) {
@@ -1428,9 +1463,11 @@ const fileMgr = {
 /** 子任务面板：打开时轮询 active + history，关闭时停止轮询。 */
 const subtaskPanel = {
     _timer: null,
+    _currentConvId: null,
 
     openModal() {
         ui.showModal('subtask-modal-overlay');
+        this._currentConvId = (typeof state !== 'undefined' && state.conversationId) || '';
         this.refresh();
         this._timer = setInterval(() => this.refresh(), 2000);
     },
@@ -1440,15 +1477,32 @@ const subtaskPanel = {
         if (this._timer) { clearInterval(this._timer); this._timer = null; }
     },
 
-    async refresh() {
-        const [active, history] = await Promise.all([
-            api.listActiveSubtasks(),
-            api.listSubtaskHistory(),
-        ]);
-        this.render(active || [], history || []);
+    /** Active conversation may change while the modal is open; resync on switch. */
+    refresh() {
+        const convId = this._currentConvId || ((typeof state !== 'undefined' && state.conversationId) || '');
+        if (!convId) {
+            this._renderEmpty('请先打开一个对话');
+            return;
+        }
+        Promise.all([
+            api.listActiveSubtasks(convId),
+            api.listSubtaskHistory(convId),
+        ]).then(([active, history]) => this.render(active || [], history || [], convId));
     },
 
-    render(active, history) {
+    setConvId(convId) {
+        if (this._currentConvId === convId) return;
+        this._currentConvId = convId;
+        this.refresh();
+    },
+
+    _renderEmpty(msg) {
+        const body = document.getElementById('subtask-panel-body');
+        if (!body) return;
+        body.innerHTML = `<div class="sched-empty">${escapeHtml(msg)}</div>`;
+    },
+
+    render(active, history, convId) {
         const body = document.getElementById('subtask-panel-body');
         if (!body) return;
         let html = '';
@@ -1456,14 +1510,16 @@ const subtaskPanel = {
         if (active.length === 0) {
             html += '<div class="sched-empty">无运行中的子任务</div>';
         } else {
-            html += '<table class="sched-table"><thead><tr><th>ID</th><th>会话</th><th>Prompt</th><th>开始</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="sched-table"><thead><tr><th>ID</th><th>Prompt</th><th>开始</th><th>操作</th></tr></thead><tbody>';
             for (const r of active) {
                 html += `<tr>
                     <td><code>${escapeHtml((r.subTaskId || '').slice(0, 8))}</code></td>
-                    <td>${escapeHtml(r.conversationId || '')}</td>
-                    <td title="${escapeHtml(r.prompt || '')}">${escapeHtml((r.prompt || '').slice(0, 50))}</td>
+                    <td title="${escapeHtml(r.prompt || '')}">${escapeHtml((r.prompt || '').slice(0, 50))}${(r.prompt || '').length > 50 ? '…' : ''}</td>
                     <td>${this._rel(r.startedAt)}</td>
-                    <td><button class="sched-btn" data-kill="${escapeHtml(r.subTaskId || '')}">杀死</button></td>
+                    <td>
+                        <button class="sched-btn" data-kill="${escapeHtml(r.subTaskId || '')}">停止</button>
+                        <button class="sched-btn" data-stop-del="${escapeHtml(r.subTaskId || '')}" style="background:var(--danger-color,#c0392b);color:#fff;margin-left:4px;">停止并删除</button>
+                    </td>
                 </tr>`;
             }
             html += '</tbody></table>';
@@ -1472,32 +1528,70 @@ const subtaskPanel = {
         if (history.length === 0) {
             html += '<div class="sched-empty">暂无历史</div>';
         } else {
-            html += '<table class="sched-table"><thead><tr><th>ID</th><th>状态</th><th>完成</th><th>结果/错误</th></tr></thead><tbody>';
+            html += '<table class="sched-table"><thead><tr><th>ID</th><th>状态</th><th>完成</th><th>结果/错误</th><th>操作</th></tr></thead><tbody>';
             for (const r of history) {
                 const detail = r.resultText || r.errorMessage || '';
                 html += `<tr>
                     <td><code>${escapeHtml((r.subTaskId || '').slice(0, 8))}</code></td>
                     <td>${escapeHtml(r.status || '')}</td>
                     <td>${this._rel(r.finishedAt)}</td>
-                    <td title="${escapeHtml(detail)}">${escapeHtml(detail.slice(0, 60))}</td>
+                    <td title="${escapeHtml(detail)}">${escapeHtml(detail.slice(0, 60))}${(detail || '').length > 60 ? '…' : ''}</td>
+                    <td><button class="sched-btn" data-history-del="${escapeHtml(r.subTaskId || '')}" style="background:var(--danger-color,#c0392b);color:#fff;">删除记录</button></td>
                 </tr>`;
             }
             html += '</tbody></table>';
         }
         body.innerHTML = html;
+        // Wire buttons
         for (const btn of body.querySelectorAll('[data-kill]')) {
-            btn.addEventListener('click', () => this.kill(btn.dataset.kill));
+            btn.addEventListener('click', () => this.kill(btn.dataset.kill, false));
+        }
+        for (const btn of body.querySelectorAll('[data-stop-del]')) {
+            btn.addEventListener('click', () => this.kill(btn.dataset.stopDel, true));
+        }
+        for (const btn of body.querySelectorAll('[data-history-del]')) {
+            btn.addEventListener('click', () => this.deleteHistory(btn.dataset.historyDel));
         }
     },
 
-    async kill(id) {
+    async kill(id, alsoDeleteHistory) {
         const ok = await dialog.confirm({
-            title: '杀死子任务',
-            message: '确认杀死子任务 ' + id.slice(0, 8) + ' ?',
+            title: alsoDeleteHistory ? '停止并删除子任务' : '停止子任务',
+            message: `确认${alsoDeleteHistory ? '停止该子任务并在历史中删除' : '停止子任务'} ${id.slice(0, 8)}?`
+                + (alsoDeleteHistory ? '' : '\n\n被挂起等待子任务结果的 AI 调用会收到「子任务已取消 用户手动取消」并继续主对话。'),
             danger: true,
         });
         if (!ok) return;
-        await api.killSubtask(id);
+        const killed = await api.killSubtask(id);
+        if (alsoDeleteHistory) {
+            // History row only appears once the task is finished (either
+            // CANCELLED or COMPLETED). markFinished in SubTaskRegistry is
+            // synchronous; we do a brief retry to cover the race where the
+            // server still has the row in `active` between kill() and the
+            // history write-through.
+            let attempts = 0;
+            let deleted = false;
+            while (attempts < 5 && !deleted) {
+                attempts++;
+                await new Promise(r => setTimeout(r, 250));
+                deleted = await api.deleteSubtaskHistory(id);
+            }
+            showToast(`已停止并删除 ${id.slice(0, 8)}${deleted ? '' : '（历史行未找到，可能尚未落库）'}`, deleted ? 'success' : 'warning');
+        } else {
+            showToast(killed ? '已停止' : '未找到该子任务', killed ? 'success' : 'warning');
+        }
+        this.refresh();
+    },
+
+    async deleteHistory(id) {
+        const ok = await dialog.confirm({
+            title: '删除子任务历史记录',
+            message: `确认删除历史子任务记录 ${id.slice(0, 8)}?`,
+            danger: true,
+        });
+        if (!ok) return;
+        const deleted = await api.deleteSubtaskHistory(id);
+        showToast(deleted ? '已删除' : '未找到记录', deleted ? 'success' : 'warning');
         this.refresh();
     },
 
@@ -1510,14 +1604,15 @@ const subtaskPanel = {
     },
 };
 
-/** 定时任务面板：当前会话的运行中 + 历史,带全部停止按钮。 */
+/** 定时任务面板：当前会话的运行中 + 历史,带全部停止按钮 + 每行操作按钮。 */
 const schedulePanel = {
     _timer: null,
     _currentConvId: null,
 
     openModal() {
         ui.showModal('schedule-modal-overlay');
-        this._currentConvId = this._resolveConvId();
+        // Read at open time, then resync whenever conversation switches.
+        this._currentConvId = (typeof state !== 'undefined' && state.conversationId) || '';
         this.refresh();
         this._timer = setInterval(() => this.refresh(), 5000);
     },
@@ -1525,12 +1620,20 @@ const schedulePanel = {
     closeModal() {
         ui.hideModal('schedule-modal-overlay');
         if (this._timer) { clearInterval(this._timer); this._timer = null; }
-        this._currentConvId = null;
+    },
+
+    /** Called from app.js when the active conversation changes. */
+    setConvId(convId) {
+        if (this._currentConvId === convId) return;
+        this._currentConvId = convId;
+        // Only refresh if the modal is currently open.
+        if (document.getElementById('schedule-modal-overlay')
+            && getComputedStyle(document.getElementById('schedule-modal-overlay')).display !== 'none') {
+            this.refresh();
+        }
     },
 
     _resolveConvId() {
-        // The app keeps `state.conversationId` as the active conversation. We
-        // also try a few window-scoped fallbacks for forward-compat.
         if (typeof state !== 'undefined' && state.conversationId) return state.conversationId;
         return (window.currentConversationId
             || (window.appState && window.appState.currentConversationId)
@@ -1564,17 +1667,15 @@ const schedulePanel = {
         let html = '';
 
         html += `<div class="sched-section-title" style="display:flex;align-items:center;justify-content:space-between;">
-            <span>当前会话: <code style="color:var(--text-muted);font-size:11px;">${escapeHtml(convId)}</code></span>
+            <span>运行中 (${live.length})</span>
             ${live.length > 0
                 ? `<button class="sched-btn" data-cancel-all style="background:var(--danger-color,#c0392b);color:#fff;padding:4px 12px;">全部停止 (${live.length})</button>`
                 : ''}
         </div>`;
-
-        html += `<div class="sched-section-title">运行中 (${live.length})</div>`;
         if (live.length === 0) {
             html += '<div class="sched-empty" style="padding:12px;">无</div>';
         } else {
-            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>Prompt</th><th>操作</th></tr></thead><tbody>';
             for (const t of live) {
                 html += this._row(t, true);
             }
@@ -1585,7 +1686,7 @@ const schedulePanel = {
         if (hist.length === 0) {
             html += '<div class="sched-empty" style="padding:12px;">无</div>';
         } else {
-            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>触发</th></tr></thead><tbody>';
+            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>触发</th><th>操作</th></tr></thead><tbody>';
             for (const t of hist) {
                 html += this._row(t, false);
             }
@@ -1598,7 +1699,7 @@ const schedulePanel = {
                 const ok = last.success ? '✓' : '✗';
                 html += `<div class="sched-empty" style="padding:6px 12px;text-align:left;font-size:11px;">
                     <code>${escapeHtml(this._shortName(t.taskName))}</code>
-                    最近一次 ${ok} · ${escapeHtml(last.fireTime)} · ${escapeHtml(String(last.durationMs))}ms
+                    最近一次 ${ok} · ${escapeHtml(last.fireTime || '')} · ${escapeHtml(String(last.durationMs || 0))}ms
                     ${last.errorMessage ? ' · err=' + escapeHtml(last.errorMessage) : ''}
                     · 共 ${execs.length} 次
                 </div>`;
@@ -1622,17 +1723,17 @@ const schedulePanel = {
     _row(t, withCancel) {
         const full = t.taskName || '';
         const shortName = this._shortName(full);
-        const prompt = t.prompt ? escapeHtml(t.prompt.slice(0, 80)) + (t.prompt.length > 80 ? '…' : '') : '';
+        const prompt = t.prompt ? escapeHtml(t.prompt.slice(0, 60)) + (t.prompt.length > 60 ? '…' : '') : '';
         return `<tr>
             <td title="${escapeHtml(full)}">
                 <div>${escapeHtml(shortName)}</div>
-                ${prompt ? `<div style="font-size:11px;color:var(--text-muted);">${prompt}</div>` : ''}
             </td>
             <td>${escapeHtml(t.taskType || '')}</td>
             <td>${escapeHtml(t.schedule || '')}</td>
+            <td title="${escapeHtml(t.prompt || '')}">${prompt || '-'}</td>
             <td>
                 ${withCancel
-                    ? `<button class="sched-btn" data-cancel="${escapeHtml(full)}">停止</button>`
+                    ? `<button class="sched-btn" data-cancel="${escapeHtml(full)}" style="background:var(--danger-color,#c0392b);color:#fff;">停止</button>`
                     : `<button class="sched-btn" data-history="${escapeHtml(full)}">详细</button>`}
             </td>
         </tr>`;
@@ -1855,14 +1956,18 @@ const mcp = {
     },
 
     async loadList() {
-        const data = await api.listMcps();
-        if (data && data.length > 0) {
-            state.mcps = data;
-            state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
-        } else {
-            state.mcps = [];
-            state.selectedMcps = [];
+        try {
+            const data = await api.listMcps();
+            if (data && data.length > 0) {
+                state.mcps = data;
+                state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
+                return;
+            }
+        } catch (e) {
+            console.warn('[mcp.loadList] failed:', e);
         }
+        state.mcps = [];
+        state.selectedMcps = [];
     },
 };
 
@@ -2473,6 +2578,14 @@ const imageUpload = {
                 continue;
             }
 
+            // Defensive double-check: if the browser silently dropped the
+            // type (some file pickers filter even without `accept`),
+            // surface an honest error rather than a silent no-op.
+            if (file.size === 0 && file.name && !file.type) {
+                showToast(`文件「${file.name}」无法识别，已忽略`, 'error');
+                continue;
+            }
+
             const isImage = this.isImage(file);
             const objectUrl = isImage ? URL.createObjectURL(file) : null;
             const docIcon = isImage ? null : this.getDocIcon(file);
@@ -2622,6 +2735,12 @@ const init = async () => {
     ui.init();
     dialog.init();
 
+    // ── Bind all events FIRST so handlers (send-btn, chips, file-drag, etc.)
+    // are guaranteed active regardless of how slow any background load is.
+    // Otherwise a hung /mcps or /conversation await keeps the page in a
+    // "looks fresh but nothing clicks" state. (BUG-7)
+    bindAllEvents();
+
     // Auth check — auto-login via cookie-based session (BFF pattern)
     const loggedIn = await auth.init();
     if (!loggedIn) return; // not logged in; auth.init already redirected
@@ -2662,10 +2781,6 @@ const init = async () => {
             console.warn('[init] conversation.createNew failed, continuing:', e);
         }
     }
-
-    // Bind all events LAST so listeners are guaranteed regardless of what the
-    // background loads did. Each binding is null-checked.
-    bindAllEvents();
 };
 
 const bindAllEvents = () => {
@@ -2707,6 +2822,12 @@ const bindAllEvents = () => {
     });
     safeBindById('file-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) fileMgr.closeModal();
+    });
+    safeBindById('subtask-modal-overlay', 'click', (e) => {
+        if (e.target === e.currentTarget) subtaskPanel.closeModal();
+    });
+    safeBindById('schedule-modal-overlay', 'click', (e) => {
+        if (e.target === e.currentTarget) schedulePanel.closeModal();
     });
 
     // Image upload

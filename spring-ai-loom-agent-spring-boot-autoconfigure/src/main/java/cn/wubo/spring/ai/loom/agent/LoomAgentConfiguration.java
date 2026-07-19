@@ -76,6 +76,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -746,7 +747,8 @@ public class LoomAgentConfiguration {
          */
         @Bean("loomAgentSubTaskRouter")
         public RouterFunction<ServerResponse> loomAgentSubTaskRouter(
-                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry) {
+                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
+                cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             // active (with optional ?conversationId= filter)
             builder.GET("spring/ai/loom/subtask/list/active",
@@ -773,6 +775,18 @@ public class LoomAgentConfiguration {
             builder.POST("spring/ai/loom/subtask/kill/{id}",
                     request -> ServerResponse
                             .ok().body(registry.kill(request.pathVariable("id"))));
+            // Delete a (typically CANCELLED or COMPLETED) sub-task history row.
+            // The kill endpoint above only marks active tasks CANCELLED; this
+            // one strips the in-memory + H2 history row for finished records.
+            builder.DELETE("spring/ai/loom/subtask/history/{id}", request -> {
+                String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                String id = request.pathVariable("id");
+                boolean ok = loomSubTaskHistoryRepository != null
+                        && loomSubTaskHistoryRepository.deleteById(user, id);
+                return ok
+                        ? ServerResponse.ok().body(true)
+                        : ServerResponse.notFound().build();
+            });
             return builder.build();
         }
     }
@@ -939,7 +953,11 @@ public class LoomAgentConfiguration {
                 @SuppressWarnings("unchecked")
                 java.util.Map<String, Object> body = request.body(java.util.Map.class);
                 String name = body != null ? (String) body.get("name") : null;
-                handleScheduleCancel(name, flexService, loomScheduleTriggerRepository, log);
+                boolean ok = handleScheduleCancel(name, flexService, loomScheduleTriggerRepository, log);
+                if (!ok) {
+                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(
+                            java.util.Map.of("message", "无权取消该定时任务或任务不存在"));
+                }
                 return ServerResponse.ok().body(true);
             });
             builder.GET("spring/ai/loom/schedule/history/{name}",
@@ -1161,6 +1179,26 @@ public class LoomAgentConfiguration {
         if (fullName == null) {
             return false;
         }
+        // BUG-13: cross-user schedule cancel. Before letting flex-schedule
+        // fire the cancellation, verify the row is owned by the calling
+        // user (resolved from the AuthenticationFilter-then-set
+        // UserContextHolder). Without this any logged-in user could cancel
+        // someone else's task by guessing the namespaced name. The lookup is
+        // by PK so no enumeration is exposed; the response is identical
+        // regardless of "not found" vs "owned by someone else".
+        String caller = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+        try {
+            var rec = repo.findByName(fullName);
+            if (rec.isEmpty() || caller == null || !caller.equals(rec.get().username())) {
+                log.warn("拒绝跨用户取消 REST 调用: caller={}, target={}, owner={}",
+                        caller, fullName,
+                        rec.map(cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord::username).orElse("<none>"));
+                return false;
+            }
+        } catch (Exception e) {
+            log.warn("schedule cancel 跨用户检查失败: name={}, err={}", fullName, e.getMessage());
+            return false;
+        }
         flexService.cancel(fullName);
         try {
             repo.delete(fullName);
@@ -1213,7 +1251,14 @@ public class LoomAgentConfiguration {
             // login: 校验 username + password，成功设 cookie
             builder.POST("spring/ai/loom/user/login", request -> {
                 UserRequestRecord body = request.body(UserRequestRecord.class);
-                UserResponseRecord response = user.login(body);
+                UserResponseRecord response;
+                try {
+                    response = user.login(body);
+                } catch (Exception e) {
+                    // 凭据错误 / 用户不存在 / 已停用 → 401，而不是 500
+                    return ServerResponse.status(HttpStatus.UNAUTHORIZED)
+                            .body(java.util.Map.of("message", e.getMessage() == null ? "登录失败" : e.getMessage()));
+                }
                 String token = user.createToken(body.username());
                 LoomAgentProperties.AuthProperty.CookieProperty cookieProp = properties.getAuth().getCookie();
                 return ServerResponse.ok()
@@ -1273,7 +1318,13 @@ public class LoomAgentConfiguration {
             // 当前用户可见的 mcp（按角色过滤；admin 全可见）
             builder.GET("spring/ai/loom/mcps", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                return ServerResponse.ok().body(roleService.getVisibleMcpsForUser(username));
+                try {
+                    return ServerResponse.ok().body(roleService.getVisibleMcpsForUser(username));
+                } catch (Exception e) {
+                    // 临时不可用（例如角色数据初始化失败）→ 返回空列表，避免页面 init 卡死
+                    log.warn("/mcps degraded, returning empty list: {}", e.getMessage());
+                    return ServerResponse.ok().body(java.util.Collections.emptyList());
+                }
             });
 
             // 当前用户角色允许的 mcp 的工具列表
@@ -1444,6 +1495,19 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/conversation", request -> ServerResponse.ok().body(userConversation.getList()));
             builder.GET("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
+                String username = UserContextHolder.getCurrentUser();
+                // BUG-12a: cross-user conversation read. Reject unless the
+                // caller owns this conversation in user_conversation. The
+                // response is 403 with an empty list — same shape as success
+                // — so client code doesn't break; the security side is the
+                // 403 status code, which the UI can render as "无权限".
+                boolean owned = userConversation.exists(new cn.wubo.spring.ai.loom.agent.model.UserConversationRecord(
+                        username, conversationId));
+                if (!owned) {
+                    log.warn("拒绝跨用户读对话: caller={}, conv={}", username, conversationId);
+                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(
+                            java.util.List.of());
+                }
                 return ServerResponse.ok().body(chatMemoryRepository.findByConversationId(conversationId));
             });
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
@@ -1909,7 +1973,17 @@ public class LoomAgentConfiguration {
             builder.GET("/spring/ai/loom/knowledge", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.list()));
             builder.PUT("/spring/ai/loom/knowledge", request -> {
                 KnowledgeRecord knowledgeRecord = request.body(KnowledgeRecord.class);
-                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name()));
+                try {
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name()));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    // 知识库名称冲突、参数错误等 → 明确的 4xx 而不是 500 (BUG-11)
+                    Integer sc = e.getStatusCode();
+                    HttpStatus status = sc != null
+                            ? HttpStatus.valueOf(sc)
+                            : HttpStatus.BAD_REQUEST;
+                    return ServerResponse.status(status).contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage() == null ? "请求失败" : e.getMessage()));
+                }
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
                 String knowledgeId = request.pathVariable("knowledgeId");
