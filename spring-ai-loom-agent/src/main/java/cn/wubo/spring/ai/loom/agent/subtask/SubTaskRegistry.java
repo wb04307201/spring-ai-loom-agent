@@ -154,14 +154,32 @@ public class SubTaskRegistry {
     }
 
     /**
-     * Attempts to cancel a running sub-task. Returns {@code true} if the task was
-     * still in {@code active} when called. Invokes the cancel hook (if registered)
-     * to interrupt the worker thread, then transitions the record to CANCELLED.
-     * Falls back to the legacy {@code attachFuture} path if no hook is registered.
+     * Attempts to cancel a running sub-task owned by {@code username}. Returns
+     * {@code true} only if the task was still active AND belongs to the caller.
+     * Returns {@code false} for unknown ids AND for cross-user attempts — the
+     * caller MUST be unable to distinguish the two cases from the return value
+     * (avoids an id-existence oracle).
+     *
+     * <p>Cross-user kill attempt is logged at WARN so ops can spot scanning.
+     *
+     * <p>Fix for BUG-RBAC-SUBTASK-KILL: previously {@code kill(id)} only looked
+     * up by id in the global active map, so any authenticated user could cancel
+     * any other user's RUNNING sub-task. Now the owner check happens BEFORE
+     * the cancel hook fires — the hook never even gets called for foreign ids.
      */
-    public boolean kill(String subTaskId) {
+    public boolean kill(String username, String subTaskId) {
+        if (username == null || username.isBlank() || subTaskId == null || subTaskId.isBlank()) {
+            return false;
+        }
         SubTaskRecord rec = active.get(subTaskId);
         if (rec == null) return false;
+        // Owner check — refuse silently so the row id stays opaque to non-owners.
+        if (rec.username() == null || !rec.username().equals(username)) {
+            org.slf4j.LoggerFactory.getLogger(SubTaskRegistry.class)
+                    .warn("拒绝跨用户 kill: caller={}, owner={}, subTaskId={}",
+                            username, rec.username(), subTaskId);
+            return false;
+        }
 
         if (cancelHook != null) {
             try {
@@ -185,6 +203,12 @@ public class SubTaskRegistry {
     /**
      * Cancels every active sub-task belonging to the given conversation.
      * Returns the number of cancelled tasks. Tolerates {@code conversationId == null}.
+     *
+     * <p>NB: skips the {@link #kill(String, String)} owner check. This is the
+     * cascade path invoked when a conversation is deleted — at that point the
+     * caller's ownership of the conversation has already been validated by
+     * the router / controller, and conversationId uniquely identifies the
+     * scoping user within the active map (one row per sub-task).
      */
     public int killAllByConversation(String conversationId) {
         if (conversationId == null) return 0;
@@ -196,9 +220,32 @@ public class SubTaskRegistry {
         });
         int n = 0;
         for (String id : ids) {
-            if (kill(id)) n++;
+            if (killInternalNoOwnerCheck(id)) n++;
         }
         return n;
+    }
+
+    /**
+     * The pre-BUG-RBAC-SUBTASK-KILL cancel path. Retained as a private
+     * helper for {@link #killAllByConversation} where ownership has already
+     * been validated by the caller.
+     */
+    private boolean killInternalNoOwnerCheck(String subTaskId) {
+        SubTaskRecord rec = active.get(subTaskId);
+        if (rec == null) return false;
+        if (cancelHook != null) {
+            try {
+                cancelHook.accept(subTaskId);
+            } catch (Exception e) {
+                CompletableFuture<?> future = rec.future();
+                if (future != null) future.cancel(true);
+            }
+        } else {
+            CompletableFuture<?> future = rec.future();
+            if (future != null) future.cancel(true);
+        }
+        markFinished(subTaskId, SubTaskStatus.CANCELLED, null, "用户取消");
+        return true;
     }
 
     /**

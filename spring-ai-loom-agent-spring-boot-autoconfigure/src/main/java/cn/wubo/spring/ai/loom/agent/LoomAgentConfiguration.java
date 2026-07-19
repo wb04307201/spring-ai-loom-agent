@@ -773,8 +773,17 @@ public class LoomAgentConfiguration {
                         return ServerResponse.ok().body(body);
                     });
             builder.POST("spring/ai/loom/subtask/kill/{id}",
-                    request -> ServerResponse
-                            .ok().body(registry.kill(request.pathVariable("id"))));
+                    request -> {
+                        // Fix for BUG-RBAC-SUBTASK-KILL: pass the current user to
+                        // SubTaskRegistry.kill(username, id) so cross-user cancel
+                        // attempts are refused. The router previously only passed
+                        // id, letting any authenticated user cancel any RUNNING
+                        // sub-task that wasn't theirs.
+                        String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                        String id = request.pathVariable("id");
+                        boolean killed = registry.kill(user, id);
+                        return ServerResponse.ok().body(killed);
+                    });
             // Delete a (typically CANCELLED or COMPLETED) sub-task history row.
             // The kill endpoint above only marks active tasks CANCELLED; this
             // one strips the in-memory + H2 history row for finished records.
