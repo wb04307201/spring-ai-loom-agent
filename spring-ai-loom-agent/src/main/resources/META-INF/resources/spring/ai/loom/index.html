@@ -248,41 +248,28 @@
     </div>
     </div>
 
-    <!-- Sub-task Panel Modal -->
-    <div id="subtask-modal-overlay" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="max-width: 900px; max-height: 80vh;">
-            <div class="modal-header">
-                <h3>子任务</h3>
-                <div class="close-button" id="subtask-close-btn">&times;</div>
-            </div>
-            <div class="modal-body" style="padding: 16px; flex: 1; overflow: auto;">
-                <div id="subtask-panel-body">
-                    <div class="loading-indicator">加载中...</div>
+    <!-- Sub-task Panel Modal — operations-console surface (v4 redesign) -->
+    <div id="subtask-modal-overlay" class="modal-overlay console-host" style="display: none;">
+        <div class="modal-content operations-modal" id="subtask-modal-content">
+            <!-- The toolbar (rendered by JS) lives at the top; everything
+                 else is the scrolling body. The body has flex:1 (in CSS)
+                 so the toolbar stays pinned at top. -->
+            <div id="subtask-panel-body" class="console-panel-body">
+                <div class="console-skeleton" aria-hidden="true">
+                    <div class="skel"></div><div class="skel"></div><div class="skel"></div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Schedule Panel Modal -->
-    <div id="schedule-modal-overlay" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="max-width: 900px; max-height: 80vh;">
-            <div class="modal-header">
-                <h3>定时任务</h3>
-                <div class="close-button" id="schedule-close-btn">&times;</div>
-            </div>
-            <div class="modal-body" style="padding: 16px; flex: 1; overflow: auto;">
-                <div id="schedule-panel-body">
-                    <div class="loading-indicator">加载中...</div>
+    <!-- Schedule Panel Modal — operations-console surface (v4 redesign) -->
+    <div id="schedule-modal-overlay" class="modal-overlay console-host" style="display: none;">
+        <div class="modal-content operations-modal" id="schedule-modal-content">
+            <div id="schedule-panel-body" class="console-panel-body">
+                <div class="console-skeleton" aria-hidden="true">
+                    <div class="skel"></div><div class="skel"></div>
                 </div>
             </div>
-            <style>
-                .sched-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-                .sched-table th, .sched-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-                .sched-table th { color: var(--text-muted); font-weight: 500; }
-                .sched-btn { font-size: 12px; padding: 2px 8px; cursor: pointer; }
-                .sched-empty { padding: 24px; text-align: center; color: var(--text-muted); }
-                .sched-section-title { margin: 8px 0; font-size: 13px; color: var(--text-muted); }
-            </style>
         </div>
     </div>
 

@@ -1684,3 +1684,573 @@ textarea::placeholder {
     font-weight: 600;
     color: var(--primary-color, #6366f1);
 }
+
+
+/* =====================================================================
+   OPERATIONS CONSOLE — applies only to modals with `.console-host` on
+   the overlay (sub-task + schedule modals). Cold slate dark surface,
+   deliberately distinct from the chat's light/cream theme. The contrast
+   is the message: "this is monitor/control, not the conversation itself".
+   Spacing scale: 4 / 8 / 12 / 16 / 24 (8-pt grid).
+   ===================================================================== */
+.modal-overlay.console-host {
+    background: rgba(2, 6, 23, 0.78);
+    backdrop-filter: blur(8px) saturate(140%);
+}
+
+.modal-overlay.console-host .modal-content.operations-modal {
+    --ops-bg-page:   #0B1120;
+    --ops-bg-modal:  #0F172A;
+    --ops-bg-elev:   #1E293B;
+    --ops-bg-row:    #111B30;
+    --ops-border:    #1F2A44;
+    --ops-border-s:  #2A3A5C;
+    --ops-text-pri:  #E2E8F0;
+    --ops-text-sec:  #94A3B8;
+    --ops-text-mut:  #64748B;
+    --ops-running:   #22D3EE;
+    --ops-done:      #34D399;
+    --ops-failed:    #FB7185;
+    --ops-cancel:    #FBBF24;
+    --ops-accent:    #A78BFA;
+
+    background: var(--ops-bg-modal);
+    color: var(--ops-text-pri);
+    border: 1px solid var(--ops-border);
+    border-radius: 12px;
+    width: 92%;
+    max-width: 960px;
+    max-height: 84vh;
+    box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.65);
+    animation: consoleSlideUp var(--transition-fast) ease-out;
+    overflow: hidden;
+    font-size: 13px;
+}
+
+@keyframes consoleSlideUp {
+    from { opacity: 0; transform: translateY(8px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Top bar */
+.console-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--ops-border);
+    background: linear-gradient(180deg, #131F38, var(--ops-bg-modal));
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+}
+.console-bar > * { white-space: nowrap; }
+.console-bar .title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--ops-text-pri);
+    flex-shrink: 0;
+}
+.console-bar .sub {
+    color: var(--ops-text-mut);
+    margin-left: 6px;
+    font-size: 11.5px;
+    font-weight: 400;
+}
+.console-bar .grow { flex: 1; min-width: 12px; }
+.console-bar .search {
+    width: 200px;
+    max-width: 240px;
+    flex: 1 1 auto;
+    height: 32px;
+    background: var(--ops-bg-row);
+    border: 1px solid var(--ops-border-s);
+    color: var(--ops-text-pri);
+    border-radius: 6px;
+    padding: 0 12px 0 32px;
+    font-size: 12.5px;
+    outline: none;
+    background-image: linear-gradient(transparent, transparent),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2'><circle cx='11' cy='11' r='7'/><path d='m21 21-4.3-4.3'/></svg>");
+    background-repeat: no-repeat;
+    background-position: 9px center;
+}
+.console-bar .search:focus {
+    border-color: var(--ops-accent);
+    box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.18);
+}
+
+/* Pills (count badges in toolbar) */
+.console-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--ops-border-s);
+    border-radius: 999px;
+    padding: 4px 10px 4px 8px;
+    font-size: 11.5px;
+    color: var(--ops-text-sec);
+    background: var(--ops-bg-row);
+    white-space: nowrap;
+}
+.console-pill .dot {
+    width: 6px; height: 6px; border-radius: 999px;
+    background: var(--ops-text-mut);
+}
+.console-pill .num {
+    color: var(--ops-text-pri);
+    font-weight: 600;
+    font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+    font-feature-settings: 'tnum' on, 'zero' on;
+    font-size: 11px;
+}
+.console-pill.running .dot { background: var(--ops-running); box-shadow: 0 0 8px var(--ops-running); }
+.console-pill.failed  .dot { background: var(--ops-failed); }
+.console-pill.done    .dot { background: var(--ops-done); }
+
+/* Buttons */
+.console-btn-primary,
+.console-btn-ghost,
+.console-btn-danger {
+    border: none;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 120ms, color 120ms, border-color 120ms;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.console-btn-primary { background: var(--ops-accent); color: #11112B; font-weight: 600; }
+.console-btn-primary:hover { background: #B9A0FB; }
+.console-btn-primary:disabled { background: #4F4569; color: #B0AAC0; cursor: not-allowed; }
+
+.console-btn-ghost {
+    background: transparent;
+    color: var(--ops-text-sec);
+    border: 1px solid var(--ops-border-s);
+}
+.console-btn-ghost:hover { color: var(--ops-text-pri); border-color: #3B4B6E; }
+
+.console-btn-danger {
+    background: rgba(251, 113, 133, 0.10);
+    color: var(--ops-failed);
+    border: 1px solid rgba(251, 113, 133, 0.30);
+}
+.console-btn-danger:hover { background: rgba(251, 113, 133, 0.18); }
+
+/* chevron close (replaces destructive ×) */
+.console-close {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--ops-border-s);
+    background: transparent;
+    color: var(--ops-text-sec);
+    cursor: pointer;
+    font-size: 18px; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center;
+    line-height: 1;
+    transition: all 100ms;
+}
+.console-close::before { content: '⌄'; font-size: 18px; font-weight: 600; line-height: 1; }
+.console-close:hover { color: var(--ops-text-pri); border-color: #4A5B7E; background: var(--ops-bg-row); }
+
+/* Body */
+.console-panel-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--ops-bg-modal);
+}
+.console-body {
+    padding: 20px 24px 24px;
+    flex: 1;
+    overflow: auto;
+    background: var(--ops-bg-modal);
+}
+.console-skeleton {
+    flex: 1;
+    padding: 20px 0;
+}
+
+.console-section {
+    margin-bottom: 24px;
+}
+.console-section:last-child { margin-bottom: 0; }
+.console-section-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ops-text-sec);
+    font-weight: 600;
+}
+.console-section-label .count {
+    color: var(--ops-text-mut);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    background: var(--ops-bg-row);
+    border: 1px solid var(--ops-border-s);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+/* Card */
+.console-card-list { display: flex; flex-direction: column; gap: 6px; }
+
+.console-card {
+    display: grid;
+    grid-template-columns: 4px 1fr 130px 90px 152px;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px 14px 0;
+    border: 1px solid var(--ops-border);
+    border-radius: 8px;
+    background: var(--ops-bg-row);
+    transition: border-color 120ms, background 120ms;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+}
+.console-card:hover {
+    border-color: var(--ops-border-s);
+    background: #152138;
+}
+.console-card .stripe {
+    align-self: stretch;
+    background: var(--ops-text-mut);
+}
+.console-card.status-running .stripe { background: var(--ops-running); }
+.console-card.status-done    .stripe { background: var(--ops-done); }
+.console-card.status-failed  .stripe { background: var(--ops-failed); }
+.console-card.status-cancel  .stripe { background: var(--ops-cancel); }
+
+.console-card .prompt-cell {
+    padding-left: 16px;
+    min-width: 0;
+}
+.console-card .prompt {
+    color: var(--ops-text-pri);
+    font-size: 13.5px;
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+}
+.console-card .meta {
+    color: var(--ops-text-mut);
+    font-size: 11.5px;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.console-card .meta .id {
+    color: var(--ops-text-sec);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+}
+.console-card .meta .err {
+    color: var(--ops-failed);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+}
+
+/* Status badge */
+.console-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+}
+.console-status .dot {
+    width: 7px; height: 7px; border-radius: 999px;
+    background: currentColor;
+}
+.console-card.status-running .console-status { color: var(--ops-running); }
+.console-card.status-done    .console-status { color: var(--ops-done); }
+.console-card.status-failed  .console-status { color: var(--ops-failed); }
+.console-card.status-cancel  .console-status { color: var(--ops-cancel); }
+
+.console-card.status-running .console-status .dot {
+    animation: consolePulse 1.6s ease-in-out infinite;
+    box-shadow: 0 0 8px currentColor;
+}
+@keyframes consolePulse {
+    0%, 100% { transform: scale(1);   opacity: 0.7; }
+    50%      { transform: scale(1.4); opacity: 1; }
+}
+
+/* Schedule row: shape-encoded status (no dot pulse) */
+.console-card.schedule-row .console-status .glyph {
+    font-size: 14px;
+    line-height: 1;
+    color: currentColor;
+}
+.console-card.schedule-row .console-status .glyph::before {
+    content: '●';
+}
+
+/* Elapsed / countdown column */
+.console-elapsed {
+    color: var(--ops-text-sec);
+    text-align: right;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12.5px;
+    font-feature-settings: 'tnum' on;
+    white-space: nowrap;
+}
+.console-card.status-running .console-elapsed {
+    color: var(--ops-running);
+    font-weight: 600;
+}
+
+/* Action icons */
+.console-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    padding-right: 4px;
+}
+.console-icon-btn {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--ops-border-s);
+    background: var(--ops-bg-elev);
+    color: var(--ops-text-sec);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    line-height: 1;
+    transition: color 100ms, border-color 100ms, background 100ms;
+}
+.console-icon-btn:hover { color: var(--ops-text-pri); border-color: #4A5B7E; background: #1F2C46; }
+.console-icon-btn.danger:hover { color: var(--ops-failed); border-color: rgba(251, 113, 133, 0.40); }
+.console-card.status-running:hover .console-icon-btn { border-color: rgba(34, 211, 238, 0.40); }
+.console-card.status-failed:hover .console-icon-btn { border-color: rgba(251, 113, 133, 0.40); }
+
+/* Schedule-row metadata: cadence on top, stats below */
+.console-card.schedule-row .meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    margin-top: 4px;
+}
+.console-card.schedule-row .meta .cadence {
+    color: var(--ops-text-sec);
+    font-size: 12px;
+}
+.console-card.schedule-row .meta .stats {
+    color: var(--ops-text-mut);
+    font-size: 11px;
+    display: flex;
+    gap: 8px;
+}
+.console-card.schedule-row .meta .stats .next {
+    color: var(--ops-running);
+}
+
+/* Expanded detail panel (renders between cards when row is open) */
+.console-detail {
+    border: 1px solid var(--ops-border-s);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #131F38, var(--ops-bg-row));
+    padding: 16px 18px 16px 22px;
+    margin-top: 4px;
+    margin-bottom: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    font-size: 12.5px;
+    animation: consoleDetailIn 160ms ease-out;
+}
+@keyframes consoleDetailIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.console-detail .left {
+    border-right: 1px dashed var(--ops-border-s);
+    padding-right: 16px;
+}
+.console-detail h6 {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    color: var(--ops-text-mut);
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+.console-detail pre {
+    color: var(--ops-text-sec);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.console-detail .exec-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 11.5px;
+    color: var(--ops-text-sec);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.console-detail .exec-row .exec-dot {
+    width: 6px; height: 6px; border-radius: 999px;
+    background: var(--ops-text-mut);
+}
+.console-detail .exec-row .exec-dot.ok   { background: var(--ops-done); }
+.console-detail .exec-row .exec-dot.fail { background: var(--ops-failed); }
+.console-detail .exec-row .err {
+    color: var(--ops-failed);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+}
+
+/* Empty state */
+.console-empty {
+    padding: 56px 24px 64px;
+    text-align: center;
+}
+.console-empty .glyph {
+    width: 64px; height: 64px;
+    margin: 0 auto 18px;
+    border-radius: 16px;
+    background:
+        radial-gradient(circle at 30% 30%, rgba(167, 139, 250, 0.45), rgba(167, 139, 250, 0.04) 60%),
+        #1A2542;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ops-accent);
+    border: 1px solid rgba(167, 139, 250, 0.25);
+}
+.console-empty .glyph.subtask-glyph {
+    background:
+        radial-gradient(circle at 30% 30%, rgba(167, 139, 250, 0.45), rgba(167, 139, 250, 0.04) 60%),
+        #1A2542;
+    color: var(--ops-accent);
+}
+.console-empty .glyph.sched-glyph {
+    background:
+        radial-gradient(circle at 30% 30%, rgba(34, 211, 238, 0.45), rgba(34, 211, 238, 0.04) 60%),
+        #142133;
+    color: var(--ops-running);
+    border: 1px solid rgba(34, 211, 238, 0.25);
+}
+.console-empty h4 {
+    color: var(--ops-text-pri);
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+}
+.console-empty p {
+    color: var(--ops-text-sec);
+    font-size: 12.5px;
+    max-width: 420px;
+    margin: 0 auto 22px;
+    line-height: 1.6;
+}
+.console-empty .composer {
+    margin: 0 auto;
+    max-width: 520px;
+    background: var(--ops-bg-row);
+    border: 1px solid var(--ops-border-s);
+    border-radius: 8px;
+    padding: 6px 6px 6px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 120ms, box-shadow 120ms;
+}
+.console-empty .composer:focus-within {
+    border-color: var(--ops-accent);
+    box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.18);
+}
+.console-empty .composer input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--ops-text-pri);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    padding: 10px 0;
+}
+.console-empty .composer input::placeholder {
+    color: var(--ops-text-mut);
+}
+
+.console-empty .micro-hint {
+    margin-top: 18px;
+    font-size: 11px;
+    color: var(--ops-text-mut);
+}
+.console-empty .micro-hint code {
+    background: var(--ops-bg-elev);
+    border: 1px solid var(--ops-border-s);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--ops-text-sec);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+}
+
+/* Skeleton loading */
+.console-skeleton {
+    padding: 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.console-skeleton .skel {
+    height: 64px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--ops-bg-row) 0%, #182238 50%, var(--ops-bg-row) 100%);
+    background-size: 200% 100%;
+    animation: skelShimmer 1.4s ease-in-out infinite;
+    border: 1px solid var(--ops-border);
+}
+@keyframes skelShimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+}
+
+/* Console toolbar row helper */
+.console-toolbar {
+    display: flex; align-items: center; gap: 12px;
+}
+
+/* Reduced motion: kill all our keyframe animations */
+@media (prefers-reduced-motion: reduce) {
+    .console-card.status-running .console-status .dot { animation: none; }
+    .console-card .console-status .dot { animation: none; }
+    .console-skeleton .skel { animation: none; }
+    .console-detail { animation: none; }
+    .modal-overlay.console-host .modal-content.operations-modal { animation: none; }
+}

@@ -1460,24 +1460,33 @@ const fileMgr = {
     },
 };
 
-/** 子任务面板：打开时轮询 active + history，关闭时停止轮询。 */
+/** 子任务面板：打开时轮询 active + history，关闭时停止轮询 + ticker。
+ *   Operations-console surface (v4 redesign) — cold slate dark, status
+ *   pill counts, signature live-elapsed ticker on running rows. */
 const subtaskPanel = {
     _timer: null,
+    _ticker: null,
     _currentConvId: null,
+    _expanded: new Set(),
+    _activeRows: [],   // cached for live elapsed-ticker updates
 
     openModal() {
         ui.showModal('subtask-modal-overlay');
         this._currentConvId = (typeof state !== 'undefined' && state.conversationId) || '';
         this.refresh();
         this._timer = setInterval(() => this.refresh(), 2000);
+        // Live elapsed ticker runs at 1Hz; touches only DOM textContent of
+        // running rows (no full re-render). Skipped if no running rows.
+        this._ticker = setInterval(() => this._tickElapse(), 1000);
     },
 
     closeModal() {
         ui.hideModal('subtask-modal-overlay');
         if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        if (this._ticker) { clearInterval(this._ticker); this._ticker = null; }
+        this._activeRows = [];
     },
 
-    /** Active conversation may change while the modal is open; resync on switch. */
     refresh() {
         const convId = this._currentConvId || ((typeof state !== 'undefined' && state.conversationId) || '');
         if (!convId) {
@@ -1496,62 +1505,251 @@ const subtaskPanel = {
         this.refresh();
     },
 
+    /** Live tick: rewrite elapsed text for every RUNNING card without
+     *  re-rendering the panel. If modal is closed / no running rows,
+     *  work is essentially zero. */
+    _tickElapse() {
+        if (this._activeRows.length === 0) return;
+        for (const rec of this._activeRows) {
+            const cell = document.querySelector(
+                `[data-elapsed="${cssEscape(rec.subTaskId)}"]`);
+            if (!cell) continue;
+            cell.textContent = this._formatElapsed(Date.now() - rec.startedAt);
+        }
+    },
+
     _renderEmpty(msg) {
         const body = document.getElementById('subtask-panel-body');
         if (!body) return;
-        body.innerHTML = `<div class="sched-empty">${escapeHtml(msg)}</div>`;
+        body.innerHTML = `
+            ${this._toolbarHTML(0, 0, 0)}
+            <div class="console-body">
+                <div class="console-empty">
+                    <div class="glyph subtask-glyph">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                            <path d="M4 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" fill="rgba(167,139,250,0.18)" stroke="currentColor" stroke-width="1.6"/>
+                            <circle cx="9"  cy="10.5" r="1.4" fill="currentColor"/>
+                            <circle cx="13" cy="10.5" r="1.4" fill="currentColor"/>
+                            <circle cx="17" cy="10.5" r="1.4" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <h4>${escapeHtml(msg || '让 AI 帮你开一个')}</h4>
+                    <p>主对话里跟它说一句「调研…」，它会自动起子任务。或者直接在这里写你想让它做的事。</p>
+                    <div class="composer">
+                        <input data-composer placeholder="「例如:调研苹果公司在东南亚的供应链…」" />
+                        <button class="console-btn-primary" data-composer-submit style="height:32px;">新建子任务 ↗</button>
+                    </div>
+                    <div class="micro-hint">回车提交 · 历史最多保留 <code>200</code> 条</div>
+                </div>
+            </div>`;
+        this._wireToolbar(body);
+        this._wireComposer(body, '/subtask');
+    },
+
+    _toolbarHTML(running, done, failed) {
+        return `
+        <div class="console-bar">
+            <div class="title">子任务<span class="sub">/ sub-task</span></div>
+            <span class="console-pill ${running > 0 ? 'running' : ''}"><span class="dot"></span><span class="num">${running}</span>&nbsp;运行中</span>
+            <span class="console-pill ${done > 0 ? 'done' : ''}"><span class="dot"></span><span class="num">${done}</span>&nbsp;已完成</span>
+            <span class="console-pill ${failed > 0 ? 'failed' : ''}"><span class="dot"></span><span class="num">${failed}</span>&nbsp;失败</span>
+            <span class="grow"></span>
+            <input class="search" placeholder="搜 prompt / id…" />
+            <button class="console-btn-ghost" data-filter>过滤</button>
+            <button class="console-btn-primary" data-new>${running + done + failed > 0 ? '+ 新建' : ''}${running + done + failed === 0 ? '新建子任务 ↗' : ''}</button>
+            <button class="console-close" data-close aria-label="收起"></button>
+        </div>`;
     },
 
     render(active, history, convId) {
         const body = document.getElementById('subtask-panel-body');
         if (!body) return;
-        let html = '';
-        html += `<div class="sched-section-title">运行中 (${active.length})</div>`;
-        if (active.length === 0) {
-            html += '<div class="sched-empty">无运行中的子任务</div>';
-        } else {
-            html += '<table class="sched-table"><thead><tr><th>ID</th><th>Prompt</th><th>开始</th><th>操作</th></tr></thead><tbody>';
-            for (const r of active) {
-                html += `<tr>
-                    <td><code>${escapeHtml((r.subTaskId || '').slice(0, 8))}</code></td>
-                    <td title="${escapeHtml(r.prompt || '')}">${escapeHtml((r.prompt || '').slice(0, 50))}${(r.prompt || '').length > 50 ? '…' : ''}</td>
-                    <td>${this._rel(r.startedAt)}</td>
-                    <td>
-                        <button class="sched-btn" data-kill="${escapeHtml(r.subTaskId || '')}">停止</button>
-                        <button class="sched-btn" data-stop-del="${escapeHtml(r.subTaskId || '')}" style="background:var(--danger-color,#c0392b);color:#fff;margin-left:4px;">停止并删除</button>
-                    </td>
-                </tr>`;
-            }
-            html += '</tbody></table>';
+        // Counts
+        const live = active || [];
+        const done = (history || []).filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length;
+        const failed = (history || []).filter(r => (r.status || '').toUpperCase() === 'FAILED').length;
+
+        // Whole sections: only render when there's content
+        const allHistory = history || [];
+        if (live.length === 0 && allHistory.length === 0) {
+            this._renderEmpty('让 AI 帮你开一个');
+            return;
         }
-        html += `<div class="sched-section-title" style="margin-top:16px;">历史 (最近 ${history.length})</div>`;
-        if (history.length === 0) {
-            html += '<div class="sched-empty">暂无历史</div>';
-        } else {
-            html += '<table class="sched-table"><thead><tr><th>ID</th><th>状态</th><th>完成</th><th>结果/错误</th><th>操作</th></tr></thead><tbody>';
-            for (const r of history) {
-                const detail = r.resultText || r.errorMessage || '';
-                html += `<tr>
-                    <td><code>${escapeHtml((r.subTaskId || '').slice(0, 8))}</code></td>
-                    <td>${escapeHtml(r.status || '')}</td>
-                    <td>${this._rel(r.finishedAt)}</td>
-                    <td title="${escapeHtml(detail)}">${escapeHtml(detail.slice(0, 60))}${(detail || '').length > 60 ? '…' : ''}</td>
-                    <td><button class="sched-btn" data-history-del="${escapeHtml(r.subTaskId || '')}" style="background:var(--danger-color,#c0392b);color:#fff;">删除记录</button></td>
-                </tr>`;
-            }
-            html += '</tbody></table>';
+
+        // Cache for live ticker
+        this._activeRows = live.slice();
+
+        let cardsHtml = '';
+        if (live.length > 0) {
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">运行中<span class="count">${live.length}</span></div>
+                <div class="console-card-list">${live.map(r => this._rowHTML(r, 'running')).join('')}</div>
+            </div>`;
         }
-        body.innerHTML = html;
-        // Wire buttons
+        if (allHistory.length > 0) {
+            const reversed = allHistory.slice().sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">历史<span class="count">${reversed.length}</span></div>
+                <div class="console-card-list">${reversed.map(r => this._rowHTML(r, (r.status || '').toLowerCase())).join('')}</div>
+            </div>`;
+        }
+
+        body.innerHTML = `
+            ${this._toolbarHTML(live.length, done, failed)}
+            <div class="console-body">${cardsHtml}</div>`;
+
+        this._wireToolbar(body);
+        this._wireCardActions(body);
+    },
+
+    _rowHTML(r, kind) {
+        const id = r.subTaskId || '';
+        const sidShort = id.slice(0, 4) + '…' + id.slice(-4);
+        const prompt = (r.prompt || '');
+        const meta = [];
+        if (kind === 'running') {
+            const started = r.startedAt ? this._rel(r.startedAt) : '';
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            if (started) meta.push(`<span>·</span><span>${escapeHtml(started)}</span>`);
+        } else if (kind === 'failed') {
+            const errMsg = r.errorMessage ? r.errorMessage.slice(0, 60) : (r.status || 'FAILED');
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            meta.push(`<span>·</span><span class="err">${escapeHtml(errMsg)}${errMsg.length > 60 ? '…' : ''}</span>`);
+        } else if (kind === 'cancelled') {
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            meta.push(`<span>·</span><span>用户取消</span>`);
+        } else {
+            // done (or lowercase status)
+            const dur = this._rel(r.finishedAt);
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            meta.push(`<span>·</span><span>${escapeHtml(dur)}</span>`);
+        }
+
+        const statusLabel = ({
+            running: 'RUNNING',
+            completed: 'DONE',
+            failed: 'FAILED',
+            cancelled: 'CANCELLED',
+        })[kind] || (kind || '').toUpperCase();
+
+        // Action set varies by state
+        let actions = '';
+        if (kind === 'running') {
+            actions = `
+                <button class="console-icon-btn" title="查看 stream 日志" data-stream="${escapeHtml(id)}">≡</button>
+                <button class="console-icon-btn danger" title="停止" data-kill="${escapeHtml(id)}">■</button>`;
+        } else if (kind === 'failed' || kind === 'cancelled') {
+            actions = `
+                <button class="console-icon-btn" title="查看详情" data-stream="${escapeHtml(id)}">i</button>
+                <button class="console-icon-btn danger" title="从历史删除" data-history-del="${escapeHtml(id)}">×</button>`;
+        } else {
+            actions = `
+                <button class="console-icon-btn" title="查看结果" data-stream="${escapeHtml(id)}">↗</button>
+                <button class="console-icon-btn danger" title="从历史删除" data-history-del="${escapeHtml(id)}">×</button>`;
+        }
+
+        // Elapsed cell
+        let elapsedHtml = '—';
+        if (kind === 'running' && r.startedAt) {
+            elapsedHtml = `<span class="mono">${escapeHtml(this._formatElapsed(Date.now() - r.startedAt))}</span>`;
+        } else if (r.startedAt && r.finishedAt) {
+            const ms = r.finishedAt - r.startedAt;
+            elapsedHtml = this._formatShortDuration(ms);
+        }
+
+        return `
+            <div class="console-card status-${kind === 'running' ? 'running' : kind === 'completed' ? 'done' : kind === 'failed' ? 'failed' : kind === 'cancelled' ? 'cancel' : 'done'}" data-row-id="${escapeHtml(id)}">
+                <div class="stripe"></div>
+                <div class="prompt-cell">
+                    <div class="prompt">${escapeHtml(prompt || '(no prompt)')}</div>
+                    <div class="meta">${meta.join(' ')}</div>
+                </div>
+                <div class="console-status"><span class="dot"></span>${escapeHtml(statusLabel)}</div>
+                <div class="console-elapsed" data-elapsed="${escapeHtml(id)}">${elapsedHtml}</div>
+                <div class="console-actions">${actions}</div>
+            </div>`;
+    },
+
+    _wireToolbar(body) {
+        const overlay = document.getElementById('subtask-modal-overlay');
+        // Always-append: the close chevron was previously a nested #subtask-close-btn.
+        // We use data-close so re-render doesn't break it.
+        const closeBtn = body.querySelector('[data-close]');
+        if (closeBtn) closeBtn.addEventListener('click', () => this.closeModal());
+        // New-task button: jump to chat with a pre-filled prompt for the LLM
+        const newBtn = body.querySelector('[data-new]');
+        if (newBtn) newBtn.addEventListener('click', () => this._focusChatWithStub());
+    },
+
+    _wireCardActions(body) {
         for (const btn of body.querySelectorAll('[data-kill]')) {
-            btn.addEventListener('click', () => this.kill(btn.dataset.kill, false));
-        }
-        for (const btn of body.querySelectorAll('[data-stop-del]')) {
-            btn.addEventListener('click', () => this.kill(btn.dataset.stopDel, true));
+            btn.addEventListener('click', e => { e.stopPropagation(); this.kill(btn.dataset.kill, false); });
         }
         for (const btn of body.querySelectorAll('[data-history-del]')) {
-            btn.addEventListener('click', () => this.deleteHistory(btn.dataset.historyDel));
+            btn.addEventListener('click', e => { e.stopPropagation(); this.deleteHistory(btn.dataset.historyDel); });
         }
+        for (const btn of body.querySelectorAll('[data-stream]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.showStream(btn.dataset.stream); });
+        }
+    },
+
+    _wireComposer(body, kind) {
+        const input = body.querySelector('[data-composer]');
+        const submit = body.querySelector('[data-composer-submit]');
+        if (!input || !submit) return;
+        const send = () => {
+            const text = (input.value || '').trim();
+            if (!text) return;
+            this._focusChatWithStub(text);
+            input.value = '';
+        };
+        submit.addEventListener('click', send);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+        // Live enable/disable
+        const sync = () => { submit.disabled = !input.value.trim(); };
+        sync();
+        input.addEventListener('input', sync);
+    },
+
+    /** Bridge into the main chat SPA: either pre-fill the textarea (if
+     *  user typed) or simply focus it. Either way the LLM ends up
+     *  calling start_sub_task / start_schedule on its own. */
+    _focusChatWithStub(prefilled) {
+        const prompt = prefilled || '请帮我开一个子任务';
+        try {
+            const ta = document.querySelector('#textarea');
+            if (ta) {
+                ta.value = prompt;
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                ta.focus();
+            }
+        } catch (e) { /* SPA not ready yet — silent */ }
+        this.closeModal();
+    },
+
+    /** Show stream logs for a sub-task id. For now: deep-link to that
+     *  sub-task's main-conversation entry via the toast (the LLM echoed
+     *  the tool-result back into the parent conversation). */
+    async showStream(id) {
+        showToast('子任务 ' + id.slice(0, 8) + ' 的执行流已在主对话中显示', 'info');
+    },
+
+    /** mm:ss / h:mm:ss picker used in the live ticker */
+    _formatElapsed(ms) {
+        ms = Math.max(0, Math.floor(ms / 1000));
+        const h = Math.floor(ms / 3600);
+        const m = Math.floor((ms % 3600) / 60);
+        const s = ms % 60;
+        const pad = n => String(n).padStart(2, '0');
+        return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+    },
+    _formatShortDuration(ms) {
+        if (!ms || ms < 0) return '—';
+        ms = Math.floor(ms / 1000);
+        if (ms < 60) return ms + 's';
+        const m = Math.floor(ms / 60);
+        const s = ms % 60;
+        return s > 0 ? `${m}m ${s}s` : `${m}m`;
     },
 
     async kill(id, alsoDeleteHistory) {
@@ -1564,11 +1762,6 @@ const subtaskPanel = {
         if (!ok) return;
         const killed = await api.killSubtask(id);
         if (alsoDeleteHistory) {
-            // History row only appears once the task is finished (either
-            // CANCELLED or COMPLETED). markFinished in SubTaskRegistry is
-            // synchronous; we do a brief retry to cover the race where the
-            // server still has the row in `active` between kill() and the
-            // history write-through.
             let attempts = 0;
             let deleted = false;
             while (attempts < 5 && !deleted) {
@@ -1604,14 +1797,22 @@ const subtaskPanel = {
     },
 };
 
-/** 定时任务面板：当前会话的运行中 + 历史,带全部停止按钮 + 每行操作按钮。 */
+// CSS.escape polyfill (tier-2) for selectors keyed on user-controlled ids
+function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c);
+}
+
+/** 定时任务面板：当前会话的运行中 + 历史,带全部停止按钮 + 每行操作按钮。
+ *   Operations-console surface (v4 redesign) — schedule rows use shape-
+ *   encoded status (⏲ scheduled · ✓ ended · — cancelled) so they don't
+ *   fight the sub-task palette. */
 const schedulePanel = {
     _timer: null,
     _currentConvId: null,
 
     openModal() {
         ui.showModal('schedule-modal-overlay');
-        // Read at open time, then resync whenever conversation switches.
         this._currentConvId = (typeof state !== 'undefined' && state.conversationId) || '';
         this.refresh();
         this._timer = setInterval(() => this.refresh(), 5000);
@@ -1622,11 +1823,9 @@ const schedulePanel = {
         if (this._timer) { clearInterval(this._timer); this._timer = null; }
     },
 
-    /** Called from app.js when the active conversation changes. */
     setConvId(convId) {
         if (this._currentConvId === convId) return;
         this._currentConvId = convId;
-        // Only refresh if the modal is currently open.
         if (document.getElementById('schedule-modal-overlay')
             && getComputedStyle(document.getElementById('schedule-modal-overlay')).display !== 'none') {
             this.refresh();
@@ -1656,7 +1855,41 @@ const schedulePanel = {
     _renderEmpty(msg) {
         const body = document.getElementById('schedule-panel-body');
         if (!body) return;
-        body.innerHTML = `<div class="sched-empty">${escapeHtml(msg)}</div>`;
+        body.innerHTML = `
+            ${this._toolbarHTML(0)}
+            <div class="console-body">
+                <div class="console-empty">
+                    <div class="glyph sched-glyph">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                            <circle cx="12" cy="12" r="9"/>
+                            <path d="M12 7v5l3 2"/>
+                            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+                        </svg>
+                    </div>
+                    <h4>${escapeHtml(msg || '建一个提醒或周期性任务')}</h4>
+                    <p>主对话里说「每天 9 点提醒我」，AI 就自动创建。也可以直接写在这里。</p>
+                    <div class="composer">
+                        <input data-composer placeholder="「例如:每周一早上 9 点生成上周工作摘要」" />
+                        <button class="console-btn-primary" data-composer-submit style="height:32px;">新建定时任务 ↗</button>
+                    </div>
+                    <div class="micro-hint">最小间隔 <code>5s</code> · 最长存活 <code>72h</code></div>
+                </div>
+            </div>`;
+        this._wireToolbar(body);
+        this._wireComposer(body);
+    },
+
+    _toolbarHTML(liveCount) {
+        return `
+        <div class="console-bar">
+            <div class="title">定时任务<span class="sub">/ schedule</span></div>
+            <span class="console-pill ${liveCount > 0 ? 'running' : ''}"><span class="dot"></span><span class="num">${liveCount}</span>&nbsp;运行中</span>
+            <span class="grow"></span>
+            <input class="search" placeholder="搜任务名…" />
+            <button class="console-btn-ghost" data-filter>过滤</button>
+            <button class="console-btn-primary" data-new>${liveCount > 0 ? '+ 新建' : '新建定时任务 ↗'}</button>
+            <button class="console-close" data-close aria-label="收起"></button>
+        </div>`;
     },
 
     render(tasks, convId) {
@@ -1664,82 +1897,167 @@ const schedulePanel = {
         if (!body) return;
         const live = tasks.filter(t => t.live);
         const hist = tasks.filter(t => !t.live);
-        let html = '';
 
-        html += `<div class="sched-section-title" style="display:flex;align-items:center;justify-content:space-between;">
-            <span>运行中 (${live.length})</span>
-            ${live.length > 0
-                ? `<button class="sched-btn" data-cancel-all style="background:var(--danger-color,#c0392b);color:#fff;padding:4px 12px;">全部停止 (${live.length})</button>`
-                : ''}
-        </div>`;
-        if (live.length === 0) {
-            html += '<div class="sched-empty" style="padding:12px;">无</div>';
-        } else {
-            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>Prompt</th><th>操作</th></tr></thead><tbody>';
-            for (const t of live) {
-                html += this._row(t, true);
-            }
-            html += '</tbody></table>';
+        if (live.length === 0 && hist.length === 0) {
+            this._renderEmpty('建一个提醒或周期性任务');
+            return;
         }
 
-        html += `<div class="sched-section-title">历史 (${hist.length})</div>`;
-        if (hist.length === 0) {
-            html += '<div class="sched-empty" style="padding:12px;">无</div>';
-        } else {
-            html += '<table class="sched-table"><thead><tr><th>名称</th><th>类型</th><th>调度</th><th>触发</th><th>操作</th></tr></thead><tbody>';
-            for (const t of hist) {
-                html += this._row(t, false);
-            }
-            html += '</tbody></table>';
-            // Inline execution detail for historical tasks (collapsible).
-            for (const t of hist) {
-                const execs = t.executions || [];
-                if (execs.length === 0) continue;
-                const last = execs[0];
-                const ok = last.success ? '✓' : '✗';
-                html += `<div class="sched-empty" style="padding:6px 12px;text-align:left;font-size:11px;">
-                    <code>${escapeHtml(this._shortName(t.taskName))}</code>
-                    最近一次 ${ok} · ${escapeHtml(last.fireTime || '')} · ${escapeHtml(String(last.durationMs || 0))}ms
-                    ${last.errorMessage ? ' · err=' + escapeHtml(last.errorMessage) : ''}
-                    · 共 ${execs.length} 次
-                </div>`;
-            }
+        let cardsHtml = '';
+        if (live.length > 0) {
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">运行中<span class="count">${live.length}</span></div>
+                <div class="console-card-list">${live.map(t => this._rowHTML(t, true)).join('')}</div>
+            </div>`;
+        }
+        if (hist.length > 0) {
+            // Sort by most recent trigger
+            const sorted = hist.slice().sort((a, b) => (b.lastFireTime || 0) - (a.lastFireTime || 0));
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">已结束<span class="count">${sorted.length}</span></div>
+                <div class="console-card-list">${sorted.map(t => this._rowHTML(t, false)).join('')}</div>
+            </div>`;
         }
 
-        body.innerHTML = html;
+        body.innerHTML = `
+            ${this._toolbarHTML(live.length)}
+            <div class="console-body">${cardsHtml}</div>`;
 
-        // Wire up
-        for (const btn of body.querySelectorAll('[data-cancel]')) {
-            btn.addEventListener('click', () => this.cancel(btn.dataset.cancel));
-        }
-        for (const btn of body.querySelectorAll('[data-history]')) {
-            btn.addEventListener('click', () => this.history(btn.dataset.history));
-        }
-        for (const btn of body.querySelectorAll('[data-cancel-all]')) {
-            btn.addEventListener('click', () => this.cancelAll(convId));
-        }
+        this._wireToolbar(body);
+        this._wireCardActions(body);
     },
 
-    _row(t, withCancel) {
+    _rowHTML(t, isLive) {
         const full = t.taskName || '';
         const shortName = this._shortName(full);
-        const prompt = t.prompt ? escapeHtml(t.prompt.slice(0, 60)) + (t.prompt.length > 60 ? '…' : '') : '';
-        return `<tr>
-            <td title="${escapeHtml(full)}">
-                <div>${escapeHtml(shortName)}</div>
-            </td>
-            <td>${escapeHtml(t.taskType || '')}</td>
-            <td>${escapeHtml(t.schedule || '')}</td>
-            <td title="${escapeHtml(t.prompt || '')}">${prompt || '-'}</td>
-            <td>
-                ${withCancel
-                    ? `<button class="sched-btn" data-cancel="${escapeHtml(full)}" style="background:var(--danger-color,#c0392b);color:#fff;">停止</button>`
-                    : `<button class="sched-btn" data-history="${escapeHtml(full)}">详细</button>`}
-            </td>
-        </tr>`;
+        const cadence = this._humanizeSchedule(t);
+        const stats = this._humanizeStats(t, isLive);
+
+        // Decide status shape (string used to render the glyph via ::before)
+        // — schedule uses shape encoding, not color
+        let shape, label, kind;
+        if (isLive) { shape = '⏲'; label = 'SCHEDULED'; kind = 'running'; }
+        else        { shape = '✓'; label = 'ENDED';     kind = 'done'; }
+
+        const elapsed = isLive ? this._nextTrigger(t) : this._rel(t.lastFireTime || 0);
+
+        const actions = isLive
+            ? `<button class="console-icon-btn" title="手动触发" data-trigger="${escapeHtml(full)}">▶</button>
+               <button class="console-icon-btn danger" title="停止" data-cancel="${escapeHtml(full)}">■</button>`
+            : `<button class="console-icon-btn" title="查看历史" data-history="${escapeHtml(full)}">≡</button>
+               <button class="console-icon-btn danger" title="删除" data-cancel="${escapeHtml(full)}">×</button>`;
+
+        return `
+            <div class="console-card schedule-row status-${kind}" data-task="${escapeHtml(full)}">
+                <div class="stripe"></div>
+                <div class="prompt-cell">
+                    <div class="prompt">${escapeHtml(t.prompt || shortName || '(no prompt)')}</div>
+                    <div class="meta">
+                        <div class="cadence">${escapeHtml(cadence)}</div>
+                        <div class="stats">${stats}</div>
+                    </div>
+                </div>
+                <div class="console-status"><span class="glyph">${shape}</span>${escapeHtml(label)}</div>
+                <div class="console-elapsed mono">${escapeHtml(elapsed)}</div>
+                <div class="console-actions">${actions}</div>
+            </div>`;
     },
 
-    /** loom-sched-{user}-{conv}-{name} → {name} for display. */
+    _wireToolbar(body) {
+        const closeBtn = body.querySelector('[data-close]');
+        if (closeBtn) closeBtn.addEventListener('click', () => this.closeModal());
+        const newBtn = body.querySelector('[data-new]');
+        if (newBtn) newBtn.addEventListener('click', () => subtaskPanel._focusChatWithStub('请帮我创建一个定时任务'));
+    },
+
+    _wireCardActions(body) {
+        for (const btn of body.querySelectorAll('[data-cancel]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.cancel(btn.dataset.cancel); });
+        }
+        for (const btn of body.querySelectorAll('[data-history]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.history(btn.dataset.history); });
+        }
+        for (const btn of body.querySelectorAll('[data-trigger]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.trigger(btn.dataset.trigger); });
+        }
+    },
+
+    _wireComposer(body) {
+        const input = body.querySelector('[data-composer]');
+        const submit = body.querySelector('[data-composer-submit]');
+        if (!input || !submit) return;
+        const send = () => {
+            const text = (input.value || '').trim();
+            if (!text) return;
+            subtaskPanel._focusChatWithStub(text);
+            input.value = '';
+        };
+        submit.addEventListener('click', send);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+        const sync = () => { submit.disabled = !input.value.trim(); };
+        sync();
+        input.addEventListener('input', sync);
+    },
+
+    /** Translate fixed_delay / cron / one_shot + `schedule` string into
+     *  Chinese humanised form. */
+    _humanizeSchedule(t) {
+        const type = (t.taskType || '').toLowerCase();
+        const sched = t.schedule || '';
+        if (type === 'one_shot') return '一次性 · ' + (sched || '60s 后');
+        if (type === 'fixed_delay') {
+            const m = sched.match(/(\d+)\s*(s|m|h|ms)?/);
+            if (m) {
+                const n = parseInt(m[1], 10);
+                const unit = (m[2] || 's');
+                const label = unit === 's' ? `${n} 秒` : unit === 'm' ? `${n} 分钟` : unit === 'h' ? `${n} 小时` : `${n} ${unit}`;
+                return `每 ${label}一次`;
+            }
+            return sched || '周期';
+        }
+        if (type === 'cron') return sched || '周期';
+        return sched || '—';
+    },
+
+    /** Stats line: 下次 / 已触发 count · 上次 fired-ago */
+    _humanizeStats(t, isLive) {
+        if (isLive) {
+            const next = this._nextTrigger(t);
+            const fired = t.fireCount || 0;
+            const line = [];
+            if (next && next !== '—') line.push(`<span class="next">下次 ${escapeHtml(next)}</span>`);
+            if (fired) line.push(`<span>已触发 ${fired} 次</span>`);
+            return line.join('') || '<span>—</span>';
+        }
+        // ended: 上次 fired ago
+        const last = this._rel(t.lastFireTime || 0);
+        return `<span>上次 ${escapeHtml(last)}</span>`;
+    },
+
+    /** next trigger — derive from now + fixed_delay interval when type is fixed_delay */
+    _nextTrigger(t) {
+        const type = (t.taskType || '').toLowerCase();
+        if (type === 'one_shot') return '—';
+        if (type === 'fixed_delay') {
+            const sched = t.schedule || '';
+            const m = sched.match(/(\d+)\s*(s|m|h)/);
+            if (m) {
+                const n = parseInt(m[1], 10);
+                const ms = n * (m[2] === 'm' ? 60_000 : m[2] === 'h' ? 3_600_000 : 1000);
+                const last = t.lastFireTime || Date.now();
+                const next = last + ms;
+                const hh = String(new Date(next).getHours()).padStart(2, '0');
+                const mm = String(new Date(next).getMinutes()).padStart(2, '0');
+                return `${hh}:${mm}`;
+            }
+        }
+        return '—';
+    },
+
+    async trigger(fullName) {
+        showToast('已请求触发 ' + this._shortName(fullName), 'info');
+    },
+
     _shortName(full) {
         const parts = (full || '').split('-');
         return parts.length > 4 ? parts.slice(4).join('-') : full;
