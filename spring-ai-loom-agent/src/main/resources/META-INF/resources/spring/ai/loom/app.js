@@ -1864,7 +1864,7 @@ const subtaskPanel = {
 
     /** Bridge into the main chat SPA: either pre-fill the textarea (if
      *  user typed) or simply focus it. Either way the LLM ends up
-     *  calling start_sub_task / start_schedule on its own. */
+     *  calling start_sub_task / create_scheduled_task on its own. */
     _focusChatWithStub(prefilled) {
         const prompt = prefilled || '请帮我开一个子任务';
         try {
