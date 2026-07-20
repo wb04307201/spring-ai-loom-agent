@@ -34,12 +34,12 @@ public class DefaultRoleService implements IRoleService {
     @Override
     public RoleInfo create(String code, String name, String description, List<String> mcpNames) {
         if (code == null || code.isBlank() || name == null || name.isBlank()) {
-            throw new LoomAgentRuntimeException("角色 code 和 name 必填");
+            throw new LoomAgentRuntimeException(400, "角色 code 和 name 必填");
         }
         Integer exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM role WHERE code = ?", Integer.class, code);
         if (exists != null && exists > 0) {
-            throw new LoomAgentRuntimeException("角色 code 已存在: " + code);
+            throw new LoomAgentRuntimeException(409, "角色 code 已存在: " + code);
         }
         jdbcTemplate.update(
                 "INSERT INTO role (code, name, is_system, description) VALUES (?, ?, FALSE, ?)",
@@ -60,10 +60,11 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void deleteOrThrow(String code) {
-        Integer isSystem = jdbcTemplate.queryForObject(
+        List<Integer> rows = jdbcTemplate.queryForList(
                 "SELECT is_system FROM role WHERE code = ?", Integer.class, code);
-        if (isSystem == null) throw new LoomAgentRuntimeException("角色不存在: " + code);
-        if (isSystem != 0) throw new LoomAgentRuntimeException("系统角色不可删除: " + code);
+        if (rows.isEmpty()) throw new LoomAgentRuntimeException(404, "角色不存在: " + code);
+        Integer isSystem = rows.get(0);
+        if (isSystem != null && isSystem != 0) throw new LoomAgentRuntimeException(400, "系统角色不可删除: " + code);
         delete(code);
     }
 

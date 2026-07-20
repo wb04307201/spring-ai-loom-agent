@@ -1418,11 +1418,21 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/admin/roles", request -> ServerResponse.ok().body(roleService.list()));
             builder.POST("spring/ai/loom/admin/roles", request -> {
                 cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest.class);
-                return ServerResponse.ok().body(roleService.create(body.code(), body.name(), body.description(), body.mcpNames()));
+                try {
+                    return ServerResponse.ok().body(roleService.create(body.code(), body.name(), body.description(), body.mcpNames()));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             builder.DELETE("spring/ai/loom/admin/roles/{code}", request -> {
-                roleService.deleteOrThrow(request.pathVariable("code"));
-                return ServerResponse.ok().body(true);
+                try {
+                    roleService.deleteOrThrow(request.pathVariable("code"));
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             builder.GET("spring/ai/loom/admin/roles/{code}/mcps", request -> {
                 return ServerResponse.ok().body(roleService.getRoleMcpsWithDefault(request.pathVariable("code")));
