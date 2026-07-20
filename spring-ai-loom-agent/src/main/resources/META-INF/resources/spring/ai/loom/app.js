@@ -2339,6 +2339,30 @@ function escapeHtml(text) {
 
 // ===================== §9 MCP Service =====================
 const mcp = {
+    /** localStorage key for persisting user MCP selection across reloads (BUG-MCP-PERSIST) */
+    STORAGE_KEY: 'loom.mcp.selectedNames',
+
+    /** Read persisted selection; returns null if missing/corrupt. */
+    _loadPersisted() {
+        try {
+            const raw = localStorage.getItem(this.STORAGE_KEY);
+            if (!raw) return null;
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr.filter(s => typeof s === 'string') : null;
+        } catch (_) {
+            return null;
+        }
+    },
+
+    /** Persist current selection. */
+    _savePersisted() {
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(state.selectedMcps));
+        } catch (_) {
+            // localStorage may be disabled (private mode, quota) — fail silently
+        }
+    },
+
     openModal() {
         ui.showModal('mcp-modal-overlay');
         this.renderModal();
@@ -2386,6 +2410,7 @@ const mcp = {
             state.selectedMcps.push(name);
             element.classList.add('selected');
         }
+        this._savePersisted();
         showToast(`已${state.selectedMcps.includes(name) ? '选中' : '取消'}MCP服务`, 'success');
     },
 
@@ -2431,7 +2456,15 @@ const mcp = {
             const data = await api.listMcps();
             if (data && data.length > 0) {
                 state.mcps = data;
-                state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
+                // Restore persisted selection if available; otherwise use defaults.
+                // Filter against current server list so deleted servers don't linger. (BUG-MCP-PERSIST)
+                const validNames = new Set(data.map(m => m.name));
+                const persisted = this._loadPersisted();
+                if (persisted && persisted.length > 0) {
+                    state.selectedMcps = persisted.filter(n => validNames.has(n));
+                } else {
+                    state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
+                }
                 return;
             }
         } catch (e) {
@@ -2890,6 +2923,7 @@ const skills = {
                     state.selectedMcps.push(toolName);
                 }
             }
+            mcp._savePersisted();
         }
 
         chat.send();
@@ -2909,6 +2943,7 @@ const skills = {
                     state.selectedMcps.push(toolName);
                 }
             }
+            mcp._savePersisted();
         }
         // 立即发送
         if (typeof chat !== 'undefined' && chat.send) {
@@ -2932,6 +2967,7 @@ const skills = {
                     state.selectedMcps.push(toolName);
                 }
             }
+            mcp._savePersisted();
         }
     },
 
