@@ -94,7 +94,7 @@ public class DefaultUserConversation implements IUserConversation {
     @Override
     public ConversationRecord create(String title) {
         String username = UserContextHolder.getCurrentUser();
-        if (username == null) throw new LoomAgentRuntimeException("未登录");
+        if (username == null) throw new LoomAgentRuntimeException(401, "未登录");
         String normalizedTitle = normalizeTitle(title);
         String conversationId = UUID.randomUUID().toString();
         jdbcTemplate.update(

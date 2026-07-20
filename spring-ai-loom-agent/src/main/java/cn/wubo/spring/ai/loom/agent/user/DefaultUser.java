@@ -171,6 +171,14 @@ public class DefaultUser implements IUser {
         if (!TYPE_ADMIN.equals(type) && !TYPE_USER.equals(type)) {
             throw new LoomAgentRuntimeException("type 必须是 ADMIN 或 USER");
         }
+        // Username MUST NOT contain '-' because the schedule-task namespace format is
+        // "loom-sched-{username}-{uuid36}-{name}" and the frontend's _shortName() parser
+        // splits on the FIRST '-' to strip the username segment. A dashed username would
+        // leave an ambiguous prefix and corrupt the short-name heuristic.
+        // See app.js _shortName (around the schedule list rendering).
+        if (username.contains("-")) {
+            throw new LoomAgentRuntimeException("用户名不能包含 '-'，与调度任务命名空间冲突");
+        }
         Integer exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM user_info WHERE username = ?", Integer.class, username);
         if (exists != null && exists > 0) {
