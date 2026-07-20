@@ -64,7 +64,7 @@
 - [ ] (RBAC) 定时任务 modal 没有"全部停止"按钮,虽然 `schedulePanel.cancelAll(convId)` 方法 + 后端 `POST /schedule/by-conversation/{convId}/cancel-all` 路由都已实现(Task 8 todo 第 1 条已提及,schedule 端同样缺失),但 `_toolbarHTML` (app.js ~2033) 不渲染 `data-cancel-all`;运维场景"这个对话一堆 1m 间隔的 polling 任务占资源,一键停掉"是常见诉求。建议：在 schedule modal toolbar 增加 `data-cancel-all` 按钮,UI 文案「全部停止 (N)」,disabled 条件 `live.length === 0`;同样要 username-scoped(后端已正确接收 `UserContextHolder.getCurrentUser()`,前端只调 API 即可)
 - [ ] (UI 规范) 定时任务 modal 的"新建"按钮(`_toolbarHTML` 中 `data-new`)和子任务 modal 一样,`_wireToolbar` 直接调 `subtaskPanel._focusChatWithStub('请帮我创建一个定时任务')` —— 实际是把 stub 塞回主聊天让 LLM 调 `create_scheduled_task`,而不是直接打开一个"创建定时任务"表单(Task 7 子任务 modal 的同类问题已记录)。建议：① 在 modal 内加一个 `<form>` 含 名称/类型(cron/fixed_delay/fixed_rate/one_shot)/间隔/cron 表达式/prompt 字段,前端直接 `POST` 给一个新的 `POST /spring/ai/loom/schedule/create` 路由(LLM 工具调用那条路绕过,纯 REST);② 或者在空状态 composer 旁加 "⚠ 直达模式(高级)" 开关
 - [ ] (空状态文案) 定时任务 modal 空状态(无 conversation 选中时)的 prompt 是 `请先打开一个对话` 但 toolbar `运行中` 数字还显示 `0`;两个状态对一个没选对话的用户来说有点冗余。建议：在 `_renderEmpty('请先打开一个对话')` 模式下隐藏整个 toolbar(只保留关闭按钮),让空状态更聚焦;或把 `运行中 0` 替换为"暂无可管理的对话"
-- [ ] (交互一致性) 定时任务 modal 的 ▶ (手动触发) 和 ■ (停止) 按钮都是 `console-icon-btn` 类,子任务 modal 是 `▶` 和 `■`,图标对照一致;但**两个 modal 的 ≡ 历史按钮含义不同**(schedule = 查看历史,subtask = 查看流式日志),用户跨 modal 切换时 tooltip 容易混淆。建议：统一 ≡ 按钮的 title 为 `查看历史`(两个 modal 都用它来打开一个 execution log 抽屉),不再混用"流式日志"语义;task 8 todo 第 6 条也提及该不一致
+- [ ] (交互一致性) 定时任务 modal 的 ▶ (手动触发) 和 ■ (停止) 按钮都是 `console-icon-btn` 类,子任务 modal 是 `▶` 和 `■`,图标对照一致;但**两个 modal 的 ≡ 历史按钮含义不同**(schedule = 查看历史,subtask = 查看流式日志),用户跨 modal 切换时 tooltip 容易混淆。建议：统一 ≡ 按钮的 title 为 `查看历史`(两个 modal 都用它来打开一个 execution log 抽屉),不再混用"流式日志"语义;task 8 todo 第 7 条也提及该不一致
 
 ## Task 10 (Admin Console — 用户管理 CRUD)
 
