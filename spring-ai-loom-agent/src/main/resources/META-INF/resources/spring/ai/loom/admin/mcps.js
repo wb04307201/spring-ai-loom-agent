@@ -97,6 +97,10 @@
         document.getElementById('em-error').style.display = 'none';
         document.getElementById('em-tools').innerHTML = '加载中...';
         document.getElementById('edit-mcp-modal').style.display = 'flex';
+        // 加载未完成前禁用保存按钮，避免在 origTitle/origDesc 仍为 '' 时点击保存把字段当"清空"发出
+        // (BUG-12-MCP-SERVER-PUT-CLEAR-RACE)
+        const saveBtn = document.getElementById('em-save');
+        if (saveBtn) saveBtn.disabled = true;
 
         try {
             const [list, tools] = await Promise.all([
@@ -118,6 +122,10 @@
             renderTools(tools || []);
         } catch (e) {
             document.getElementById('em-tools').innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+        } finally {
+            // 加载完成（或失败）后启用保存按钮，让用户可以重试或基于加载结果显示保存
+            // (BUG-12-MCP-SERVER-PUT-CLEAR-RACE)
+            if (saveBtn) saveBtn.disabled = false;
         }
     }
 
@@ -176,6 +184,10 @@
     }
 
     async function saveEdit() {
+        // 保存按钮在 openEdit 加载完成前被禁用；如意外在加载阶段被触发则直接返回，避免发出空值触发后端清空逻辑
+        // (BUG-12-MCP-SERVER-PUT-CLEAR-RACE)
+        const saveBtn = document.getElementById('em-save');
+        if (saveBtn && saveBtn.disabled) return;
         const name = currentEdit.name;
         const title = document.getElementById('em-title').value.trim();
         const desc = document.getElementById('em-desc').value.trim();
