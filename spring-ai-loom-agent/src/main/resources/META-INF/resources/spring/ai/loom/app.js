@@ -2211,9 +2211,40 @@ const schedulePanel = {
         showToast('已请求触发 ' + this._shortName(fullName), 'info');
     },
 
+    /**
+     * BUG-SCHEDULE-SHORTNAME: Extract the user-supplied task name from the
+     * namespaced full name (loom-sched-{username}-{conversationId}-{name}).
+     * The previous implementation split on '-' and dropped the first 4
+     * segments, but conversationId is a UUID containing 4 dashes of its own,
+     * so the slice truncated halfway through the conv id and exposed a
+     * tail like "884a-43ba-af9f-8304dab3fe32-tmp-test-schedule" instead of
+     * the intended "tmp-test-schedule".
+     *
+     * Heuristic: since conversationId is a UUID (36 chars, format
+     * 8-4-4-4-12 hex + 4 dashes) and username has no dashes in practice,
+     * strip "loom-sched-" + first dash-separated segment (username), then
+     * strip 36 more chars (the conv id), then return whatever follows.
+     * Falls back to the previous best-effort slice if the conv id length
+     * doesn't match.
+     */
     _shortName(full) {
-        const parts = (full || '').split('-');
-        return parts.length > 4 ? parts.slice(4).join('-') : full;
+        const f = full || '';
+        const prefix = 'loom-sched-';
+        if (f.startsWith(prefix)) {
+            const rest = f.substring(prefix.length);   // "{username}-{convId}-{name}"
+            const dashIdx = rest.indexOf('-');
+            if (dashIdx > 0) {
+                const convStart = dashIdx + 1;
+                // UUID convId = 36 chars (e.g. "e5436384-039e-4a23-a35c-968e969e48b8")
+                if (rest.length >= convStart + 36) {
+                    const afterConv = rest.substring(convStart + 36);
+                    if (afterConv.startsWith('-')) return afterConv.substring(1);
+                }
+            }
+        }
+        // Fallback: best-effort slice if format is unexpected.
+        const parts = f.split('-');
+        return parts.length > 4 ? parts.slice(4).join('-') : f;
     },
 
     async cancel(fullName) {
