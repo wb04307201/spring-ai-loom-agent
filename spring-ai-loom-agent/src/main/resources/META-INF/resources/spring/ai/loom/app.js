@@ -2339,13 +2339,20 @@ function escapeHtml(text) {
 
 // ===================== §9 MCP Service =====================
 const mcp = {
-    /** localStorage key for persisting user MCP selection across reloads (BUG-MCP-PERSIST) */
-    STORAGE_KEY: 'loom.mcp.selectedNames',
+    /**
+     * Build a per-user localStorage key for persisting MCP selection.
+     * Namespace by username so selections do not leak across users sharing a browser
+     * (BUG-MCP-PERSIST-LEAK). Falls back to '_anonymous' if state.username is null/empty.
+     */
+    _storageKey() {
+        const u = state.username;
+        return 'loom.mcp.selectedNames.' + (u && typeof u === 'string' && u.length ? u : '_anonymous');
+    },
 
     /** Read persisted selection; returns null if missing/corrupt. */
     _loadPersisted() {
         try {
-            const raw = localStorage.getItem(this.STORAGE_KEY);
+            const raw = localStorage.getItem(this._storageKey());
             if (!raw) return null;
             const arr = JSON.parse(raw);
             return Array.isArray(arr) ? arr.filter(s => typeof s === 'string') : null;
@@ -2357,7 +2364,7 @@ const mcp = {
     /** Persist current selection. */
     _savePersisted() {
         try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(state.selectedMcps));
+            localStorage.setItem(this._storageKey(), JSON.stringify(state.selectedMcps));
         } catch (_) {
             // localStorage may be disabled (private mode, quota) — fail silently
         }
