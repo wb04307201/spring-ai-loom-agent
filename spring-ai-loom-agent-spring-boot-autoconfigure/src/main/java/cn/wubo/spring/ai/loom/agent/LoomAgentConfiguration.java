@@ -1458,9 +1458,15 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/admin/mcp-system", request -> ServerResponse.ok().body(mcpServerAdmin.listSystem()));
             builder.PUT("spring/ai/loom/admin/mcps/{name}", request -> {
                 cn.wubo.spring.ai.loom.agent.model.UpdateMcpServerRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.UpdateMcpServerRequest.class);
-                return ServerResponse.ok().body(mcpServerAdmin.update(request.pathVariable("name"),
-                        body == null ? null : body.title(),
-                        body == null ? null : body.description()));
+                try {
+                    return ServerResponse.ok().body(mcpServerAdmin.update(request.pathVariable("name"),
+                            body == null ? null : body.title(),
+                            body == null ? null : body.description()));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    // name 不是 SDK 实时 mcp → 404 而不是 200 (BUG-12-MCP-SERVER-PUT-GHOST)
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // V7 起删除 /active 端点：mcp 是否可用完全由角色授权决定
             // 工具列表 / 更新改用 query string 或独立路径，避免 mcp 名含 @ / / 等特殊字符触发 Tomcat 400
@@ -1475,11 +1481,17 @@ public class LoomAgentConfiguration {
                         request.body(cn.wubo.spring.ai.loom.agent.model.UpsertMcpToolRequest.class);
                 Long toolId = request.pathVariable("toolId").equals("0") ? 0L
                         : Long.parseLong(request.pathVariable("toolId"));
-                return ServerResponse.ok().body(mcpServerAdmin.upsertTool(
-                        toolId,
-                        body == null ? null : body.mcpName(),
-                        body == null ? null : body.name(),
-                        body == null ? null : body.description()));
+                try {
+                    return ServerResponse.ok().body(mcpServerAdmin.upsertTool(
+                            toolId,
+                            body == null ? null : body.mcpName(),
+                            body == null ? null : body.name(),
+                            body == null ? null : body.description()));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    // toolId 非 0 但 DB 里找不到 → 404 而不是 500 (BUG-12-MCP-TOOL-PUT-404)
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : 404;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // 删除已维护的工具描述记录（删除后回退到 SDK 默认）
             builder.DELETE("spring/ai/loom/admin/mcp-tools/{toolId}", request -> {

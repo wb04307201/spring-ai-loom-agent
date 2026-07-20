@@ -59,9 +59,13 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
         Map<String, Map<String, Object>> dbServerRows = new HashMap<>();
         try {
             org.springframework.jdbc.core.RowMapper<Map<String, Object>> serverMapper = (rs, rowNum) -> {
-                dbServerRows.put(rs.getString(1), Map.of(
-                        "title", rs.getString(2),
-                        "description", rs.getString(3)));
+                // 用 HashMap 而不是 Map.of()，因为 title/description 都可能为 null，
+                // Map.of() 不接受 null value，会抛 NPE 被外层 catch 吞掉导致整行丢失
+                // (BUG-12-MCP-SYSTEM-MAPOF-NPE)
+                Map<String, Object> row = new HashMap<>();
+                row.put("title", rs.getString(2));
+                row.put("description", rs.getString(3));
+                dbServerRows.put(rs.getString(1), row);
                 return null;
             };
             jdbcTemplate.query(
@@ -107,17 +111,35 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
 
     @Override
     public McpServerInfo update(String name, String title, String description) {
+        // mcp_server 表只用于描述 SDK 实时 mcp；拒绝给"非 SDK 实时 mcp 名"建幽灵行
+        // 之前 PUT /admin/mcps/{name} 不存在会 INSERT，导致 mcp_server 表里出现 SDK 已下线但 DB 还在的脏数据
+        // (BUG-12-MCP-SERVER-PUT-GHOST)
+        boolean live = false;
+        List<McpRecord> liveMcps = mcp().mcps();
+        if (liveMcps != null) {
+            for (McpRecord r : liveMcps) {
+                if (r.name().equals(name)) { live = true; break; }
+            }
+        }
+        if (!live) {
+            throw new LoomAgentRuntimeException(404, "MCP 服务不存在或未连接: " + name);
+        }
+        // null 或空串 = 清空该字段（admin 在编辑 modal 里清空输入框后保存，期望 DB 回到 NULL = 用 SDK 默认）
+        // 之前 COALESCE(?, title) 在 null 时保留旧值，与前端"留空 = 用 SDK 默认"契约不符
+        // (BUG-12-MCP-SERVER-PUT-CLEAR)
+        Object titleParam = (title == null || title.isBlank()) ? null : title;
+        Object descParam = (description == null || description.isBlank()) ? null : description;
         Integer n = jdbcTemplate.update(
-                "UPDATE mcp_server SET title = COALESCE(?, title), " +
-                        "description = COALESCE(?, description), " +
+                "UPDATE mcp_server SET title = ?, " +
+                        "description = ?, " +
                         "updated_at = CURRENT_TIMESTAMP " +
                         "WHERE name = ?",
-                title, description, name);
+                titleParam, descParam, name);
         if (n == 0) {
-            // 不存在就插入
+            // SDK 实时有但 DB 没记录 → INSERT 维护行（这是正常的"首次维护"场景）
             jdbcTemplate.update(
                     "INSERT INTO mcp_server (name, title, description) VALUES (?, ?, ?)",
-                    name, title, description);
+                    name, titleParam, descParam);
         }
         return jdbcTemplate.queryForObject(
                 "SELECT name, title, description FROM mcp_server WHERE name = ?",
