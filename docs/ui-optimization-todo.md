@@ -33,3 +33,7 @@
 - [ ] (Task 5 已修复) MCP: 模态框 checkbox 切换只更新内存 `state.selectedMcps`,`mcp.loadList()` 每次重置为 `defaultSelected` 默认值,刷新页面后用户的选择全部丢失 → Task 5 commit 6a964ac 修复: 引入 `STORAGE_KEY='loom.mcp.selectedNames'`,`toggleSelect` 后立即持久化,`loadList()` 优先读 localStorage,并过滤掉已删除的服务
 - [ ] (来源: Task 5) MCP: 服务列表 5 个 MCP 服务(`/mcps` 返回值) `defaultSelected` 全部为 `true`(没有任何可取消的默认项),造成"全部勾选 vs 默认勾选"无差别;建议至少 1-2 个默认关(如 `memory` / `sequential-thinking` 这类高级工具),让用户首次打开能感受到"勾选 vs 取消"的实际效果
 - [ ] (来源: Task 5) MCP: 详情面板的"包含工具"列表只展示工具名 + 描述,但工具是否被勾选(受 MCP 服务级 checkbox 控制,所有工具都被一起勾/取消)没有可视化指示;如果未来支持工具级粒度勾选,需要单独渲染每个工具的 checkbox;目前是服务级粒度,UI 文案可以加一行提示"该服务下所有工具会作为一个整体被启用/禁用"
+- [ ] (来源: Task 6) 技能库: `skills.send()` 是 dead code（无任何 UI 路径调用），现在流程全走 `apply()`(自动发送) / `copyToTextarea()`(只填充) 两个入口；建议删除 `send()` 精简代码；同时让 `apply()` / `copyToTextarea()` 提取到一个内部 helper 复用 `_buildPrompt`，避免三份重复的 params 替换 + MCP auto-select 逻辑
+- [ ] (来源: Task 6) 技能库: 模态框的 `currentTab` 跨 close/reopen 保持，用户上次停在「提交」Tab，再次打开就停在「提交」——但「提交」Tab 内容是一次性的(选 skill 后才有提交表单)，容易让人摸不着头脑；建议每次 `openModal()` 重置 `currentTab = 'mine'`
+- [ ] (来源: Task 6) 技能库: 关闭模态框时 `state.selectedSkill` 未清空、`#skill-detail-title` 未重置；下次进入若尚未渲染 detail 会保留上次的 skill 名作为标题；建议在 `closeModal()` 里 `document.getElementById('skill-detail-title').textContent = '技能详情'; state.selectedSkill = null;`
+- [ ] (来源: Task 6) 技能库: 提交 `tmp-test-skill` 后,「提交」Tab 列表里仍能看到它(因为它是 USER_CREATED source,而 submit tab 列的是 USER_CREATED 全部)——已提交到市场等审批的 skill 仍可被重复提交多次；建议提交成功后从「提交」Tab 过滤掉已 PENDING/APPROVED/REJECTED 的同名 skill，或在每个 skill 旁加一个"PENDING"小标识
