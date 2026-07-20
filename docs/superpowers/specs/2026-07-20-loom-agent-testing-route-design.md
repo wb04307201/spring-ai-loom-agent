@@ -27,7 +27,7 @@
 1. `mvn clean install -Dgpg.skip=true -DskipTests` (确认编译过,后台跑)
 2. `mvn spring-boot:run -pl spring-ai-loom-agent-test` (后台启动,日志盯住直到 "Started" 字样)
 3. 用 chrome-devtools `navigate_page` 打开 `http://localhost:8080/spring/ai/loom/`
-4. 验证 login 页加载、admin/admin 默认账号能登录
+4. 验证 login 页加载、`wb04307201/123456` 默认账号能登录
 5. 主聊天页渲染: 侧边栏 + 工具栏 6 个按钮 + 消息流输入框可见
 
 **Smoke 通过标准:** 至少能发一条 hello 给 LLM 拿到 SSE 回复。

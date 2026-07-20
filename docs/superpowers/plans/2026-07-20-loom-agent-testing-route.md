@@ -14,7 +14,7 @@
 - **Build tool:** Maven (multi-module)
 - **服务启动命令:** `mvn spring-boot:run -pl spring-ai-loom-agent-test`
 - **服务端口:** 默认 8080,前端入口 `http://localhost:8080/spring/ai/loom/`
-- **默认账号:** admin / admin (admin 角色,可访问 `/admin/console.html`)
+- **默认账号:** `wb04307201` / `123456` (admin 角色,可访问 `/admin/console.html`) — 由 `V1.0__init.sql` seed
 - **bug fix commit 规范:** `fix(模块): 描述 (BUG-XXX-YYY)` 沿用仓库现有
 - **UI 优化 commit 规范:** `ui(模块): 描述`
 - **临时数据命名:** 所有测试期间创建的数据用 `tmp-` 前缀,阶段 4 一次性清
@@ -58,7 +58,7 @@ mcp__chrome-devtools__new_page(url="http://localhost:8080/spring/ai/loom/login.h
 
 Expected: 看到 login 表单,username/password 两个输入框 + 登录按钮。
 
-- [ ] **Step 4: 用 admin/admin 登录**
+- [ ] **Step 4: 用 `wb04307201` / `123456` 登录**
 
 通过 `take_snapshot` 拿到登录按钮 uid,`fill` 填账号密码,`click` 登录。
 
