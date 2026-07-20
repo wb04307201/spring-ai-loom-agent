@@ -81,7 +81,7 @@ class SubTaskRegistryTest {
         CompletableFuture<?> f = new CompletableFuture<>();
         registry.attachFuture(id, f);
 
-        boolean ok = registry.kill(id);
+        boolean ok = registry.kill("alice", id);
 
         assertThat(ok).isTrue();
         assertThat(f.isCancelled()).isTrue();
@@ -117,7 +117,20 @@ class SubTaskRegistryTest {
     @Test
     void gettersOnMissingReturnNullOrEmpty() {
         assertThat(registry.get(UUID.randomUUID().toString())).isNull();
-        assertThat(registry.kill("nonexistent")).isFalse();
+        assertThat(registry.kill("alice", "nonexistent")).isFalse();
+    }
+
+    @Test
+    void killRejectsDifferentUsernameWithoutCancelling() {
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
+        registry = new SubTaskRegistry(8, 100, id -> callCount.incrementAndGet());
+        String id = registry.register("alice", "conv-1", "p1");
+
+        boolean killed = registry.kill("bob", id);
+
+        assertThat(killed).isFalse();
+        assertThat(callCount.get()).isZero();
+        assertThat(registry.get(id).status()).isEqualTo(SubTaskStatus.RUNNING);
     }
 
     @Test
@@ -130,7 +143,7 @@ class SubTaskRegistryTest {
         });
 
         String id = registry.register("alice", "conv-1", "p1");
-        boolean killed = registry.kill(id);
+        boolean killed = registry.kill("alice", id);
 
         assertThat(killed).isTrue();
         assertThat(callCount.get()).isEqualTo(1);
@@ -147,7 +160,7 @@ class SubTaskRegistryTest {
         registry = new SubTaskRegistry(8, 100);   // 2-arg ctor: no hook
         String id = registry.register("alice", "conv-1", "p1");
 
-        boolean killed = registry.kill(id);
+        boolean killed = registry.kill("alice", id);
 
         assertThat(killed).isTrue();
         assertThat(registry.get(id).status())

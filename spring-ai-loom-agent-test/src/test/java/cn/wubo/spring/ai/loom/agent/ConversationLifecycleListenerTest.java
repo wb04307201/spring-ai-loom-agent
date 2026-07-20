@@ -38,12 +38,13 @@ class ConversationLifecycleListenerTest {
         CompletableFuture<?> f = new CompletableFuture<>();
         registry.attachFuture(id, f);
 
-        // No loom repo dependency wired → third counter is 0.
+        // No persistence repositories wired → all four persistence counters are 0.
         int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
-                "conv-1", "alice", registry, flexService, null);
+                "conv-1", "alice", registry, flexService, null, null, null);
 
-        // 1 subtask killed, 1 schedule cancelled (only alice/conv-1), 0 rows deleted
-        assertThat(cleaned).containsExactly(1, 1, 0);
+        // 1 subtask killed, 1 schedule cancelled (only alice/conv-1), no persisted rows;
+        // the just-cancelled task is also removed from the in-memory history deque.
+        assertThat(cleaned).containsExactly(1, 1, 0, 0, 0, 1);
         assertThat(f.isCancelled()).isTrue();
         verify(flexService).cancel("loom-sched-alice-conv-1-remind");
         verify(flexService, never()).cancel("loom-sched-alice-conv-2-other");
@@ -54,16 +55,16 @@ class ConversationLifecycleListenerTest {
     void toleratesMissingSubtaskRegistryAndSchedule() {
         // Both optional dependencies absent — no exception, zero counts.
         int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
-                "conv-1", "alice", null, null, null);
-        assertThat(cleaned).containsExactly(0, 0, 0);
+                "conv-1", "alice", null, null, null, null, null);
+        assertThat(cleaned).containsExactly(0, 0, 0, 0, 0, 0);
     }
 
     @Test
     void doesNotCancelOtherUsersSchedulesForSameConvName() {
         int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
-                "conv-1", "bob", null, flexService, null);
+                "conv-1", "bob", null, flexService, null, null, null);
         // Only bob's conv-1 schedule cancelled, not alice's.
-        assertThat(cleaned).containsExactly(0, 1, 0);
+        assertThat(cleaned).containsExactly(0, 1, 0, 0, 0, 0);
         verify(flexService).cancel("loom-sched-bob-conv-1-foo");
         verify(flexService, never()).cancel("loom-sched-alice-conv-1-remind");
     }
