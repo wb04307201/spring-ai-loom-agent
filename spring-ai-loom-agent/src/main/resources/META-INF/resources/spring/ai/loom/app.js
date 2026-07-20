@@ -2221,12 +2221,17 @@ const schedulePanel = {
      * the intended "tmp-test-schedule".
      *
      * Heuristic: since conversationId is a UUID (36 chars, format
-     * 8-4-4-4-12 hex + 4 dashes) and username has no dashes in practice,
-     * strip "loom-sched-" + first dash-separated segment (username), then
-     * strip 36 more chars (the conv id), then return whatever follows.
-     * Falls back to the previous best-effort slice if the conv id length
-     * doesn't match.
+     * 8-4-4-4-12 hex + 4 dashes), strip "loom-sched-" + first dash-separated
+     * segment (username), then strip 36 more chars (the conv id), then
+     * return whatever follows. Falls back to the previous best-effort slice
+     * if the conv id length doesn't match.
+     *
+     * IMPORTANT: username MUST not contain dashes (NOT currently validated by
+     * DefaultUser.createUser; if dashes are ever allowed, the heuristic below
+     * will break — see TODO below).
      */
+    // TODO: tighten DefaultUser.createUser to reject dashes in username, or refactor _shortName to iterate past additional dashes until 36 UUID chars consumed
+    // TODO: tighten DefaultUser.createUser to reject dashes in username, or refactor _shortName to iterate past additional dashes until 36 UUID chars consumed
     _shortName(full) {
         const f = full || '';
         const prefix = 'loom-sched-';
