@@ -57,6 +57,16 @@ class ConversationRouterTest {
                 "{\"title\":\"tmp-stolen-title\"}");
 
         assertThat(response.statusCode().value()).isEqualTo(403);
+
+        // The body MUST be a structured error object so the frontend can distinguish
+        // a cross-user 403 from a generic 500/network failure. The previous bare
+        // `body(false)` was indistinguishable from a transport drop.
+        Object entity = readBody(response);
+        assertThat(entity).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) entity;
+        assertThat(body).containsEntry("error", "forbidden");
+        assertThat(body).containsEntry("code", 403);
     }
 
     private static RouterFunction<ServerResponse> router(IUserConversation conversations) {
@@ -84,5 +94,12 @@ class ConversationRouterTest {
         ServerRequest request = ServerRequest.create(
                 servletRequest, java.util.List.of(new MappingJackson2HttpMessageConverter()));
         return router.route(request).orElseThrow().handle(request);
+    }
+
+    private static Object readBody(ServerResponse response) {
+        // The PATCH 403 path uses .body(Map) which produces an EntityResponse whose
+        // entity() exposes the body directly. We don't need to round-trip through
+        // HttpMessageConverters to verify the body shape.
+        return ((org.springframework.web.servlet.function.EntityResponse<?>) response).entity();
     }
 }

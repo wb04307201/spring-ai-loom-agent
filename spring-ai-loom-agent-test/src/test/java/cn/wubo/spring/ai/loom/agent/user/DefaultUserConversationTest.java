@@ -64,6 +64,32 @@ class DefaultUserConversationTest {
     }
 
     @Test
+    void createReturnsTimestampsReadBackFromDatabase() throws Exception {
+        // JDBC default isolation can produce created_at < JVM-clock by ms. Verify the
+        // create() return value matches what is actually persisted (i.e. read from DB)
+        // rather than Instant.now() captured before the INSERT.
+        ConversationRecord created = conversations.create("tmp-conv-1");
+
+        // The persisted row's created_at must be a non-null DB-assigned timestamp.
+        assertThat(created.createdAt()).isNotNull();
+        assertThat(created.updatedAt()).isNotNull();
+
+        // Calling getList() right after create() must yield the same timestamps —
+        // no ms-level drift between in-memory record and DB. We compare to
+        // millisecond precision because H2's TIMESTAMP default may not retain
+        // sub-millisecond precision consistently across reads.
+        ConversationRecord listed = conversations.getList().stream()
+                .filter(r -> r.conversationId().equals(created.conversationId()))
+                .findFirst().orElseThrow();
+        assertThat(listed.createdAt().toEpochMilli()).isEqualTo(created.createdAt().toEpochMilli());
+        assertThat(listed.updatedAt().toEpochMilli()).isEqualTo(created.updatedAt().toEpochMilli());
+
+        // And the persisted row's timestamps must be on/before "now" (the JVM clock when
+        // we got the read-back) — i.e. the DB did the stamping, not this JVM.
+        assertThat(created.createdAt()).isBeforeOrEqualTo(java.time.Instant.now().plusSeconds(1));
+    }
+
+    @Test
     void existingConversationWithoutCustomTitleStillUsesMessagePreview() {
         ChatMemory memory = mock(ChatMemory.class);
         conversations = new DefaultUserConversation(jdbc, memory, mock(Cache.class));

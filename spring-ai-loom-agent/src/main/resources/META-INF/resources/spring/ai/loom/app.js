@@ -322,7 +322,12 @@ const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title }),
         });
-        return r.ok;
+        if (r.status === 403) {
+            // Cross-user rename rejection — surface a specific toast so the user
+            // understands this is a permissions failure, not a generic network drop.
+            return { ok: false, reason: 'forbidden' };
+        }
+        return { ok: r.ok };
     },
     async getConversationMessages(id) {
         const r = await apiFetch(API.getConversation(id));
@@ -1092,15 +1097,15 @@ const conversation = {
                 return;
             }
             completed = true;
-            const renamed = await api.renameConversation(id, title);
-            if (renamed) {
+            const result = await api.renameConversation(id, title);
+            if (result.ok) {
                 await this.loadList();
                 showToast('对话已重命名', 'success');
             } else {
                 input.remove();
                 text.style.removeProperty('display');
                 actions.style.removeProperty('display');
-                showToast('重命名失败', 'error');
+                showToast(result.reason === 'forbidden' ? '无权重命名该对话' : '重命名失败', 'error');
             }
         };
         input.addEventListener('click', (e) => e.stopPropagation());

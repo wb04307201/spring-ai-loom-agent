@@ -23,7 +23,11 @@ class SidebarFrontendContractTest {
         assertThat(source).contains("sidebar-item-rename");
         assertThat(source).contains("if (!state.conversationId) {\r\n            await conversation.createNew();");
         assertThat(source).contains("if (deleted)");
+        assertThat(source).contains("reason === 'forbidden'");
+        assertThat(source).contains("无权重命名该对话");
         assertThat(source).doesNotContain("else {\n                await conversation.createNew();");
         assertThat(source).doesNotContain("if (ok) {\n            if (state.conversationId === id)");
+        // Old contract: bare `return r.ok` for rename — replaced by structured {ok, reason}
+        assertThat(source).doesNotContain("async renameConversation(id, title) {\n        const r = await apiFetch(API.renameConversation(id), {\n            method: 'PATCH',\n            headers: { 'Content-Type': 'application/json' },\n            body: JSON.stringify({ title }),\n        });\n        return r.ok;\n    }");
     }
 }

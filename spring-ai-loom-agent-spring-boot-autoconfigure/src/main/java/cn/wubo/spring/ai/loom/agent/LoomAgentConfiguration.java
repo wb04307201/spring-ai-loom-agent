@@ -1515,7 +1515,11 @@ public class LoomAgentConfiguration {
                 if (updated == 0) {
                     log.warn("拒绝跨用户重命名对话: caller={}, conv={}",
                             UserContextHolder.getCurrentUser(), conversationId);
-                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(false);
+                    // Return a structured body so the frontend can distinguish a
+                    // cross-user 403 from a 500/network failure (the previous `body(false)`
+                    // shape was indistinguishable from a generic network drop).
+                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(
+                            java.util.Map.of("error", "forbidden", "code", 403));
                 }
                 return ServerResponse.ok().body(true);
             });

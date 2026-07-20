@@ -100,7 +100,18 @@ public class DefaultUserConversation implements IUserConversation {
         jdbcTemplate.update(
                 "insert into user_conversation (username, conversation_id, title) values (?, ?, ?)",
                 username, conversationId, normalizedTitle);
-        return new ConversationRecord(conversationId, normalizedTitle, Instant.now(), Instant.now());
+        // Read back the row so createdAt/updatedAt reflect the DB's CURRENT_TIMESTAMP
+        // (not this JVM's clock). Without this, an immediate listConversations() after
+        // create() could surface ordering/equality mismatches between in-memory and DB.
+        return jdbcTemplate.queryForObject(
+                "select conversation_id, title, created_at, updated_at " +
+                        "from user_conversation where username = ? and conversation_id = ?",
+                (rs, rowNum) -> new ConversationRecord(
+                        rs.getString("conversation_id"),
+                        rs.getString("title"),
+                        toInstant(rs.getTimestamp("created_at")),
+                        toInstant(rs.getTimestamp("updated_at"))),
+                username, conversationId);
     }
 
     @Override
