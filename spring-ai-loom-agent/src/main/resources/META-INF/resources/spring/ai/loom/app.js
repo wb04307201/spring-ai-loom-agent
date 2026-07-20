@@ -1430,6 +1430,11 @@ const knowledge = {
                 this.currentKbId = null;
                 document.getElementById('ks-detail').innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
             }
+            // BUG-KB-DELETE-ACTIVE: also clear the chat-bound KB if it matches,
+            // so the next message doesn't RAG-query a deleted KB.
+            if (state.selectedKnowledgeId === id) {
+                state.selectedKnowledgeId = null;
+            }
             this.loadList();
             showToast('知识库已删除', 'success');
         } else {
