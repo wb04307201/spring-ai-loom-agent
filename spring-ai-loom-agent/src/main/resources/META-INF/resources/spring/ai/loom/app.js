@@ -1547,6 +1547,7 @@ const subtaskPanel = {
     },
 
     _toolbarHTML(running, done, failed) {
+        const total = running + done + failed;
         return `
         <div class="console-bar">
             <div class="title">子任务<span class="sub">/ sub-task</span></div>
@@ -1556,7 +1557,9 @@ const subtaskPanel = {
             <span class="grow"></span>
             <input class="search" placeholder="搜 prompt / id…" />
             <button class="console-btn-ghost" data-filter>过滤</button>
-            <button class="console-btn-primary" data-new>${running + done + failed > 0 ? '+ 新建' : ''}${running + done + failed === 0 ? '新建子任务 ↗' : ''}</button>
+            ${total > 0
+                ? `<button class="console-btn-primary" data-new>+ 新建</button>`
+                : ''}
             <button class="console-close" data-close aria-label="收起"></button>
         </div>`;
     },
@@ -1887,7 +1890,9 @@ const schedulePanel = {
             <span class="grow"></span>
             <input class="search" placeholder="搜任务名…" />
             <button class="console-btn-ghost" data-filter>过滤</button>
-            <button class="console-btn-primary" data-new>${liveCount > 0 ? '+ 新建' : '新建定时任务 ↗'}</button>
+            ${liveCount > 0
+                ? `<button class="console-btn-primary" data-new>+ 新建</button>`
+                : ''}
             <button class="console-close" data-close aria-label="收起"></button>
         </div>`;
     },
