@@ -38,7 +38,8 @@ build/
 
 *.log
 /.claude/settings.local.json
-/.claude/test-screenshots/**/_*  # sensitive scratch files (_conv_ids.txt, _convs.json, etc.) — never commit
+/.claude/test-screenshots/  # ephemeral regression-test screenshots — kept locally, not in repo
+/.claude/worktrees/  # agent worktree clones — created on demand, removed after use
 /.playwright-mcp/
 /mcp/
 /.local/
