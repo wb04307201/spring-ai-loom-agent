@@ -25,3 +25,8 @@
 
 - [ ] (可访问性) 侧边栏: 1200px 以下折叠态只显示多个相同的“💬”图标，名称和操作按钮完全隐藏，屏幕阅读器/键盘用户难以辨别及管理会话；建议保留 `aria-label`/tooltip，并提供键盘可达的展开控件
 - [ ] (来源: Task 3) 文件附件 a11y: 用户附件条 `user-attach-thumb` / `user-attach-doc` 缺少 `alt` / `aria-label` 详细说明文件用途;建议加上 `aria-label="${fileName} (附件, 大小 ${size})"`
+- [x] (Task 4 修复) 知识库: 删除当前选中的知识库时只清理了 detail 面板的 `currentKbId`,没有清理 `state.selectedKnowledgeId`,下次聊天仍会把已删除 KB id 传给 RAG advisor → Task 4 commit 6851f94 修复
+- [ ] (来源: Task 4) 知识库: 上传时没有任何"向量化中 / 向量化完成"进度提示,大文件下用户会以为接口卡死;`uploadWithKnowledge` 已经是同步向量化的,但 UI 只在 200 后弹成功 toast;建议加进度条或阶段提示
+- [ ] (来源: Task 4) 知识库: 删除知识库时只删了 KB 行 + file_info 行 + 向量,KB 目录 `~/.loom/knowledge/{user}/{kbId}/` 留下空文件夹(`Files.deleteIfExists` 只删 file,没删父目录);建议在 `deleteAllKnowledge` 末尾 `Files.deleteIfExists(knowledgeDir)`,空目录自动清理
+- [ ] (来源: Task 4) 知识库: `state.selectedKnowledgeId` 不持久化,刷新页面后丢失,K radio 回到"不使用知识库";建议存到 `localStorage` 或后端会话上下文,刷新后自动恢复
+- [ ] (来源: Task 4) 知识库: 模态框左侧 KB 列表用 radio 单选,但 radio 的圆点视觉上跟旁边 × 删除按钮靠得很近(尤其在 KB 名称较长时),容易误点;建议加 `padding-right` 或把 radio 缩到 12px
