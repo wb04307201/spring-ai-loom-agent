@@ -794,11 +794,33 @@ const ui = {
             </div>`;
     },
 
-    renderUserMessage(text) {
+    renderUserMessage(text, attachments) {
         const item = document.createElement('div');
         item.className = 'chat-item chat-item-right';
+        let attachHtml = '';
+        if (attachments && attachments.length > 0) {
+            // Render a compact strip of attached files so the user can see
+            // what they actually sent (the AI gets fileIds on the wire, but
+            // without this strip the user bubble would only show the text).
+            attachHtml = '<div class="user-attachments">' + attachments.map(a => {
+                if (a.objectUrl) {
+                    return `<div class="user-attach-thumb" title="${escapeHtml(a.fileName)}">
+                        <img src="${a.objectUrl}" alt="${escapeHtml(a.fileName)}"/>
+                    </div>`;
+                }
+                // Document — reuse the doc-icon SVG the upload module already renders
+                const ext = '.' + (a.fileName || '').split('.').pop().toLowerCase();
+                const icons = (imageUpload && imageUpload.DOC_ICONS) || {};
+                const svg = icons[ext] || icons['.txt'] || '';
+                return `<div class="user-attach-doc" title="${escapeHtml(a.fileName)}">
+                    <div class="user-attach-doc-icon">${svg}</div>
+                    <div class="user-attach-doc-name">${escapeHtml(a.fileName)}</div>
+                </div>`;
+            }).join('') + '</div>';
+        }
+        const textHtml = text ? `<div style="margin: 16px">${renderMarkdown(text)}</div>` : '';
         item.innerHTML = `
-            <div class="bubble"><div style="margin: 16px">${renderMarkdown(text)}</div></div>
+            <div class="bubble">${attachHtml}${textHtml}</div>
             <div class="avatar"><img src="${userImage}" alt="用户"/></div>`;
         this.mainContent.appendChild(item);
         this.scrollToBottom();
@@ -1187,7 +1209,7 @@ const chat = {
             if (!state.conversationId) return;
         }
 
-        ui.renderUserMessage(text);
+        ui.renderUserMessage(text, state.pendingImages.slice());
         ui.disableSend();
 
         const id = Date.now();

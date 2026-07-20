@@ -375,6 +375,58 @@ body {
     border-top-right-radius: 4px;
 }
 
+/* User attachment strip — shown above the user message text so users can
+   visually confirm what they sent (image thumbnails or doc-icon chips). */
+.user-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px 0 16px;
+}
+.user-attach-thumb {
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+}
+.user-attach-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.user-attach-doc {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.12);
+    max-width: 200px;
+    min-width: 0;
+}
+.user-attach-doc-icon {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+}
+.user-attach-doc-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.user-attach-doc-name {
+    font-size: 12px;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
 .avatar {
     width: 40px;
     height: 40px;
