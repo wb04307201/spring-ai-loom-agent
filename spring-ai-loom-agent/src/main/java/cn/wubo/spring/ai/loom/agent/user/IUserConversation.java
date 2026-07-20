@@ -15,6 +15,12 @@ public interface IUserConversation {
 
     int insert(UserConversationRecord userConversationRecord);
 
+    /** 创建并持久化一个属于当前用户的空会话。 */
+    ConversationRecord create(String title);
+
+    /** 仅允许当前用户重命名自己的会话。 */
+    int rename(String conversationId, String title);
+
     /** 软删：设置 deleted_at = now()，不删除记录 */
     int deleteById(String conversationId);
 

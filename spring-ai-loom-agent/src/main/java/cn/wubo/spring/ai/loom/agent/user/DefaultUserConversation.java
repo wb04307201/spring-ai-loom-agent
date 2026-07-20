@@ -32,18 +32,21 @@ public class DefaultUserConversation implements IUserConversation {
     public List<ConversationRecord> getList() {
         String username = UserContextHolder.getCurrentUser();
         if (username == null) return List.of();
-        List<UserConversationRecord> userConversationRecords = jdbcTemplate.query(
-                "select * from user_conversation where username = ? and deleted_at is null",
-                this::mapUserConversationRecord,
-                username
-        );
-
-        List<ConversationRecord> conversations = new ArrayList<>();
-        for (UserConversationRecord userConversationRecord : userConversationRecords) {
-            String preview = buildPreview(userConversationRecord.conversationId());
-            conversations.add(new ConversationRecord(userConversationRecord.conversationId(), preview));
-        }
-        return conversations;
+        return jdbcTemplate.query(
+                "select conversation_id, title, created_at, updated_at " +
+                        "from user_conversation where username = ? and deleted_at is null " +
+                        "order by created_at desc, conversation_id desc",
+                (rs, rowNum) -> {
+                    String conversationId = rs.getString("conversation_id");
+                    String title = rs.getString("title");
+                    if (title == null || title.isBlank()) title = buildPreview(conversationId);
+                    return new ConversationRecord(
+                            conversationId,
+                            title,
+                            toInstant(rs.getTimestamp("created_at")),
+                            toInstant(rs.getTimestamp("updated_at")));
+                },
+                username);
     }
 
     private String buildPreview(String conversationId) {
@@ -86,6 +89,36 @@ public class DefaultUserConversation implements IUserConversation {
         return jdbcTemplate.update(
                 "insert into user_conversation (username, conversation_id) values (?, ?)",
                 userConversationRecord.username(), userConversationRecord.conversationId());
+    }
+
+    @Override
+    public ConversationRecord create(String title) {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null) throw new LoomAgentRuntimeException("未登录");
+        String normalizedTitle = normalizeTitle(title);
+        String conversationId = UUID.randomUUID().toString();
+        jdbcTemplate.update(
+                "insert into user_conversation (username, conversation_id, title) values (?, ?, ?)",
+                username, conversationId, normalizedTitle);
+        return new ConversationRecord(conversationId, normalizedTitle, Instant.now(), Instant.now());
+    }
+
+    @Override
+    public int rename(String conversationId, String title) {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null) return 0;
+        String normalizedTitle = normalizeTitle(title);
+        return jdbcTemplate.update(
+                "update user_conversation set title = ?, updated_at = current_timestamp " +
+                        "where username = ? and conversation_id = ? and deleted_at is null",
+                normalizedTitle, username, conversationId);
+    }
+
+    private static String normalizeTitle(String title) {
+        String normalized = title == null ? "" : title.trim();
+        if (normalized.isEmpty()) normalized = "新对话";
+        if (normalized.length() > 100) normalized = normalized.substring(0, 100);
+        return normalized;
     }
 
     @Override

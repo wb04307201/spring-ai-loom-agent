@@ -1502,6 +1502,23 @@ public class LoomAgentConfiguration {
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository> loomSubTaskHistoryRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/conversation", request -> ServerResponse.ok().body(userConversation.getList()));
+            builder.POST("spring/ai/loom/user-conversations", request -> {
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                String title = body == null ? null : java.util.Objects.toString(body.get("title"), null);
+                return ServerResponse.status(HttpStatus.CREATED).body(userConversation.create(title));
+            });
+            builder.PATCH("spring/ai/loom/user-conversations/{conversationId}", request -> {
+                String conversationId = request.pathVariable("conversationId");
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                String title = body == null ? null : java.util.Objects.toString(body.get("title"), null);
+                int updated = userConversation.rename(conversationId, title);
+                if (updated == 0) {
+                    log.warn("拒绝跨用户重命名对话: caller={}, conv={}",
+                            UserContextHolder.getCurrentUser(), conversationId);
+                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(false);
+                }
+                return ServerResponse.ok().body(true);
+            });
             builder.GET("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
                 String username = UserContextHolder.getCurrentUser();

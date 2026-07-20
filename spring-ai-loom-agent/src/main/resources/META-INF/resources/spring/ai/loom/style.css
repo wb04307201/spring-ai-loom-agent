@@ -218,6 +218,7 @@ body {
 
 .sidebar-item-text {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -225,9 +226,16 @@ body {
     color: var(--text-primary);
 }
 
+.sidebar-item-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.sidebar-item-rename,
 .sidebar-item-delete {
     opacity: 0;
-    padding: 4px 8px;
+    padding: 4px 6px;
     border: none;
     background: transparent;
     cursor: pointer;
@@ -237,12 +245,31 @@ body {
     border-radius: 4px;
 }
 
-.sidebar-item:hover .sidebar-item-delete {
+.sidebar-item:hover .sidebar-item-rename,
+.sidebar-item:hover .sidebar-item-delete,
+.sidebar-item:focus-within .sidebar-item-rename,
+.sidebar-item:focus-within .sidebar-item-delete {
     opacity: 1;
+}
+
+.sidebar-item-rename:hover {
+    color: var(--primary-color);
 }
 
 .sidebar-item-delete:hover {
     color: var(--error-color);
+}
+
+.sidebar-item-edit {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 7px;
+    border: 1px solid var(--primary-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    outline: none;
 }
 
 .sidebar-empty {
@@ -1455,8 +1482,8 @@ textarea::placeholder {
         font-size: 18px;
     }
 
-    .sidebar-item-delete {
-        opacity: 0;
+    .sidebar-item-actions {
+        display: none;
     }
 
     .new-chat-btn {
@@ -1486,6 +1513,10 @@ textarea::placeholder {
     .sidebar-item-text,
     .new-chat-btn span {
         display: block;
+    }
+
+    .sidebar-item-actions {
+        display: flex;
     }
 
     .sidebar-item::before {

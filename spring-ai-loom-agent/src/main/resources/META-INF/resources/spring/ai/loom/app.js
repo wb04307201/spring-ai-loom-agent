@@ -19,6 +19,8 @@ const API = {
     createUser: '/spring/ai/loom/admin/users',
     deleteUser: (username) => `/spring/ai/loom/admin/users/${encodeURIComponent(username)}`,
     listConversations: '/spring/ai/loom/conversation',
+    createConversation: '/spring/ai/loom/user-conversations',
+    renameConversation: (id) => `/spring/ai/loom/user-conversations/${id}`,
     getConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     deleteConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     stream: '/spring/ai/loom/stream',
@@ -305,6 +307,22 @@ const api = {
         const r = await apiFetch(API.listConversations);
         if (!r.ok) { try { await r.text(); } catch (_) {} return []; }
         try { return await r.json(); } catch (_) { return []; }
+    },
+    async createConversation(title = '新对话') {
+        const r = await apiFetch(API.createConversation, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+        return r.ok ? r.json() : null;
+    },
+    async renameConversation(id, title) {
+        const r = await apiFetch(API.renameConversation(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+        return r.ok;
     },
     async getConversationMessages(id) {
         const r = await apiFetch(API.getConversation(id));
@@ -974,19 +992,41 @@ const conversation = {
         }
         container.innerHTML = '';
         for (const item of list) {
-            const id = item.conversationId || item.id || item.id;
+            const id = item.conversationId || item.id;
             const title = item.title || truncateText(item.name || '新对话', API.titleMaxLength);
             const div = document.createElement('div');
             div.className = 'sidebar-item' + (state.conversationId === id ? ' active' : '');
-            div.innerHTML = `
-                <span class="sidebar-item-text" title="${title}">${title}</span>
-                <button class="sidebar-item-delete" title="删除对话">&times;</button>`;
-            // Listen on parent .sidebar-item so it works in both full-width and collapsed (icon-only) modes
+            div.dataset.conversationId = id;
+
+            const text = document.createElement('span');
+            text.className = 'sidebar-item-text';
+            text.title = title;
+            text.textContent = title;
+
+            const actions = document.createElement('span');
+            actions.className = 'sidebar-item-actions';
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'sidebar-item-rename';
+            renameBtn.title = '重命名对话';
+            renameBtn.setAttribute('aria-label', '重命名对话');
+            renameBtn.textContent = '✎';
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'sidebar-item-delete';
+            deleteBtn.title = '删除对话';
+            deleteBtn.setAttribute('aria-label', '删除对话');
+            deleteBtn.innerHTML = '&times;';
+            actions.append(renameBtn, deleteBtn);
+            div.append(text, actions);
+
             div.addEventListener('click', (e) => {
-                if (e.target.classList.contains('sidebar-item-delete')) return;
+                if (e.target.closest('.sidebar-item-actions') || e.target.classList.contains('sidebar-item-edit')) return;
                 this.switchTo(id);
             });
-            div.querySelector('.sidebar-item-delete').addEventListener('click', (e) => {
+            renameBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.startRename(div, id, title);
+            });
+            deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.delete(id);
             });
@@ -994,20 +1034,81 @@ const conversation = {
         }
     },
 
-    createNew() {
+    async createNew() {
         if (state.isStreaming) {
             showToast('请等待 AI 回复完成', 'warning');
             return;
         }
-        state.conversationId = crypto.randomUUID();
+        const created = await api.createConversation('新对话');
+        if (!created) {
+            showToast('新建对话失败', 'error');
+            return;
+        }
+        state.conversationId = created.conversationId || created.id;
         ui.clearChat();
         imageUpload.clear();
-        // refresh sidebar highlight
-        this.loadList();
+        await this.loadList();
         // Notify panels of the conversation switch so an open sub-task or
         // schedule modal can re-fetch the per-conversation list.
         try { subtaskPanel.setConvId(state.conversationId); } catch (_) {}
         try { schedulePanel.setConvId(state.conversationId); } catch (_) {}
+    },
+
+    startRename(div, id, currentTitle) {
+        if (state.isStreaming) {
+            showToast('请等待 AI 回复完成', 'warning');
+            return;
+        }
+        const text = div.querySelector('.sidebar-item-text');
+        const actions = div.querySelector('.sidebar-item-actions');
+        if (!text || !actions || div.querySelector('.sidebar-item-edit')) return;
+        text.style.display = 'none';
+        actions.style.display = 'none';
+
+        const input = document.createElement('input');
+        input.className = 'sidebar-item-edit';
+        input.type = 'text';
+        input.maxLength = 100;
+        input.value = currentTitle;
+        input.setAttribute('aria-label', '对话名称');
+        div.insertBefore(input, text);
+        input.focus();
+        input.select();
+
+        let completed = false;
+        const cancel = () => {
+            if (completed) return;
+            completed = true;
+            input.remove();
+            text.style.removeProperty('display');
+            actions.style.removeProperty('display');
+        };
+        const save = async () => {
+            if (completed) return;
+            const title = input.value.trim();
+            if (!title) {
+                showToast('对话名称不能为空', 'warning');
+                input.focus();
+                return;
+            }
+            completed = true;
+            const renamed = await api.renameConversation(id, title);
+            if (renamed) {
+                await this.loadList();
+                showToast('对话已重命名', 'success');
+            } else {
+                input.remove();
+                text.style.removeProperty('display');
+                actions.style.removeProperty('display');
+                showToast('重命名失败', 'error');
+            }
+        };
+        input.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        });
+        input.addEventListener('blur', () => { if (!completed) cancel(); });
     },
 
     async switchTo(id) {
@@ -1040,11 +1141,21 @@ const conversation = {
         });
         if (!ok) return;
         const deleted = await api.deleteConversation(id);
-        if (ok) {
+        if (deleted) {
             if (state.conversationId === id) {
-                this.createNew();
+                const remaining = (await api.listConversations()).filter(item =>
+                    (item.conversationId || item.id) !== id);
+                if (remaining.length > 0) {
+                    await this.switchTo(remaining[0].conversationId || remaining[0].id);
+                } else {
+                    state.conversationId = null;
+                    ui.clearChat();
+                    imageUpload.clear();
+                    try { subtaskPanel.setConvId(null); } catch (_) {}
+                    try { schedulePanel.setConvId(null); } catch (_) {}
+                }
             }
-            this.loadList();
+            await this.loadList();
             showToast('对话已删除', 'success');
         } else {
             showToast('删除失败', 'error');
@@ -1064,6 +1175,11 @@ const chat = {
         if (!text && !state.isStreaming) {
             showToast('请输入消息内容', 'error');
             return;
+        }
+
+        if (!state.conversationId) {
+            await conversation.createNew();
+            if (!state.conversationId) return;
         }
 
         ui.renderUserMessage(text);
@@ -3095,15 +3211,8 @@ const init = async () => {
         console.warn('[init] conversation.loadList failed, continuing:', e);
     }
 
-    // Create initial conversation if none. Use try/catch so a render failure
-    // does not leave state.conversationId = null (which causes /stream to 500).
-    if (!state.conversationId) {
-        try {
-            conversation.createNew();
-        } catch (e) {
-            console.warn('[init] conversation.createNew failed, continuing:', e);
-        }
-    }
+    // Keep the initial canvas empty so users explicitly create the first persisted conversation.
+    // chat.send() below provides a defensive fallback for Enter/send calls without a current id.
 };
 
 const bindAllEvents = () => {
