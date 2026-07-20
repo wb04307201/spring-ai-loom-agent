@@ -30,3 +30,6 @@
 - [ ] (来源: Task 4) 知识库: 删除知识库时只删了 KB 行 + file_info 行 + 向量,KB 目录 `~/.loom/knowledge/{user}/{kbId}/` 留下空文件夹(`Files.deleteIfExists` 只删 file,没删父目录);建议在 `deleteAllKnowledge` 末尾 `Files.deleteIfExists(knowledgeDir)`,空目录自动清理
 - [ ] (来源: Task 4) 知识库: `state.selectedKnowledgeId` 不持久化,刷新页面后丢失,K radio 回到"不使用知识库";建议存到 `localStorage` 或后端会话上下文,刷新后自动恢复
 - [ ] (来源: Task 4) 知识库: 模态框左侧 KB 列表用 radio 单选,但 radio 的圆点视觉上跟旁边 × 删除按钮靠得很近(尤其在 KB 名称较长时),容易误点;建议加 `padding-right` 或把 radio 缩到 12px
+- [ ] (Task 5 已修复) MCP: 模态框 checkbox 切换只更新内存 `state.selectedMcps`,`mcp.loadList()` 每次重置为 `defaultSelected` 默认值,刷新页面后用户的选择全部丢失 → Task 5 commit 6a964ac 修复: 引入 `STORAGE_KEY='loom.mcp.selectedNames'`,`toggleSelect` 后立即持久化,`loadList()` 优先读 localStorage,并过滤掉已删除的服务
+- [ ] (来源: Task 5) MCP: 服务列表 5 个 MCP 服务(`/mcps` 返回值) `defaultSelected` 全部为 `true`(没有任何可取消的默认项),造成"全部勾选 vs 默认勾选"无差别;建议至少 1-2 个默认关(如 `memory` / `sequential-thinking` 这类高级工具),让用户首次打开能感受到"勾选 vs 取消"的实际效果
+- [ ] (来源: Task 5) MCP: 详情面板的"包含工具"列表只展示工具名 + 描述,但工具是否被勾选(受 MCP 服务级 checkbox 控制,所有工具都被一起勾/取消)没有可视化指示;如果未来支持工具级粒度勾选,需要单独渲染每个工具的 checkbox;目前是服务级粒度,UI 文案可以加一行提示"该服务下所有工具会作为一个整体被启用/禁用"
