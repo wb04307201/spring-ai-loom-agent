@@ -2231,7 +2231,6 @@ const schedulePanel = {
      * will break — see TODO below).
      */
     // TODO: tighten DefaultUser.createUser to reject dashes in username, or refactor _shortName to iterate past additional dashes until 36 UUID chars consumed
-    // TODO: tighten DefaultUser.createUser to reject dashes in username, or refactor _shortName to iterate past additional dashes until 36 UUID chars consumed
     _shortName(full) {
         const f = full || '';
         const prefix = 'loom-sched-';
