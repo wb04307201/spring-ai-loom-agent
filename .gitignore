@@ -38,6 +38,7 @@ build/
 
 *.log
 /.claude/settings.local.json
+/.claude/test-screenshots/**/_*  # sensitive scratch files (_conv_ids.txt, _convs.json, etc.) — never commit
 /.playwright-mcp/
 /mcp/
 /.local/
