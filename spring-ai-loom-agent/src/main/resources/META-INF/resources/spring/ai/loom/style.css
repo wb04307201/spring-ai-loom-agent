@@ -2254,3 +2254,385 @@ textarea::placeholder {
     .console-detail { animation: none; }
     .modal-overlay.console-host .modal-content.operations-modal { animation: none; }
 }
+
+
+/* =====================================================================
+   DIRECTION A — same-family override
+   Replace the cold-slate operations-console palette with a cream/indigo
+   variant that lives inside the main app's color family. The modal reads
+   as "a deeper panel of the same product" instead of "an entirely
+   different product".
+   ===================================================================== */
+
+/* Overlay backdrop — softer dim instead of near-black */
+.modal-overlay.console-host { background: rgba(15, 23, 42, 0.32); backdrop-filter: blur(2px); }
+
+/* Modal container — cream surface, dark text, light border */
+.modal-overlay.console-host .modal-content.operations-modal {
+    background: #FFFFFF;
+    color: #1E293B;
+    border: 1px solid #E2E8F0;
+    border-radius: 14px;
+    width: 92%;
+    max-width: 1080px;
+    max-height: 84vh;
+    box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.10),
+                0 30px 60px -30px rgba(15, 23, 42, 0.18);
+    overflow: hidden;
+    font-size: 13.5px;
+    animation: consoleSlideUp 0.18s ease-out;
+}
+
+@keyframes consoleSlideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Top bar — same family as main app toolbar, with subtitle */
+.modal-overlay.console-host .console-bar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    padding: 14px 22px;
+}
+.modal-overlay.console-host .console-bar .title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1E293B;
+}
+.modal-overlay.console-host .console-bar .sub {
+    color: #94A3B8;
+    font-size: 12.5px;
+    margin-left: 4px;
+}
+.modal-overlay.console-host .console-bar .grow { flex: 1; min-width: 12px; }
+
+/* Search input — main app input style, indigo focus ring */
+.modal-overlay.console-host .console-bar input.search {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    color: #1E293B;
+    border-radius: 7px;
+    height: 32px;
+    width: 200px;
+    max-width: 240px;
+    flex: 1 1 auto;
+    padding: 0 12px 0 32px;
+    font-size: 13px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 120ms, box-shadow 120ms;
+}
+.modal-overlay.console-host .console-bar input.search:focus {
+    border-color: #6366F1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.10);
+}
+
+/* Status pills — light tint background, status color on text + dot */
+.modal-overlay.console-host .console-pill {
+    background: #F8FAFC;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 4px 12px 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #1E293B;
+    box-shadow: none;
+}
+.modal-overlay.console-host .console-pill .dot {
+    width: 7px; height: 7px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: none;
+}
+.modal-overlay.console-host .console-pill .num {
+    color: #1E293B;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    margin-left: 2px;
+}
+.modal-overlay.console-host .console-pill.running {
+    color: #0891B2;
+    background: rgba(8, 145, 178, 0.10);
+}
+.modal-overlay.console-host .console-pill.failed {
+    color: #DC2626;
+    background: rgba(220, 38, 38, 0.10);
+}
+.modal-overlay.console-host .console-pill.done {
+    color: #059669;
+    background: rgba(5, 150, 105, 0.10);
+}
+
+/* Buttons — main app's primary indigo + a light ghost variant */
+.modal-overlay.console-host .console-btn-primary {
+    background: #6366F1;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-weight: 500;
+    transition: background 120ms;
+}
+.modal-overlay.console-host .console-btn-primary:hover { background: #4F46E5; }
+.modal-overlay.console-host .console-btn-primary:disabled {
+    background: #C7D2FE;
+    color: #FFFFFF;
+    cursor: not-allowed;
+}
+.modal-overlay.console-host .console-btn-ghost {
+    background: #FFFFFF;
+    color: #64748B;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
+    padding: 7px 12px;
+}
+.modal-overlay.console-host .console-btn-ghost:hover {
+    color: #1E293B;
+    border-color: #CBD5E1;
+}
+
+/* Closable chevron — same shape, lighter chrome */
+.modal-overlay.console-host .console-close {
+    background: #FFFFFF;
+    color: #64748B;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
+    width: 32px; height: 32px;
+}
+.modal-overlay.console-host .console-close:hover {
+    color: #1E293B;
+    border-color: #CBD5E1;
+    background: #F8FAFC;
+}
+
+/* Body */
+.modal-overlay.console-host .console-panel-body {
+    background: #FFFFFF;
+    overflow: hidden;
+}
+.modal-overlay.console-host .console-body {
+    padding: 16px 22px 22px;
+    background: #FFFFFF;
+    overflow: auto;
+}
+.modal-overlay.console-host .console-skeleton {
+    background: transparent;
+    padding: 24px 0;
+}
+.modal-overlay.console-host .console-skeleton .skel {
+    background: linear-gradient(90deg, #F1F5F9 0%, #E2E8F0 50%, #F1F5F9 100%);
+    border: none;
+}
+
+/* Section label — uppercase tracking, paired with a chip count */
+.modal-overlay.console-host .console-section-label {
+    color: #64748B;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    font-weight: 600;
+}
+.modal-overlay.console-host .console-section-label .count {
+    color: #94A3B8;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+}
+
+/* Cards — white surface, light border, 4px colored rail, indigo hover lift */
+.modal-overlay.console-host .console-card {
+    display: grid;
+    grid-template-columns: 4px 1fr 124px 88px 96px;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px 12px 0;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    background: #FFFFFF;
+    transition: border-color 120ms, box-shadow 120ms;
+}
+.modal-overlay.console-host .console-card:hover {
+    border-color: #CBD5E1;
+    box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.06);
+}
+.modal-overlay.console-host .console-card .stripe {
+    background: #94A3B8;  /* idle default */
+}
+.modal-overlay.console-host .console-card.status-running .stripe { background: #0891B2; }
+.modal-overlay.console-host .console-card.status-done    .stripe { background: #059669; }
+.modal-overlay.console-host .console-card.status-failed  .stripe { background: #DC2626; }
+.modal-overlay.console-host .console-card.status-cancel  .stripe { background: #D97706; }
+
+.modal-overlay.console-host .console-card .prompt-cell { padding-left: 14px; min-width: 0; }
+.modal-overlay.console-host .console-card .prompt {
+    color: #1E293B;
+    font-size: 13.5px;
+    line-height: 1.5;
+    font-weight: 400;
+}
+.modal-overlay.console-host .console-card .meta {
+    color: #94A3B8;
+    font-size: 11.5px;
+    margin-top: 4px;
+    gap: 6px;
+}
+.modal-overlay.console-host .console-card .meta .id {
+    color: #64748B;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+}
+.modal-overlay.console-host .console-card .meta .err {
+    color: #DC2626;
+    background: rgba(220, 38, 38, 0.06);
+    border: 1px solid rgba(220, 38, 38, 0.18);
+    padding: 0 6px;
+    border-radius: 3px;
+}
+
+/* Status badge — text-only, color from currentColor */
+.modal-overlay.console-host .console-status {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    gap: 5px;
+}
+.modal-overlay.console-host .console-status .dot {
+    width: 7px; height: 7px;
+    background: currentColor;
+    box-shadow: none;
+}
+.modal-overlay.console-host .console-card.status-running .console-status { color: #0891B2; }
+.modal-overlay.console-host .console-card.status-done    .console-status { color: #059669; }
+.modal-overlay.console-host .console-card.status-failed  .console-status { color: #DC2626; }
+.modal-overlay.console-host .console-card.status-cancel  .console-status { color: #D97706; }
+
+/* Pulse on running rows — 1.6s breathing dot */
+@keyframes pillPulse {
+    0%, 100% { transform: scale(1);   opacity: 0.65; }
+    50%      { transform: scale(1.3); opacity: 1; }
+}
+.modal-overlay.console-host .console-card.status-running .console-status .dot {
+    animation: pillPulse 1.6s ease-in-out infinite;
+    box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.10);
+}
+.modal-overlay.console-host .console-card.schedule-row .console-status .glyph::before {
+    content: '●';
+}
+
+/* Elapsed column — monospace, indigo on running */
+.modal-overlay.console-host .console-elapsed {
+    color: #64748B;
+    text-align: right;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12.5px;
+}
+.modal-overlay.console-host .console-card.status-running .console-elapsed {
+    color: #0891B2;
+    font-weight: 600;
+}
+
+/* Action buttons — light variant, danger uses red wash */
+.modal-overlay.console-host .console-icon-btn {
+    background: #FFFFFF;
+    color: #64748B;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    width: 28px; height: 28px;
+}
+.modal-overlay.console-host .console-icon-btn:hover {
+    color: #1E293B;
+    border-color: #CBD5E1;
+    background: #F8FAFC;
+}
+.modal-overlay.console-host .console-icon-btn.danger {
+    color: #DC2626;
+    background: rgba(220, 38, 38, 0.04);
+    border-color: rgba(220, 38, 38, 0.30);
+}
+.modal-overlay.console-host .console-icon-btn.danger:hover {
+    background: rgba(220, 38, 38, 0.10);
+    border-color: rgba(220, 38, 38, 0.45);
+}
+
+/* Schedule row metadata — cadence and stats stacked */
+.modal-overlay.console-host .console-card.schedule-row .meta {
+    gap: 2px;
+}
+.modal-overlay.console-host .console-card.schedule-row .meta .cadence {
+    color: #64748B;
+    font-size: 12px;
+}
+.modal-overlay.console-host .console-card.schedule-row .meta .stats {
+    color: #94A3B8;
+    font-size: 11px;
+}
+.modal-overlay.console-host .console-card.schedule-row .meta .stats .next {
+    color: #0891B2;
+}
+
+/* Section divider — 1px hairline between sections (replaces
+   whitespace-only separation in v4) */
+.modal-overlay.console-host .console-section + .console-section {
+    padding-top: 18px;
+    border-top: 1px solid #F1F5F9;
+    margin-top: 18px;
+}
+
+/* Empty state — softer than dark variant. Icon is a tint, not a glow;
+   entire body gets a faint indigo wash (Direction A tweak #2). */
+.modal-overlay.console-host .console-empty {
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.04) 0%, rgba(99, 102, 241, 0) 60%);
+    padding: 48px 24px 56px;
+}
+.modal-overlay.console-host .console-empty .glyph {
+    background: rgba(99, 102, 241, 0.10);
+    color: #6366F1;
+    border: 1px solid rgba(99, 102, 241, 0.20);
+    border-radius: 14px;
+    width: 56px; height: 56px;
+}
+.modal-overlay.console-host .console-empty .glyph.sched-glyph {
+    background: rgba(8, 145, 178, 0.10);
+    color: #0891B2;
+    border-color: rgba(8, 145, 178, 0.20);
+}
+.modal-overlay.console-host .console-empty h4 {
+    color: #1E293B;
+    font-size: 16px;
+    font-weight: 600;
+}
+.modal-overlay.console-host .console-empty p {
+    color: #64748B;
+    font-size: 13px;
+}
+.modal-overlay.console-host .console-empty .composer {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 4px 4px 4px 14px;
+}
+.modal-overlay.console-host .console-empty .composer:focus-within {
+    border-color: #6366F1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.10);
+}
+.modal-overlay.console-host .console-empty .composer input { color: #1E293B; }
+.modal-overlay.console-host .console-empty .composer input::placeholder { color: #94A3B8; }
+.modal-overlay.console-host .console-empty .micro-hint code {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    color: #64748B;
+}
+
+/* Detail pane (when a row is expanded) — light variant */
+.modal-overlay.console-host .console-detail {
+    background: #F8FAFC;
+    border-color: #E2E8F0;
+}
+.modal-overlay.console-host .console-detail h6 { color: #64748B; }
+.modal-overlay.console-host .console-detail pre { color: #475569; }
+.modal-overlay.console-host .console-detail .exec-row { color: #64748B; }
+.modal-overlay.console-host .console-detail .exec-row .err { color: #DC2626; }
+.modal-overlay.console-host .console-detail .left { border-color: #E2E8F0; }
+
+@media (prefers-reduced-motion: reduce) {
+    .modal-overlay.console-host .modal-content.operations-modal { animation: none; }
+    .modal-overlay.console-host .console-card.status-running .console-status .dot { animation: none; }
+}
