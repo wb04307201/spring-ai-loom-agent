@@ -491,6 +491,10 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/schedule/history/by-conversation/' + encodeURIComponent(convId));
         return r.ok ? r.json() : [];
     },
+    async scheduleLimits() {
+        const r = await apiFetch('/spring/ai/loom/schedule/limits');
+        return r.ok ? r.json() : {};
+    },
     async cancelAllSchedulesByConversation(convId) {
         const r = await apiFetch('/spring/ai/loom/schedule/by-conversation/' + encodeURIComponent(convId) + '/cancel-all', {
             method: 'POST',
@@ -1995,12 +1999,30 @@ const schedulePanel = {
     async refresh() {
         const convId = this._currentConvId || this._resolveConvId();
         this._currentConvId = convId;
+        await this._ensureLimits();
         if (!convId) {
             this._renderEmpty('请先打开一个对话');
             return;
         }
         const tasks = await api.scheduleByConversation(convId);
         this.render(tasks || [], convId);
+    },
+
+    async _ensureLimits() {
+        if (this._limits) return this._limits;
+        try { this._limits = await api.scheduleLimits(); } catch (_) { this._limits = {}; }
+        return this._limits;
+    },
+
+    _limitsHintHTML() {
+        const L = this._limits || {};
+        if (L.enforcing === false) {
+            return `<div class="micro-hint">触发限制未启用</div>`;
+        }
+        const min = L.minInterval ? `最小间隔 <code>${escapeHtml(String(L.minInterval))}</code>` : '';
+        const max = L.maxLifetime ? `最长存活 <code>${escapeHtml(String(L.maxLifetime))}</code>` : '';
+        const parts = [min, max].filter(Boolean).join(' · ');
+        return parts ? `<div class="micro-hint">${parts}</div>` : '';
     },
 
     _renderEmpty(msg) {
@@ -2023,7 +2045,7 @@ const schedulePanel = {
                         <input data-composer placeholder="「例如:每周一早上 9 点生成上周工作摘要」" />
                         <button class="console-btn-primary" data-composer-submit style="height:32px;">新建定时任务 ↗</button>
                     </div>
-                    <div class="micro-hint">最小间隔 <code>5s</code> · 最长存活 <code>72h</code></div>
+                    ${this._limitsHintHTML()}
                 </div>
             </div>`;
         this._wireToolbar(body);

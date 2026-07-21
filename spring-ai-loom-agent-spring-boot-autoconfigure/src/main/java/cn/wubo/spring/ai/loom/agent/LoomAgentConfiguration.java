@@ -893,8 +893,24 @@ public class LoomAgentConfiguration {
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+                ObjectProvider<cn.wubo.flex.schedule.core.TaskLimits> taskLimitsProvider,
                 cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
             RouterFunctions.Builder builder = RouterFunctions.route();
+            // Expose the configured trigger limits so the UI hint reflects the
+            // actual flex.schedule.limits.* instead of a hardcoded guess. Returns
+            // {enforcing, minInterval, maxLifetime, mode} with durations formatted
+            // compactly (e.g. "10m", "72h"); null when a limit is unset/disabled.
+            builder.GET("spring/ai/loom/schedule/limits", request -> {
+                cn.wubo.flex.schedule.core.TaskLimits limits = taskLimitsProvider.getIfAvailable();
+                java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+                boolean enforcing = limits != null && limits.isEnforcing();
+                body.put("enforcing", enforcing);
+                body.put("minInterval", enforcing ? formatScheduleDuration(limits.minInterval()) : null);
+                body.put("maxLifetime", (limits != null && limits.hasMaxLifetime())
+                        ? formatScheduleDuration(limits.maxLifetime()) : null);
+                body.put("mode", limits != null && limits.mode() != null ? limits.mode().toString() : null);
+                return ServerResponse.ok().body(body);
+            });
             // Structured list for the UI: this user's tasks only (TaskInfo{taskName,taskType,schedule}).
             // Optional ?conversationId= filter so the per-conversation schedule modal
             // can show just THIS conversation's currently-running tasks without
@@ -1215,6 +1231,22 @@ public class LoomAgentConfiguration {
             log.warn("取消定时任务时删除持久化行失败: name={}", fullName, e);
         }
         return true;
+    }
+
+    /**
+     * Formats a schedule limit {@link java.time.Duration} into the compact form
+     * the UI hint shows ("5s" / "10m" / "72h" / "1d"). Returns {@code null} for a
+     * null / zero / negative duration so the endpoint can omit an unset limit.
+     */
+    static String formatScheduleDuration(java.time.Duration d) {
+        if (d == null || d.isZero() || d.isNegative()) {
+            return null;
+        }
+        long s = d.getSeconds();
+        if (s % 86400 == 0) return (s / 86400) + "d";
+        if (s % 3600 == 0) return (s / 3600) + "h";
+        if (s % 60 == 0) return (s / 60) + "m";
+        return s + "s";
     }
 
     @Configuration
