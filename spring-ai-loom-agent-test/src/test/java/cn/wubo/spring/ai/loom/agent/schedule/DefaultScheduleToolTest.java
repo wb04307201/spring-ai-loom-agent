@@ -66,9 +66,24 @@ class DefaultScheduleToolTest {
 
     @Test
     void cancelScheduleCallsCancelOnNamespacedName() {
+        // BUG-13: cancelSchedule now verifies the row is owned by the caller
+        // (toolContext username) before firing flexService.cancel. Stub the
+        // repo so findByName returns a row owned by "alice"; otherwise the
+        // ownership guard short-circuits and cancel is never invoked.
+        String full = "loom-sched-alice-conv-1-remind";
+        when(repo.findByName(full)).thenReturn(java.util.Optional.of(ownedRow(full, "alice", "conv-1")));
         ToolContext ctx = new ToolContext(Map.of("username", "alice", "parentConversationId", "conv-1"));
         tool.cancelSchedule("remind", ctx);
-        verify(flexService).cancel("loom-sched-alice-conv-1-remind");
+        verify(flexService).cancel(full);
+    }
+
+    /** Minimal owned schedule row for BUG-13 ownership-guard tests. */
+    private static LoomScheduleTriggerRecord ownedRow(String taskName, String username, String convId) {
+        return new LoomScheduleTriggerRecord(
+                taskName, LoomScheduleTriggerRecord.TYPE_FIXED_DELAY,
+                null, 600L, null, null, "say hi",
+                username, convId, false,
+                java.time.Instant.EPOCH, java.time.Instant.EPOCH);
     }
 
     @Test

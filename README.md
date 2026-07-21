@@ -35,8 +35,9 @@
   - **Usage Statistics** — monthly Token usage for all users, filterable by year / month
   - Unauthenticated access 302-redirects to login. All admin paths require `user_info.type = ADMIN`.
 - **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
+- **Sub-tasks & Scheduled Tasks** — The main conversation can delegate a slice of work to a "sub-model" that runs synchronously (`start_sub_task`; sub-tasks cannot spawn further sub-tasks/schedules, preventing recursion). The LLM can also create/cancel/list/get-history of scheduled tasks that run as sub-tasks when they fire. Schedules persist to H2 (`loom_scheduled_task`, added in `V2.0`) and are restored on restart preserving the original `createdAt` so `max-lifetime` accumulates across restarts. Both are enabled by default (`subtask.enabled` / `schedule.enabled`); the chat toolbar includes 🧩 Sub-tasks / ⏰ Schedule panels.
 - **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
-- **Built-in Tools** — Time, file, skill, git, maven, and the end-to-end deploy tool. Time/file/skill/compile are enabled by default; git/maven are opt-in. See [TOOLS.md](docs/TOOLS.md) for all `@Tool` method signatures, defaults, and configuration.
+- **Built-in Tools** — Time, file, skill, sub-task, schedule, git, maven, and the end-to-end deploy tool. Time/file/skill/sub-task/schedule/compile are enabled by default; git/maven are opt-in. See [TOOLS.md](docs/TOOLS.md) for all `@Tool` method signatures, defaults, and configuration.
 - **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations (dual-version: library `V1.0` + app module `V1.1` sharing the standard `flyway_schema_history`), broad support for chat/embedding/vector store backends
 
 ## Built-in Tools
@@ -48,6 +49,8 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
 | File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
 | Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
+| Sub-task | `ISubTaskTool` | 1 | ✅ enabled | `subtask.enabled` |
+| Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
 | Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |

@@ -34,8 +34,9 @@
   - **用量统计** — 所有用户月度 Token 用量，按年 / 月筛选
   - 未登录访问 302 重定向到 login。所有 admin 路径都要求 `user_info.type = ADMIN`。
 - **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
+- **子任务 & 定时任务** — 主对话可把一段任务委派给"子模型"同步执行（`start_sub_task`，子任务内不能再起子任务/定时以防递归）；LLM 亦可创建/取消/列出/查历史定时任务，触发时以子任务方式运行。定时任务持久化到 H2（`loom_scheduled_task`，V2.0 新增），并在重启时按原 `createdAt` 恢复，`max-lifetime` 跨重启累计。两者默认启用（`subtask.enabled` / `schedule.enabled`），聊天工具栏含 🧩 子任务 / ⏰ 定时 面板。
 - **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
-- **内置工具** — 时间、文件、技能、Git、Maven 及端到端部署工具。时间/文件/技能/部署默认启用，Git/Maven 需 opt-in 开启。详细方法签名、默认值、配置见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
+- **内置工具** — 时间、文件、技能、子任务、定时、Git、Maven 及端到端部署工具。时间/文件/技能/子任务/定时/部署默认启用，Git/Maven 需 opt-in 开启。详细方法签名、默认值、配置见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
 - **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移（双版本：库 `V1.0` + 应用模块 `V1.1`，共用 Spring Boot 默认的 `flyway_schema_history`），广泛支持多种聊天/嵌入/向量存储后端
 
 ## 内置工具
@@ -47,6 +48,8 @@
 | 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
 | 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
 | 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
+| 子任务 | `ISubTaskTool` | 1 | ✅ 启用 | `subtask.enabled` |
+| 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
 | 编译部署 | `ICompileAndDeployTool` | 1 | ✅ 启用 | `compile.enabled` |

@@ -67,7 +67,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 | `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call()`; tools filtered to exclude self-tools (no `ISubTaskTool`/`IScheduleTool`) to prevent recursion. Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` — 主对话把一段任务委派给"子模型"同步执行，拿到最终文本。默认 enabled (`subtask.enabled=true`) |
-| `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
+| `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，V2.0 增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
 
@@ -96,9 +96,11 @@ Organized into 7 nested static `@Configuration` classes:
 ### Data Layer
 
 - **Schema** (库自带的 schema + admin seed)：
-  - 库 `src/main/resources/db/migration/V1.0__init.sql` — 建表（knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp）+ 默认 admin 账号
+  - 库 `src/main/resources/db/migration/V1.0__init.sql` — 基础建表（knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp）+ 默认 admin 账号。**保持稳定,不再改动**
+  - 库 `src/main/resources/db/migration/V2.0__subtask_and_schedule.sql` — **V2.0 增量**（把历史 V12~V17 合并成一个文件）：新增 `loom_scheduled_task` / `loom_schedule_execution` / `loom_subtask_history`，给 `user_conversation` 追加侧边栏三列 title/created_at/updated_at，`SPRING_AI_CHAT_MEMORY.conversation_id` 加宽到 255（子任务命名空间 id 需要）。旧 `flex_scheduled_task`（V12）已删——flex-schedule 1.x 纯内存、无 JdbcTaskRepository、零引用（保留一条防御性 `DROP IF EXISTS` 清理残留）
   - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据：12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill
-  - 两套 Flyway 用小数版本号（V1.0 / V1.1）在同一 Flyway 实例里按字典序执行
+  - Flyway 用版本号在同一实例里按序执行：`V1.0`(基础) → `V1.1`(业务数据) → `V2.0`(子任务/定时增量)
+  - **升级注意**：全新库按上述顺序干净跑通。已跑过旧 V12~V17 的历史库无法就地迁移到 V2.0（旧版本号已从磁盘移除）——需全新库或 `flyway baseline`；本地开发 `rm -rf ~/.loom/datasource` 即可重跑
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
 - **Flyway table**: `flyway_schema_history`（Spring Boot 默认，库不覆盖）
 
@@ -133,7 +135,7 @@ All under `spring.ai.loom.agent`:
 - `git` — `enabled` (boolean, default **false** — opt-in), `username` / `token` for remote git authentication. Top-level `gitUsername` / `gitToken` are kept for backward compatibility
 - `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
 - `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)
-- `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
+- `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (V2.0 增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
 - `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative）
 - `knowledgeBasePath` — 知识库文件存储根目录，默认 `${user.home}/.loom/knowledge`
 - `datasourceDir` — H2 文件存储目录，默认 `${user.home}/.loom/datasource`（在 `application.yml` 的 `spring.datasource.url` 里通过 `${user.home}/.loom/datasource/db` 拼接）

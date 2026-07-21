@@ -19,19 +19,23 @@
   - [8.3 Base-image Templates (built-in)](#83-base-image-templates-built-in)
   - [8.4 Example Invocation](#84-example-invocation)
   - [8.5 End-to-End Conversation Examples](#85-end-to-end-conversation-examples)
-- [9. Replacing a Sub-Tool](#9-replacing-a-sub-tool)
+- [9. `ISubTaskTool` — Sub-task Delegation](#9-isubtasktool--sub-task-delegation)
+- [10. `IScheduleTool` — Scheduled Tasks](#10-ischeduletool--scheduled-tasks)
+- [11. Replacing a Sub-Tool](#11-replacing-a-sub-tool)
 
 ---
 
 ## 1. Tool Group Switches
 
-Every built-in tool group is gated by a `*.enabled` property under `spring.ai.loom.agent.*`. The `time` / `file` / `skill` / `compile` groups are enabled by default; `git` and `maven` are **opt-in** because end-to-end deployment already covers the compile/package use case.
+Every built-in tool group is gated by a `*.enabled` property under `spring.ai.loom.agent.*`. The `time` / `file` / `skill` / `subtask` / `schedule` / `compile` groups are enabled by default; `git` and `maven` are **opt-in** because end-to-end deployment already covers the compile/package use case.
 
 | Property           | Type    | Default | Description                                                       |
 |--------------------|---------|---------|-------------------------------------------------------------------|
 | `time.enabled`     | boolean | `true`  | Time tools (`ITimeTool` — current time, timezone conversion)       |
 | `file.enabled`     | boolean | `true`  | File tools (`IFileTool` — 16 path-based read/write/edit/delete)   |
 | `skill.enabled`    | boolean | `true`  | Skill tools (`ISkillTool` — list skills, get skill details)       |
+| `subtask.enabled`  | boolean | `true`  | Sub-task delegation (`ISubTaskTool` — `start_sub_task` runs a slice of work on a sub-model synchronously) |
+| `schedule.enabled` | boolean | `true`  | Scheduled tasks (`IScheduleTool` — create/cancel/list/history; fires as a sub-task, persisted to H2 + restored on restart) |
 | `git.enabled`      | boolean | `false` | Git tools (`IGitTool` — 28 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
 | `maven.enabled`    | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
 | `compile.enabled`  | boolean | `true`  | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → buildTool build [maven/npm/pip] → docker build → docker run → health check). Supports Spring Boot, Node (backend + static-frontend → nginx), and Python projects. |
@@ -55,13 +59,15 @@ spring:
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. Sub-interfaces (`ITimeTool`, `ISkillTool`, `IFileTool`, `IGitTool`, `IMavenTool`) each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. Sub-interfaces (`ITimeTool`, `ISkillTool`, `IFileTool`, `ISubTaskTool`, `IScheduleTool`, `IGitTool`, `IMavenTool`) each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
 | Sub-Interface             | Default Impl                | Methods | Default State | Notes                                          |
 |---------------------------|-----------------------------|---------|---------------|------------------------------------------------|
 | `ITimeTool`               | `DefaultTimeTool`           | 2       | enabled       | Always on when `time.enabled` is unset        |
 | `ISkillTool`              | `DefaultSkillTool`          | 2       | enabled       | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read |
 | `IFileTool`               | `DefaultFileTool`           | 16      | enabled       | Path-based; root = `{fileBasePath}/{username}/` |
+| `ISubTaskTool`            | `DefaultSubTaskTool`        | 1       | enabled       | `start_sub_task` — delegate to a sub-model synchronously; sub-tasks cannot spawn sub-tasks/schedules |
+| `IScheduleTool`           | `DefaultScheduleTool`       | 4       | enabled       | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
 | `IGitTool`                | `DefaultGitTool` (JGit 7.6) | 28      | **disabled**  | Opt-in via `git.enabled=true`                  |
 | `IMavenTool`              | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **disabled**  | Opt-in via `maven.enabled=true`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool`   | `DefaultCompileAndDeployTool` | 1     | enabled       | End-to-end `git clone → build → docker run → health check` |
@@ -398,7 +404,52 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 
 ---
 
-## 9. Replacing a Sub-Tool
+## 9. `ISubTaskTool` — Sub-task Delegation
+
+| Item            | Details                                                                               |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool`                                   |
+| **Default**     | `DefaultSubTaskTool`                                                                  |
+| **Override**    | Custom `@Bean ISubTaskTool`                                                           |
+| **State**       | Enabled by default; toggle with `spring.ai.loom.agent.subtask.enabled`                |
+| **Methods**     | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously** via `ChatClient.call()` and returns the final text |
+
+The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool`) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
+
+**Configuration**:
+
+| Property                       | Default | Description                              |
+|--------------------------------|---------|------------------------------------------|
+| `subtask.enabled`              | `true`  | Enable the `start_sub_task` tool         |
+| `subtask.max-concurrent`       | `4`     | Max concurrent sub-tasks                 |
+| `subtask.max-history`          | `200`   | Retained sub-task history entries        |
+
+---
+
+## 10. `IScheduleTool` — Scheduled Tasks
+
+| Item            | Details                                                                               |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool`                                 |
+| **Default**     | `DefaultScheduleTool`                                                                 |
+| **Override**    | Custom `@Bean IScheduleTool`                                                          |
+| **State**       | Enabled by default; toggle with `spring.ai.loom.agent.schedule.enabled`               |
+| **Methods (4)** | `createSchedule` (cron / fixed_delay / fixed_rate / one_shot), `cancelSchedule`, `listSchedules`, `getScheduleHistory` |
+
+Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` and **fire as sub-tasks** when triggered. LoomAgent owns the H2 persistence (`loom_scheduled_task`, added in `V2.0`); `ScheduleRestoreListener` rehydrates rows on `ApplicationReadyEvent` preserving the original `createdAt` so the `max-lifetime` ceiling accumulates across restarts (rows older than the ceiling are cleaned up). Cancelling verifies row ownership (cross-user cancel is refused) and deletes the persisted row so the restore listener cannot resurrect a "ghost" task.
+
+**Trigger constraints** come from `flex.schedule.limits`:
+
+| Property                       | Example | Description                              |
+|--------------------------------|---------|------------------------------------------|
+| `schedule.enabled`             | `true`  | Enable the schedule tools                |
+| `flex.schedule.limits.min-interval` | `10m` | Minimum trigger interval             |
+| `flex.schedule.limits.max-lifetime` | `72h` | Max task lifetime (accumulates across restarts) |
+| `flex.schedule.limits.mode`    | `strict`| `strict` = exceeding a limit throws      |
+
+---
+
+## 11. Replacing a Sub-Tool
 
 Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a custom implementation wins automatically:
 

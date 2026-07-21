@@ -14,7 +14,7 @@ import java.util.Set;
  * <p>
  * Persists {@link SubTaskRegistry.SubTaskRecord} rows across application
  * restarts. Schema is also declared as a Flyway migration
- * ({@code V15__loom_subtask_history.sql}); this class additionally calls
+ * ({@code V2.0__subtask_and_schedule.sql} — table {@code loom_subtask_history}); this class additionally calls
  * {@link #ensureSchema()} defensively so the table is created even when
  * Flyway is bypassed (e.g. integration tests with bare H2 URLs).
  * </p>

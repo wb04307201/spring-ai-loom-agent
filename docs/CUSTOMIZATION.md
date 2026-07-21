@@ -517,7 +517,7 @@ Spring AI supports multiple model providers. Switch by configuring the correspon
 
 | Item            | Details                                                                         |
 |-----------------|---------------------------------------------------------------------------------|
-| **Default**     | Library ships `V1.0__init.sql` at `classpath:db/migration/` (schema + admin seed). Application modules add their own `V1__xxx.sql` (or `V1.1__xxx.sql` etc.) in the same `classpath:db/migration/`; Spring Boot's default Flyway runs them in version order on a single `flyway_schema_history` table. Library does **not** override Flyway's default location or history table. |
+| **Default**     | Library ships `V1.0__init.sql` (base schema + admin seed) and `V2.0__subtask_and_schedule.sql` (sub-task / schedule tables + sidebar columns) at `classpath:db/migration/`. Application modules add their own migration (e.g. `V1.1__xxx.sql`) in the same `classpath:db/migration/`; Spring Boot's default Flyway runs them in version order on a single `flyway_schema_history` table. Library does **not** override Flyway's default location or history table. |
 
 ---
 

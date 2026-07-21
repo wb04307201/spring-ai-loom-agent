@@ -14,7 +14,7 @@ import java.util.List;
  * <p>
  * Persists {@link LoomScheduleExecutionRecord} rows across application restarts.
  * Schema is also declared as a Flyway migration
- * ({@code V16__loom_schedule_execution.sql}); this class additionally calls
+ * ({@code V2.0__subtask_and_schedule.sql} — table {@code loom_schedule_execution}); this class additionally calls
  * {@link #ensureSchema()} defensively so the table is created even when Flyway
  * is bypassed.
  * </p>

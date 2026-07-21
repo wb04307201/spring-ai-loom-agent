@@ -37,7 +37,7 @@ Constraints (enforced by flex-schedule's `flex.schedule.limits.*`):
 - **Minimum trigger interval**: `min-interval` (test app default 10 minutes)
 - **Maximum lifetime**: `max-lifetime` (test app default 3 days / 72h)
 - **Mode**: `mode=strict` throws an exception when exceeded (creation fails with a friendly message)
-- **Persistence**: loom-agent manages its own H2 table `loom_scheduled_task` (Flyway `V13`); see "Persistence (Path B — loom-owned)" below. Tasks survive restarts, with `createdAt` preserved so `max-lifetime` accumulates across restarts.
+- **Persistence**: loom-agent manages its own H2 table `loom_scheduled_task` (added in `V2.0`; originally `V13`); see "Persistence (Path B — loom-owned)" below. Tasks survive restarts, with `createdAt` preserved so `max-lifetime` accumulates across restarts.
 
 Task name namespace: `loom-sched-{username}-{conversationId}-{name}` — tasks with the same name in different users/conversations never collide, and the list query filters by this prefix.
 
@@ -65,7 +65,7 @@ Both capabilities can be independently disabled via `enabled=false`; the corresp
 
 H2 persistence for scheduled tasks is managed by loom-agent itself (replacing the earlier approach that piggybacked on flex-schedule):
 
-- **Table**: `loom_scheduled_task` (Flyway `V13` supersedes the old `flex_scheduled_task`)
+- **Table**: `loom_scheduled_task` (added in `V2.0`; replaced the old `flex_scheduled_task` which is no longer created)
 - **Columns**: `task_name` PK + `schedule_type` (`cron` / `fixed_delay` / `fixed_rate` / `one_shot`) + three expression columns (one per type) + `prompt` CLOB + `username` + `conversation_id` + `paused` + `created_at` / `updated_at`
 - **Repository**: `ILoomScheduleTriggerRepository` (in `cn.wubo.spring.ai.loom.agent.schedule`); default impl `JdbcLoomScheduleTriggerRepository` is wired by `LoomAgentConfiguration.ScheduleConfiguration` via `@Bean` + `@ConditionalOnMissingBean`
 - **Writes**: `repo.save(...)` after every successful `createSchedule`; `repo.delete(...)` after every successful `cancelSchedule`; `repo.deleteAllForConversation(user, conv)` on conversation deletion

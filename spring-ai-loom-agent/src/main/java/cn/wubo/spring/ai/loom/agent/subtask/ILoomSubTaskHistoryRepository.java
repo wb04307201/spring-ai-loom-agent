@@ -6,7 +6,7 @@ import java.util.Set;
 /**
  * Persistence boundary for sub-task execution history.
  * <p>
- * Backed by an H2 table (Flyway V15) so that history survives application
+ * Backed by an H2 table (Flyway V2.0, {@code loom_subtask_history}) so that history survives application
  * restarts. The in-memory {@link SubTaskRegistry} continues to be the
  * single source of truth for live queries; this repository is a write-through
  * sink + cold-start rehydration source.

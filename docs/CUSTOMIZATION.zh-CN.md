@@ -517,7 +517,7 @@ Spring AI 支持多种模型，通过配置对应 Starter 和 API Key 自动切�
 
 | 项目       | 内容                                                               |
 |----------|------------------------------------------------------------------|
-| **默认配置** | 库自带 `V1.0__init.sql` 在 `classpath:db/migration/`（表结构 + admin seed）。应用模块在同目录下加自己的 `V1__xxx.sql`（或 `V1.1__xxx.sql` 等）；Spring Boot 默认 Flyway 按版本号顺序跑、单一 `flyway_schema_history` 表。库**不**覆盖 Flyway 默认路径和 history 表。 |
+| **默认配置** | 库自带 `V1.0__init.sql`（基础表结构 + admin seed）和 `V2.0__subtask_and_schedule.sql`（子任务 / 定时表 + 侧边栏列）在 `classpath:db/migration/`。应用模块在同目录下加自己的迁移（如 `V1.1__xxx.sql`）；Spring Boot 默认 Flyway 按版本号顺序跑、单一 `flyway_schema_history` 表。库**不**覆盖 Flyway 默认路径和 history 表。 |
 
 ---
 

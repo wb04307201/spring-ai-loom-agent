@@ -16,8 +16,8 @@ import java.util.Optional;
  * H2 / JDBC-backed {@link ILoomScheduleTriggerRepository}.
  * <p>
  * Persists {@link LoomScheduleTriggerRecord} rows across application restarts.
- * Schema is also declared as a Flyway migration
- * ({@code V13__loom_scheduled_task.sql}); this class additionally calls
+ * Schema is also declared in the Flyway migration
+ * ({@code V2.0__subtask_and_schedule.sql} — table {@code loom_scheduled_task}); this class additionally calls
  * {@link #ensureSchema()} defensively so the table is created even when Flyway
  * is bypassed (e.g. integration tests with bare H2 URLs).
  * </p>
@@ -70,7 +70,7 @@ public class JdbcLoomScheduleTriggerRepository implements ILoomScheduleTriggerRe
 
     /**
      * Creates the persistence table and indexes if absent. Safe to invoke multiple
-     * times — Flyway (V13) is the canonical schema source in production; this is
+     * times — the Flyway migration (V2.0) is the canonical schema source in production; this is
      * a defensive belt-and-suspenders for non-Flyway callers.
      */
     public void ensureSchema() {

@@ -89,7 +89,12 @@ class SubTaskAndScheduleHistoryIntegrationTest {
         // throws and the sub-task ends up FAILED instead of COMPLETED — both
         // are valid outcomes for this test; what we care about is that the
         // history record exists.
-        await().atMost(20, TimeUnit.SECONDS).until(() -> fired.getCount() == 0);
+        // NOTE: with a key set, the sub-task makes a REAL LLM round-trip whose
+        // latency is externally variable (observed ~12s idle, more under
+        // rate-limiting). awaitility returns as soon as the call completes, so
+        // a generous 60s cap only costs wall-clock on genuinely slow calls
+        // while eliminating the false-timeout flake seen at the old 20s cap.
+        await().atMost(60, TimeUnit.SECONDS).until(() -> fired.getCount() == 0);
 
         // Phase 2: sub-task is archived into history (terminal status set,
         // moved out of active). The prompt we sent is the lookup key.
