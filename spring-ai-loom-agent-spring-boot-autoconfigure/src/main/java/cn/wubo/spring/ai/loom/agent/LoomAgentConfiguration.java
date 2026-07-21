@@ -748,8 +748,17 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentSubTaskRouter")
         public RouterFunction<ServerResponse> loomAgentSubTaskRouter(
                 cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
+                cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties properties,
                 cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
+            // Configured sub-task limits so the UI hint reflects the actual
+            // spring.ai.loom.agent.subtask.* instead of a hardcoded "200".
+            builder.GET("spring/ai/loom/subtask/limits", request -> {
+                java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+                body.put("maxHistory", properties.getSubtask().getMaxHistory());
+                body.put("maxConcurrent", properties.getSubtask().getMaxConcurrent());
+                return ServerResponse.ok().body(body);
+            });
             // active (with optional ?conversationId= filter)
             builder.GET("spring/ai/loom/subtask/list/active",
                     request -> {

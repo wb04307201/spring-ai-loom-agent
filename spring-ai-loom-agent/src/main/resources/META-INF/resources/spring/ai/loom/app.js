@@ -462,6 +462,10 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/subtask/list/history' + q);
         return r.ok ? r.json() : [];
     },
+    async subtaskLimits() {
+        const r = await apiFetch('/spring/ai/loom/subtask/limits');
+        return r.ok ? r.json() : {};
+    },
     async killSubtask(id) {
         const r = await apiFetch('/spring/ai/loom/subtask/kill/' + encodeURIComponent(id), { method: 'POST' });
         return r.ok;
@@ -1641,14 +1645,26 @@ const subtaskPanel = {
 
     refresh() {
         const convId = this._currentConvId || ((typeof state !== 'undefined' && state.conversationId) || '');
-        if (!convId) {
-            this._renderEmpty('请先打开一个对话');
-            return;
-        }
-        Promise.all([
-            api.listActiveSubtasks(convId),
-            api.listSubtaskHistory(convId),
-        ]).then(([active, history]) => this.render(active || [], history || [], convId));
+        this._ensureLimits().then(() => {
+            if (!convId) {
+                this._renderEmpty('请先打开一个对话');
+                return;
+            }
+            Promise.all([
+                api.listActiveSubtasks(convId),
+                api.listSubtaskHistory(convId),
+            ]).then(([active, history]) => this.render(active || [], history || [], convId));
+        });
+    },
+
+    _ensureLimits() {
+        if (this._limits) return Promise.resolve(this._limits);
+        return api.subtaskLimits().then(l => (this._limits = l || {})).catch(() => (this._limits = {}));
+    },
+
+    _limitsHintHTML() {
+        const n = (this._limits && this._limits.maxHistory) || 200;
+        return `<div class="micro-hint">回车提交 · 历史最多保留 <code>${escapeHtml(String(n))}</code> 条</div>`;
     },
 
     setConvId(convId) {
@@ -1691,7 +1707,7 @@ const subtaskPanel = {
                         <input data-composer placeholder="「例如:调研苹果公司在东南亚的供应链…」" />
                         <button class="console-btn-primary" data-composer-submit style="height:32px;">新建子任务 ↗</button>
                     </div>
-                    <div class="micro-hint">回车提交 · 历史最多保留 <code>200</code> 条</div>
+                    ${this._limitsHintHTML()}
                 </div>
             </div>`;
         this._wireToolbar(body);
