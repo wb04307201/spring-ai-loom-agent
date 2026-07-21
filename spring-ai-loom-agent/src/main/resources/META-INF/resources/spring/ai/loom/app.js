@@ -1212,6 +1212,15 @@ const chat = {
             return;
         }
 
+        // Guard against the attach→send race: if any attachment is still
+        // uploading (fileId not yet assigned), sending now would silently drop
+        // it (fileIds would contain undefined) and the model would answer as if
+        // no file was attached. Block until the upload finishes.
+        if (state.pendingImages.some(img => !img.fileId)) {
+            showToast('文件还在上传中，请稍候再发送', 'error');
+            return;
+        }
+
         if (!state.conversationId) {
             await conversation.createNew();
             if (!state.conversationId) return;
@@ -1236,7 +1245,7 @@ const chat = {
             mcps: state.selectedMcps,
             enableRag: state.enableRag,
             knowledgeId: state.selectedKnowledgeId || null,
-            fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId) : null,
+            fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId).filter(Boolean) : null,
         };
 
         // Clear pending image after capturing fileId
