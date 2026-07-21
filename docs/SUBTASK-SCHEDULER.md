@@ -39,6 +39,8 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 
 任务名命名空间：`loom-sched-{username}-{conversationId}-{name}`，因此不同用户 / 会话下同名任务互不冲突，列表也按此前缀过滤。
 
+> **⚠ Username 约束**：namespace 的 `{username}-{conversationId}` 段以第一个 `-` 作为分隔符，因此 **`username` 不得包含 `-`**。`DefaultUser.createUser` 已在 2026-07 测试 commit `dc20b8f` 后强制校验：含 `-` 的 username 会抛 `LoomAgentRuntimeException(400, ...)`。前端 `schedulePanel._shortName` 解析同样依赖此不变式（截掉 prefix + 第一个 `-` + 36 字符 UUID），未来如需放开 username-dash，必须同步把 `_shortName` 改为基于"找最后一个 36 字符 UUID 形串"的解析方式，不能再用 `split('-').slice(4)` 这种按位置切的脆弱做法。
+
 配置（`spring.ai.loom.agent.schedule.*`）：`enabled`（默认 `true`）。
 
 ## 前端面板
