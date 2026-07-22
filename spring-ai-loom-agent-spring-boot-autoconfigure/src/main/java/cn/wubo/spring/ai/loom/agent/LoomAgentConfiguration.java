@@ -1,6 +1,8 @@
 package cn.wubo.spring.ai.loom.agent;
 
 import cn.wubo.file.view.storage.IFileStorage;
+import cn.wubo.flex.schedule.core.ExecutionHistory;
+import cn.wubo.flex.schedule.core.FlexScheduledTaskRegistrar;
 import cn.wubo.spring.ai.loom.agent.chat.DefaultChat;
 import cn.wubo.spring.ai.loom.agent.chat.IChat;
 import cn.wubo.spring.ai.loom.agent.document.DefaultDocumentRead;
@@ -92,6 +94,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
@@ -328,23 +331,28 @@ public class LoomAgentConfiguration {
                 final int[] finalTotal = {0};
                 final String[] finalModel = {null};
                 final boolean[] hasUsage = {false};
+                final java.util.concurrent.atomic.AtomicBoolean usageRecorded =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
 
                 // 注册到 registry：disposable 暂存 wrapper；onStop 回调用于在停止时记录累积 usage
                 final java.util.concurrent.atomic.AtomicReference<reactor.core.Disposable> subRef = new java.util.concurrent.atomic.AtomicReference<>();
+                final java.util.concurrent.atomic.AtomicBoolean disposeRequested =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
                 emitterRegistry.register(username, conversationId, emitter,
                         new reactor.core.Disposable() {
                             @Override public void dispose() {
+                                disposeRequested.set(true);
                                 reactor.core.Disposable d = subRef.get();
                                 if (d != null && !d.isDisposed()) d.dispose();
                             }
                             @Override public boolean isDisposed() {
                                 reactor.core.Disposable d = subRef.get();
-                                return d == null || d.isDisposed();
+                                return disposeRequested.get() || d == null || d.isDisposed();
                             }
                         },
                         () -> {
                             // 用户主动 stop 时触发：把已经累积的 usage 入库（避免丢数据）
-                            if (hasUsage[0]) {
+                            if (hasUsage[0] && usageRecorded.compareAndSet(false, true)) {
                                 try {
                                     tokenUsage.record(
                                             conversationId, username, "ASSISTANT",
@@ -373,7 +381,7 @@ public class LoomAgentConfiguration {
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
-                        chatResponseFlux
+                        reactor.core.Disposable subscription = chatResponseFlux
                                 .filter(chatResponse -> chatResponse.getResult() != null)
                                 .subscribe(chatResponse -> {
                             try {
@@ -403,7 +411,7 @@ public class LoomAgentConfiguration {
                             }
                         }, emitter::completeWithError, () -> {
                             // 流结束：把累计的 usage 一次性入库
-                            if (hasUsage[0]) {
+                            if (hasUsage[0] && usageRecorded.compareAndSet(false, true)) {
                                 try {
                                     tokenUsage.record(
                                             conversationId, username, "ASSISTANT",
@@ -417,6 +425,8 @@ public class LoomAgentConfiguration {
                             emitterRegistry.autoCleanup(username, conversationId);
                             emitter.complete();
                         });
+                        subRef.set(subscription);
+                        if (disposeRequested.get()) subscription.dispose();
                     } catch (Exception e) {
                         emitter.completeWithError(e);
                     }
@@ -777,8 +787,8 @@ public class LoomAgentConfiguration {
                         String conv = request.param("conversationId").orElse(null);
                         java.util.List<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord> body =
                                 conv == null
-                                        ? registry.listHistory(user, 50)
-                                        : registry.listHistoryByConversation(user, conv, 50);
+                                        ? registry.listHistory(user, properties.getSubtask().getMaxHistory())
+                                        : registry.listHistoryByConversation(user, conv, properties.getSubtask().getMaxHistory());
                         return ServerResponse.ok().body(body);
                     });
             builder.POST("spring/ai/loom/subtask/kill/{id}",
@@ -830,6 +840,20 @@ public class LoomAgentConfiguration {
     public static class ScheduleConfiguration {
 
         @Bean
+        @ConditionalOnMissingBean(ExecutionHistory.class)
+        public ExecutionHistory loomFlexExecutionHistory() {
+            return new cn.wubo.flex.schedule.core.InMemoryExecutionHistory();
+        }
+
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.schedule.LoomFlexExecutionHistoryRegistrar
+        loomFlexExecutionHistoryRegistrar(FlexScheduledTaskRegistrar registrar,
+                                           ExecutionHistory executionHistory) {
+            return new cn.wubo.spring.ai.loom.agent.schedule.LoomFlexExecutionHistoryRegistrar(
+                    registrar, executionHistory);
+        }
+
+        @Bean
         public cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool defaultScheduleTool(
                 @Qualifier("flexScheduledTaskService") cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
                 cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
@@ -870,10 +894,11 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
                 cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor subTaskExecutor,
                 cn.wubo.flex.schedule.core.TaskLimits taskLimits,
-                cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties execProps) {
+                cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties execProps,
+                JdbcTemplate jdbcTemplate) {
             return new cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener(
                     flexService, loomScheduleTriggerRepository, subTaskExecutor, taskLimits,
-                    loomScheduleExecutionRepository, execProps.getMaxPerTask());
+                    loomScheduleExecutionRepository, execProps.getMaxPerTask(), jdbcTemplate);
         }
 
         @Bean
@@ -903,7 +928,8 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
                 cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
                 ObjectProvider<cn.wubo.flex.schedule.core.TaskLimits> taskLimitsProvider,
-                cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool) {
+                cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool scheduleTool,
+                cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionProperties execProps) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             // Expose the configured trigger limits so the UI hint reflects the
             // actual flex.schedule.limits.* instead of a hardcoded guess. Returns
@@ -994,9 +1020,15 @@ public class LoomAgentConfiguration {
                 }
                 return ServerResponse.ok().body(true);
             });
-            builder.GET("spring/ai/loom/schedule/history/{name}",
-                    request -> ServerResponse.ok().body(
-                            flexService.getExecutionHistory(request.pathVariable("name"), 50)));
+            builder.GET("spring/ai/loom/schedule/history/{name}", request -> {
+                String name = request.pathVariable("name");
+                if (!handleScheduleHistoryOwnership(name, loomScheduleTriggerRepository, log)) {
+                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(
+                            java.util.Map.of("message", "无权访问该定时任务历史"));
+                }
+                return ServerResponse.ok().body(
+                        loomScheduleExecutionRepository.findByTaskName(name, execProps.getMaxPerTask()));
+            });
             // Per-conversation schedule history.
             //   - source-of-truth for "what schedules exist for this conversation" is
             //     loom_scheduled_task (H2). This covers BOTH still-registered tasks
@@ -1192,6 +1224,30 @@ public class LoomAgentConfiguration {
     }
 
     /**
+     * Verifies ownership before exposing the in-memory execution history for a
+     * namespaced schedule. Missing rows and foreign rows deliberately share the
+     * same false result so the endpoint does not disclose task existence.
+     */
+    public static boolean handleScheduleHistoryOwnership(
+            String fullName,
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository repo,
+            org.slf4j.Logger log) {
+        if (fullName == null) return false;
+        String caller = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+        try {
+            var record = repo.findByName(fullName);
+            if (record.isEmpty() || caller == null || !caller.equals(record.get().username())) {
+                log.warn("拒绝跨用户读取定时历史: caller={}, target={}", caller, fullName);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            log.warn("读取定时历史权限校验失败: name={}, err={}", fullName, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Dual-write cancel handler for the REST {@code POST /spring/ai/loom/schedule/cancel}
      * route. Cancels the in-memory task AND deletes the corresponding
      * {@code loom_scheduled_task} row so the {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener}
@@ -1258,6 +1314,14 @@ public class LoomAgentConfiguration {
         return s + "s";
     }
 
+    static ServerResponse runtimeErrorResponse(
+            cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex,
+            int fallbackStatus) {
+        int status = ex.getStatusCode() != null ? ex.getStatusCode() : fallbackStatus;
+        return ServerResponse.status(status).body(java.util.Map.of(
+                "message", ex.getMessage() == null ? "请求失败" : ex.getMessage()));
+    }
+
     @Configuration
     @Slf4j
     static class WebConfiguration {
@@ -1309,7 +1373,10 @@ public class LoomAgentConfiguration {
                     return ServerResponse.status(HttpStatus.UNAUTHORIZED)
                             .body(java.util.Map.of("message", e.getMessage() == null ? "登录失败" : e.getMessage()));
                 }
-                String token = user.createToken(body.username());
+                // DefaultUser.login() already calls createToken() internally; reuse that
+                // token instead of minting a second one (which would leak an orphan
+                // session into the cache for the full maxAge window).
+                String token = response.token();
                 LoomAgentProperties.AuthProperty.CookieProperty cookieProp = properties.getAuth().getCookie();
                 return ServerResponse.ok()
                         .cookie(createSessionCookie(token, cookieProp))
@@ -1361,8 +1428,12 @@ public class LoomAgentConfiguration {
             builder.POST("spring/ai/loom/user/changePassword", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 ChangePasswordRequest body = request.body(ChangePasswordRequest.class);
-                user.changePassword(username, body.oldPassword(), body.newPassword());
-                return ServerResponse.ok().body(true);
+                try {
+                    user.changePassword(username, body.oldPassword(), body.newPassword());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    return runtimeErrorResponse(e, 400);
+                }
             });
 
             // 当前用户可见的 mcp（按角色过滤；admin 全可见）
@@ -1401,15 +1472,23 @@ public class LoomAgentConfiguration {
             // 管理员：创建用户
             builder.POST("spring/ai/loom/admin/users", request -> {
                 CreateUserRequest body = request.body(CreateUserRequest.class);
-                user.createUser(body.username(), body.nickname(), body.password(), body.type());
-                return ServerResponse.ok().body(true);
+                try {
+                    user.createUser(body.username(), body.nickname(), body.password(), body.type());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    return runtimeErrorResponse(e, 400);
+                }
             });
 
             // 管理员：删除用户
             builder.DELETE("spring/ai/loom/admin/users/{username}", request -> {
                 String username = request.pathVariable("username");
-                user.deleteUser(username);
-                return ServerResponse.ok().body(true);
+                try {
+                    user.deleteUser(username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    return runtimeErrorResponse(e, 400);
+                }
             });
 
             // 管理员：列出某用户全部会话（含已软删 + content_cleaned 标记）
@@ -1585,6 +1664,18 @@ public class LoomAgentConfiguration {
                             java.util.Map.of("error", "forbidden", "code", 403));
                 }
                 return ServerResponse.ok().body(true);
+            });
+            builder.GET("/spring/ai/loom/admin/conversations/{conversationId}/messages", request -> {
+                String targetUser = request.param("username").orElse(null);
+                String conversationId = request.pathVariable("conversationId");
+                boolean owned = targetUser != null
+                        && userConversation.adminListByUsername(targetUser).stream()
+                                .anyMatch(view -> conversationId.equals(view.conversationId()));
+                if (!owned) {
+                    return ServerResponse.notFound().build();
+                }
+                return ServerResponse.ok().body(
+                        chatMemoryRepository.findByConversationId(conversationId));
             });
             builder.GET("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
@@ -1936,6 +2027,9 @@ public class LoomAgentConfiguration {
             builder.GET("/spring/ai/loom/file/{id}/download", request -> {
                 String id = request.pathVariable("id");
                 FileRecord fileRecord = file.getById(id, UserContextHolder.getCurrentUser());
+                if (fileRecord == null) {
+                    return ServerResponse.notFound().build();
+                }
                 // 选 Content-Type：优先 FileRecord.mimeType（写入时 Tika 探测过），没有再按扩展名猜，最后兜底 octet-stream
                 MediaType contentType = resolveContentType(fileRecord);
                 // 拼 Content-Disposition：中文文件名按 RFC 5987 用 filename*=UTF-8''<urlencoded>，
@@ -1945,8 +2039,9 @@ public class LoomAgentConfiguration {
                         .contentLength(fileRecord.size())
                         .header("Content-Disposition", buildContentDisposition(fileRecord.fileName()))
                         .build((res, req) -> {
-                            try (OutputStream os = req.getOutputStream()) {
-                                os.write(Files.readAllBytes(Path.of(fileRecord.path())));
+                            try (InputStream is = Files.newInputStream(Path.of(fileRecord.path()));
+                                 OutputStream os = req.getOutputStream()) {
+                                is.transferTo(os);
                                 os.flush();
                             }
                             return new ModelAndView();
@@ -2033,18 +2128,25 @@ public class LoomAgentConfiguration {
                 if (!resolved.startsWith(baseDir) || !Files.exists(resolved) || !Files.isRegularFile(resolved)) {
                     return null;
                 }
-                String pathStr = resolved.toString();
+                // Normalize again after resolving symlinks. A lexical prefix check alone
+                // would allow a link inside the user's directory to point outside it.
+                Path realBaseDir = baseDir.toRealPath();
+                Path realResolved = resolved.toRealPath();
+                if (!realResolved.startsWith(realBaseDir) || !Files.isRegularFile(realResolved)) {
+                    return null;
+                }
+                String pathStr = realResolved.toString();
                 FileRecord existing = file.getByExactPath(pathStr, username);
                 if (existing != null) return existing.id();
 
                 org.apache.tika.Tika tika = new org.apache.tika.Tika();
-                String mimeType = tika.detect(resolved.toFile());
+                String mimeType = tika.detect(realResolved.toFile());
                 String fileId = java.util.UUID.randomUUID().toString();
-                java.nio.file.attribute.BasicFileAttributes attrs = Files.readAttributes(resolved, java.nio.file.attribute.BasicFileAttributes.class);
+                java.nio.file.attribute.BasicFileAttributes attrs = Files.readAttributes(realResolved, java.nio.file.attribute.BasicFileAttributes.class);
                 file.insert(new FileRecord(
                         fileId,
                         null,
-                        resolved.getFileName().toString(),
+                        realResolved.getFileName().toString(),
                         attrs.size(),
                         java.time.LocalDateTime.ofInstant(attrs.lastModifiedTime().toInstant(), java.time.ZoneId.systemDefault()),
                         pathStr,

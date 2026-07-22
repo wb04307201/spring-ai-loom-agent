@@ -4,6 +4,8 @@ import cn.wubo.flex.schedule.core.FlexScheduledTaskService;
 import cn.wubo.flex.schedule.core.TaskBuilder;
 import cn.wubo.flex.schedule.core.TaskLimits;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
+import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
+import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
 import cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +58,7 @@ public class ScheduleRestoreListener {
     private final ISubTaskExecutor subTaskExecutor;
     private final TaskLimits taskLimits;
     private final ILoomScheduleExecutionRepository executionRepo;
+    private final org.springframework.jdbc.core.JdbcTemplate userJdbcTemplate;
     /** Per-task execution history cap (newest N kept). Default 1000. */
     private final int maxExecutionsPerTask;
 
@@ -65,12 +68,23 @@ public class ScheduleRestoreListener {
                                    TaskLimits taskLimits,
                                    ILoomScheduleExecutionRepository executionRepo,
                                    int maxExecutionsPerTask) {
+        this(flexService, repo, subTaskExecutor, taskLimits, executionRepo, maxExecutionsPerTask, null);
+    }
+
+    public ScheduleRestoreListener(FlexScheduledTaskService flexService,
+                                   ILoomScheduleTriggerRepository repo,
+                                   ISubTaskExecutor subTaskExecutor,
+                                   TaskLimits taskLimits,
+                                   ILoomScheduleExecutionRepository executionRepo,
+                                   int maxExecutionsPerTask,
+                                   org.springframework.jdbc.core.JdbcTemplate userJdbcTemplate) {
         this.flexService = flexService;
         this.repo = repo;
         this.subTaskExecutor = subTaskExecutor;
         this.taskLimits = taskLimits != null ? taskLimits : TaskLimits.DISABLED;
         this.executionRepo = executionRepo;
         this.maxExecutionsPerTask = Math.max(10, maxExecutionsPerTask);
+        this.userJdbcTemplate = userJdbcTemplate;
     }
 
     /** Backward-compatible constructor for callers that haven't wired the execution repo yet. */
@@ -78,7 +92,7 @@ public class ScheduleRestoreListener {
                                    ILoomScheduleTriggerRepository repo,
                                    ISubTaskExecutor subTaskExecutor,
                                    TaskLimits taskLimits) {
-        this(flexService, repo, subTaskExecutor, taskLimits, null, 1000);
+        this(flexService, repo, subTaskExecutor, taskLimits, null, 1000, null);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -91,7 +105,18 @@ public class ScheduleRestoreListener {
         int droppedOrphan = 0;
         int failed = 0;
 
+        java.util.Set<String> knownUsernames = loadKnownUsernames();
         for (LoomScheduleTriggerRecord r : records) {
+            if (r.username() != null && !knownUsernames.contains(r.username())) {
+                // Skip tasks whose owner no longer exists. Without this filter,
+                // a deleted user would have their scheduled prompts fired under
+                // whichever account happens to be logged in at restart time.
+                repo.delete(r.taskName());
+                droppedOrphan++;
+                log.warn("Dropping scheduled task [{}] whose owner [{}] no longer exists",
+                        r.taskName(), r.username());
+                continue;
+            }
             try {
                 if (isExpired(r.taskName(), r.createdAt())) {
                     repo.delete(r.taskName());
@@ -185,7 +210,11 @@ public class ScheduleRestoreListener {
         boolean success = false;
         String errorMessage = null;
         try {
-            subTaskExecutor.execute(req);
+            SubTaskResult result = subTaskExecutor.execute(req);
+            if (result.status() == SubTaskStatus.FAILED || result.status() == SubTaskStatus.CANCELLED) {
+                errorMessage = result.errorMessage();
+                throw new RuntimeException("恢复的调度子任务未完成: " + errorMessage);
+            }
             success = true;
         } catch (Exception e) {
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -230,6 +259,25 @@ public class ScheduleRestoreListener {
             }
         } catch (Exception e) {
             log.warn("Failed to record schedule execution [{}]: {}", r.taskName(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Read distinct usernames from {@code user_info} so the restore loop can drop
+     * tasks whose owner has been deleted (avoids firing a deleted user's prompt
+     * under whichever account the next restart sees).
+     */
+    private java.util.Set<String> loadKnownUsernames() {
+        if (userJdbcTemplate == null) {
+            return java.util.Collections.emptySet();
+        }
+        try {
+            return new java.util.HashSet<>(userJdbcTemplate.queryForList(
+                    "SELECT username FROM user_info", String.class));
+        } catch (Exception e) {
+            log.warn("loadKnownUsernames failed; will fall back to no orphan filter: {}",
+                    e.getMessage());
+            return java.util.Collections.emptySet();
         }
     }
 
