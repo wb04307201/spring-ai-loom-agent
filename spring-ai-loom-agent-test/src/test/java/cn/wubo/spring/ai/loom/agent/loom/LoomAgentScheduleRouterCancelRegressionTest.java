@@ -121,4 +121,38 @@ class LoomAgentScheduleRouterCancelRegressionTest {
         verify(flex, never()).cancel(anyString());
         verify(repo, never()).delete(anyString());
     }
+
+    @Test
+    void handleScheduleHistoryOwnership_allowsOwnerOnly() {
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-history";
+        when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
+        UserContextHolder.setCurrentUser("alice");
+
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                fullName, repo, LoggerFactory.getLogger(getClass()))).isTrue();
+    }
+
+    @Test
+    void handleScheduleHistoryOwnership_rejectsForeignUnknownAndMissingCaller() {
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-history";
+        when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
+
+        UserContextHolder.setCurrentUser("bob");
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                fullName, repo, LoggerFactory.getLogger(getClass()))).isFalse();
+
+        UserContextHolder.clear();
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                fullName, repo, LoggerFactory.getLogger(getClass()))).isFalse();
+
+        when(repo.findByName("unknown")).thenReturn(Optional.empty());
+        UserContextHolder.setCurrentUser("alice");
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                "unknown", repo, LoggerFactory.getLogger(getClass()))).isFalse();
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                null, repo, LoggerFactory.getLogger(getClass()))).isFalse();
+    }
 }
+

@@ -79,4 +79,25 @@ class DefaultUserTest {
                 .hasMessageContaining("'-'")
                 .hasMessageNotContaining("用户名已存在");
     }
+
+    @Test
+    void createUser_rejectsOversizedPassword() {
+        // Defensive cap (MAX_PASSWORD=128) blocks a hostile admin POST from
+        // pushing a multi-MB plaintext through BCrypt and burning CPU.
+        String huge = "x".repeat(129);
+        assertThatThrownBy(() -> users.createUser("wb-over", "nick", huge, "USER"))
+                .isInstanceOf(LoomAgentRuntimeException.class)
+                .hasMessageContaining("密码 ≤ 128");
+    }
+
+    @Test
+    void createUser_rejectsOversizedUsername() {
+        // Mirror the password cap: a 65-char username would slip past the
+        // initial blank check but blow up at the DB layer. Cap at 64
+        // characters in line with the user_info schema.
+        String huge = "x".repeat(65);
+        assertThatThrownBy(() -> users.createUser(huge, "nick", "password123", "USER"))
+                .isInstanceOf(LoomAgentRuntimeException.class)
+                .hasMessageContaining("用户名 ≤ 64");
+    }
 }

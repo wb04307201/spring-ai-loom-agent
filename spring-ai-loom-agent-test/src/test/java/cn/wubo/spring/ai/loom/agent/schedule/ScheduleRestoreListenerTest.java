@@ -29,6 +29,7 @@ class ScheduleRestoreListenerTest {
     private TaskBuilder builder;
     private ILoomScheduleTriggerRepository repo;
     private ISubTaskExecutor subTaskExecutor;
+    private org.springframework.jdbc.core.JdbcTemplate userJdbcTemplate;
     private TaskLimits limits72h;
     private ScheduleRestoreListener listener;
 
@@ -38,6 +39,7 @@ class ScheduleRestoreListenerTest {
         builder = mock(TaskBuilder.class);
         repo = mock(ILoomScheduleTriggerRepository.class);
         subTaskExecutor = mock(ISubTaskExecutor.class);
+        userJdbcTemplate = mock(org.springframework.jdbc.core.JdbcTemplate.class);
         // 72h max-lifetime, STRICT mode — matches the loom-agent test app's defaults.
         limits72h = new TaskLimits(Duration.ofMinutes(10), Duration.ofHours(72), TaskLimits.Mode.STRICT);
         when(flexService.task(any())).thenReturn(builder);
@@ -48,8 +50,11 @@ class ScheduleRestoreListenerTest {
         when(builder.fixedRate(any(Duration.class), any(Duration.class))).thenReturn(builder);
         when(builder.oneShot(any(Duration.class))).thenReturn(builder);
         when(builder.createdAt(any(Instant.class))).thenReturn(builder);
+        // Owner (alice) exists; no orphan drop.
+        when(userJdbcTemplate.queryForList(anyString(), eq(String.class)))
+                .thenReturn(List.of("alice", "bob"));
 
-        listener = new ScheduleRestoreListener(flexService, repo, subTaskExecutor, limits72h);
+        listener = new ScheduleRestoreListener(flexService, repo, subTaskExecutor, limits72h, null, 1000, userJdbcTemplate);
     }
 
     private static LoomScheduleTriggerRecord record(String taskName,
@@ -186,7 +191,7 @@ class ScheduleRestoreListenerTest {
         when(repo.findAll()).thenReturn(List.of(record("ancient", "cron", ancient, false)));
 
         ScheduleRestoreListener permissiveListener = new ScheduleRestoreListener(
-                flexService, repo, subTaskExecutor, TaskLimits.DISABLED);
+                flexService, repo, subTaskExecutor, TaskLimits.DISABLED, null, 1000, userJdbcTemplate);
         permissiveListener.restoreOnStartup();
 
         verify(builder).createdAt(ancient);
