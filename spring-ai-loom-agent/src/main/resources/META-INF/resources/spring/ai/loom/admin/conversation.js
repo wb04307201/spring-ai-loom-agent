@@ -103,7 +103,10 @@
         const target = document.getElementById('messages-list');
         if (!target) return;
         try {
-            const r = await fetch(`/spring/ai/loom/conversation/${encodeURIComponent(conversationId)}`, {credentials: 'include'});
+            const messagePath = username
+                ? `/spring/ai/loom/admin/conversations/${encodeURIComponent(conversationId)}/messages?username=${encodeURIComponent(username)}`
+                : `/spring/ai/loom/conversation/${encodeURIComponent(conversationId)}`;
+            const r = await fetch(messagePath, {credentials: 'include'});
             if (!r.ok) {
                 target.innerHTML = `<div class="empty-state">内容已清理或加载失败</div>`;
                 return;
