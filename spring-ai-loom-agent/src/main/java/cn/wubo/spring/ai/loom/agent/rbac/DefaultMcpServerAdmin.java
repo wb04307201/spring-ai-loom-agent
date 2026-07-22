@@ -11,6 +11,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,6 +22,8 @@ import java.util.Optional;
 
 @Component
 public class DefaultMcpServerAdmin implements IMcpServerAdmin {
+
+    private static final Logger log = LoggerFactory.getLogger(DefaultMcpServerAdmin.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectProvider<cn.wubo.spring.ai.loom.agent.mcp.IMcp> mcpProvider;
@@ -72,7 +76,9 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
                     "SELECT name, title, description FROM mcp_server WHERE name IN (" + placeholders + ")",
                     serverMapper,
                     (Object[]) names.toArray());
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            log.warn("查询 mcp_server 元数据失败，将回退为未维护视图: {}", e.getMessage(), e);
+        }
         // 3. 批量查工具描述
         Map<String, Map<String, String>> dbToolByMcp = new HashMap<>();
         try {
@@ -85,7 +91,9 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
                     "SELECT mcp_name, name, description FROM mcp_tool WHERE mcp_name IN (" + placeholders + ")",
                     toolMapper,
                     (Object[]) names.toArray());
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            log.warn("查询 mcp_tool 描述失败，将使用 SDK 默认描述: {}", e.getMessage(), e);
+        }
 
         // 4. 合并
         List<McpSystemView> out = new ArrayList<>();
@@ -159,7 +167,9 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
                     (rs, n) -> dbByName.put(rs.getString(3),
                             new McpToolInfo(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4))),
                     mcpName);
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            log.warn("查询 mcp_tool 记录失败 (mcpName={})，将仅展示 SDK 实时工具: {}", mcpName, e.getMessage(), e);
+        }
         // 拿 SDK 实时工具列表（保证 mcp_tool 表里没有的也展示出来）
         List<McpToolInfo> out = new ArrayList<>();
         for (McpRecord rec : mcp().mcps()) {

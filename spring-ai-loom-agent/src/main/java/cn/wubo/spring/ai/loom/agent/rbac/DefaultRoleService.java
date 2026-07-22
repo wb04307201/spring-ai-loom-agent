@@ -3,6 +3,7 @@ package cn.wubo.spring.ai.loom.agent.rbac;
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.model.McpSystemView;
 import cn.wubo.spring.ai.loom.agent.model.RoleInfo;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -76,6 +77,9 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void setUserRoles(String username, List<String> roleCodes) {
+        if (findUserType(username) == null) {
+            throw new LoomAgentRuntimeException("用户不存在: " + username);
+        }
         jdbcTemplate.update("DELETE FROM user_role WHERE username = ?", username);
         if (roleCodes != null && !roleCodes.isEmpty()) {
             for (String r : roleCodes) {
@@ -87,12 +91,27 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void setUserRolesOrSkipAdmin(String username, List<String> roleCodes) {
-        String type = jdbcTemplate.queryForObject(
-                "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        String type = findUserType(username);
+        if (type == null) {
+            throw new LoomAgentRuntimeException("用户不存在: " + username);
+        }
         if ("ADMIN".equals(type)) {
             return;
         }
         setUserRoles(username, roleCodes);
+    }
+
+    /**
+     * 查用户 type，用户不存在时返回 null（而不是抛 EmptyResultDataAccessException）。
+     * 供 chat 热路径 {@link #getVisibleMcpsForUser} 及角色写入使用，避免 500。
+     */
+    private String findUserType(String username) {
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
     }
 
     @Override
@@ -131,8 +150,7 @@ public class DefaultRoleService implements IRoleService {
      */
     @Override
     public List<McpSystemView> getVisibleMcpsForUser(String username) {
-        String type = jdbcTemplate.queryForObject(
-                "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        String type = findUserType(username);
         List<McpSystemView> system = mcpServerAdmin.listSystem();
         if (system == null) system = List.of();
         if ("ADMIN".equals(type)) {
