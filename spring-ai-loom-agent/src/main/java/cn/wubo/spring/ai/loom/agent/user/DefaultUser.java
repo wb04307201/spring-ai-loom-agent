@@ -17,6 +17,10 @@ public class DefaultUser implements IUser {
 
     private static final String TYPE_ADMIN = "ADMIN";
     private static final String TYPE_USER = "USER";
+    /** Defensive input caps for createUser — see the comment in createUser. */
+    private static final int MAX_USERNAME = 64;
+    private static final int MAX_NICKNAME = 64;
+    private static final int MAX_PASSWORD = 128;
 
     private final JdbcTemplate jdbcTemplate;
     private final BCryptPasswordEncoder passwordEncoder;
@@ -29,13 +33,6 @@ public class DefaultUser implements IUser {
     }
 
     // ---- session ----
-
-    @Override
-    public Boolean isAutoLogin() {
-        // 此方法保留兼容旧逻辑；实际是否已登录由前端根据 cookie 状态判断。
-        // 这里返回 true 不影响原有行为（前端会用 cookie 调 isAutoLogin 端点）。
-        return true;
-    }
 
     @Override
     public String createToken(String username) {
@@ -167,6 +164,15 @@ public class DefaultUser implements IUser {
                 || password == null || password.length() < 6
                 || type == null) {
             throw new LoomAgentRuntimeException("参数不合法（用户名/昵称必填，密码至少 6 位）");
+        }
+        // Defensive length caps so a hostile admin POST cannot push a 100KB
+        // username or a 1MB password through BCrypt (which would burn CPU
+        // proportional to plaintext size).
+        if (username.length() > MAX_USERNAME || nickname.length() > MAX_NICKNAME
+                || password.length() > MAX_PASSWORD) {
+            throw new LoomAgentRuntimeException(
+                    "参数过长：用户名 ≤ " + MAX_USERNAME + "，昵称 ≤ " + MAX_NICKNAME
+                            + "，密码 ≤ " + MAX_PASSWORD);
         }
         if (!TYPE_ADMIN.equals(type) && !TYPE_USER.equals(type)) {
             throw new LoomAgentRuntimeException("type 必须是 ADMIN 或 USER");
