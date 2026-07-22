@@ -1,6 +1,6 @@
 ---
 name: project-overview-image
-description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目概览图。当前 DashScope 文生图模型在多文字 + 信息图场景下文字易错位（详见 README.md），已回退 docs/project-overview-{en,zh}.png 到 mermaid 版本作为 baseline；skill 框架已搭好（generate.py + check.py + 异步 + 重试 + 文本检查），等更好模型可一键启用。
+description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目概览图。当前用 wan2.7-image（generate.py PRIMARY_MODEL，需 DASHSCOPE_WORKSPACE_ID）生成，文字清晰；docs/project-overview-{en,zh}.png 即由本 skill 产出。generate.py 的 EN_LAYOUT/ZH_LAYOUT 是布局单一真源（含 8 工具组 + RBAC + 管理控制台）。
 ---
 
 # project-overview-image
@@ -17,7 +17,7 @@ description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目
      - 核心 4 大功能：Chat UI / Knowledge Base / MCP Tools / Skill Library + Market
      - RBAC + 用户类型
      - Admin 控制台（sidebar 5 区块）
-     - 6 个工具组（File 16 / Git 28 / Maven 6 / Compile & Deploy / Time / Skill）
+     - 8 个工具组（File 16 / Git 28 / Maven 6 / Compile & Deploy / Time / Skill / Sub-task / Schedule）
      - 文件管理
      - 数据层（H2 + Flyway 双版本 V1.0 / V1.1）
      - 底层栈（Spring Boot 3.x / Spring AI 1.x / JDK 17+ / JVector / JGit）
@@ -44,7 +44,7 @@ description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目
 
 4. **检查图片（必须通过才能结束，否则重试）**
    - **单图内容检查**：
-     - 包含关键信息（项目名、核心 4 大功能、6 工具组、RBAC / Admin / 数据层 等关键词）
+     - 包含关键信息（项目名、核心 4 大功能、8 工具组、RBAC / Admin / 数据层 等关键词）
      - 无版本号 / 日期 / 年份 / 时间戳
      - 中文版含中文字符、英文版含英文词
    - **跨图一致性**：
@@ -93,7 +93,7 @@ skill 触发（任意一种）：
 
 - [ ] 中英双图都已生成
 - [ ] 包含项目名 `Spring AI LoomAgent`
-- [ ] 包含核心 4 大功能 + 6 工具组
+- [ ] 包含核心 4 大功能 + 8 工具组（含子任务 / 定时）
 - [ ] 包含 RBAC / Admin 控制台 / 数据层
 - [ ] **无版本号 / 日期 / 年份**（生成 prompt 明确禁止）
 - [ ] 中文版主要中文 + 英文版主要英文

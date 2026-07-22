@@ -46,14 +46,25 @@ rm -f docs/project-overview-{en,zh}-r*.png
 | `prompt_extend` | 可选：true 让模型自动扩写 prompt |
 | `watermark` | 可选：false 关闭水印 |
 
-## 6 大板块布局
+## 7 大板块布局
 
 1. **HEADER**：项目名 + 副标题
-2. **CORE 4**：4 张青色卡片（对话 / 知识库 / MCP / 技能）
-3. **6 TOOLS**：6 张卡片（文件 / Git / Maven / 部署 / 时间 / 技能），**第 4 张"部署"橙色高亮**
-4. **ADMIN**：5 个芯片（用户 / 角色 / MCP / 市场 / 会话）+ 2 个胶囊（管理员 / 普通用户）
-5. **STACK**：7 个技术栈胶囊（Spring Boot / Spring AI / JDK 17 / JVector / JGit / Flyway / ChatMemory）
-6. **FLOW + FOOTER**：4 框流程（核心 → 配置 → 启动 → 测试）+ "接口 默认 可替换" 横幅
+2. **CORE 4**：4 张青色卡片（对话 / 知识库 / MCP / 技能市场）
+3. **8 TOOLS**：8 张卡片（文件 16 / Git 28 / Maven 6 / 部署 1 / 时间 2 / 技能 2 / 子任务 1 / 定时 4），**第 4 张"部署"橙色高亮 + 右上角 ★**
+4. **RBAC**：灰色小标题 "RBAC + User Type" + 5 芯片（用户 / 角色 / MCP / 市场 / 会话）+ 2 胶囊（管理员 / 普通用户）
+5. **STACK**：8 个技术栈胶囊（Spring Boot / Spring AI / JDK 17 / JVector / JGit / H2 / Flyway / ChatMemory）
+6. **FLOW**：4 框流程（核心 → 配置 → 启动 → 测试）
+7. **FOOTER**：中点分隔横幅（接口 · 默认 · 可替换）
+
+## Prompt 关键约束（generate.py 单一真源）
+
+- **Card icon rule**（每张卡片强制）：图标区**只能有几何图标**，禁止任何文字、字母、数字、叠字、伪字符（解决 MCP 卡变 "NCP"、Maven 卡变 "PMC" 这类 ghost text）
+- 顶部 4 卡末位是 **Skill Market**（中英一致），把"技能"+"市场"合并到一张卡里，避免与下行工具组 Skill 重名
+- 8 工具组每张卡在名字后附**工具方法数** `(16)` `(28)` `(6)` ...，与 README "Built-in Tools" 表对齐
+- Deploy 卡 = 橙色 + 右上角 ★ + "推荐入口"
+- 栈行 **8 个胶囊**必须严格一行展示；prompt 写了"如果拥挤缩小 padding 而不是省略"
+- footer 用中点 `·` 分隔（中英一致）
+- 专有名词字符级约束：JVector = `J` + `V` + `ector`；JDK 17 = `JDK` + 数字 `17`
 
 ## Prompt 设计陷阱（避免常见错误）
 
@@ -63,8 +74,11 @@ rm -f docs/project-overview-{en,zh}-r*.png
 4. ❌ 尺码（`1328 by 1328 pixels`）→ 出现在画布上
 5. ❌ 长复合词（`FILE MANAGEMENT`）→ 拼成 `FILMANAGEMENT`
 6. ❌ Chat 字面拼写（`C-h-a-t`）→ 模型画成 `C-h-a-t`
-7. ✅ 强调"唯一"：用 "the ONLY card with orange" 防止多个高亮
-8. ✅ 短标签：1-2 字中文 / 1 单词英文
+7. ❌ 卡内多次写同一标签（"MCP" 出现 2 次）→ 让 label 只在底部出现一次
+8. ❌ 图标区出现文字（"MCP" 卡上方出现 "NCP" 伪影）→ 用 "card icon rule" 强制
+9. ✅ 强调"唯一"：用 "the ONLY card with orange" 防止多个高亮
+10. ✅ 短标签：1-2 字中文 / 1 单词英文
+11. ✅ 行末必须一行装下：prompt 写 "must fit on one line without overflow"
 
 ## wan2.7-image 已知限制
 
@@ -73,6 +87,8 @@ rm -f docs/project-overview-{en,zh}-r*.png
   - 模块流可能多出 1-2 个重复框（"starter"/"config"）
   - footer "Default" 偶尔拼成 "Defauit" / "Defaun"
   - 背景偶尔加白边装饰
+  - 栈行 8 胶囊可能溢出（如果整套拥挤，prompt 优先缩 padding 而不是省略项）
+  - 图标区仍可能偶尔注入 1 个伪字符（MCP→NCP、Maven→PMC） — 是核心修复目标
 - 强烈建议 **5+5 候选选最佳**（以前用 qwen-image 需要 50+ 候选）
 
 ## 文件结构

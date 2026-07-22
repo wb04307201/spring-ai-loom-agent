@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview Images
 
-`docs/project-overview-en.png` and `docs/project-overview-zh.png` (shown at the top of `README.md` / `README.zh-CN.md`) are generated from project source + `README.md` + this `CLAUDE.md` by the project skill at **`.claude/skills/project-overview-image/`** using the latest DashScope image model. Regenerate via the skill trigger phrases ("更新项目概览图", "刷新 README 顶部的 overview 图", "生成 docs/project-overview-{en,zh}.png") whenever the architecture changes meaningfully — never hand-edit the PNGs. Prompt payloads and the API call shape live in `docs/image-generation-prompts.md`.
+`docs/project-overview-en.png` and `docs/project-overview-zh.png` (shown at the top of `README.md` / `README.zh-CN.md`) are generated from project source + `README.md` + this `CLAUDE.md` by the project skill at **`.claude/skills/project-overview-image/`** using DashScope `wan2.7-image` (`generate.py` PRIMARY_MODEL; requires `DASHSCOPE_WORKSPACE_ID` + `DASHSCOPE_API_KEY`). The infographic layout (single source of truth) lives in `generate.py`'s `EN_LAYOUT` / `ZH_LAYOUT` — edit those, not the PNGs. Regenerate via the skill trigger phrases ("更新项目概览图", "刷新 README 顶部的 overview 图", "生成 docs/project-overview-{en,zh}.png") whenever the architecture changes meaningfully — never hand-edit the PNGs.
 
 ## Module Structure
 
@@ -81,7 +81,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `McpConfiguration` | SyncMcp / ASyncMcp |
 | `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — `time/file/skill/compile` 默认 enabled；`git/maven` 默认 disabled。Each can be enabled/disabled via `spring.ai.loom.agent.{time,file,skill,git,maven,compile}.enabled=true/false`. IMavenTool additionally requires maven-invoker on the classpath. |
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
-| `WebConfiguration` | AuthenticationFilter, 6 RouterFunctions |
+| `WebConfiguration` | AuthenticationFilter, 10 RouterFunctions |
 
 - `@AutoConfigureAfter` all Spring AI model/embedding/vectorstore/memory/MCP auto-configurations
 - Creates `ChatClient` with `MessageChatMemoryAdvisor` and `SimpleLoggerAdvisor`
@@ -146,7 +146,7 @@ Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring
 - `index.html` — entry point，含文件管理模态框（目录树视图）
 - `app.js` — Vue-based chat UI (SSE streaming, sidebar, modals). **BFF + Cookie auth**: no localStorage token, browser auto-carries HttpOnly cookie
 - `style.css` — styling
-- Uses marked.js for Markdown rendering, eventsource-parser for SSE
+- Uses marked.js for Markdown rendering (sanitized by a tiny inline `markdown-renderer.js` allowlist), and a minimal inline SSE parser in `app.js`
 
 **文件管理模态框**: 显示 `{fileBasePath}/{username}/`（例如 `C:\Users\<you>\.loom\file\<username>\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/jvector-index/`、`~/.loom/datasource/`、`~/.loom/compile-deploy-workspaces/` 这些工具/系统目录。
 
