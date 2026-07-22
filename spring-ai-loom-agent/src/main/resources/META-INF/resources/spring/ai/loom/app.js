@@ -6,6 +6,8 @@
  * §2 Global state = only state writes.
  */
 
+import { sanitizeHtml } from './markdown-renderer.js';
+
 // ===================== §1 Constants & Configuration =====================
 const API_PREFIX = '';
 const API = {
@@ -103,7 +105,8 @@ async function apiFetch(url, options = {}) {
     try {
         resp = await fetch(url, options);
     } catch (e) {
-        // 网络/中止错误：返回一个合成的 Response，让上层走 r.ok === false 分支
+        if (e && e.name === 'AbortError') throw e;
+        // 网络错误：返回一个合成的 Response，让上层走 r.ok === false 分支
         console.warn('[apiFetch] network error for', url, e);
         return new Response(null, { status: 599, statusText: e.message || 'network error' });
     }
@@ -243,11 +246,11 @@ function renderMarkdown(text) {
         text = text.replace(/url:(https?:\/\/[^\s\n]+)/g, '$1');
         // 2. Strip instruction lines about HTML <a> tags (not useful to the user)
         text = text.replace(/^使用HTML\s*<a>\s*标签.*$/gm, '').trim();
-        // Parse markdown normally, then post-process all links to open in new tab
-        const html = marked.parse(text);
+        // Parse markdown, sanitize all generated HTML, then post-process links to open in new tab
+        const html = sanitizeHtml(marked.parse(text));
         return html.replace(/<a\s/g, '<a target="_blank" rel="noopener noreferrer" ');
     }
-    catch { return text; }
+    catch { return escapeHtml(text); }
 }
 
 // ===================== §4 API Service Layer =====================
@@ -509,11 +512,12 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/conversation/' + encodeURIComponent(convId) + '/state');
         return r.ok ? r.json() : null;
     },
-    async streamChat(record, onChunk, onComplete, onError) {
+    async streamChat(record, onChunk, onComplete, onError, signal) {
         const resp = await apiFetch(API.stream, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(record),
+            signal,
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
@@ -532,7 +536,17 @@ const api = {
             parser.feed(decoder.decode(value, { stream: true }));
             await read();
         }
-        await read();
+        try {
+            await read();
+        } catch (e) {
+            // Abort is a user-initiated stop, not an error — swallow it.
+            if (e && e.name === 'AbortError') {
+                try { reader.cancel(); } catch (_) {}
+                onComplete();
+                return;
+            }
+            throw e;
+        }
     },
 };
 
@@ -1251,6 +1265,10 @@ const chat = {
         // Clear pending image after capturing fileId
         imageUpload.clear();
 
+        // Create an AbortController so stopStream() can abort the frontend read.
+        const controller = new AbortController();
+        state.controller = controller;
+
         try {
             await api.streamChat(record,
                 (data) => {
@@ -1265,7 +1283,10 @@ const chat = {
                     if (data.content) {
                         answerText += data.content;
                         if (answerEl) answerEl.innerHTML = renderMarkdown(answerText);
-                        if (originEl) originEl.innerHTML = answerText;
+                        // origin-* is the "copy raw / download" payload; it is read
+                        // via textContent downstream, so write raw text rather than
+                        // parsing it as HTML. Keeps `<img onerror>` etc. inert.
+                        if (originEl) originEl.textContent = answerText;
                     }
                     ui.scrollToBottom();
                 },
@@ -1281,15 +1302,21 @@ const chat = {
                     // error
                     const actionsEl = document.getElementById('actions-' + id);
                     if (actionsEl) actionsEl.style.display = '';
-                    if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + (error.message || '未知错误') + '</span>';
+                    if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + escapeHtml(error.message || '未知错误') + '</span>';
                     ui.enableSend();
                     ui.setStopButtonVisible(false);
-                }
+                },
+                controller.signal
             );
         } catch (error) {
-            if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + error.message + '</span>';
+            // AbortError = user-initiated stop, not a failure.
+            if (!(error && error.name === 'AbortError')) {
+                if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + escapeHtml(error.message || '未知错误') + '</span>';
+            }
             ui.enableSend();
             ui.setStopButtonVisible(false);
+        } finally {
+            if (state.controller === controller) state.controller = null;
         }
     },
 
@@ -1315,12 +1342,19 @@ const chat = {
         } catch (e) {
             showToast('停止失败：' + e.message, 'error');
         } finally {
+            // Abort the frontend read after signalling the backend to stop.
+            if (state.controller) {
+                try { state.controller.abort(); } catch (_) {}
+            }
             ui.setStopButtonVisible(false);
         }
     },
 
     abortStream() {
         if (state.isStreaming) {
+            if (state.controller) {
+                try { state.controller.abort(); } catch (_) {}
+            }
             ui.enableSend();
         }
     },
@@ -3215,12 +3249,13 @@ const imageUpload = {
         div.id = thumbId;
 
         // Document icon or image
+        const safeName = escapeHtml(fileName || '');
         let contentHtml;
         if (docIcon) {
             contentHtml = `<div class="doc-icon-container">${docIcon}</div>
-                <div class="doc-filename" title="${fileName}">${fileName}</div>`;
+                <div class="doc-filename" title="${safeName}">${safeName}</div>`;
         } else {
-            contentHtml = `<img src="${objectUrl}" alt="${fileName}">
+            contentHtml = `<img src="${objectUrl}" alt="${safeName}">
                 <div class="thumbnail-loading"><div class="spinner"></div></div>`;
         }
 

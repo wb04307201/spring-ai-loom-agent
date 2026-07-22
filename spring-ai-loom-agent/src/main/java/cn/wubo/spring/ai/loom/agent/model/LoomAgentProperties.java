@@ -200,6 +200,11 @@ public class LoomAgentProperties {
                 "/spring/ai/loom/user/logout",
                 "/spring/ai/loom/index.html",
                 "/spring/ai/loom/app.js",
+                // app.js (line 9) does `import { sanitizeHtml } from './markdown-renderer.js'`,
+                // so the module must be reachable without a session cookie; otherwise
+                // the very first page load on a logged-out browser fails to import
+                // the module and the chat UI is broken.
+                "/spring/ai/loom/markdown-renderer.js",
                 "/spring/ai/loom/style.css",
                 "/spring/ai/loom/login.html",
                 "/spring/ai/loom/login.js",
