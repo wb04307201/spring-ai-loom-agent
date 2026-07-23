@@ -1509,8 +1509,14 @@ public class LoomAgentConfiguration {
                 int month = java.time.LocalDate.now().getMonthValue();
                 String y = request.param("year").orElse(null);
                 String m = request.param("month").orElse(null);
-                if (y != null) year = Integer.parseInt(y);
-                if (m != null) month = Integer.parseInt(m);
+                // year/month 必须是数字——非数字 (year=abc 或超出 int 范围) 走 400 而不是 500
+                try {
+                    if (y != null) year = Integer.parseInt(y);
+                    if (m != null) month = Integer.parseInt(m);
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "year/month 必须是数字: year=" + y + ", month=" + m));
+                }
                 return ServerResponse.ok().body(tokenUsage.monthlyByUser(year, month));
             });
 
@@ -1568,8 +1574,15 @@ public class LoomAgentConfiguration {
             });
             builder.PUT("spring/ai/loom/admin/users/{username}/roles", request -> {
                 cn.wubo.spring.ai.loom.agent.model.SetUserRolesRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.SetUserRolesRequest.class);
-                roleService.setUserRolesOrSkipAdmin(request.pathVariable("username"), body == null ? null : body.roleCodes());
-                return ServerResponse.ok().body(true);
+                // 用户不存在 → 4xx 而不是 500（service 抛 LoomAgentRuntimeException）
+                try {
+                    roleService.setUserRolesOrSkipAdmin(request.pathVariable("username"), body == null ? null : body.roleCodes());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
 
             // ===== MCP 元数据管理 =====
@@ -1599,8 +1612,14 @@ public class LoomAgentConfiguration {
             builder.PUT("spring/ai/loom/admin/mcp-tools/{toolId}", request -> {
                 cn.wubo.spring.ai.loom.agent.model.UpsertMcpToolRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.UpsertMcpToolRequest.class);
-                Long toolId = request.pathVariable("toolId").equals("0") ? 0L
-                        : Long.parseLong(request.pathVariable("toolId"));
+                String toolIdRaw = request.pathVariable("toolId");
+                Long toolId;
+                try {
+                    toolId = toolIdRaw.equals("0") ? 0L : Long.parseLong(toolIdRaw);
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.status(HttpStatus.BAD_REQUEST)
+                            .body(java.util.Map.of("error", "toolId 必须是数字: " + toolIdRaw));
+                }
                 try {
                     return ServerResponse.ok().body(mcpServerAdmin.upsertTool(
                             toolId,
@@ -1611,11 +1630,24 @@ public class LoomAgentConfiguration {
                     // toolId 非 0 但 DB 里找不到 → 404 而不是 500 (BUG-12-MCP-TOOL-PUT-404)
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : 404;
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataAccessException dae) {
+                    // 入参不满足 DB 约束（NOT NULL 字段为空等）→ 400 而非 500，
+                    // 避免 admin 端意外把后端异常以 500 形式抛给前端。
+                    log.warn("admin upsertTool 数据约束失败: toolId={}, message={}", toolId, dae.getMessage());
+                    return ServerResponse.status(HttpStatus.BAD_REQUEST)
+                            .body(java.util.Map.of("error", "数据约束失败: " + dae.getMostSpecificCause().getMessage()));
                 }
             });
             // 删除已维护的工具描述记录（删除后回退到 SDK 默认）
             builder.DELETE("spring/ai/loom/admin/mcp-tools/{toolId}", request -> {
-                Long toolId = Long.parseLong(request.pathVariable("toolId"));
+                // toolId 必须是数字——非数字走 400 而不是 500（PUT 已在 R22 修过，DELETE 同根因）
+                Long toolId;
+                try {
+                    toolId = Long.parseLong(request.pathVariable("toolId"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "toolId 必须是数字: " + request.pathVariable("toolId")));
+                }
                 int n = jdbcTemplate.update("DELETE FROM mcp_tool WHERE id = ?", toolId);
                 if (n == 0) return ServerResponse.notFound().build();
                 return ServerResponse.ok().body(true);
@@ -1837,19 +1869,49 @@ public class LoomAgentConfiguration {
             builder.PUT("spring/ai/loom/skill", request -> {
                 SkillRecord skill = request.body(SkillRecord.class);
                 String username = UserContextHolder.getCurrentUser();
-                skillStorage.save(skill, username);
-                return ServerResponse.ok().body(true);
+                // 空 body 或 service 抛异常 → 4xx 而不是 500
+                try {
+                    if (skill == null) {
+                        return ServerResponse.badRequest().body(java.util.Map.of("error", "请求体不能为空"));
+                    }
+                    skillStorage.save(skill, username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "Skill 字段缺失（name/content 必填）"));
+                }
             });
             builder.GET("spring/ai/loom/skill/{name}", request -> {
                 String name = request.pathVariable("name");
                 String username = UserContextHolder.getCurrentUser();
-                return ServerResponse.ok().body(skillStorage.get(name, username));
+                try {
+                    return ServerResponse.ok().body(skillStorage.get(name, username));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    // "Skill 不存在或无权限" 由 service 抛 message-only 异常；
+                    // 没有显式 statusCode，路由层就近兜底成 404 而不是默认 500。
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    log.debug("skill get 失败: name={}, user={}, message={}", name, username, ex.getMessage());
+                    return ServerResponse.status(code).body(
+                            java.util.Map.of("error", ex.getMessage() == null ? "Skill 不存在或无权限" : ex.getMessage()));
+                }
             });
             builder.DELETE("spring/ai/loom/skill/{name}", request -> {
                 String name = request.pathVariable("name");
                 String username = UserContextHolder.getCurrentUser();
-                skillStorage.remove(name, username);
-                return ServerResponse.ok().body(true);
+                try {
+                    skillStorage.remove(name, username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    log.debug("skill delete 失败: name={}, user={}, message={}", name, username, ex.getMessage());
+                    return ServerResponse.status(code).body(
+                            java.util.Map.of("error", ex.getMessage() == null ? "Skill 不存在或无权限" : ex.getMessage()));
+                }
             });
             // PATCH：改描述 / 默认加载
             builder.PATCH("spring/ai/loom/skill/{name}", request -> {
@@ -1857,8 +1919,15 @@ public class LoomAgentConfiguration {
                 String username = UserContextHolder.getCurrentUser();
                 cn.wubo.spring.ai.loom.agent.model.UserSkillPatchRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.UserSkillPatchRequest.class);
-                skillStorage.patch(name, username, body);
-                return ServerResponse.ok().body(true);
+                try {
+                    skillStorage.patch(name, username, body);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    log.debug("skill patch 失败: name={}, user={}, message={}", name, username, ex.getMessage());
+                    return ServerResponse.status(code).body(
+                            java.util.Map.of("error", ex.getMessage() == null ? "Skill 不存在或无权限" : ex.getMessage()));
+                }
             });
             // 手动触发同步
             builder.POST("spring/ai/loom/skill/sync", request -> {
@@ -1879,21 +1948,57 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/market-skills", request -> ServerResponse.ok().body(marketService.listApproved()));
             // 任意用户：按 id 查
             builder.GET("spring/ai/loom/market-skills/{id}", request -> {
-                Long id = Long.parseLong(request.pathVariable("id"));
-                return ServerResponse.ok().body(marketService.get(id));
+                // id 必须是数字——非数字走 400 而不是 500；service 抛 "Skill 不存在" → 404 而不是 500
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    return ServerResponse.ok().body(marketService.get(id));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // 任意用户：拉取到自己的 user_skill
             builder.POST("spring/ai/loom/market-skills/{id}/pull", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                Long id = Long.parseLong(request.pathVariable("id"));
-                return ServerResponse.ok().body(marketService.pull(username, id));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    return ServerResponse.ok().body(marketService.pull(username, id));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // 任意用户：提交新 Skill（status=PENDING）
             builder.POST("spring/ai/loom/user/market-skills", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest.class);
-                return ServerResponse.ok().body(marketService.submit(username, body));
+                if (body == null) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(marketService.submit(username, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "字段缺失（name/description/content 必填）"));
+                }
             });
             return builder.build();
         }
@@ -1922,43 +2027,101 @@ public class LoomAgentConfiguration {
                 if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest.class);
-                return ServerResponse.ok().body(marketService.adminCreate(username, body));
+                if (body == null) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(marketService.adminCreate(username, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "字段缺失（name/description/content 必填）"));
+                }
             });
             // admin 改任意 Skill
             builder.PUT("spring/ai/loom/admin/market-skills/{id}", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                Long id = Long.parseLong(request.pathVariable("id"));
+                // id 必须是数字——非数字走 400 而不是 500；service 抛 "Skill 不存在" → 404
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
                 cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest.class);
-                return ServerResponse.ok().body(marketService.adminUpdate(username, id, body));
+                try {
+                    return ServerResponse.ok().body(marketService.adminUpdate(username, id, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // admin 删
             builder.DELETE("spring/ai/loom/admin/market-skills/{id}", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                Long id = Long.parseLong(request.pathVariable("id"));
-                marketService.adminDelete(username, id);
-                return ServerResponse.ok().body(true);
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    marketService.adminDelete(username, id);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // 审批
             builder.POST("spring/ai/loom/admin/market-skills/{id}/approve", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                Long id = Long.parseLong(request.pathVariable("id"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
                 cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest.class);
                 String comment = body == null ? null : body.comment();
-                return ServerResponse.ok().body(marketService.approve(username, id, comment));
+                try {
+                    return ServerResponse.ok().body(marketService.approve(username, id, comment));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             builder.POST("spring/ai/loom/admin/market-skills/{id}/reject", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                Long id = Long.parseLong(request.pathVariable("id"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
                 cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest.class);
                 String comment = body == null ? null : body.comment();
-                return ServerResponse.ok().body(marketService.reject(username, id, comment));
+                try {
+                    return ServerResponse.ok().body(marketService.reject(username, id, comment));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             return builder.build();
         }
@@ -2026,7 +2189,16 @@ public class LoomAgentConfiguration {
             // 按 fileId 下载：直接读磁盘，不依赖 IUpload（@Tool downloadFileUrl 用此端点）
             builder.GET("/spring/ai/loom/file/{id}/download", request -> {
                 String id = request.pathVariable("id");
-                FileRecord fileRecord = file.getById(id, UserContextHolder.getCurrentUser());
+                // IFile.getById 在 row 不存在时抛 EmptyResultDataAccessException（queryForObject），
+                // 任意非 UUID 字符串也走不到 row 但同样会触发异常——这里统一兜底成 404 而不是 500
+                FileRecord fileRecord;
+                try {
+                    fileRecord = file.getById(id, UserContextHolder.getCurrentUser());
+                } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+                    return ServerResponse.notFound().build();
+                } catch (org.springframework.dao.IncorrectResultSizeDataAccessException e) {
+                    return ServerResponse.notFound().build();
+                }
                 if (fileRecord == null) {
                     return ServerResponse.notFound().build();
                 }
@@ -2061,9 +2233,18 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentUploadRouter(IUpload upload) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.POST("/spring/ai/loom/file/upload", request -> {
-                Part part = request.multipartData().getFirst("file");
+                // multipartData() 自身在 Content-Type 不是 multipart/* 或 body 为空时会抛
+                // InvalidContentTypeException (Tomcat) / ServerWebInputException (WebFlux)，需要提前捕获。
+                String fileErrMsg = "上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件";
+                Part part;
+                try {
+                    part = request.multipartData().getFirst("file");
+                } catch (Exception e) {
+                    // Tomcat 缺 multipart header / body 不解析 → 400 而不是 500
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", fileErrMsg));
+                }
                 if (part == null) {
-                    throw new IllegalArgumentException("上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件");
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", fileErrMsg));
                 }
                 String fileId = upload.upload(part.getInputStream(), part.getSubmittedFileName(), part.getContentType());
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(java.util.Map.of("fileId", fileId, "status", "success"));
@@ -2168,6 +2349,11 @@ public class LoomAgentConfiguration {
             builder.GET("/spring/ai/loom/knowledge", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.list()));
             builder.PUT("/spring/ai/loom/knowledge", request -> {
                 KnowledgeRecord knowledgeRecord = request.body(KnowledgeRecord.class);
+                // 空 body / 缺 name → 400 而不是 500（request.body 返回 null → knowledgeRecord.name() NPE）
+                if (knowledgeRecord == null || knowledgeRecord.name() == null || knowledgeRecord.name().isBlank()) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
+                }
                 try {
                     return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name()));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
@@ -2178,6 +2364,10 @@ public class LoomAgentConfiguration {
                             : HttpStatus.BAD_REQUEST;
                     return ServerResponse.status(status).contentType(MediaType.APPLICATION_JSON)
                             .body(java.util.Map.of("message", e.getMessage() == null ? "请求失败" : e.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    // DB 层 NOT NULL / UNIQUE 约束 → 400 而不是 500
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "数据约束失败: " + e.getMostSpecificCause().getMessage()));
                 }
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
@@ -2185,9 +2375,16 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.deleteAllKnowledge(knowledgeId));
             });
             builder.POST("/spring/ai/loom/knowledge/{knowledgeId}/upload", request -> {
-                Part part = request.multipartData().getFirst("file");
+                // 与 /file/upload 同理：缺 multipart header / body 走 400 而不是 500
+                String fileErrMsg = "上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件";
+                Part part;
+                try {
+                    part = request.multipartData().getFirst("file");
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", fileErrMsg));
+                }
                 if (part == null) {
-                    throw new IllegalArgumentException("上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件");
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", fileErrMsg));
                 }
                 String knowledgeId = request.pathVariable("knowledgeId");
 
@@ -2200,7 +2397,14 @@ public class LoomAgentConfiguration {
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}", request -> {
                 String fileId = request.pathVariable("fileId");
-                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.delete(fileId));
+                // upload.delete 内部调 file.getById，row 不存在抛 EmptyResultDataAccessException → 404
+                try {
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.delete(fileId));
+                } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+                    return ServerResponse.notFound().build();
+                } catch (org.springframework.dao.IncorrectResultSizeDataAccessException e) {
+                    return ServerResponse.notFound().build();
+                }
             });
             return builder.build();
         }

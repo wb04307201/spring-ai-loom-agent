@@ -118,7 +118,14 @@ public class DefaultScheduleTool implements IScheduleTool {
      */
     private void persistAfterRegister(String full, String name, String scheduleType, String expression,
                                       String prompt, String username, String convId) {
-        long nowSec = parseLongOrZero(expression);
+        // BUG-14: fixed_rate / fixed_delay expressions come from the LLM in
+        // units like "15m" / "12 分钟" / "PT11M". Use the lenient parseSeconds
+        // (same one that drives flex-schedule) so the H2 row's
+        // interval_seconds reflects the real interval. The previous
+        // parseLongOrZero swallowed "15m" as NFE and wrote 0, which made
+        // ScheduleRestoreListener treat restored rows as "PT0S" and drop them
+        // at the next boot. Clamp negatives to 0 defensively.
+        long nowSec = Math.max(0L, parseSeconds(expression));
         Instant now = Instant.now();
         LoomScheduleTriggerRecord record = new LoomScheduleTriggerRecord(
                 full,
@@ -165,9 +172,15 @@ public class DefaultScheduleTool implements IScheduleTool {
         if (expression == null) return -1L;
         String s = expression.trim().toLowerCase()
                 .replace(" ", "")
+                .replace("秒钟", "s")    // Chinese compound "秒钟" handled first
                 .replace("秒", "s")
                 .replace("secs", "s")
                 .replace("sec", "s")
+                // Chinese time units → shorthand. Order matters: longest first
+                // so "分钟" matches before "分" and "分钟" before "秒" already
+                // happened above.
+                .replace("分钟", "m")
+                .replace("分", "m")
                 .replace("minutes", "m")
                 .replace("minute", "m")
                 .replace("mins", "m")

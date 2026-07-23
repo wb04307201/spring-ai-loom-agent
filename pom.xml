@@ -61,7 +61,7 @@
         <file-view.version>1.4.2-sb3</file-view.version>
         <jgit.version>7.6.0.202603022253-r</jgit.version>
         <maven.version>3.3.0</maven.version>
-        <flex-schedule.version>1.0-SNAPSHOT</flex-schedule.version>
+        <flex-schedule.version>1.2.2</flex-schedule.version>
     </properties>
 
     <dependencyManagement>

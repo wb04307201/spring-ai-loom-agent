@@ -105,9 +105,15 @@ public class ScheduleRestoreListener {
         int droppedOrphan = 0;
         int failed = 0;
 
-        java.util.Set<String> knownUsernames = loadKnownUsernames();
+        java.util.Set<String> knownUsernames = loadKnownUsernames();   // null = no filter
         for (LoomScheduleTriggerRecord r : records) {
-            if (r.username() != null && !knownUsernames.contains(r.username())) {
+            // Orphan check skipped entirely when there is no JdbcTemplate wired
+            // (legacy / test-only constructor). Returning an empty Set would
+            // conflate "I have no source of truth" with "I know every username
+            // is missing" → would nuke every restored task.
+            if (knownUsernames != null
+                    && r.username() != null
+                    && !knownUsernames.contains(r.username())) {
                 // Skip tasks whose owner no longer exists. Without this filter,
                 // a deleted user would have their scheduled prompts fired under
                 // whichever account happens to be logged in at restart time.
@@ -266,10 +272,16 @@ public class ScheduleRestoreListener {
      * Read distinct usernames from {@code user_info} so the restore loop can drop
      * tasks whose owner has been deleted (avoids firing a deleted user's prompt
      * under whichever account the next restart sees).
+     *
+     * @return the set of known usernames, or {@code null} if no {@link JdbcTemplate}
+     *         was wired (signaling "no source of truth — skip the orphan check
+     *         entirely"). An empty set returned from a live query still triggers
+     *         the filter (every row counts as orphan), which is the correct
+     *         semantics when the underlying query succeeded with no rows.
      */
     private java.util.Set<String> loadKnownUsernames() {
         if (userJdbcTemplate == null) {
-            return java.util.Collections.emptySet();
+            return null;   // sentinel: caller skips the orphan check entirely
         }
         try {
             return new java.util.HashSet<>(userJdbcTemplate.queryForList(
@@ -277,7 +289,7 @@ public class ScheduleRestoreListener {
         } catch (Exception e) {
             log.warn("loadKnownUsernames failed; will fall back to no orphan filter: {}",
                     e.getMessage());
-            return java.util.Collections.emptySet();
+            return null;   // query failed → opt out rather than nuke everything
         }
     }
 

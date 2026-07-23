@@ -67,9 +67,13 @@ public class DefaultUserConversation implements IUserConversation {
 
     @Override
     public boolean exists(UserConversationRecord userConversationRecord) {
+        // 软删后的对话应当视为"已不存在"，否则 GET /conversation/{id} 路由
+        // 的所有权校验会被绕过，命中空消息体后前端表现为"对话在但内容被清"，
+        // 而非"已删除"——和 admin clean-batch 之后的语义混淆。
         try {
             Integer count = jdbcTemplate.queryForObject(
-                    "select count(*) from user_conversation where username = ? and conversation_id = ?",
+                    "select count(*) from user_conversation " +
+                            "where username = ? and conversation_id = ? and deleted_at is null",
                     Integer.class,
                     userConversationRecord.username(), userConversationRecord.conversationId());
             return count != null && count > 0;
