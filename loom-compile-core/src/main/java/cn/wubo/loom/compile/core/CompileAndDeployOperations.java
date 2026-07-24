@@ -56,7 +56,7 @@ public class CompileAndDeployOperations {
 
     // ==================== Main Entry ====================
 
-    public CompileAndDeployResult compileAndDeploy(Path workspaceBasePath, Map<String, Object> params) {
+    public CompileAndDeployResult compileAndDeploy(Path workspaceBasePath, String user, Map<String, Object> params) {
         List<String> steps = new ArrayList<>();
         long startMs = System.currentTimeMillis();
 
@@ -88,7 +88,18 @@ public class CompileAndDeployOperations {
 
         int effectivePort = port;
         int effectiveContainerPort = containerPort;
-        String workspaceName = "compile-deploy-" + UUID.randomUUID().toString().substring(0, 8);
+        // Workspace name encodes the username and a short timestamp so:
+        //   1) ops can identify the owning user just by `ls` (defense-in-depth
+        //      against the user dir being shared);
+        //   2) ops can age workspaces by name when deciding what to prune;
+        //   3) the random UUID suffix keeps concurrent invocations collision-free.
+        // Format: compile-deploy-<username>-<yyyyMMddHHmmss>-<uuid8>
+        String workspaceName = "compile-deploy-"
+                + sanitizeForDirName(user)
+                + "-"
+                + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
+                + "-"
+                + UUID.randomUUID().toString().substring(0, 8);
         Path workspace = workspaceBasePath.resolve(workspaceName);
         String repoName = deriveRepoName(gitUrl);
         Path projectDir = workspace.resolve(repoName);
@@ -207,15 +218,51 @@ public class CompileAndDeployOperations {
             }
 
             log.info("compileAndDeploy done. elapsed={}ms, workspace={}", System.currentTimeMillis() - startMs, workspace);
-            return CompileAndDeployResult.ok(workspace.toString(), gitUrl, branch, effectiveImage,
+            CompileAndDeployResult ok = CompileAndDeployResult.ok(workspace.toString(), gitUrl, branch, effectiveImage,
                     effectiveContainer, effectivePort, accessUrl, effectiveHealthPath, steps);
+            // Default keepWorkspace=false → clean up on success (workspace was
+            // an ephemeral scratch space for the docker build context, not a
+            // user-owned artifact). Failure paths keep the workspace regardless
+            // (for post-mortem; the workspace dir name embeds username +
+            // timestamp so it's easy to correlate to a given run).
+            if (!config.keepWorkspace()) {
+                try {
+                    deleteRecursively(workspace);
+                    log.info("Cleaned up workspace after success: {}", workspace);
+                } catch (Exception cleanupErr) {
+                    log.warn("Workspace cleanup failed for {}: {}", workspace, cleanupErr.getMessage());
+                }
+            } else {
+                log.info("Keeping successful workspace (keepWorkspace=true): {}", workspace);
+            }
+            return ok;
         } catch (Exception e) {
             log.error("compileAndDeploy unexpected failure. workspace={}", workspace, e);
             steps.add("Exception: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            // Failure path always keeps the workspace (regardless of
+            // keepWorkspace) — see CompileConfig docstring ("失败时保留供排障").
+            log.info("Failure — workspace preserved at: {}", workspace);
             return CompileAndDeployResult.fail(workspace.toString(), gitUrl, effectiveImage,
                     effectiveContainer, effectivePort, effectiveHealthPath, steps,
                     "Internal error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Strip characters that are illegal / awkward in directory names on common
+     * filesystems: anything outside {@code [A-Za-z0-9._-]} becomes {@code _}.
+     * Empty username collapses to {@code anonymous} so the directory name is
+     * never empty.
+     */
+    private static String sanitizeForDirName(String username) {
+        if (username == null || username.isBlank()) return "anonymous";
+        StringBuilder sb = new StringBuilder(username.length());
+        for (int i = 0; i < username.length(); i++) {
+            char c = username.charAt(i);
+            sb.append((Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == '.') ? c : '_');
+        }
+        String sanitized = sb.toString();
+        return sanitized.isEmpty() ? "anonymous" : sanitized;
     }
 
     // ==================== Step Implementations ====================

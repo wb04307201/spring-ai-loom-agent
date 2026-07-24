@@ -49,7 +49,12 @@ public class LoomCompileMcpService {
             @ToolParam(description = "参数 Map，包含：gitUrl（必填）、port（必填）、containerPort（必填）、"
                     + "branch、subDir、imageName、containerName、healthPath、buildTool（maven/npm/npm-frontend/pip）、"
                     + "baseImage、runCommand、gitUsername、gitPassword") Map<String, Object> params) {
-        CompileAndDeployResult result = operations.compileAndDeploy(basePath, params);
+        // Username doesn't exist in the MCP auth context here; fall back to
+        // "anonymous" so the workspace dir name still has an ownership hint
+        // (rather than empty / "mcp"). MCP callers can override via the
+        // params map if they want a specific label.
+        String user = params.get("__user") instanceof String s && !s.isBlank() ? s : "anonymous";
+        CompileAndDeployResult result = operations.compileAndDeploy(basePath, user, params);
         return formatResult(result);
     }
 

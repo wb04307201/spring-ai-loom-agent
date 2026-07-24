@@ -3,6 +3,7 @@ package cn.wubo.spring.ai.loom.agent.rbac;
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.model.McpSystemView;
 import cn.wubo.spring.ai.loom.agent.model.RoleInfo;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -34,12 +35,12 @@ public class DefaultRoleService implements IRoleService {
     @Override
     public RoleInfo create(String code, String name, String description, List<String> mcpNames) {
         if (code == null || code.isBlank() || name == null || name.isBlank()) {
-            throw new LoomAgentRuntimeException("角色 code 和 name 必填");
+            throw new LoomAgentRuntimeException(400, "角色 code 和 name 必填");
         }
         Integer exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM role WHERE code = ?", Integer.class, code);
         if (exists != null && exists > 0) {
-            throw new LoomAgentRuntimeException("角色 code 已存在: " + code);
+            throw new LoomAgentRuntimeException(409, "角色 code 已存在: " + code);
         }
         jdbcTemplate.update(
                 "INSERT INTO role (code, name, is_system, description) VALUES (?, ?, FALSE, ?)",
@@ -60,10 +61,11 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void deleteOrThrow(String code) {
-        Integer isSystem = jdbcTemplate.queryForObject(
+        List<Integer> rows = jdbcTemplate.queryForList(
                 "SELECT is_system FROM role WHERE code = ?", Integer.class, code);
-        if (isSystem == null) throw new LoomAgentRuntimeException("角色不存在: " + code);
-        if (isSystem != 0) throw new LoomAgentRuntimeException("系统角色不可删除: " + code);
+        if (rows.isEmpty()) throw new LoomAgentRuntimeException(404, "角色不存在: " + code);
+        Integer isSystem = rows.get(0);
+        if (isSystem != null && isSystem != 0) throw new LoomAgentRuntimeException(400, "系统角色不可删除: " + code);
         delete(code);
     }
 
@@ -75,6 +77,9 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void setUserRoles(String username, List<String> roleCodes) {
+        if (findUserType(username) == null) {
+            throw new LoomAgentRuntimeException("用户不存在: " + username);
+        }
         jdbcTemplate.update("DELETE FROM user_role WHERE username = ?", username);
         if (roleCodes != null && !roleCodes.isEmpty()) {
             for (String r : roleCodes) {
@@ -86,12 +91,27 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void setUserRolesOrSkipAdmin(String username, List<String> roleCodes) {
-        String type = jdbcTemplate.queryForObject(
-                "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        String type = findUserType(username);
+        if (type == null) {
+            throw new LoomAgentRuntimeException("用户不存在: " + username);
+        }
         if ("ADMIN".equals(type)) {
             return;
         }
         setUserRoles(username, roleCodes);
+    }
+
+    /**
+     * 查用户 type，用户不存在时返回 null（而不是抛 EmptyResultDataAccessException）。
+     * 供 chat 热路径 {@link #getVisibleMcpsForUser} 及角色写入使用，避免 500。
+     */
+    private String findUserType(String username) {
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
     }
 
     @Override
@@ -130,8 +150,7 @@ public class DefaultRoleService implements IRoleService {
      */
     @Override
     public List<McpSystemView> getVisibleMcpsForUser(String username) {
-        String type = jdbcTemplate.queryForObject(
-                "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        String type = findUserType(username);
         List<McpSystemView> system = mcpServerAdmin.listSystem();
         if (system == null) system = List.of();
         if ("ADMIN".equals(type)) {

@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API 文档
 
 > **Base URL**: `http://localhost:8080`（测试环境默认端口）
-> **版本**: 1.1.33
+> **版本**: 1.1.34
 > **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
@@ -741,7 +741,7 @@ GET /spring/ai/chat/loom/mcp
   {
     "name": "weather-mcp",
     "title": "天气查询",
-    "version": "1.1.33",
+    "version": "1.1.34",
     "description": "提供实时天气查询服务",
     "defaultSelected": true,
     "tools": [

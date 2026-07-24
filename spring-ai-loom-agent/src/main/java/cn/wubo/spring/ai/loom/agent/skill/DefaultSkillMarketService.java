@@ -8,6 +8,7 @@ import cn.wubo.spring.ai.loom.agent.model.UserSkill;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -78,6 +79,7 @@ public class DefaultSkillMarketService implements ISkillMarketService {
     /* ===== 用户提交 ===== */
 
     @Override
+    @Transactional
     public MarketSkill submit(String username, MarketSkillSubmitRequest req) {
         validateNameVersion(req.name(), req.version());
         if (req.content() == null || req.content().isBlank()) {
@@ -123,6 +125,7 @@ public class DefaultSkillMarketService implements ISkillMarketService {
     /* ===== admin 直接 CRUD ===== */
 
     @Override
+    @Transactional
     public MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req) {
         validateNameVersion(req.name(), req.version());
         if (req.content() == null || req.content().isBlank()) {
@@ -148,6 +151,7 @@ public class DefaultSkillMarketService implements ISkillMarketService {
     }
 
     @Override
+    @Transactional
     public MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req) {
         MarketSkill existing = get(id);
         jdbcTemplate.update(
@@ -163,6 +167,7 @@ public class DefaultSkillMarketService implements ISkillMarketService {
     }
 
     @Override
+    @Transactional
     public void adminDelete(String adminUsername, Long id) {
         // 先把 user_skill / role_skill 里所有引用清掉
         jdbcTemplate.update("DELETE FROM user_skill WHERE market_skill_id = ?", id);
@@ -174,6 +179,7 @@ public class DefaultSkillMarketService implements ISkillMarketService {
     /* ===== 用户拉取 ===== */
 
     @Override
+    @Transactional
     public UserSkill pull(String username, Long marketSkillId) {
         MarketSkill m = get(marketSkillId);
         if (!MarketSkill.STATUS_APPROVED.equals(m.status())) {

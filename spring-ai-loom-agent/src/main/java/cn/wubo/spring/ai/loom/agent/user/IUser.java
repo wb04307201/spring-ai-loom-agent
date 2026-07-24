@@ -9,12 +9,6 @@ import java.util.List;
 public interface IUser {
 
     /**
-     * 检查 session cookie 是否有效（true 表示已登录）。
-     * 用于前端在进入 index.html 时判断是否要跳转到 login.html。
-     */
-    Boolean isAutoLogin();
-
-    /**
      * 校验用户名 + 密码，成功返回带 token + nickname 的响应。
      * 失败抛 LoomAgentRuntimeException。
      */

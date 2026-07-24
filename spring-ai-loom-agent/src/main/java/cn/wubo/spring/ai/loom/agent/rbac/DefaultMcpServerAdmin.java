@@ -11,6 +11,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,6 +22,8 @@ import java.util.Optional;
 
 @Component
 public class DefaultMcpServerAdmin implements IMcpServerAdmin {
+
+    private static final Logger log = LoggerFactory.getLogger(DefaultMcpServerAdmin.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectProvider<cn.wubo.spring.ai.loom.agent.mcp.IMcp> mcpProvider;
@@ -59,16 +63,22 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
         Map<String, Map<String, Object>> dbServerRows = new HashMap<>();
         try {
             org.springframework.jdbc.core.RowMapper<Map<String, Object>> serverMapper = (rs, rowNum) -> {
-                dbServerRows.put(rs.getString(1), Map.of(
-                        "title", rs.getString(2),
-                        "description", rs.getString(3)));
+                // 用 HashMap 而不是 Map.of()，因为 title/description 都可能为 null，
+                // Map.of() 不接受 null value，会抛 NPE 被外层 catch 吞掉导致整行丢失
+                // (BUG-12-MCP-SYSTEM-MAPOF-NPE)
+                Map<String, Object> row = new HashMap<>();
+                row.put("title", rs.getString(2));
+                row.put("description", rs.getString(3));
+                dbServerRows.put(rs.getString(1), row);
                 return null;
             };
             jdbcTemplate.query(
                     "SELECT name, title, description FROM mcp_server WHERE name IN (" + placeholders + ")",
                     serverMapper,
                     (Object[]) names.toArray());
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            log.warn("查询 mcp_server 元数据失败，将回退为未维护视图: {}", e.getMessage(), e);
+        }
         // 3. 批量查工具描述
         Map<String, Map<String, String>> dbToolByMcp = new HashMap<>();
         try {
@@ -81,7 +91,9 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
                     "SELECT mcp_name, name, description FROM mcp_tool WHERE mcp_name IN (" + placeholders + ")",
                     toolMapper,
                     (Object[]) names.toArray());
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            log.warn("查询 mcp_tool 描述失败，将使用 SDK 默认描述: {}", e.getMessage(), e);
+        }
 
         // 4. 合并
         List<McpSystemView> out = new ArrayList<>();
@@ -107,17 +119,35 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
 
     @Override
     public McpServerInfo update(String name, String title, String description) {
+        // mcp_server 表只用于描述 SDK 实时 mcp；拒绝给"非 SDK 实时 mcp 名"建幽灵行
+        // 之前 PUT /admin/mcps/{name} 不存在会 INSERT，导致 mcp_server 表里出现 SDK 已下线但 DB 还在的脏数据
+        // (BUG-12-MCP-SERVER-PUT-GHOST)
+        boolean live = false;
+        List<McpRecord> liveMcps = mcp().mcps();
+        if (liveMcps != null) {
+            for (McpRecord r : liveMcps) {
+                if (r.name().equals(name)) { live = true; break; }
+            }
+        }
+        if (!live) {
+            throw new LoomAgentRuntimeException(404, "MCP 服务不存在或未连接: " + name);
+        }
+        // null 或空串 = 清空该字段（admin 在编辑 modal 里清空输入框后保存，期望 DB 回到 NULL = 用 SDK 默认）
+        // 之前 COALESCE(?, title) 在 null 时保留旧值，与前端"留空 = 用 SDK 默认"契约不符
+        // (BUG-12-MCP-SERVER-PUT-CLEAR)
+        Object titleParam = (title == null || title.isBlank()) ? null : title;
+        Object descParam = (description == null || description.isBlank()) ? null : description;
         Integer n = jdbcTemplate.update(
-                "UPDATE mcp_server SET title = COALESCE(?, title), " +
-                        "description = COALESCE(?, description), " +
+                "UPDATE mcp_server SET title = ?, " +
+                        "description = ?, " +
                         "updated_at = CURRENT_TIMESTAMP " +
                         "WHERE name = ?",
-                title, description, name);
+                titleParam, descParam, name);
         if (n == 0) {
-            // 不存在就插入
+            // SDK 实时有但 DB 没记录 → INSERT 维护行（这是正常的"首次维护"场景）
             jdbcTemplate.update(
                     "INSERT INTO mcp_server (name, title, description) VALUES (?, ?, ?)",
-                    name, title, description);
+                    name, titleParam, descParam);
         }
         return jdbcTemplate.queryForObject(
                 "SELECT name, title, description FROM mcp_server WHERE name = ?",
@@ -137,7 +167,9 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
                     (rs, n) -> dbByName.put(rs.getString(3),
                             new McpToolInfo(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4))),
                     mcpName);
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            log.warn("查询 mcp_tool 记录失败 (mcpName={})，将仅展示 SDK 实时工具: {}", mcpName, e.getMessage(), e);
+        }
         // 拿 SDK 实时工具列表（保证 mcp_tool 表里没有的也展示出来）
         List<McpToolInfo> out = new ArrayList<>();
         for (McpRecord rec : mcp().mcps()) {

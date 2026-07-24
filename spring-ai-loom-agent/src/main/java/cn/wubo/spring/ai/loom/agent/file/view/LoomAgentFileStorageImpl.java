@@ -3,6 +3,7 @@ package cn.wubo.spring.ai.loom.agent.file.view;
 import cn.wubo.file.view.storage.IFileStorage;
 import cn.wubo.file.view.storage.dto.FileStorageInfo;
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
+import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -25,11 +26,30 @@ public class LoomAgentFileStorageImpl implements IFileStorage {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Username-scoped lookup. Without the WHERE username = ? predicate, any
+     * authenticated user could read another user's file metadata (and bytes,
+     * via /wopi/files/{id}/contents) just by guessing the row id.
+     *
+     * <p>Fix for BUG-RBAC-FILE-WOPI: previously the SQL only filtered by
+     * id, so cross-user access via the wopi / file-view path succeeded.
+     * Username is sourced from {@link UserContextHolder} populated upstream by
+     * {@code AuthenticationFilter}; tests verify that an empty/null context
+     * still refuses (no row matches {@code username = '' OR NULL}).
+     */
     @Override
     public FileStorageInfo findById(String id) {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null || username.isBlank()) {
+            // No authenticated user in context → refuse with 404 (not 500).
+            // Cross-user attempts land here too once AuthenticationFilter
+            // populates the right username (BUG-RBAC-FILE-WOPI fix).
+            throw new LoomAgentRuntimeException(404, "文件不存在");
+        }
         try {
             return jdbcTemplate.queryForObject(
-                    "SELECT id, file_name, size, mime_type, path FROM file_info WHERE id = ?",
+                    "SELECT id, file_name, size, mime_type, path FROM file_info"
+                            + " WHERE id = ? AND username = ?",
                     (rs, rowNum) -> new FileStorageInfo(
                             rs.getString("id"),
                             rs.getString("file_name"),
@@ -38,10 +58,12 @@ public class LoomAgentFileStorageImpl implements IFileStorage {
                             rs.getString("path"),
                             "1"
                     ),
-                    id
+                    id, username
             );
         } catch (Exception e) {
-            throw new LoomAgentRuntimeException("文件不存在");
+            // Either id not found OR id belongs to another user → uniformly
+            // 404. Do NOT leak whether the id exists (oracle guard).
+            throw new LoomAgentRuntimeException(404, "文件不存在");
         }
     }
 

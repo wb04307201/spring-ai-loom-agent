@@ -6,6 +6,8 @@
  * §2 Global state = only state writes.
  */
 
+import { sanitizeHtml } from './markdown-renderer.js';
+
 // ===================== §1 Constants & Configuration =====================
 const API_PREFIX = '';
 const API = {
@@ -19,6 +21,8 @@ const API = {
     createUser: '/spring/ai/loom/admin/users',
     deleteUser: (username) => `/spring/ai/loom/admin/users/${encodeURIComponent(username)}`,
     listConversations: '/spring/ai/loom/conversation',
+    createConversation: '/spring/ai/loom/user-conversations',
+    renameConversation: (id) => `/spring/ai/loom/user-conversations/${id}`,
     getConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     deleteConversation: (id) => `/spring/ai/loom/conversation/${id}`,
     stream: '/spring/ai/loom/stream',
@@ -97,7 +101,15 @@ function showToast(message, type = 'success') {
 
 /** Wrapper for fetch that clears state on 401 */
 async function apiFetch(url, options = {}) {
-    const resp = await fetch(url, options);
+    let resp;
+    try {
+        resp = await fetch(url, options);
+    } catch (e) {
+        if (e && e.name === 'AbortError') throw e;
+        // 网络错误：返回一个合成的 Response，让上层走 r.ok === false 分支
+        console.warn('[apiFetch] network error for', url, e);
+        return new Response(null, { status: 599, statusText: e.message || 'network error' });
+    }
     if (resp.status === 401 && state.username) {
         // Session expired or invalidated — clear client-side state
         auth.clear();
@@ -234,11 +246,11 @@ function renderMarkdown(text) {
         text = text.replace(/url:(https?:\/\/[^\s\n]+)/g, '$1');
         // 2. Strip instruction lines about HTML <a> tags (not useful to the user)
         text = text.replace(/^使用HTML\s*<a>\s*标签.*$/gm, '').trim();
-        // Parse markdown normally, then post-process all links to open in new tab
-        const html = marked.parse(text);
+        // Parse markdown, sanitize all generated HTML, then post-process links to open in new tab
+        const html = sanitizeHtml(marked.parse(text));
         return html.replace(/<a\s/g, '<a target="_blank" rel="noopener noreferrer" ');
     }
-    catch { return text; }
+    catch { return escapeHtml(text); }
 }
 
 // ===================== §4 API Service Layer =====================
@@ -265,6 +277,8 @@ const api = {
         return r.json();
     },
     async logout() {
+        convStatePanel.stop();
+        schedulePanel.closeModal();
         const r = await fetch(API.logout, { method: 'POST', credentials: 'include' });
         return r.ok;
     },
@@ -294,7 +308,29 @@ const api = {
     },
     async listConversations() {
         const r = await apiFetch(API.listConversations);
-        return r.ok ? r.json() : [];
+        if (!r.ok) { try { await r.text(); } catch (_) {} return []; }
+        try { return await r.json(); } catch (_) { return []; }
+    },
+    async createConversation(title = '新对话') {
+        const r = await apiFetch(API.createConversation, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+        return r.ok ? r.json() : null;
+    },
+    async renameConversation(id, title) {
+        const r = await apiFetch(API.renameConversation(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+        if (r.status === 403) {
+            // Cross-user rename rejection — surface a specific toast so the user
+            // understands this is a permissions failure, not a generic network drop.
+            return { ok: false, reason: 'forbidden' };
+        }
+        return { ok: r.ok };
     },
     async getConversationMessages(id) {
         const r = await apiFetch(API.getConversation(id));
@@ -306,7 +342,12 @@ const api = {
     },
     async listMcps() {
         const r = await apiFetch(API.listMcps);
-        return r.ok ? r.json() : [];
+        if (!r.ok) {
+            // Drain body to release the connection, then return empty
+            try { await r.text(); } catch (_) {}
+            return [];
+        }
+        try { return await r.json(); } catch (_) { return []; }
     },
     async listSkills() {
         const r = await apiFetch(API.listSkills);
@@ -414,11 +455,69 @@ const api = {
         const r = await apiFetch('/spring/ai/loom/file/tree');
         return r.ok ? r.json() : { name: '.', type: 'directory', children: [] };
     },
-    async streamChat(record, onChunk, onComplete, onError) {
+    async listActiveSubtasks(conversationId) {
+        const q = conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : '';
+        const r = await apiFetch('/spring/ai/loom/subtask/list/active' + q);
+        return r.ok ? r.json() : [];
+    },
+    async listSubtaskHistory(conversationId) {
+        const q = conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : '';
+        const r = await apiFetch('/spring/ai/loom/subtask/list/history' + q);
+        return r.ok ? r.json() : [];
+    },
+    async subtaskLimits() {
+        const r = await apiFetch('/spring/ai/loom/subtask/limits');
+        return r.ok ? r.json() : {};
+    },
+    async killSubtask(id) {
+        const r = await apiFetch('/spring/ai/loom/subtask/kill/' + encodeURIComponent(id), { method: 'POST' });
+        return r.ok;
+    },
+    async deleteSubtaskHistory(id) {
+        const r = await apiFetch('/spring/ai/loom/subtask/history/' + encodeURIComponent(id), { method: 'DELETE' });
+        return r.ok;
+    },
+    async listSchedules(conversationId) {
+        const q = conversationId ? '?conversationId=' + encodeURIComponent(conversationId) : '';
+        const r = await apiFetch('/spring/ai/loom/schedule/list' + q);
+        return r.ok ? r.json() : [];
+    },
+    async cancelSchedule(fullName) {
+        const r = await apiFetch('/spring/ai/loom/schedule/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: fullName }),
+        });
+        return r.ok;
+    },
+    async scheduleHistory(fullName) {
+        const r = await apiFetch('/spring/ai/loom/schedule/history/' + encodeURIComponent(fullName));
+        return r.ok ? r.json() : [];
+    },
+    async scheduleByConversation(convId) {
+        const r = await apiFetch('/spring/ai/loom/schedule/history/by-conversation/' + encodeURIComponent(convId));
+        return r.ok ? r.json() : [];
+    },
+    async scheduleLimits() {
+        const r = await apiFetch('/spring/ai/loom/schedule/limits');
+        return r.ok ? r.json() : {};
+    },
+    async cancelAllSchedulesByConversation(convId) {
+        const r = await apiFetch('/spring/ai/loom/schedule/by-conversation/' + encodeURIComponent(convId) + '/cancel-all', {
+            method: 'POST',
+        });
+        return r.ok ? r.json() : { cancelled: 0 };
+    },
+    async conversationState(convId) {
+        const r = await apiFetch('/spring/ai/loom/conversation/' + encodeURIComponent(convId) + '/state');
+        return r.ok ? r.json() : null;
+    },
+    async streamChat(record, onChunk, onComplete, onError, signal) {
         const resp = await apiFetch(API.stream, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(record),
+            signal,
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
@@ -437,7 +536,17 @@ const api = {
             parser.feed(decoder.decode(value, { stream: true }));
             await read();
         }
-        await read();
+        try {
+            await read();
+        } catch (e) {
+            // Abort is a user-initiated stop, not an error — swallow it.
+            if (e && e.name === 'AbortError') {
+                try { reader.cancel(); } catch (_) {}
+                onComplete();
+                return;
+            }
+            throw e;
+        }
     },
 };
 
@@ -707,11 +816,33 @@ const ui = {
             </div>`;
     },
 
-    renderUserMessage(text) {
+    renderUserMessage(text, attachments) {
         const item = document.createElement('div');
         item.className = 'chat-item chat-item-right';
+        let attachHtml = '';
+        if (attachments && attachments.length > 0) {
+            // Render a compact strip of attached files so the user can see
+            // what they actually sent (the AI gets fileIds on the wire, but
+            // without this strip the user bubble would only show the text).
+            attachHtml = '<div class="user-attachments">' + attachments.map(a => {
+                if (a.objectUrl) {
+                    return `<div class="user-attach-thumb" title="${escapeHtml(a.fileName)}">
+                        <img src="${a.objectUrl}" alt="${escapeHtml(a.fileName)}"/>
+                    </div>`;
+                }
+                // Document — reuse the doc-icon SVG the upload module already renders
+                const ext = '.' + (a.fileName || '').split('.').pop().toLowerCase();
+                const icons = (imageUpload && imageUpload.DOC_ICONS) || {};
+                const svg = icons[ext] || icons['.txt'] || '';
+                return `<div class="user-attach-doc" title="${escapeHtml(a.fileName)}">
+                    <div class="user-attach-doc-icon">${svg}</div>
+                    <div class="user-attach-doc-name">${escapeHtml(a.fileName)}</div>
+                </div>`;
+            }).join('') + '</div>';
+        }
+        const textHtml = text ? `<div style="margin: 16px">${renderMarkdown(text)}</div>` : '';
         item.innerHTML = `
-            <div class="bubble"><div style="margin: 16px">${renderMarkdown(text)}</div></div>
+            <div class="bubble">${attachHtml}${textHtml}</div>
             <div class="avatar"><img src="${userImage}" alt="用户"/></div>`;
         this.mainContent.appendChild(item);
         this.scrollToBottom();
@@ -818,6 +949,7 @@ const ui = {
         state.isStreaming = false;
         ui.setToolbarLocked(false);
         ui.setStopButtonVisible(false);
+        convStatePanel.refresh();   // refresh after every stream completion
     },
 
     disableSend() {
@@ -892,8 +1024,13 @@ const ui = {
 // ===================== §6 Conversation Management =====================
 const conversation = {
     async loadList() {
-        const data = await api.listConversations();
-        this.renderSidebar(data);
+        try {
+            const data = await api.listConversations();
+            this.renderSidebar(data);
+        } catch (e) {
+            console.warn('[conversation.loadList] failed:', e);
+            this.renderSidebar([]);
+        }
     },
 
     renderSidebar(list) {
@@ -904,19 +1041,41 @@ const conversation = {
         }
         container.innerHTML = '';
         for (const item of list) {
-            const id = item.conversationId || item.id || item.id;
+            const id = item.conversationId || item.id;
             const title = item.title || truncateText(item.name || '新对话', API.titleMaxLength);
             const div = document.createElement('div');
             div.className = 'sidebar-item' + (state.conversationId === id ? ' active' : '');
-            div.innerHTML = `
-                <span class="sidebar-item-text" title="${title}">${title}</span>
-                <button class="sidebar-item-delete" title="删除对话">&times;</button>`;
-            // Listen on parent .sidebar-item so it works in both full-width and collapsed (icon-only) modes
+            div.dataset.conversationId = id;
+
+            const text = document.createElement('span');
+            text.className = 'sidebar-item-text';
+            text.title = title;
+            text.textContent = title;
+
+            const actions = document.createElement('span');
+            actions.className = 'sidebar-item-actions';
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'sidebar-item-rename';
+            renameBtn.title = '重命名对话';
+            renameBtn.setAttribute('aria-label', '重命名对话');
+            renameBtn.textContent = '✎';
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'sidebar-item-delete';
+            deleteBtn.title = '删除对话';
+            deleteBtn.setAttribute('aria-label', '删除对话');
+            deleteBtn.innerHTML = '&times;';
+            actions.append(renameBtn, deleteBtn);
+            div.append(text, actions);
+
             div.addEventListener('click', (e) => {
-                if (e.target.classList.contains('sidebar-item-delete')) return;
+                if (e.target.closest('.sidebar-item-actions') || e.target.classList.contains('sidebar-item-edit')) return;
                 this.switchTo(id);
             });
-            div.querySelector('.sidebar-item-delete').addEventListener('click', (e) => {
+            renameBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.startRename(div, id, title);
+            });
+            deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.delete(id);
             });
@@ -924,16 +1083,81 @@ const conversation = {
         }
     },
 
-    createNew() {
+    async createNew() {
         if (state.isStreaming) {
             showToast('请等待 AI 回复完成', 'warning');
             return;
         }
-        state.conversationId = crypto.randomUUID();
+        const created = await api.createConversation('新对话');
+        if (!created) {
+            showToast('新建对话失败', 'error');
+            return;
+        }
+        state.conversationId = created.conversationId || created.id;
         ui.clearChat();
         imageUpload.clear();
-        // refresh sidebar highlight
-        this.loadList();
+        await this.loadList();
+        // Notify panels of the conversation switch so an open sub-task or
+        // schedule modal can re-fetch the per-conversation list.
+        try { subtaskPanel.setConvId(state.conversationId); } catch (_) {}
+        try { schedulePanel.setConvId(state.conversationId); } catch (_) {}
+    },
+
+    startRename(div, id, currentTitle) {
+        if (state.isStreaming) {
+            showToast('请等待 AI 回复完成', 'warning');
+            return;
+        }
+        const text = div.querySelector('.sidebar-item-text');
+        const actions = div.querySelector('.sidebar-item-actions');
+        if (!text || !actions || div.querySelector('.sidebar-item-edit')) return;
+        text.style.display = 'none';
+        actions.style.display = 'none';
+
+        const input = document.createElement('input');
+        input.className = 'sidebar-item-edit';
+        input.type = 'text';
+        input.maxLength = 100;
+        input.value = currentTitle;
+        input.setAttribute('aria-label', '对话名称');
+        div.insertBefore(input, text);
+        input.focus();
+        input.select();
+
+        let completed = false;
+        const cancel = () => {
+            if (completed) return;
+            completed = true;
+            input.remove();
+            text.style.removeProperty('display');
+            actions.style.removeProperty('display');
+        };
+        const save = async () => {
+            if (completed) return;
+            const title = input.value.trim();
+            if (!title) {
+                showToast('对话名称不能为空', 'warning');
+                input.focus();
+                return;
+            }
+            completed = true;
+            const result = await api.renameConversation(id, title);
+            if (result.ok) {
+                await this.loadList();
+                showToast('对话已重命名', 'success');
+            } else {
+                input.remove();
+                text.style.removeProperty('display');
+                actions.style.removeProperty('display');
+                showToast(result.reason === 'forbidden' ? '无权重命名该对话' : '重命名失败', 'error');
+            }
+        };
+        input.addEventListener('click', (e) => e.stopPropagation());
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        });
+        input.addEventListener('blur', () => { if (!completed) cancel(); });
     },
 
     async switchTo(id) {
@@ -945,9 +1169,12 @@ const conversation = {
         chat.abortStream();
 
         state.conversationId = id;
+        try { subtaskPanel.setConvId(id); } catch (_) {}
+        try { schedulePanel.setConvId(id); } catch (_) {}
         try {
             const messages = await api.getConversationMessages(id);
             ui.renderMessages(messages);
+            convStatePanel.start();   // refresh state strip on conversation switch
         } catch (e) {
             showToast('加载对话失败', 'error');
         }
@@ -963,11 +1190,21 @@ const conversation = {
         });
         if (!ok) return;
         const deleted = await api.deleteConversation(id);
-        if (ok) {
+        if (deleted) {
             if (state.conversationId === id) {
-                this.createNew();
+                const remaining = (await api.listConversations()).filter(item =>
+                    (item.conversationId || item.id) !== id);
+                if (remaining.length > 0) {
+                    await this.switchTo(remaining[0].conversationId || remaining[0].id);
+                } else {
+                    state.conversationId = null;
+                    ui.clearChat();
+                    imageUpload.clear();
+                    try { subtaskPanel.setConvId(null); } catch (_) {}
+                    try { schedulePanel.setConvId(null); } catch (_) {}
+                }
             }
-            this.loadList();
+            await this.loadList();
             showToast('对话已删除', 'success');
         } else {
             showToast('删除失败', 'error');
@@ -989,7 +1226,21 @@ const chat = {
             return;
         }
 
-        ui.renderUserMessage(text);
+        // Guard against the attach→send race: if any attachment is still
+        // uploading (fileId not yet assigned), sending now would silently drop
+        // it (fileIds would contain undefined) and the model would answer as if
+        // no file was attached. Block until the upload finishes.
+        if (state.pendingImages.some(img => !img.fileId)) {
+            showToast('文件还在上传中，请稍候再发送', 'error');
+            return;
+        }
+
+        if (!state.conversationId) {
+            await conversation.createNew();
+            if (!state.conversationId) return;
+        }
+
+        ui.renderUserMessage(text, state.pendingImages.slice());
         ui.disableSend();
 
         const id = Date.now();
@@ -1008,11 +1259,15 @@ const chat = {
             mcps: state.selectedMcps,
             enableRag: state.enableRag,
             knowledgeId: state.selectedKnowledgeId || null,
-            fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId) : null,
+            fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId).filter(Boolean) : null,
         };
 
         // Clear pending image after capturing fileId
         imageUpload.clear();
+
+        // Create an AbortController so stopStream() can abort the frontend read.
+        const controller = new AbortController();
+        state.controller = controller;
 
         try {
             await api.streamChat(record,
@@ -1028,7 +1283,10 @@ const chat = {
                     if (data.content) {
                         answerText += data.content;
                         if (answerEl) answerEl.innerHTML = renderMarkdown(answerText);
-                        if (originEl) originEl.innerHTML = answerText;
+                        // origin-* is the "copy raw / download" payload; it is read
+                        // via textContent downstream, so write raw text rather than
+                        // parsing it as HTML. Keeps `<img onerror>` etc. inert.
+                        if (originEl) originEl.textContent = answerText;
                     }
                     ui.scrollToBottom();
                 },
@@ -1044,15 +1302,21 @@ const chat = {
                     // error
                     const actionsEl = document.getElementById('actions-' + id);
                     if (actionsEl) actionsEl.style.display = '';
-                    if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + (error.message || '未知错误') + '</span>';
+                    if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + escapeHtml(error.message || '未知错误') + '</span>';
                     ui.enableSend();
                     ui.setStopButtonVisible(false);
-                }
+                },
+                controller.signal
             );
         } catch (error) {
-            if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + error.message + '</span>';
+            // AbortError = user-initiated stop, not a failure.
+            if (!(error && error.name === 'AbortError')) {
+                if (answerEl) answerEl.innerHTML += '<br/><span style="color:var(--error-color)">发送失败：' + escapeHtml(error.message || '未知错误') + '</span>';
+            }
             ui.enableSend();
             ui.setStopButtonVisible(false);
+        } finally {
+            if (state.controller === controller) state.controller = null;
         }
     },
 
@@ -1078,12 +1342,19 @@ const chat = {
         } catch (e) {
             showToast('停止失败：' + e.message, 'error');
         } finally {
+            // Abort the frontend read after signalling the backend to stop.
+            if (state.controller) {
+                try { state.controller.abort(); } catch (_) {}
+            }
             ui.setStopButtonVisible(false);
         }
     },
 
     abortStream() {
         if (state.isStreaming) {
+            if (state.controller) {
+                try { state.controller.abort(); } catch (_) {}
+            }
             ui.enableSend();
         }
     },
@@ -1103,8 +1374,13 @@ const knowledge = {
     },
 
     async loadList() {
-        const data = await api.listKnowledge();
-        this.renderList(data);
+        try {
+            const data = await api.listKnowledge();
+            this.renderList(data);
+        } catch (e) {
+            console.warn('[knowledge.loadList] failed:', e);
+            this.renderList([]);
+        }
     },
 
     renderList(list) {
@@ -1204,6 +1480,11 @@ const knowledge = {
             if (this.currentKbId === id) {
                 this.currentKbId = null;
                 document.getElementById('ks-detail').innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
+            }
+            // BUG-KB-DELETE-ACTIVE: also clear the chat-bound KB if it matches,
+            // so the next message doesn't RAG-query a deleted KB.
+            if (state.selectedKnowledgeId === id) {
+                state.selectedKnowledgeId = null;
             }
             this.loadList();
             showToast('知识库已删除', 'success');
@@ -1378,6 +1659,779 @@ const fileMgr = {
     },
 };
 
+/** 子任务面板：打开时轮询 active + history，关闭时停止轮询 + ticker。
+ *   Operations-console surface (v4 redesign) — cold slate dark, status
+ *   pill counts, signature live-elapsed ticker on running rows. */
+const subtaskPanel = {
+    _timer: null,
+    _ticker: null,
+    _currentConvId: null,
+    _expanded: new Set(),
+    _activeRows: [],   // cached for live elapsed-ticker updates
+
+    openModal() {
+        ui.showModal('subtask-modal-overlay');
+        this._currentConvId = (typeof state !== 'undefined' && state.conversationId) || '';
+        this.refresh();
+        this._timer = setInterval(() => this.refresh(), 2000);
+        // Live elapsed ticker runs at 1Hz; touches only DOM textContent of
+        // running rows (no full re-render). Skipped if no running rows.
+        this._ticker = setInterval(() => this._tickElapse(), 1000);
+    },
+
+    closeModal() {
+        ui.hideModal('subtask-modal-overlay');
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        if (this._ticker) { clearInterval(this._ticker); this._ticker = null; }
+        this._activeRows = [];
+    },
+
+    refresh() {
+        const convId = this._currentConvId || ((typeof state !== 'undefined' && state.conversationId) || '');
+        this._ensureLimits().then(() => {
+            if (!convId) {
+                this._renderEmpty('请先打开一个对话');
+                return;
+            }
+            Promise.all([
+                api.listActiveSubtasks(convId),
+                api.listSubtaskHistory(convId),
+            ]).then(([active, history]) => this.render(active || [], history || [], convId));
+        });
+    },
+
+    _ensureLimits() {
+        if (this._limits) return Promise.resolve(this._limits);
+        return api.subtaskLimits().then(l => (this._limits = l || {})).catch(() => (this._limits = {}));
+    },
+
+    _limitsHintHTML() {
+        const n = (this._limits && this._limits.maxHistory) || 200;
+        return `<div class="micro-hint">回车提交 · 历史最多保留 <code>${escapeHtml(String(n))}</code> 条</div>`;
+    },
+
+    setConvId(convId) {
+        if (this._currentConvId === convId) return;
+        this._currentConvId = convId;
+        this.refresh();
+    },
+
+    /** Live tick: rewrite elapsed text for every RUNNING card without
+     *  re-rendering the panel. If modal is closed / no running rows,
+     *  work is essentially zero. */
+    _tickElapse() {
+        if (this._activeRows.length === 0) return;
+        for (const rec of this._activeRows) {
+            const cell = document.querySelector(
+                `[data-elapsed="${cssEscape(rec.subTaskId)}"]`);
+            if (!cell) continue;
+            cell.textContent = this._formatElapsed(Date.now() - rec.startedAt);
+        }
+    },
+
+    _renderEmpty(msg) {
+        const body = document.getElementById('subtask-panel-body');
+        if (!body) return;
+        body.innerHTML = `
+            ${this._toolbarHTML(0, 0, 0)}
+            <div class="console-body">
+                <div class="console-empty">
+                    <div class="glyph subtask-glyph">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                            <path d="M4 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" fill="rgba(167,139,250,0.18)" stroke="currentColor" stroke-width="1.6"/>
+                            <circle cx="9"  cy="10.5" r="1.4" fill="currentColor"/>
+                            <circle cx="13" cy="10.5" r="1.4" fill="currentColor"/>
+                            <circle cx="17" cy="10.5" r="1.4" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <h4>${escapeHtml(msg || '让 AI 帮你开一个')}</h4>
+                    <p>主对话里跟它说一句「调研…」，它会自动起子任务。或者直接在这里写你想让它做的事。</p>
+                    <div class="composer">
+                        <input data-composer placeholder="「例如:调研苹果公司在东南亚的供应链…」" />
+                        <button class="console-btn-primary" data-composer-submit style="height:32px;">新建子任务 ↗</button>
+                    </div>
+                    ${this._limitsHintHTML()}
+                </div>
+            </div>`;
+        this._wireToolbar(body);
+        this._wireComposer(body, '/subtask');
+    },
+
+    _toolbarHTML(running, done, failed) {
+        const total = running + done + failed;
+        return `
+        <div class="console-bar">
+            <div class="title">子任务<span class="sub">/ sub-task</span></div>
+            <span class="console-pill ${running > 0 ? 'running' : ''}"><span class="dot"></span><span class="num">${running}</span>&nbsp;运行中</span>
+            <span class="console-pill ${done > 0 ? 'done' : ''}"><span class="dot"></span><span class="num">${done}</span>&nbsp;已完成</span>
+            <span class="console-pill ${failed > 0 ? 'failed' : ''}"><span class="dot"></span><span class="num">${failed}</span>&nbsp;失败</span>
+            <span class="grow"></span>
+            <input class="search" placeholder="搜 prompt / id…" />
+            <button class="console-btn-ghost" data-filter>过滤</button>
+            ${total > 0
+                ? `<button class="console-btn-primary" data-new>+ 新建</button>`
+                : ''}
+            <button class="console-close" data-close aria-label="收起"></button>
+        </div>`;
+    },
+
+    render(active, history, convId) {
+        const body = document.getElementById('subtask-panel-body');
+        if (!body) return;
+        // Counts
+        const live = active || [];
+        const done = (history || []).filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length;
+        const failed = (history || []).filter(r => (r.status || '').toUpperCase() === 'FAILED').length;
+
+        // Whole sections: only render when there's content
+        const allHistory = history || [];
+        if (live.length === 0 && allHistory.length === 0) {
+            this._renderEmpty('让 AI 帮你开一个');
+            return;
+        }
+
+        // Cache for live ticker
+        this._activeRows = live.slice();
+
+        let cardsHtml = '';
+        if (live.length > 0) {
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">运行中<span class="count">${live.length}</span></div>
+                <div class="console-card-list">${live.map(r => this._rowHTML(r, 'running')).join('')}</div>
+            </div>`;
+        }
+        if (allHistory.length > 0) {
+            const reversed = allHistory.slice().sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">历史<span class="count">${reversed.length}</span></div>
+                <div class="console-card-list">${reversed.map(r => this._rowHTML(r, (r.status || '').toLowerCase())).join('')}</div>
+            </div>`;
+        }
+
+        body.innerHTML = `
+            ${this._toolbarHTML(live.length, done, failed)}
+            <div class="console-body">${cardsHtml}</div>`;
+
+        this._wireToolbar(body);
+        this._wireCardActions(body);
+    },
+
+    _rowHTML(r, kind) {
+        const id = r.subTaskId || '';
+        const sidShort = id.slice(0, 4) + '…' + id.slice(-4);
+        const prompt = (r.prompt || '');
+        const meta = [];
+        if (kind === 'running') {
+            const started = r.startedAt ? this._rel(r.startedAt) : '';
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            if (started) meta.push(`<span>·</span><span>${escapeHtml(started)}</span>`);
+        } else if (kind === 'failed') {
+            const errMsg = r.errorMessage ? r.errorMessage.slice(0, 60) : (r.status || 'FAILED');
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            meta.push(`<span>·</span><span class="err">${escapeHtml(errMsg)}${errMsg.length > 60 ? '…' : ''}</span>`);
+        } else if (kind === 'cancelled') {
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            meta.push(`<span>·</span><span>用户取消</span>`);
+        } else {
+            // done (or lowercase status)
+            const dur = this._rel(r.finishedAt);
+            meta.push(`<span class="id mono">${escapeHtml(sidShort)}</span>`);
+            meta.push(`<span>·</span><span>${escapeHtml(dur)}</span>`);
+        }
+
+        const statusLabel = ({
+            running: 'RUNNING',
+            completed: 'DONE',
+            failed: 'FAILED',
+            cancelled: 'CANCELLED',
+        })[kind] || (kind || '').toUpperCase();
+
+        // Action set varies by state
+        let actions = '';
+        if (kind === 'running') {
+            actions = `
+                <button class="console-icon-btn" title="查看 stream 日志" data-stream="${escapeHtml(id)}">≡</button>
+                <button class="console-icon-btn danger" title="停止" data-kill="${escapeHtml(id)}">■</button>`;
+        } else if (kind === 'failed' || kind === 'cancelled') {
+            actions = `
+                <button class="console-icon-btn" title="查看详情" data-stream="${escapeHtml(id)}">i</button>
+                <button class="console-icon-btn danger" title="从历史删除" data-history-del="${escapeHtml(id)}">×</button>`;
+        } else {
+            actions = `
+                <button class="console-icon-btn" title="查看结果" data-stream="${escapeHtml(id)}">↗</button>
+                <button class="console-icon-btn danger" title="从历史删除" data-history-del="${escapeHtml(id)}">×</button>`;
+        }
+
+        // Elapsed cell
+        let elapsedHtml = '—';
+        if (kind === 'running' && r.startedAt) {
+            elapsedHtml = `<span class="mono">${escapeHtml(this._formatElapsed(Date.now() - r.startedAt))}</span>`;
+        } else if (r.startedAt && r.finishedAt) {
+            const ms = r.finishedAt - r.startedAt;
+            elapsedHtml = this._formatShortDuration(ms);
+        }
+
+        return `
+            <div class="console-card status-${kind === 'running' ? 'running' : kind === 'completed' ? 'done' : kind === 'failed' ? 'failed' : kind === 'cancelled' ? 'cancel' : 'done'}" data-row-id="${escapeHtml(id)}">
+                <div class="stripe"></div>
+                <div class="prompt-cell">
+                    <div class="prompt">${escapeHtml(prompt || '(no prompt)')}</div>
+                    <div class="meta">${meta.join(' ')}</div>
+                </div>
+                <div class="console-status"><span class="dot"></span>${escapeHtml(statusLabel)}</div>
+                <div class="console-elapsed" data-elapsed="${escapeHtml(id)}">${elapsedHtml}</div>
+                <div class="console-actions">${actions}</div>
+            </div>`;
+    },
+
+    _wireToolbar(body) {
+        const overlay = document.getElementById('subtask-modal-overlay');
+        // Always-append: the close chevron was previously a nested #subtask-close-btn.
+        // We use data-close so re-render doesn't break it.
+        const closeBtn = body.querySelector('[data-close]');
+        if (closeBtn) closeBtn.addEventListener('click', () => this.closeModal());
+        // New-task button: jump to chat with a pre-filled prompt for the LLM
+        const newBtn = body.querySelector('[data-new]');
+        if (newBtn) newBtn.addEventListener('click', () => this._focusChatWithStub());
+    },
+
+    _wireCardActions(body) {
+        for (const btn of body.querySelectorAll('[data-kill]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.kill(btn.dataset.kill, false); });
+        }
+        for (const btn of body.querySelectorAll('[data-history-del]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.deleteHistory(btn.dataset.historyDel); });
+        }
+        for (const btn of body.querySelectorAll('[data-stream]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.showStream(btn.dataset.stream); });
+        }
+    },
+
+    _wireComposer(body, kind) {
+        const input = body.querySelector('[data-composer]');
+        const submit = body.querySelector('[data-composer-submit]');
+        if (!input || !submit) return;
+        const send = () => {
+            const text = (input.value || '').trim();
+            if (!text) return;
+            this._focusChatWithStub(text);
+            input.value = '';
+        };
+        submit.addEventListener('click', send);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+        // Live enable/disable
+        const sync = () => { submit.disabled = !input.value.trim(); };
+        sync();
+        input.addEventListener('input', sync);
+    },
+
+    /** Bridge into the main chat SPA: either pre-fill the textarea (if
+     *  user typed) or simply focus it. Either way the LLM ends up
+     *  calling start_sub_task / create_scheduled_task on its own. */
+    _focusChatWithStub(prefilled) {
+        const prompt = prefilled || '请帮我开一个子任务';
+        try {
+            const ta = document.querySelector('#textarea');
+            if (ta) {
+                ta.value = prompt;
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                ta.focus();
+            }
+        } catch (e) { /* SPA not ready yet — silent */ }
+        this.closeModal();
+    },
+
+    /** Show stream logs for a sub-task id. For now: deep-link to that
+     *  sub-task's main-conversation entry via the toast (the LLM echoed
+     *  the tool-result back into the parent conversation). */
+    async showStream(id) {
+        showToast('子任务 ' + id.slice(0, 8) + ' 的执行流已在主对话中显示', 'info');
+    },
+
+    /** mm:ss / h:mm:ss picker used in the live ticker */
+    _formatElapsed(ms) {
+        ms = Math.max(0, Math.floor(ms / 1000));
+        const h = Math.floor(ms / 3600);
+        const m = Math.floor((ms % 3600) / 60);
+        const s = ms % 60;
+        const pad = n => String(n).padStart(2, '0');
+        return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+    },
+    _formatShortDuration(ms) {
+        if (!ms || ms < 0) return '—';
+        ms = Math.floor(ms / 1000);
+        if (ms < 60) return ms + 's';
+        const m = Math.floor(ms / 60);
+        const s = ms % 60;
+        return s > 0 ? `${m}m ${s}s` : `${m}m`;
+    },
+
+    async kill(id, alsoDeleteHistory) {
+        const ok = await dialog.confirm({
+            title: alsoDeleteHistory ? '停止并删除子任务' : '停止子任务',
+            message: `确认${alsoDeleteHistory ? '停止该子任务并在历史中删除' : '停止子任务'} ${id.slice(0, 8)}?`
+                + (alsoDeleteHistory ? '' : '\n\n被挂起等待子任务结果的 AI 调用会收到「子任务已取消 用户手动取消」并继续主对话。'),
+            danger: true,
+        });
+        if (!ok) return;
+        const killed = await api.killSubtask(id);
+        if (alsoDeleteHistory) {
+            let attempts = 0;
+            let deleted = false;
+            while (attempts < 5 && !deleted) {
+                attempts++;
+                await new Promise(r => setTimeout(r, 250));
+                deleted = await api.deleteSubtaskHistory(id);
+            }
+            showToast(`已停止并删除 ${id.slice(0, 8)}${deleted ? '' : '（历史行未找到，可能尚未落库）'}`, deleted ? 'success' : 'warning');
+        } else {
+            showToast(killed ? '已停止' : '未找到该子任务', killed ? 'success' : 'warning');
+        }
+        this.refresh();
+    },
+
+    async deleteHistory(id) {
+        const ok = await dialog.confirm({
+            title: '删除子任务历史记录',
+            message: `确认删除历史子任务记录 ${id.slice(0, 8)}?`,
+            danger: true,
+        });
+        if (!ok) return;
+        const deleted = await api.deleteSubtaskHistory(id);
+        showToast(deleted ? '已删除' : '未找到记录', deleted ? 'success' : 'warning');
+        this.refresh();
+    },
+
+    _rel(ms) {
+        if (!ms) return '-';
+        const d = Math.floor((Date.now() - ms) / 1000);
+        if (d < 60) return `${d}s 前`;
+        if (d < 3600) return `${Math.floor(d / 60)}m 前`;
+        return `${Math.floor(d / 3600)}h 前`;
+    },
+};
+
+// CSS.escape polyfill (tier-2) for selectors keyed on user-controlled ids
+function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c);
+}
+
+/** 定时任务面板：当前会话的运行中 + 历史,带全部停止按钮 + 每行操作按钮。
+ *   Operations-console surface (v4 redesign) — schedule rows use shape-
+ *   encoded status (⏲ scheduled · ✓ ended · — cancelled) so they don't
+ *   fight the sub-task palette. */
+const schedulePanel = {
+    _timer: null,
+    _currentConvId: null,
+
+    openModal() {
+        ui.showModal('schedule-modal-overlay');
+        this._currentConvId = (typeof state !== 'undefined' && state.conversationId) || '';
+        this.refresh();
+        this._timer = setInterval(() => this.refresh(), 5000);
+    },
+
+    closeModal() {
+        ui.hideModal('schedule-modal-overlay');
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    },
+
+    setConvId(convId) {
+        if (this._currentConvId === convId) return;
+        this._currentConvId = convId;
+        if (document.getElementById('schedule-modal-overlay')
+            && getComputedStyle(document.getElementById('schedule-modal-overlay')).display !== 'none') {
+            this.refresh();
+        }
+    },
+
+    _resolveConvId() {
+        if (typeof state !== 'undefined' && state.conversationId) return state.conversationId;
+        return (window.currentConversationId
+            || (window.appState && window.appState.currentConversationId)
+            || (window.chatState && window.chatState.currentConversationId)
+            || (location.hash.match(/conv[=:]([\w-]+)/) || [])[1]
+            || '') || '';
+    },
+
+    async refresh() {
+        const convId = this._currentConvId || this._resolveConvId();
+        this._currentConvId = convId;
+        await this._ensureLimits();
+        if (!convId) {
+            this._renderEmpty('请先打开一个对话');
+            return;
+        }
+        const tasks = await api.scheduleByConversation(convId);
+        this.render(tasks || [], convId);
+    },
+
+    async _ensureLimits() {
+        if (this._limits) return this._limits;
+        try { this._limits = await api.scheduleLimits(); } catch (_) { this._limits = {}; }
+        return this._limits;
+    },
+
+    _limitsHintHTML() {
+        const L = this._limits || {};
+        if (L.enforcing === false) {
+            return `<div class="micro-hint">触发限制未启用</div>`;
+        }
+        const min = L.minInterval ? `最小间隔 <code>${escapeHtml(String(L.minInterval))}</code>` : '';
+        const max = L.maxLifetime ? `最长存活 <code>${escapeHtml(String(L.maxLifetime))}</code>` : '';
+        const parts = [min, max].filter(Boolean).join(' · ');
+        return parts ? `<div class="micro-hint">${parts}</div>` : '';
+    },
+
+    _renderEmpty(msg) {
+        const body = document.getElementById('schedule-panel-body');
+        if (!body) return;
+        body.innerHTML = `
+            ${this._toolbarHTML(0)}
+            <div class="console-body">
+                <div class="console-empty">
+                    <div class="glyph sched-glyph">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                            <circle cx="12" cy="12" r="9"/>
+                            <path d="M12 7v5l3 2"/>
+                            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+                        </svg>
+                    </div>
+                    <h4>${escapeHtml(msg || '建一个提醒或周期性任务')}</h4>
+                    <p>主对话里说「每天 9 点提醒我」，AI 就自动创建。也可以直接写在这里。</p>
+                    <div class="composer">
+                        <input data-composer placeholder="「例如:每周一早上 9 点生成上周工作摘要」" />
+                        <button class="console-btn-primary" data-composer-submit style="height:32px;">新建定时任务 ↗</button>
+                    </div>
+                    ${this._limitsHintHTML()}
+                </div>
+            </div>`;
+        this._wireToolbar(body);
+        this._wireComposer(body);
+    },
+
+    _toolbarHTML(liveCount) {
+        return `
+        <div class="console-bar">
+            <div class="title">定时任务<span class="sub">/ schedule</span></div>
+            <span class="console-pill ${liveCount > 0 ? 'running' : ''}"><span class="dot"></span><span class="num">${liveCount}</span>&nbsp;运行中</span>
+            <span class="grow"></span>
+            <input class="search" placeholder="搜任务名…" />
+            <button class="console-btn-ghost" data-filter>过滤</button>
+            ${liveCount > 0
+                ? `<button class="console-btn-primary" data-new>+ 新建</button>`
+                : ''}
+            <button class="console-close" data-close aria-label="收起"></button>
+        </div>`;
+    },
+
+    render(tasks, convId) {
+        const body = document.getElementById('schedule-panel-body');
+        if (!body) return;
+        const live = tasks.filter(t => t.live);
+        const hist = tasks.filter(t => !t.live);
+
+        if (live.length === 0 && hist.length === 0) {
+            this._renderEmpty('建一个提醒或周期性任务');
+            return;
+        }
+
+        let cardsHtml = '';
+        if (live.length > 0) {
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">运行中<span class="count">${live.length}</span></div>
+                <div class="console-card-list">${live.map(t => this._rowHTML(t, true)).join('')}</div>
+            </div>`;
+        }
+        if (hist.length > 0) {
+            // Sort by most recent trigger
+            const sorted = hist.slice().sort((a, b) => (b.lastFireTime || 0) - (a.lastFireTime || 0));
+            cardsHtml += `<div class="console-section">
+                <div class="console-section-label">已结束<span class="count">${sorted.length}</span></div>
+                <div class="console-card-list">${sorted.map(t => this._rowHTML(t, false)).join('')}</div>
+            </div>`;
+        }
+
+        body.innerHTML = `
+            ${this._toolbarHTML(live.length)}
+            <div class="console-body">${cardsHtml}</div>`;
+
+        this._wireToolbar(body);
+        this._wireCardActions(body);
+    },
+
+    _rowHTML(t, isLive) {
+        const full = t.taskName || '';
+        const shortName = this._shortName(full);
+        const cadence = this._humanizeSchedule(t);
+        const stats = this._humanizeStats(t, isLive);
+
+        // Decide status shape (string used to render the glyph via ::before)
+        // — schedule uses shape encoding, not color
+        let shape, label, kind;
+        if (isLive) { shape = '⏲'; label = 'SCHEDULED'; kind = 'running'; }
+        else        { shape = '✓'; label = 'ENDED';     kind = 'done'; }
+
+        const elapsed = isLive ? this._nextTrigger(t) : this._rel(t.lastFireTime || 0);
+
+        const actions = isLive
+            ? `<button class="console-icon-btn" title="手动触发" data-trigger="${escapeHtml(full)}">▶</button>
+               <button class="console-icon-btn danger" title="停止" data-cancel="${escapeHtml(full)}">■</button>`
+            : `<button class="console-icon-btn" title="查看历史" data-history="${escapeHtml(full)}">≡</button>
+               <button class="console-icon-btn danger" title="删除" data-cancel="${escapeHtml(full)}">×</button>`;
+
+        return `
+            <div class="console-card schedule-row status-${kind}" data-task="${escapeHtml(full)}">
+                <div class="stripe"></div>
+                <div class="prompt-cell">
+                    <div class="prompt">${escapeHtml(t.prompt || shortName || '(no prompt)')}</div>
+                    <div class="meta">
+                        <div class="cadence">${escapeHtml(cadence)}</div>
+                        <div class="stats">${stats}</div>
+                    </div>
+                </div>
+                <div class="console-status"><span class="glyph">${shape}</span>${escapeHtml(label)}</div>
+                <div class="console-elapsed mono">${escapeHtml(elapsed)}</div>
+                <div class="console-actions">${actions}</div>
+            </div>`;
+    },
+
+    _wireToolbar(body) {
+        const closeBtn = body.querySelector('[data-close]');
+        if (closeBtn) closeBtn.addEventListener('click', () => this.closeModal());
+        const newBtn = body.querySelector('[data-new]');
+        if (newBtn) newBtn.addEventListener('click', () => subtaskPanel._focusChatWithStub('请帮我创建一个定时任务'));
+    },
+
+    _wireCardActions(body) {
+        for (const btn of body.querySelectorAll('[data-cancel]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.cancel(btn.dataset.cancel); });
+        }
+        for (const btn of body.querySelectorAll('[data-history]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.history(btn.dataset.history); });
+        }
+        for (const btn of body.querySelectorAll('[data-trigger]')) {
+            btn.addEventListener('click', e => { e.stopPropagation(); this.trigger(btn.dataset.trigger); });
+        }
+    },
+
+    _wireComposer(body) {
+        const input = body.querySelector('[data-composer]');
+        const submit = body.querySelector('[data-composer-submit]');
+        if (!input || !submit) return;
+        const send = () => {
+            const text = (input.value || '').trim();
+            if (!text) return;
+            subtaskPanel._focusChatWithStub(text);
+            input.value = '';
+        };
+        submit.addEventListener('click', send);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+        const sync = () => { submit.disabled = !input.value.trim(); };
+        sync();
+        input.addEventListener('input', sync);
+    },
+
+    /** Translate fixed_delay / cron / one_shot + `schedule` string into
+     *  Chinese humanised form. */
+    _humanizeSchedule(t) {
+        const type = (t.taskType || '').toLowerCase();
+        const sched = t.schedule || '';
+        if (type === 'one_shot') return '一次性 · ' + (sched || '60s 后');
+        if (type === 'fixed_delay') {
+            const m = sched.match(/(\d+)\s*(s|m|h|ms)?/);
+            if (m) {
+                const n = parseInt(m[1], 10);
+                const unit = (m[2] || 's');
+                const label = unit === 's' ? `${n} 秒` : unit === 'm' ? `${n} 分钟` : unit === 'h' ? `${n} 小时` : `${n} ${unit}`;
+                return `每 ${label}一次`;
+            }
+            return sched || '周期';
+        }
+        if (type === 'cron') return sched || '周期';
+        return sched || '—';
+    },
+
+    /** Stats line: 下次 / 已触发 count · 上次 fired-ago */
+    _humanizeStats(t, isLive) {
+        if (isLive) {
+            const next = this._nextTrigger(t);
+            const fired = t.fireCount || 0;
+            const line = [];
+            if (next && next !== '—') line.push(`<span class="next">下次 ${escapeHtml(next)}</span>`);
+            if (fired) line.push(`<span>已触发 ${fired} 次</span>`);
+            return line.join('') || '<span>—</span>';
+        }
+        // ended: 上次 fired ago
+        const last = this._rel(t.lastFireTime || 0);
+        return `<span>上次 ${escapeHtml(last)}</span>`;
+    },
+
+    /** next trigger — derive from now + fixed_delay interval when type is fixed_delay */
+    _nextTrigger(t) {
+        const type = (t.taskType || '').toLowerCase();
+        if (type === 'one_shot') return '—';
+        if (type === 'fixed_delay') {
+            const sched = t.schedule || '';
+            const m = sched.match(/(\d+)\s*(s|m|h)/);
+            if (m) {
+                const n = parseInt(m[1], 10);
+                const ms = n * (m[2] === 'm' ? 60_000 : m[2] === 'h' ? 3_600_000 : 1000);
+                const last = t.lastFireTime || Date.now();
+                const next = last + ms;
+                const hh = String(new Date(next).getHours()).padStart(2, '0');
+                const mm = String(new Date(next).getMinutes()).padStart(2, '0');
+                return `${hh}:${mm}`;
+            }
+        }
+        return '—';
+    },
+
+    async trigger(fullName) {
+        showToast('已请求触发 ' + this._shortName(fullName), 'info');
+    },
+
+    /**
+     * BUG-SCHEDULE-SHORTNAME: Extract the user-supplied task name from the
+     * namespaced full name (loom-sched-{username}-{conversationId}-{name}).
+     * The previous implementation split on '-' and dropped the first 4
+     * segments, but conversationId is a UUID containing 4 dashes of its own,
+     * so the slice truncated halfway through the conv id and exposed a
+     * tail like "884a-43ba-af9f-8304dab3fe32-tmp-test-schedule" instead of
+     * the intended "tmp-test-schedule".
+     *
+     * Heuristic: since conversationId is a UUID (36 chars, format
+     * 8-4-4-4-12 hex + 4 dashes), strip "loom-sched-" + first dash-separated
+     * segment (username), then strip 36 more chars (the conv id), then
+     * return whatever follows. Falls back to the previous best-effort slice
+     * if the conv id length doesn't match.
+     *
+     * IMPORTANT: username MUST not contain dashes (NOT currently validated by
+     * DefaultUser.createUser; if dashes are ever allowed, the heuristic below
+     * will break — see TODO below).
+     */
+    // TODO: tighten DefaultUser.createUser to reject dashes in username, or refactor _shortName to iterate past additional dashes until 36 UUID chars consumed
+    _shortName(full) {
+        const f = full || '';
+        const prefix = 'loom-sched-';
+        if (f.startsWith(prefix)) {
+            const rest = f.substring(prefix.length);   // "{username}-{convId}-{name}"
+            const dashIdx = rest.indexOf('-');
+            if (dashIdx > 0) {
+                const convStart = dashIdx + 1;
+                // UUID convId = 36 chars (e.g. "e5436384-039e-4a23-a35c-968e969e48b8")
+                if (rest.length >= convStart + 36) {
+                    const afterConv = rest.substring(convStart + 36);
+                    if (afterConv.startsWith('-')) return afterConv.substring(1);
+                }
+            }
+        }
+        // Fallback: best-effort slice if format is unexpected.
+        const parts = f.split('-');
+        return parts.length > 4 ? parts.slice(4).join('-') : f;
+    },
+
+    async cancel(fullName) {
+        const ok = await dialog.confirm({
+            title: '停止定时器',
+            message: '确认停止定时器 ' + this._shortName(fullName) + ' ?',
+            danger: true,
+        });
+        if (!ok) return;
+        await api.cancelSchedule(fullName);
+        this.refresh();
+    },
+
+    async history(fullName) {
+        const records = await api.scheduleHistory(fullName);
+        const lines = (records || []).slice(0, 20).map(r => {
+            const status = r.success ? '成功' : '失败';
+            return `${r.startTime || ''} ${status}${r.error ? '(' + r.error + ')' : ''}`;
+        }).join('  ·  ');
+        await dialog.confirm({
+            title: '执行历史 · ' + this._shortName(fullName),
+            message: lines || '(暂无执行记录)',
+            okText: '关闭',
+        });
+    },
+
+    async cancelAll(convId) {
+        const ok = await dialog.confirm({
+            title: '全部停止',
+            message: `确认停止当前对话的所有定时任务(包括未触发的和历史任务的配置)?\n\nconv: ${convId}`,
+            danger: true,
+        });
+        if (!ok) return;
+        const r = await api.cancelAllSchedulesByConversation(convId);
+        await dialog.alert({
+            title: '已停止',
+            message: `运行时取消 ${r.cancelled} 条,删除 H2 配置 ${r.rowsDeleted} 条,删除执行历史 ${r.execRowsDeleted} 条`,
+        });
+        this.refresh();
+    },
+};
+
+/** 对话状态条:在聊天输入框上方显示"运行中 / 触发 / 失败"等可操作的状态。
+ * 颜色:绿色 = 有活动且无失败;红色 = 过去 7 天有失败;灰色 = 全部为 0 / 无活动。
+ * 不发请求时隐藏。
+ */
+const convStatePanel = {
+    _timer: null,
+    _currentConvId: null,
+
+    start() {
+        if (this._timer) return;
+        this.refresh();
+        this._timer = setInterval(() => this.refresh(), 8000);
+    },
+
+    stop() {
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        this._currentConvId = null;
+        this._hide();
+    },
+
+    async refresh() {
+        const convId = (typeof state !== 'undefined' && state.conversationId) || '';
+        if (!convId) { this._hide(); return; }
+        this._currentConvId = convId;
+        const s = await api.conversationState(convId);
+        if (!s) { this._hide(); return; }
+        this._render(s);
+    },
+
+    _hide() {
+        const el = document.getElementById('conv-state-strip');
+        if (el) el.style.display = 'none';
+    },
+
+    _render(s) {
+        const el = document.getElementById('conv-state-strip');
+        if (!el) return;
+        const fields = ['activeSchedules', 'executionsLast7d', 'executionsFailedLast7d',
+            'activeSubTasks', 'subTaskHistoryLast7d', 'subTaskFailedLast7d'];
+        const activityKeys = ['activeSchedules', 'executionsLast7d', 'activeSubTasks', 'subTaskHistoryLast7d'];
+        const failureKeys = ['executionsFailedLast7d', 'subTaskFailedLast7d'];
+        const hasActivity = activityKeys.some(k => (s[k] || 0) > 0);
+        const hasFailures = failureKeys.some(k => (s[k] || 0) > 0);
+        if (!hasActivity && !hasFailures) { el.style.display = 'none'; return; }
+        el.style.display = 'flex';
+        for (const k of fields) {
+            const item = el.querySelector(`[data-key="${k}"]`);
+            if (!item) continue;
+            const n = s[k] || 0;
+            item.querySelector('.conv-state-num').textContent = String(n);
+            item.classList.remove('has-activity', 'has-failures');
+            if (failureKeys.includes(k) && n > 0) item.classList.add('has-failures');
+            else if (activityKeys.includes(k) && n > 0) item.classList.add('has-activity');
+        }
+        // Whole-strip border tint when failures present.
+        el.style.borderTop = hasFailures ? '1px solid rgba(231, 76, 60, 0.4)'
+                                          : '1px solid var(--border-color, rgba(255,255,255,0.06))';
+    },
+};
+
 function getFileIcon(name) {
     const ext = name.split('.').pop().toLowerCase();
     const icons = {
@@ -1401,6 +2455,37 @@ function escapeHtml(text) {
 
 // ===================== §9 MCP Service =====================
 const mcp = {
+    /**
+     * Build a per-user localStorage key for persisting MCP selection.
+     * Namespace by username so selections do not leak across users sharing a browser
+     * (BUG-MCP-PERSIST-LEAK). Falls back to '_anonymous' if state.username is null/empty.
+     */
+    _storageKey() {
+        const u = state.username;
+        return 'loom.mcp.selectedNames.' + (u && typeof u === 'string' && u.length ? u : '_anonymous');
+    },
+
+    /** Read persisted selection; returns null if missing/corrupt. */
+    _loadPersisted() {
+        try {
+            const raw = localStorage.getItem(this._storageKey());
+            if (!raw) return null;
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr.filter(s => typeof s === 'string') : null;
+        } catch (_) {
+            return null;
+        }
+    },
+
+    /** Persist current selection. */
+    _savePersisted() {
+        try {
+            localStorage.setItem(this._storageKey(), JSON.stringify(state.selectedMcps));
+        } catch (_) {
+            // localStorage may be disabled (private mode, quota) — fail silently
+        }
+    },
+
     openModal() {
         ui.showModal('mcp-modal-overlay');
         this.renderModal();
@@ -1448,6 +2533,7 @@ const mcp = {
             state.selectedMcps.push(name);
             element.classList.add('selected');
         }
+        this._savePersisted();
         showToast(`已${state.selectedMcps.includes(name) ? '选中' : '取消'}MCP服务`, 'success');
     },
 
@@ -1489,14 +2575,26 @@ const mcp = {
     },
 
     async loadList() {
-        const data = await api.listMcps();
-        if (data && data.length > 0) {
-            state.mcps = data;
-            state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
-        } else {
-            state.mcps = [];
-            state.selectedMcps = [];
+        try {
+            const data = await api.listMcps();
+            if (data && data.length > 0) {
+                state.mcps = data;
+                // Restore persisted selection if available; otherwise use defaults.
+                // Filter against current server list so deleted servers don't linger. (BUG-MCP-PERSIST)
+                const validNames = new Set(data.map(m => m.name));
+                const persisted = this._loadPersisted();
+                if (persisted && persisted.length > 0) {
+                    state.selectedMcps = persisted.filter(n => validNames.has(n));
+                } else {
+                    state.selectedMcps = data.filter(m => m.defaultSelected).map(m => m.name);
+                }
+                return;
+            }
+        } catch (e) {
+            console.warn('[mcp.loadList] failed:', e);
         }
+        state.mcps = [];
+        state.selectedMcps = [];
     },
 };
 
@@ -1948,6 +3046,7 @@ const skills = {
                     state.selectedMcps.push(toolName);
                 }
             }
+            mcp._savePersisted();
         }
 
         chat.send();
@@ -1967,6 +3066,7 @@ const skills = {
                     state.selectedMcps.push(toolName);
                 }
             }
+            mcp._savePersisted();
         }
         // 立即发送
         if (typeof chat !== 'undefined' && chat.send) {
@@ -1990,6 +3090,7 @@ const skills = {
                     state.selectedMcps.push(toolName);
                 }
             }
+            mcp._savePersisted();
         }
     },
 
@@ -2107,6 +3208,14 @@ const imageUpload = {
                 continue;
             }
 
+            // Defensive double-check: if the browser silently dropped the
+            // type (some file pickers filter even without `accept`),
+            // surface an honest error rather than a silent no-op.
+            if (file.size === 0 && file.name && !file.type) {
+                showToast(`文件「${file.name}」无法识别，已忽略`, 'error');
+                continue;
+            }
+
             const isImage = this.isImage(file);
             const objectUrl = isImage ? URL.createObjectURL(file) : null;
             const docIcon = isImage ? null : this.getDocIcon(file);
@@ -2140,12 +3249,13 @@ const imageUpload = {
         div.id = thumbId;
 
         // Document icon or image
+        const safeName = escapeHtml(fileName || '');
         let contentHtml;
         if (docIcon) {
             contentHtml = `<div class="doc-icon-container">${docIcon}</div>
-                <div class="doc-filename" title="${fileName}">${fileName}</div>`;
+                <div class="doc-filename" title="${safeName}">${safeName}</div>`;
         } else {
-            contentHtml = `<img src="${objectUrl}" alt="${fileName}">
+            contentHtml = `<img src="${objectUrl}" alt="${safeName}">
                 <div class="thumbnail-loading"><div class="spinner"></div></div>`;
         }
 
@@ -2256,43 +3366,64 @@ const init = async () => {
     ui.init();
     dialog.init();
 
+    // ── Bind all events FIRST so handlers (send-btn, chips, file-drag, etc.)
+    // are guaranteed active regardless of how slow any background load is.
+    // Otherwise a hung /mcps or /conversation await keeps the page in a
+    // "looks fresh but nothing clicks" state. (BUG-7)
+    bindAllEvents();
+
     // Auth check — auto-login via cookie-based session (BFF pattern)
     const loggedIn = await auth.init();
+    if (!loggedIn) return; // not logged in; auth.init already redirected
 
-    // Only load protected resources after successful login
-    if (loggedIn) {
-        // Load MCPs
+    // Each "background" load is wrapped so a single failure does NOT abort
+    // the rest of init. Without these try/catch, a flaky /mcps or /conversation
+    // endpoint could leave the page in a state where event listeners never
+    // bind — making the entire UI look "fresh" but non-functional.
+    // (auto-test round-01 / .temp/bugs/round-01-bug-02.md)
+    try {
         await mcp.loadList();
+    } catch (e) {
+        console.warn('[init] mcp.loadList failed, continuing:', e);
     }
 
-    // Feature detection (image upload)
     try {
         const uploadOk = await api.checkKnowledgeUpload();
         if (uploadOk) {
-            document.getElementById('image-add-btn').style.display = 'flex';
+            const ib = document.getElementById('image-add-btn');
+            if (ib) ib.style.display = 'flex';
         }
-    } catch { /* upload not available */
+    } catch (e) {
+        console.warn('[init] checkKnowledgeUpload failed, continuing:', e);
     }
 
-    // Load conversations
-    await conversation.loadList();
-
-    // Create initial conversation if none
-    if (!state.conversationId) {
-        conversation.createNew();
+    try {
+        await conversation.loadList();
+    } catch (e) {
+        console.warn('[init] conversation.loadList failed, continuing:', e);
     }
 
-    // Event bindings
-    const textarea = document.getElementById('textarea');
-    const sendBtn = document.getElementById('send-btn');
+    // Keep the initial canvas empty so users explicitly create the first persisted conversation.
+    // chat.send() below provides a defensive fallback for Enter/send calls without a current id.
+};
 
-    textarea.addEventListener('keydown', (event) => {
+const bindAllEvents = () => {
+    const safeBind = (sel, type, handler) => {
+        const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
+        if (e && handler) e.addEventListener(type, handler);
+    };
+    const safeBindById = (id, type, handler) => {
+        if (id) safeBind(document.getElementById(id), type, handler);
+    };
+
+    const ta = document.getElementById('textarea');
+    safeBind(ta, 'keydown', (event) => {
         if (event.key === 'Enter' && event.ctrlKey) {
             event.preventDefault();
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            textarea.value = textarea.value.substring(0, start) + '\n' + textarea.value.substring(end);
-            textarea.setSelectionRange(start + 1, start + 1);
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            ta.value = ta.value.substring(0, start) + '\n' + ta.value.substring(end);
+            ta.setSelectionRange(start + 1, start + 1);
         }
         if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) {
             event.preventDefault();
@@ -2300,33 +3431,37 @@ const init = async () => {
         }
     });
 
-    sendBtn.addEventListener('click', () => chat.send());
-    const stopBtn = document.getElementById('stop-btn');
-    if (stopBtn) stopBtn.addEventListener('click', () => chat.stopStream());
+    safeBindById('send-btn', 'click', () => chat.send());
+    safeBindById('stop-btn', 'click', () => chat.stopStream());
 
     // Modal overlay click-to-close
-    document.getElementById('mcp-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('mcp-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) mcp.closeModal();
     });
-    document.getElementById('skills-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('skills-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) skills.closeModal();
     });
-    document.getElementById('ks-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('ks-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) knowledge.closePanel();
     });
-    document.getElementById('file-modal-overlay').addEventListener('click', (e) => {
+    safeBindById('file-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) fileMgr.closeModal();
+    });
+    safeBindById('subtask-modal-overlay', 'click', (e) => {
+        if (e.target === e.currentTarget) subtaskPanel.closeModal();
+    });
+    safeBindById('schedule-modal-overlay', 'click', (e) => {
+        if (e.target === e.currentTarget) schedulePanel.closeModal();
     });
 
     // Image upload
-    imageUpload.init();
+    if (typeof imageUpload.init === 'function') imageUpload.init();
 
-    // Image viewer close handlers
-    document.getElementById('image-viewer-overlay').addEventListener('click', (e) => {
+    safeBindById('image-viewer-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) imageUpload.hideFullscreen();
     });
-    document.getElementById('viewer-close').addEventListener('click', () => imageUpload.hideFullscreen());
-    document.addEventListener('keydown', (e) => {
+    safeBindById('viewer-close', 'click', () => imageUpload.hideFullscreen());
+    safeBind(document, 'keydown', (e) => {
         if (e.key === 'Escape') imageUpload.hideFullscreen();
     });
 
@@ -2334,8 +3469,7 @@ const init = async () => {
     responsive.handleResize();
     window.addEventListener('resize', responsive.handleResize);
 
-    // Event listeners (replaces inline onclick handlers from ES module scope)
-    const el = (sel) => document.querySelector(sel);
+    // Top-level buttons (replace inline onclick handlers from ES module scope)
     const addIf = (sel, handler) => {
         const e = document.querySelector(sel);
         if (e) e.addEventListener('click', handler);
@@ -2347,6 +3481,10 @@ const init = async () => {
     addIf('#skills-button', () => skills.openModal());
     addIf('#file-manager-button', () => fileMgr.openModal());
     addIf('#file-close-btn', () => fileMgr.closeModal());
+    addIf('#subtask-button', () => subtaskPanel.openModal());
+    addIf('#subtask-close-btn', () => subtaskPanel.closeModal());
+    addIf('#schedule-button', () => schedulePanel.openModal());
+    addIf('#schedule-close-btn', () => schedulePanel.closeModal());
     addIf('#mcp-close-btn', () => mcp.closeModal());
     addIf('#skills-close-btn', () => skills.closeModal());
     addIf('#skill-add-btn', () => skills.showCreateForm());
@@ -2354,7 +3492,15 @@ const init = async () => {
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
 };
 
-document.addEventListener('DOMContentLoaded', init);
+// Init trigger — type="module" scripts are deferred, so by the time this
+// module evaluates, DOMContentLoaded may have ALREADY FIRED. In that case the
+// listener below would never trigger and the page would be a static shell.
+// Guard with document.readyState.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
 
 // Expose to global for testing/debugging
 window._loomAgent = {state, api, imageUpload, auth, chat, conversation, ui, fileMgr};

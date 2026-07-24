@@ -51,6 +51,60 @@
                 </div>
             </div>
 
+            <!-- Conversation state strip (active schedules / recent failures) -->
+            <div id="conv-state-strip" class="conv-state-strip" style="display:none;">
+                <span class="conv-state-item" data-key="activeSchedules" title="当前会话运行中的定时任务">
+                    <span class="conv-state-icon">⏰</span><span class="conv-state-num">0</span><span class="conv-state-label">定时运行</span>
+                </span>
+                <span class="conv-state-item" data-key="executionsLast7d" title="过去 7 天触发次数">
+                    <span class="conv-state-icon">📊</span><span class="conv-state-num">0</span><span class="conv-state-label">触发 (7d)</span>
+                </span>
+                <span class="conv-state-item" data-key="executionsFailedLast7d" title="过去 7 天失败次数">
+                    <span class="conv-state-icon">✗</span><span class="conv-state-num">0</span><span class="conv-state-label">失败 (7d)</span>
+                </span>
+                <span class="conv-state-item" data-key="activeSubTasks" title="当前会话运行中的子任务">
+                    <span class="conv-state-icon">⚙</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务运行</span>
+                </span>
+                <span class="conv-state-item" data-key="subTaskHistoryLast7d" title="过去 7 天子任务历史">
+                    <span class="conv-state-icon">📋</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务 (7d)</span>
+                </span>
+                <span class="conv-state-item" data-key="subTaskFailedLast7d" title="过去 7 天子任务失败">
+                    <span class="conv-state-icon">⚠</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务失败 (7d)</span>
+                </span>
+            </div>
+            <style>
+                .conv-state-strip {
+                    display: flex;
+                    gap: 16px;
+                    padding: 8px 20px;
+                    background: rgba(255,255,255,0.02);
+                    border-top: 1px solid var(--border-color, rgba(255,255,255,0.06));
+                    font-size: 12px;
+                    color: var(--text-muted, #888);
+                    align-items: center;
+                    overflow-x: auto;
+                }
+                .conv-state-item {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 2px 8px;
+                    border-radius: 12px;
+                    background: rgba(255,255,255,0.03);
+                    cursor: default;
+                }
+                .conv-state-item.has-activity {
+                    background: rgba(46, 204, 113, 0.12);
+                    color: #2ecc71;
+                }
+                .conv-state-item.has-failures {
+                    background: rgba(231, 76, 60, 0.12);
+                    color: #e74c3c;
+                }
+                .conv-state-icon { font-size: 13px; }
+                .conv-state-num { font-weight: 600; }
+            </style>
+
             <!-- Input Area -->
             <div class="input-area">
                 <div class="toolbar">
@@ -70,6 +124,14 @@
                         <span>📁</span>
                         <span>文件</span>
                     </button>
+                    <button class="toolbar-btn" id="subtask-button">
+                        <span>🧩</span>
+                        <span>子任务</span>
+                    </button>
+                    <button class="toolbar-btn" id="schedule-button">
+                        <span>⏰</span>
+                        <span>定时</span>
+                    </button>
                 </div>
                 <textarea id="textarea" placeholder="输入消息... (Ctrl+Enter 换行，Enter 发送)"></textarea>
                 <div class="image-upload-area" id="image-upload-area" style="display: none;">
@@ -81,7 +143,7 @@
                             <path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                         </svg>
                     </button>
-                    <input type="file" id="image-file-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" style="display: none;">
+                    <input type="file" id="image-file-input" style="display: none;">
                     <div class="button-area">
                         <button id="send-btn">发送消息</button>
                         <button id="stop-btn" style="display: none; background: var(--error-color, #ef4444); color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; margin-left: 8px;">停止</button>
@@ -186,9 +248,33 @@
     </div>
     </div>
 
+    <!-- Sub-task Panel Modal — operations-console surface (v4 redesign) -->
+    <div id="subtask-modal-overlay" class="modal-overlay console-host" style="display: none;">
+        <div class="modal-content operations-modal" id="subtask-modal-content">
+            <!-- The toolbar (rendered by JS) lives at the top; everything
+                 else is the scrolling body. The body has flex:1 (in CSS)
+                 so the toolbar stays pinned at top. -->
+            <div id="subtask-panel-body" class="console-panel-body">
+                <div class="console-skeleton" aria-hidden="true">
+                    <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Panel Modal — operations-console surface (v4 redesign) -->
+    <div id="schedule-modal-overlay" class="modal-overlay console-host" style="display: none;">
+        <div class="modal-content operations-modal" id="schedule-modal-content">
+            <div id="schedule-panel-body" class="console-panel-body">
+                <div class="console-skeleton" aria-hidden="true">
+                    <div class="skel"></div><div class="skel"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Knowledge Space Modal (full-screen panel) -->
-    <div id="ks-modal-overlay" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="max-width: 1000px; max-height: 85vh;">
+    <div id="ks-modal-overlay" class="modal-overlay" style="display: none;">        <div class="modal-content" style="max-width: 1000px; max-height: 85vh;">
             <div class="modal-header">
                 <h3>知识空间</h3>
                 <div style="display: flex; align-items: center; gap: 12px;">

@@ -1,6 +1,8 @@
 spring:
   datasource:
-      url: jdbc:h2:file:./.local/datasource/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+      # 库文件位置：与 loom-agent 的本地 state 同根 — 都在 $user.home/.loom/。
+      # 这样 `rm -rf ~/.loom/` 一条命令就能清掉所有用户本地状态（库、向量索引、上传、临时工作区）。
+      url: jdbc:h2:file:${user.home}/.loom/datasource/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
       username: sa
       password: 123456
   flyway:
@@ -76,6 +78,14 @@ spring:
         #     localRepository: C:\Users\wb043\.m2\repository
         #     maxOutputLines: 200
         #     defaultTimeoutMs: 300000
+        # 子任务：主对话把一段任务委派给"子模型"同步执行（子任务无法再启子任务/定时器）
+        subtask:
+          enabled: true
+          max-concurrent: 4
+          max-history: 200
+        # 定时任务：LLM 创建的定时器，触发时以子任务方式运行（间隔/存活上限见 flex.schedule.limits）
+        schedule:
+          enabled: true
         rag:
           similarityThreshold: 0.50
           top-k: 4
@@ -110,6 +120,15 @@ spring:
 #      host: localhost
 #      port: 9379
 #      password: 123456
+
+# flex-schedule: 定时任务触发间隔/存活上限（strict = 超限抛异常）
+flex:
+  schedule:
+    pool-size: 8
+    limits:
+      min-interval: 10m
+      max-lifetime: 72h
+      mode: strict
 
 logging:
   level:

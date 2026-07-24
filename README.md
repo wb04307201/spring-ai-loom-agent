@@ -22,22 +22,18 @@
 
 ## Features
 
-- **Chat Interface** — SSE streaming, multi-turn conversations, collapsible model reasoning, message copy/download. **Multimodal input**: images (`+` upload with thumbnail preview) and documents (Tika-extracted text) can be mixed in a single message.
-- **RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, optional LLM metadata enrichment, JVector local vector store
-- **MCP Service Integration** — Sync/async dual mode. The available MCP tools per session come from **role-based authorization** (`role_mcp` table) — admin assigns MCPs to roles, users enable the tools they want per chat.
-- **Skill Library + Market** — Prompt templates stored in the database. **3 sources**: `USER_CREATED` (self-built, fully editable), `MARKET_PULLED` (pulled from the approved market, content locked), `ROLE_GRANTED` (auto-injected from role auth, fully read-only). The Skill Market supports versioning (`author, name, version` unique), admin approval workflow, and bulk CRUD. Skills reference MCP tools by `@tool_name` inside their `content`.
-- **RBAC + User Type** — Two-level permission: `user_info.type` (ADMIN / USER, set at creation) + dynamic `role` (admin-managed, assigned per user). Admin auto-bypasses role checks and sees all MCPs; regular users see MCPs that come from the union of their assigned roles.
-- **Admin Console** — Sidebar-styled SPA shell. Five independent sections:
-  - **User Management** — user list, role assignment, batch content cleanup
-  - **Role Management** — RBAC business roles + grant MCP / Skill to a role
-  - **Skill Market** — approve / reject / directly CRUD Skill (with version control)
-  - **MCP Description Maintenance** — maintain Chinese descriptions for SDK MCP tools / tool args
-  - **Usage Statistics** — monthly Token usage for all users, filterable by year / month
-  - Unauthenticated access 302-redirects to login. All admin paths require `user_info.type = ADMIN`.
-- **File Management** — Disk storage + H2 metadata, multimodal chat (image Media + document text mixed), file download, preview
-- **Frontend UI** — Sidebar conversation history, image/document `+` upload with thumbnail preview, responsive layout
-- **Built-in Tools** — Time, file, skill, git, maven, and the end-to-end deploy tool. Time/file/skill/compile are enabled by default; git/maven are opt-in. See [TOOLS.md](docs/TOOLS.md) for all `@Tool` method signatures, defaults, and configuration.
-- **Engineering** — Spring Boot auto-configuration (fully replaceable components), Flyway migrations (dual-version: library `V1.0` + app module `V1.1` sharing the standard `flyway_schema_history`), broad support for chat/embedding/vector store backends
+> **Core capabilities**: 💬 Streaming chat · 🖼 Multimodal · 📚 RAG · 🔧 MCP tools · 🧠 Skill library + market · 🧩 Sub-tasks · ⏰ Scheduled tasks · 🛡 RBAC · 🎛 Admin console — one dependency, batteries included.
+
+- **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
+- **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
+- **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
+- **🧠 Skill Library + Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`
+- **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
+- **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
+- **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / MCP descriptions / usage stats; admin-gated
+- **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
+- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / end-to-end deploy (on by default), git / maven (opt-in); see [TOOLS.md](docs/TOOLS.md)
+- **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
 
@@ -48,6 +44,8 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
 | File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
 | Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
+| Sub-task | `ISubTaskTool` | 1 | ✅ enabled | `subtask.enabled` |
+| Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
 | Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |
@@ -75,7 +73,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.33</version>
+  <version>1.1.34</version>
 </dependency>
 ```
 

@@ -32,7 +32,7 @@ FORBIDDEN_PATTERNS = [
 # 视觉检查 prompt
 EN_VISUAL_CHECK_PROMPT = """Analyze this project overview infographic and answer:
 1. Is the title "Spring AI LoomAgent" clearly visible? (Y/N)
-2. Are these sections present and labeled in English: CORE 4 FEATURES / RBAC + USER TYPE / ADMIN CONSOLE / 6 TOOL GROUPS / FILE MANAGEMENT / DATA LAYER / STACK / SUPPORT? (Y/N + missing list)
+2. Are these sections present and labeled in English: CORE 4 FEATURES / RBAC + USER TYPE / ADMIN CONSOLE / 8 TOOL GROUPS / FILE MANAGEMENT / DATA LAYER / STACK / SUPPORT? (Y/N + missing list)
 3. Are there any visible:
    - Version numbers like "v1.0", "v2.0", "1.0.0", "3.5.16"? (Y/N)
    - Dates like "2024", "2025", "2026", "2024-01-01"? (Y/N)
@@ -57,7 +57,7 @@ Reply in format:
 
 ZH_VISUAL_CHECK_PROMPT = """分析这张中文项目概览信息图，回答：
 1. 标题 "Spring AI LoomAgent" 是否清晰可见？(Y/N)
-2. 这些板块是否有且都用中文标注：核心 4 大功能 / RBAC + 用户类型 / 管理控制台 / 6 个工具组 / 文件管理 / 数据层 / 底层栈 / 支撑？(Y/N + 缺失列表)
+2. 这些板块是否有且都用中文标注：核心 4 大功能 / RBAC + 用户类型 / 管理控制台 / 8 个工具组 / 文件管理 / 数据层 / 底层栈 / 支撑？(Y/N + 缺失列表)
 3. 是否出现：
    - 任何版本号（v1.0、v2.0、1.0.0、3.5.16 这种）？(Y/N)
    - 任何日期 / 年份（2024、2025、2026、2024-01-01 这种）？(Y/N)

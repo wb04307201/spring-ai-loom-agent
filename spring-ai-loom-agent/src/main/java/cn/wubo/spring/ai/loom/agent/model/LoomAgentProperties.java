@@ -53,8 +53,54 @@ public class LoomAgentProperties {
     // 通过 cn.wubo.spring.ai.loom.agent.skill 包下的服务管理
     private JVectorProperties jvector = new JVectorProperties();
     private String timezone = "Asia/Shanghai";
-    private String fileBasePath = ".local/file";
-    private String knowledgeBasePath = ".local/knowledge";
+
+    /**
+     * Root directory under the user's home that hosts ALL loom-agent local
+     * state (file uploads, knowledge files, H2 DB, jvector index, compile
+     * workspaces). Putting everything under {@code ${user.home}/.loom/} means
+     * a single {@code rm -rf ~/.loom/} wipes a user's complete local
+     * footprint — and means cwd-relative paths no longer fire, so the
+     * "spring-boot:run from test module vs parent module" inconsistency
+     * disappears across the board.
+     *
+     * <p>Sub-paths ({@link #fileBasePath}, {@link #knowledgeBasePath},
+     * {@link #jvector}, etc.) are derived from this root via field defaults,
+     * but Spring's {@code @ConfigurationProperties} does NOT auto-resolve
+     * field-init {@code ${...}} placeholders, so the actual integration
+     * point is in the consumer side: each property either reads the literal
+     * value above OR — when {@code loomHome} is overridden in yml — the
+     * consumer rebuilds the path. Override the sub-paths directly in yml if
+     * you only need to relocate a specific state category.</p>
+     *
+     * <p>Override via {@code spring.ai.loom.agent.loom-home} in
+     * application.yml.</p>
+     */
+    private String loomHome = System.getProperty("user.home") + "/.loom";
+
+    /**
+     * User files root directory. Defaulted to an ABSOLUTE path under the
+     * user's home directory (NOT a cwd-relative path) so the directory the
+     * file manager UI shows is always the same as the directory IUpload
+     * writes to — regardless of whether spring-boot:run is launched from the
+     * parent project root or the test module root.
+     *
+     * <p>Overrideable via {@code spring.ai.loom.agent.file-base-path} in
+     * application.yml.</p>
+     */
+    private String fileBasePath = System.getProperty("user.home") + "/.loom/file";
+    /**
+     * Knowledge-base file root. Defaulted to absolute for the same reason as
+     * {@link #fileBasePath}. Override via
+     * {@code spring.ai.loom.agent.knowledge-base-path}.
+     */
+    private String knowledgeBasePath = System.getProperty("user.home") + "/.loom/knowledge";
+    /**
+     * Absolute root for the H2 file database. Set via yml
+     * {@code spring.datasource.url} as
+     * {@code jdbc:h2:file:${spring.ai.loom-agent.datasource-dir}/db}. Default
+     * value is exposed here so consumers can derive the URL if they want to.
+     */
+    private String datasourceDir = System.getProperty("user.home") + "/.loom/datasource";
     private String gitUsername;
     private String gitToken;
 
@@ -66,6 +112,20 @@ public class LoomAgentProperties {
     private ToolGroupProperty skill = new ToolGroupProperty();
     private GitProperty git = new GitProperty();
     private CompileProperty compile = new CompileProperty();
+    /**
+     * Sub-task feature (main conversation delegates work to a "sub-model").
+     * <p>
+     * yml: {@code spring.ai.loom.agent.subtask.*}。
+     */
+    private SubTaskProperty subtask = new SubTaskProperty();
+
+    /**
+     * Scheduled-task feature (LLM creates timers that fire sub-tasks).
+     * <p>
+     * yml: {@code spring.ai.loom.agent.schedule.*}。Trigger limits (min-interval /
+     * max-lifetime) are configured under {@code flex.schedule.limits.*}.
+     */
+    private ScheduleProperty schedule = new ScheduleProperty();
 
     @Data
     public static class RagProperty {
@@ -103,7 +163,13 @@ public class LoomAgentProperties {
 
     @Data
     public static class JVectorProperties {
-        private String indexPath = ".local/jvector-index";
+        /**
+         * HNSW index directory. Defaulted to an absolute path under
+         * {@code ~/.loom/jvector-index/} so the vector-store is owned by
+         * the user regardless of cwd. Override via
+         * {@code spring.ai.loom-agent.jvector.index-path} in yml.
+         */
+        private String indexPath = System.getProperty("user.home") + "/.loom/jvector-index";
         private int m = 16;
         private int efConstruction = 100;
         private int efSearch = 10;
@@ -115,14 +181,30 @@ public class LoomAgentProperties {
         /**
          * 需要鉴权的路径模式（Ant 风格）。默认只鉴权 API 路径，
          * 静态资源（index.html/app.js/style.css）和用户登录接口不在此列。
+         *
+         * <p>Includes {@code /wopi/**} and {@code /file/view/**} so the
+         * file-view library's wopi / preview routes also flow through
+         * {@code AuthenticationFilter}. file-view's own
+         * {@code OncePerRequestFilter} uses {@code String.equals} against
+         * its config, so its default {@code [/file/view, /wopi]} never
+         * matches {@code /file/view/{id}} or {@code /wopi/files/{id}}
+         * — authentication falls back to {@code AuthenticationFilter},
+         * which uses Ant matching and sets {@code UserContextHolder}.
+         * Without this entry, downstream {@code IFileStorage.findById}
+         * sees an empty user context (BUG-RBAC-FILE-WOPI surface).
          */
-        private List<String> pathPatterns = List.of("/spring/ai/loom/**");
+        private List<String> pathPatterns = List.of("/spring/ai/loom/**", "/wopi/**", "/file/view/**");
         private List<String> excludePathPatterns = List.of(
                 "/spring/ai/loom/user/login",
                 "/spring/ai/loom/user/isAutoLogin",
                 "/spring/ai/loom/user/logout",
                 "/spring/ai/loom/index.html",
                 "/spring/ai/loom/app.js",
+                // app.js (line 9) does `import { sanitizeHtml } from './markdown-renderer.js'`,
+                // so the module must be reachable without a session cookie; otherwise
+                // the very first page load on a logged-out browser fails to import
+                // the module and the chat UI is broken.
+                "/spring/ai/loom/markdown-renderer.js",
                 "/spring/ai/loom/style.css",
                 "/spring/ai/loom/login.html",
                 "/spring/ai/loom/login.js",
@@ -316,5 +398,32 @@ public class LoomAgentProperties {
             /** exec 形式启动命令，会被序列化为 Dockerfile 的 ENTRYPOINT JSON 数组。 */
             private List<String> command;
         }
+    }
+
+    /**
+     * 子任务功能配置。yml 通过 {@code spring.ai.loom.agent.subtask.*} 配置。
+     * <ul>
+     *   <li>{@code enabled} — 是否注册子任务相关 bean（默认 true）</li>
+     *   <li>{@code maxConcurrent} — 同时在飞子任务数上限；超过则启动请求被拒（默认 4）</li>
+     *   <li>{@code maxHistory} — 每用户历史保留条数；超出 FIFO 丢弃最旧的（默认 200）</li>
+     * </ul>
+     */
+    @Data
+    public static class SubTaskProperty {
+        private boolean enabled = true;
+        private int maxConcurrent = 4;
+        private int maxHistory = 200;
+    }
+
+    /**
+     * 定时任务功能配置。yml 通过 {@code spring.ai.loom.agent.schedule.*} 配置。
+     * <ul>
+     *   <li>{@code enabled} — 是否注册定时任务相关 bean（默认 true）</li>
+     * </ul>
+     * 触发间隔/存活上限由 flex-schedule 的 {@code flex.schedule.limits.*} 强校验。
+     */
+    @Data
+    public static class ScheduleProperty {
+        private boolean enabled = true;
     }
 }

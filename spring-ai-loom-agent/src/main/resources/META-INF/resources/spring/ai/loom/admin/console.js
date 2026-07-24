@@ -85,7 +85,7 @@
         try {
             const now = new Date();
             const r = await fetch(`/spring/ai/loom/admin/stats/tokens/monthly?year=${now.getFullYear()}&month=${now.getMonth() + 1}`, {
-                method: 'POST', credentials: 'include',
+                credentials: 'include',
             });
             if (!r.ok) return;
             const list = await r.json();

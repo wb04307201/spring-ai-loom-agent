@@ -32,18 +32,21 @@ public class DefaultUserConversation implements IUserConversation {
     public List<ConversationRecord> getList() {
         String username = UserContextHolder.getCurrentUser();
         if (username == null) return List.of();
-        List<UserConversationRecord> userConversationRecords = jdbcTemplate.query(
-                "select * from user_conversation where username = ? and deleted_at is null",
-                this::mapUserConversationRecord,
-                username
-        );
-
-        List<ConversationRecord> conversations = new ArrayList<>();
-        for (UserConversationRecord userConversationRecord : userConversationRecords) {
-            String preview = buildPreview(userConversationRecord.conversationId());
-            conversations.add(new ConversationRecord(userConversationRecord.conversationId(), preview));
-        }
-        return conversations;
+        return jdbcTemplate.query(
+                "select conversation_id, title, created_at, updated_at " +
+                        "from user_conversation where username = ? and deleted_at is null " +
+                        "order by created_at desc, conversation_id desc",
+                (rs, rowNum) -> {
+                    String conversationId = rs.getString("conversation_id");
+                    String title = rs.getString("title");
+                    if (title == null || title.isBlank()) title = buildPreview(conversationId);
+                    return new ConversationRecord(
+                            conversationId,
+                            title,
+                            toInstant(rs.getTimestamp("created_at")),
+                            toInstant(rs.getTimestamp("updated_at")));
+                },
+                username);
     }
 
     private String buildPreview(String conversationId) {
@@ -64,9 +67,13 @@ public class DefaultUserConversation implements IUserConversation {
 
     @Override
     public boolean exists(UserConversationRecord userConversationRecord) {
+        // 软删后的对话应当视为"已不存在"，否则 GET /conversation/{id} 路由
+        // 的所有权校验会被绕过，命中空消息体后前端表现为"对话在但内容被清"，
+        // 而非"已删除"——和 admin clean-batch 之后的语义混淆。
         try {
             Integer count = jdbcTemplate.queryForObject(
-                    "select count(*) from user_conversation where username = ? and conversation_id = ?",
+                    "select count(*) from user_conversation " +
+                            "where username = ? and conversation_id = ? and deleted_at is null",
                     Integer.class,
                     userConversationRecord.username(), userConversationRecord.conversationId());
             return count != null && count > 0;
@@ -86,6 +93,47 @@ public class DefaultUserConversation implements IUserConversation {
         return jdbcTemplate.update(
                 "insert into user_conversation (username, conversation_id) values (?, ?)",
                 userConversationRecord.username(), userConversationRecord.conversationId());
+    }
+
+    @Override
+    public ConversationRecord create(String title) {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null) throw new LoomAgentRuntimeException(401, "未登录");
+        String normalizedTitle = normalizeTitle(title);
+        String conversationId = UUID.randomUUID().toString();
+        jdbcTemplate.update(
+                "insert into user_conversation (username, conversation_id, title) values (?, ?, ?)",
+                username, conversationId, normalizedTitle);
+        // Read back the row so createdAt/updatedAt reflect the DB's CURRENT_TIMESTAMP
+        // (not this JVM's clock). Without this, an immediate listConversations() after
+        // create() could surface ordering/equality mismatches between in-memory and DB.
+        return jdbcTemplate.queryForObject(
+                "select conversation_id, title, created_at, updated_at " +
+                        "from user_conversation where username = ? and conversation_id = ?",
+                (rs, rowNum) -> new ConversationRecord(
+                        rs.getString("conversation_id"),
+                        rs.getString("title"),
+                        toInstant(rs.getTimestamp("created_at")),
+                        toInstant(rs.getTimestamp("updated_at"))),
+                username, conversationId);
+    }
+
+    @Override
+    public int rename(String conversationId, String title) {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null) return 0;
+        String normalizedTitle = normalizeTitle(title);
+        return jdbcTemplate.update(
+                "update user_conversation set title = ?, updated_at = current_timestamp " +
+                        "where username = ? and conversation_id = ? and deleted_at is null",
+                normalizedTitle, username, conversationId);
+    }
+
+    private static String normalizeTitle(String title) {
+        String normalized = title == null ? "" : title.trim();
+        if (normalized.isEmpty()) normalized = "新对话";
+        if (normalized.length() > 100) normalized = normalized.substring(0, 100);
+        return normalized;
     }
 
     @Override

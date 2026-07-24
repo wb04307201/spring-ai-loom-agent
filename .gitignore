@@ -38,9 +38,13 @@ build/
 
 *.log
 /.claude/settings.local.json
+/.claude/test-screenshots/  # ephemeral regression-test screenshots — kept locally, not in repo
+/.claude/worktrees/  # agent worktree clones — created on demand, removed after use
 /.playwright-mcp/
 /mcp/
 /.local/
+.superpowers
+# superpowers plugin working dir (sdd briefs/reports etc.)
 /spring-ai-loom-agent-test/.local/
 /spring-ai-loom-agent-test/mcp/
 /spring-ai-loom-agent-test/.playwright-mcp/

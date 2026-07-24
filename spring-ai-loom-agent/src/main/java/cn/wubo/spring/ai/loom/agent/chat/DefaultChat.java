@@ -109,6 +109,10 @@ public class DefaultChat implements IChat {
         }
         Map<String, Object> props = new HashMap<>();
         props.put("username", username);
+        // 注入会话 id,让 sub-task / schedule 这类工具知道这次调用属于哪个会话
+        // (用于 ChatMemory 命名空间 + 删除历史时的清理)。ISubTaskTool/IScheduleTool
+        // 通过 toolContext.getContext().get("parentConversationId") 读取。
+        props.put("parentConversationId", conversationId);
         String scheme = request.getScheme();         // http 或 https
         String serverName = request.getServerName(); // localhost 或 IP
         int serverPort = request.getServerPort();    // 8080

@@ -19,19 +19,23 @@
   - [8.3 预置基础镜像模板](#83-预置基础镜像模板)
   - [8.4 工具入参示例](#84-工具入参示例)
   - [8.5 端到端对话示例](#85-端到端对话示例)
-- [9. 替换子工具](#9-替换子工具)
+- [9. `ISubTaskTool` — 子任务委派](#9-isubtasktool--子任务委派)
+- [10. `IScheduleTool` — 定时任务](#10-ischeduletool--定时任务)
+- [11. 替换子工具](#11-替换子工具)
 
 ---
 
 ## 1. 工具启用开关
 
-每个内置工具组都通过 `spring.ai.loom.agent.*` 下的 `*.enabled` 属性控制开关。`time` / `file` / `skill` / `compile` 默认启用；`git` 和 `maven` 是 **opt-in**（默认关闭），因为端到端部署已经覆盖了编译/打包场景。
+每个内置工具组都通过 `spring.ai.loom.agent.*` 下的 `*.enabled` 属性控制开关。`time` / `file` / `skill` / `subtask` / `schedule` / `compile` 默认启用；`git` 和 `maven` 是 **opt-in**（默认关闭），因为端到端部署已经覆盖了编译/打包场景。
 
 | 属性                 | 类型     | 默认值   | 说明                                                       |
 |--------------------|--------|-------|----------------------------------------------------------|
 | `time.enabled`     | boolean | `true`  | 时间工具（`ITimeTool` — 当前时间、时区转换）                            |
 | `file.enabled`     | boolean | `true`  | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除）                     |
 | `skill.enabled`    | boolean | `true`  | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
+| `subtask.enabled`  | boolean | `true`  | 子任务委派（`ISubTaskTool` — `start_sub_task` 把一段任务交给子模型同步执行）        |
+| `schedule.enabled` | boolean | `true`  | 定时任务（`IScheduleTool` — 创建/取消/列出/查历史；触发时以子任务方式运行，持久化到 H2 + 重启恢复） |
 | `git.enabled`      | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
 | `maven.enabled`    | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** — 编译/打包走 `ICompileAndDeployTool`。 |
 | `compile.enabled`  | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
@@ -55,13 +59,15 @@ spring:
 
 ## 2. `IEmbedTool` 总览
 
-`IEmbedTool` 是聚合标记接口。子接口（`ITimeTool`、`ISkillTool`、`IFileTool`、`IGitTool`、`IMavenTool`）各自向 LLM 提供独立的 `@Tool` 方法。`ICompileAndDeployTool` 同样继承 `IEmbedTool`，是部署场景的推荐入口。
+`IEmbedTool` 是聚合标记接口。子接口（`ITimeTool`、`ISkillTool`、`IFileTool`、`ISubTaskTool`、`IScheduleTool`、`IGitTool`、`IMavenTool`）各自向 LLM 提供独立的 `@Tool` 方法。`ICompileAndDeployTool` 同样继承 `IEmbedTool`，是部署场景的推荐入口。
 
 | 子接口                       | 默认实现                              | 方法数  | 默认状态      | 备注                                          |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool`              | `DefaultTimeTool`                 | 2    | 启用        | 未设 `time.enabled` 时始终开启                     |
 | `ISkillTool`             | `DefaultSkillTool`                | 2    | 启用        | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
 | `IFileTool`              | `DefaultFileTool`                 | 16   | 启用        | 基于路径；根目录 = `{fileBasePath}/{username}/` |
+| `ISubTaskTool`           | `DefaultSubTaskTool`              | 1    | 启用        | `start_sub_task` — 把任务委派给子模型同步执行；子任务内不能再起子任务/定时 |
+| `IScheduleTool`          | `DefaultScheduleTool`             | 4    | 启用        | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
 | `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 28   | **禁用**    | 通过 `git.enabled=true` 开启                     |
 | `IMavenTool`             | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用**    | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
 | `ICompileAndDeployTool`  | `DefaultCompileAndDeployTool`     | 1    | 启用        | 端到端 `git clone → build → docker run → health check` |
@@ -405,7 +411,52 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ---
 
-## 9. 替换子工具
+## 9. `ISubTaskTool` — 子任务委派
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool`                    |
+| **默认实现** | `DefaultSubTaskTool`                                                   |
+| **覆盖方式** | 自定义 `@Bean ISubTaskTool`                                              |
+| **状态**   | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换                    |
+| **方法**   | `start_sub_task(prompt, systemContext)` — 把一段任务委派给"子模型"，通过 `ChatClient.call()` **同步执行**并返回最终文本 |
+
+子任务运行在专用的 `loomSubTaskExecutor` 线程池（`ISubTaskExecutor` / `DefaultSubTaskExecutor`）上。其工具集会**排除自身工具**（`ISubTaskTool` / `IScheduleTool`），因此子任务无法再启子任务或定时（防递归）。子任务记忆命名空间为 `{conversationId}--sub--{subTaskId}`。
+
+**配置**：
+
+| 属性                       | 默认值   | 说明                              |
+|--------------------------|-------|---------------------------------|
+| `subtask.enabled`        | `true` | 启用 `start_sub_task` 工具          |
+| `subtask.max-concurrent` | `4`   | 最大并发子任务数                       |
+| `subtask.max-history`    | `200` | 保留的子任务历史条数                     |
+
+---
+
+## 10. `IScheduleTool` — 定时任务
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool`                  |
+| **默认实现** | `DefaultScheduleTool`                                                  |
+| **覆盖方式** | 自定义 `@Bean IScheduleTool`                                             |
+| **状态**   | 默认启用；通过 `spring.ai.loom.agent.schedule.enabled` 切换                   |
+| **方法（4）** | `createSchedule`（cron / fixed_delay / fixed_rate / one_shot）、`cancelSchedule`、`listSchedules`、`getScheduleHistory` |
+
+定时任务命名空间为 `loom-sched-{username}-{conversationId}-{name}`，触发时**以子任务方式运行**。loom-agent 自管 H2 持久化（`loom_scheduled_task`，V2.0 新增）；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，使 `max-lifetime` 上限跨重启累计（超上限的行自动清理）。取消时会校验行所有权（跨用户取消会被拒绝）并删除持久化行，使恢复监听器不会"复活"幽灵任务。
+
+**触发约束**来自 `flex.schedule.limits`：
+
+| 属性                       | 示例    | 说明                              |
+|--------------------------|-------|---------------------------------|
+| `schedule.enabled`       | `true` | 启用定时任务工具                       |
+| `flex.schedule.limits.min-interval` | `10m` | 最小触发间隔                    |
+| `flex.schedule.limits.max-lifetime` | `72h` | 任务最大存活（跨重启累计）          |
+| `flex.schedule.limits.mode` | `strict` | `strict` = 超限抛异常            |
+
+---
+
+## 11. 替换子工具
 
 每个子工具接口都通过 `@ConditionalOnMissingBean` 注册，自定义实现自动优先生效：
 

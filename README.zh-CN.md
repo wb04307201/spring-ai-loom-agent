@@ -21,22 +21,19 @@
 ---
 
 ## 功能特性
-- **对话交互** — SSE 流式聊天，多轮对话，模型推理过程折叠展示，消息复制/下载。**多模态输入**：图片（`+` 上传 + 缩略图预览）和文档（Tika 解析的文本）可混合在同一条消息中。
-- **RAG 知识库** — 多知识库管理，Tika 文档解析 + 向量化，可选 LLM 元数据增强，JVector 本地向量存储
-- **MCP 服务集成** — 同步/异步双模式。每次会话可用的 MCP 工具来自**角色授权**（`role_mcp` 表）—— admin 给角色授权 MCP，用户在聊天时按需勾选启用。
-- **Skill 库 + 市场** — Prompt 模板全部存数据库。**3 种来源**：`USER_CREATED`（自建，完全可改）、`MARKET_PULLED`（从已审批市场拉取，内容锁定）、`ROLE_GRANTED`（角色授权自动注入，完全只读）。Skill 市场支持版本号（`author, name, version` 三元组唯一）、admin 审批流程、批量 CRUD。技能通过 `content` 里的 `@工具名` 引用 MCP 工具。
-- **RBAC + 用户类型** — 两级权限：`user_info.type`（ADMIN / USER，建用户时定）+ 动态 `role`（admin 维护，按用户分配）。admin 自动绕过角色检查、看到全部 MCP；普通用户看到的是其所有角色授权 MCP 的并集。
-- **管理控制台** — 侧边栏风格的 SPA shell。5 个独立区块：
-  - **用户管理** — 用户列表 + 分配角色 + 批量清理会话
-  - **角色管理** — RBAC 业务角色 + 给角色授权 MCP / Skill
-  - **Skill 市场** — 审批 / 拒绝 / 直接 CRUD Skill（带版本控制）
-  - **MCP 描述维护** — 给 SDK MCP 工具 / 工具参数维护中文描述
-  - **用量统计** — 所有用户月度 Token 用量，按年 / 月筛选
-  - 未登录访问 302 重定向到 login。所有 admin 路径都要求 `user_info.type = ADMIN`。
-- **文件管理** — 磁盘存储 + H2 元数据，多模态聊天（图片 Media + 文档文本混合），文件下载，预览
-- **前端 UI** — 侧边栏对话历史，图片/文档 `+` 按钮上传与缩略图预览，响应式布局
-- **内置工具** — 时间、文件、技能、Git、Maven 及端到端部署工具。时间/文件/技能/部署默认启用，Git/Maven 需 opt-in 开启。详细方法签名、默认值、配置见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
-- **工程化** — Spring Boot 自动配置（全组件可替换），Flyway 迁移（双版本：库 `V1.0` + 应用模块 `V1.1`，共用 Spring Boot 默认的 `flyway_schema_history`），广泛支持多种聊天/嵌入/向量存储后端
+
+> **核心能力**：💬 流式对话 · 🖼 多模态图文 · 📚 RAG 知识库 · 🔧 MCP 工具 · 🧠 Skill 库 + 市场 · 🧩 子任务 · ⏰ 定时任务 · 🛡 RBAC 权限 · 🎛 管理控制台 —— 引一个依赖，开箱即用。
+
+- **💬 流式对话** — SSE 多轮聊天，推理过程折叠展示，消息复制/下载；支持图片 + 文档**多模态混合输入**
+- **📚 RAG 知识库** — 多知识库管理，Tika 解析 + 向量化，内置 JVector 本地向量库（可替换为任意 Spring AI 向量存储）
+- **🔧 MCP 工具集成** — 同步/异步双模式；可用工具按**角色授权**下发，会话内按需勾选启用
+- **🧠 Skill 库 + 市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权），带版本号与 admin 审批流；技能用 `@工具名` 调用 MCP
+- **🧩 子任务 & ⏰ 定时任务** — 主对话把任务委派给"子模型"同步执行；LLM 可创建定时任务，触发时以子任务运行，重启自动恢复
+- **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
+- **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / MCP 描述 / 用量统计 五大模块，admin 路径鉴权
+- **📁 文件管理** — 磁盘存储 + H2 元数据，上传 / 预览 / 下载，聊天附件自动桥接
+- **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 端到端部署（默认启用），Git / Maven（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
+- **⚙️ 开箱即用工程化** — Spring Boot 自动配置，全组件 `@ConditionalOnMissingBean` 可替换，Flyway 迁移，广泛支持各类聊天 / 嵌入 / 向量存储后端
 
 ## 内置工具
 
@@ -47,6 +44,8 @@
 | 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
 | 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
 | 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
+| 子任务 | `ISubTaskTool` | 1 | ✅ 启用 | `subtask.enabled` |
+| 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
 | 编译部署 | `ICompileAndDeployTool` | 1 | ✅ 启用 | `compile.enabled` |
@@ -73,7 +72,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.33</version>
+    <version>1.1.34</version>
 </dependency>
 ```
 

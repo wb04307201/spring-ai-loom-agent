@@ -61,14 +61,37 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
                     List.of(), "无法获取用户名，请通过登录态调用");
         }
 
-        Path workspaceBasePath = getUserFileDir(username);
-        return operations.compileAndDeploy(workspaceBasePath, params);
+        Path workspaceBasePath = getCompileDeployWorkspaceDir(username);
+        return operations.compileAndDeploy(workspaceBasePath, username, params);
     }
 
     // ==================== Username / Path ====================
 
+    /**
+     * Per-user UPLOAD directory (i.e. where IUpload writes user-provided files
+     * such as chat attachments and the file manager UI browses). This is what
+     * {@link #getCompileDeployWorkspaceDir(String)} deliberately avoids — the
+     * two spaces MUST be kept separate so compile-deploy workspaces don't
+     * pollute the user's file listing and {@code rm -rf} on one space never
+     * wipes the other.
+     */
     Path getUserFileDir(String username) {
         return Paths.get(fileBasePath, username);
+    }
+
+    /**
+     * Per-user COMPILE-DEPLOY WORKSPACE directory. Distinct from the upload dir
+     * so users see only their files in the file manager. Lives under
+     * {@code $user.home/.loom/compile-deploy-workspaces/&lt;username&gt;/}, which
+     * gives the user an obvious {@code rm -rf} target per account:
+     *
+     * <pre>
+     *   rm -rf ~/.loom/compile-deploy-workspaces/&lt;username&gt;   # clean up everything
+     * </pre>
+     */
+    Path getCompileDeployWorkspaceDir(String username) {
+        return Paths.get(System.getProperty("user.home"),
+                ".loom", "compile-deploy-workspaces", username);
     }
 
     private static String username(ToolContext toolContext) {

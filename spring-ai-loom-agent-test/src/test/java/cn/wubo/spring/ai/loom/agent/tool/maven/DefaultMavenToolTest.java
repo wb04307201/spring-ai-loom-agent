@@ -306,15 +306,19 @@ class DefaultMavenToolTest {
         Path fakeMavenHome = Files.createTempDirectory("fake-maven-home-");
         Path fakeBin = fakeMavenHome.resolve("bin");
         Files.createDirectories(fakeBin);
-        // Windows: 用 mvn.cmd；这里输出 1000 行然后退出，远超测试 timeout
+        // Windows: 用 mvn.cmd。关键：脚本时长必须可靠地 >> 测试 timeout(500ms)，
+        // 否则在快机器上 echo 循环秒完 → 进程先于 timeout 结束 → 不报"超时" → 测试假失败。
+        // 用 `ping -n 2 127.0.0.1`(~1s 挂钟休眠) 保证每轮耗时与 CPU/磁盘无关；
+        // 循环上限 30 轮(~30s)作安全兜底，工具应在 500ms 后强杀该进程链。
         Path fakeMvn = fakeBin.resolve("mvn.cmd");
         Files.writeString(fakeMvn, """
                 @echo off
                 set /a N=0
                 :loop
                 echo [fake-mvn] working... %N%
+                ping -n 2 127.0.0.1 >nul
                 set /a N=N+1
-                if %N% LSS 1000 goto loop
+                if %N% LSS 30 goto loop
                 exit 0
                 """, StandardCharsets.UTF_8);
 
