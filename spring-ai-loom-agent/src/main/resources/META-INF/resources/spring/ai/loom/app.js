@@ -141,12 +141,19 @@ function looksLikeDefaultConversationTitle(t) {
     return /^新对话\s+\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}$/.test(s);
 }
 
-/** Derive an auto title from the first user message (≤12 chars, collapse
- *  whitespace, trim trailing punctuation). Falls back to "新对话" for empty input. */
+/** Derive an auto title from the first user message. Collapses whitespace,
+ *  then — when the message is longer than 12 chars — breaks at the last
+ *  whitespace within the first 12 so we don't leave a half-word like "bu"
+ *  dangling at the end. Falls back to a hard slice for CJK-only text
+ *  (no spaces to anchor on). Returns "新对话" for empty input. */
 function deriveAutoTitleFromMessage(text) {
     const flat = String(text || '').replace(/\s+/g, ' ').trim();
     if (!flat) return '新对话';
-    return flat.length > 12 ? flat.slice(0, 12).trimEnd() : flat;
+    if (flat.length <= 12) return flat;
+    const head = flat.slice(0, 12);
+    const lastSpace = head.lastIndexOf(' ');
+    if (lastSpace > 0) return head.slice(0, lastSpace).trimEnd();
+    return head.trimEnd();
 }
 
 // ===================== §3.5 Generic Confirm / Prompt Modal =====================
