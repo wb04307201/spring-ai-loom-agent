@@ -57,6 +57,7 @@ const state = {
     nickname: null,
     userType: null, // 'ADMIN' / 'USER'
     conversationId: null,
+    conversationTitle: null, // tracks the current conversation's title to gate auto-rename
     selectedMcps: [],
     selectedKnowledgeId: null,
     selectedSkill: null,
@@ -115,6 +116,44 @@ async function apiFetch(url, options = {}) {
         auth.clear();
     }
     return resp;
+}
+
+/** Build a unique-by-moment default title for newly-created conversations.
+ *  e.g. "新对话 7-24 14:32" — two conversations opened in the same minute are
+ *  still distinguishable in the sidebar even before any message is sent. */
+function generateDefaultConversationTitle() {
+    const d = new Date();
+    const M = d.getMonth() + 1;
+    const D = d.getDate();
+    const h = d.getHours();
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `新对话 ${M}-${D} ${h}:${m}`;
+}
+
+/** Detect a still-default placeholder title (used by chat.send() to decide
+ *  whether to auto-rename from the first user message). Matches both the bare
+ *  legacy "新对话" and the timestamped variant produced by
+ *  generateDefaultConversationTitle. */
+function looksLikeDefaultConversationTitle(t) {
+    if (!t) return true;
+    const s = String(t).trim();
+    if (s === '新对话') return true;
+    return /^新对话\s+\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}$/.test(s);
+}
+
+/** Derive an auto title from the first user message. Collapses whitespace,
+ *  then — when the message is longer than 12 chars — breaks at the last
+ *  whitespace within the first 12 so we don't leave a half-word like "bu"
+ *  dangling at the end. Falls back to a hard slice for CJK-only text
+ *  (no spaces to anchor on). Returns "新对话" for empty input. */
+function deriveAutoTitleFromMessage(text) {
+    const flat = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!flat) return '新对话';
+    if (flat.length <= 12) return flat;
+    const head = flat.slice(0, 12);
+    const lastSpace = head.lastIndexOf(' ');
+    if (lastSpace > 0) return head.slice(0, lastSpace).trimEnd();
+    return head.trimEnd();
 }
 
 // ===================== §3.5 Generic Confirm / Prompt Modal =====================
@@ -1043,6 +1082,11 @@ const conversation = {
         for (const item of list) {
             const id = item.conversationId || item.id;
             const title = item.title || truncateText(item.name || '新对话', API.titleMaxLength);
+            // Keep state.conversationTitle in sync for the currently-active conversation
+            // so chat.send() can decide whether to auto-rename from the first message.
+            if (id === state.conversationId) {
+                state.conversationTitle = item.title || item.name || '新对话';
+            }
             const div = document.createElement('div');
             div.className = 'sidebar-item' + (state.conversationId === id ? ' active' : '');
             div.dataset.conversationId = id;
@@ -1088,12 +1132,14 @@ const conversation = {
             showToast('请等待 AI 回复完成', 'warning');
             return;
         }
-        const created = await api.createConversation('新对话');
+        const defaultTitle = generateDefaultConversationTitle();
+        const created = await api.createConversation(defaultTitle);
         if (!created) {
             showToast('新建对话失败', 'error');
             return;
         }
         state.conversationId = created.conversationId || created.id;
+        state.conversationTitle = defaultTitle;
         ui.clearChat();
         imageUpload.clear();
         await this.loadList();
@@ -1101,6 +1147,21 @@ const conversation = {
         // schedule modal can re-fetch the per-conversation list.
         try { subtaskPanel.setConvId(state.conversationId); } catch (_) {}
         try { schedulePanel.setConvId(state.conversationId); } catch (_) {}
+    },
+
+    /** Auto-rename from the first user message when the title is still the default
+     *  placeholder. Idempotent per session: a manually renamed conversation or one
+     *  already auto-renamed never re-fires. No-op on empty text or stale conv ids. */
+    async maybeAutoRename(convId, userText) {
+        if (!convId || !userText) return;
+        if (!looksLikeDefaultConversationTitle(state.conversationTitle)) return;
+        const autoTitle = deriveAutoTitleFromMessage(userText);
+        if (!autoTitle || autoTitle === state.conversationTitle) return;
+        const result = await api.renameConversation(convId, autoTitle);
+        if (result && result.ok) {
+            state.conversationTitle = autoTitle;
+            await this.loadList();
+        }
     },
 
     startRename(div, id, currentTitle) {
@@ -1143,6 +1204,7 @@ const conversation = {
             completed = true;
             const result = await api.renameConversation(id, title);
             if (result.ok) {
+                if (state.conversationId === id) state.conversationTitle = title;
                 await this.loadList();
                 showToast('对话已重命名', 'success');
             } else {
@@ -1297,6 +1359,10 @@ const chat = {
                     ui.enableSend();
                     ui.setStopButtonVisible(false);
                     conversation.loadList();
+                    // Auto-rename from the first user message if the conversation still
+                    // carries its default placeholder title. Fire-and-forget; the title
+                    // update will refresh the sidebar once the PATCH lands.
+                    conversation.maybeAutoRename(state.conversationId, text);
                 },
                 (error) => {
                     // error
