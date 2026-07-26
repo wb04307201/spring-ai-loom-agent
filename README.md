@@ -44,7 +44,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
 | File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
 | Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
-| Sub-task | `ISubTaskTool` | 1 | ✅ enabled | `subtask.enabled` |
+| Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
 | Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
@@ -73,7 +73,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.34</version>
+  <version>1.1.35</version>
 </dependency>
 ```
 

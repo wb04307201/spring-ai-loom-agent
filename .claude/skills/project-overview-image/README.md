@@ -50,7 +50,7 @@ rm -f docs/project-overview-{en,zh}-r*.png
 
 1. **HEADER**：项目名 + 副标题
 2. **CORE 4**：4 张青色卡片（对话 / 知识库 / MCP / 技能市场）
-3. **8 TOOLS**：8 张卡片（文件 16 / Git 28 / Maven 6 / 部署 1 / 时间 2 / 技能 2 / 子任务 1 / 定时 4），**第 4 张"部署"橙色高亮 + 右上角 ★**
+3. **8 TOOLS**：8 张卡片（文件 16 / Git 28 / Maven 6 / 部署 1 / 时间 2 / 技能 2 / 子任务 4 / 定时 4），**第 4 张"部署"橙色高亮 + 右上角 ★**
 4. **RBAC**：灰色小标题 "RBAC + User Type" + 5 芯片（用户 / 角色 / MCP / 市场 / 会话）+ 2 胶囊（管理员 / 普通用户）
 5. **STACK**：8 个技术栈胶囊（Spring Boot / Spring AI / JDK 17 / JVector / JGit / H2 / Flyway / ChatMemory）
 6. **FLOW**：4 框流程（核心 → 配置 → 启动 → 测试）

@@ -66,7 +66,7 @@ spring:
 | `ITimeTool`               | `DefaultTimeTool`           | 2       | enabled       | Always on when `time.enabled` is unset        |
 | `ISkillTool`              | `DefaultSkillTool`          | 2       | enabled       | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read |
 | `IFileTool`               | `DefaultFileTool`           | 16      | enabled       | Path-based; root = `{fileBasePath}/{username}/` |
-| `ISubTaskTool`            | `DefaultSubTaskTool`        | 1       | enabled       | `start_sub_task` — delegate to a sub-model synchronously; sub-tasks cannot spawn sub-tasks/schedules |
+| `ISubTaskTool`            | `DefaultSubTaskTool`        | 4       | enabled       | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool`           | `DefaultScheduleTool`       | 4       | enabled       | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
 | `IGitTool`                | `DefaultGitTool` (JGit 7.6) | 28      | **disabled**  | Opt-in via `git.enabled=true`                  |
 | `IMavenTool`              | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **disabled**  | Opt-in via `maven.enabled=true`; needs `maven-invoker` on classpath |
@@ -412,7 +412,7 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 | **Default**     | `DefaultSubTaskTool`                                                                  |
 | **Override**    | Custom `@Bean ISubTaskTool`                                                           |
 | **State**       | Enabled by default; toggle with `spring.ai.loom.agent.subtask.enabled`                |
-| **Methods**     | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously** via `ChatClient.call()` and returns the final text |
+| **Methods**     | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
 
 The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool`) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
 
