@@ -153,6 +153,16 @@ public class DefaultScheduleTool implements IScheduleTool {
         }
     }
 
+    /**
+     * Null-safe ToolContext string reader. Returns "" when the context is missing
+     * or the value isn't a String, so callers can treat absent keys uniformly.
+     */
+    private static String readContextString(ToolContext toolContext, String key) {
+        if (toolContext == null || toolContext.getContext() == null) return "";
+        Object v = toolContext.getContext().get(key);
+        return (v instanceof String s) ? s : "";
+    }
+
     private static long parseLongOrZero(String expression) {
         try {
             return Long.parseLong(expression);
@@ -298,7 +308,36 @@ public class DefaultScheduleTool implements IScheduleTool {
     @Override
     @Tool(description = "列出当前会话下我创建的所有定时任务。")
     public String listSchedules(ToolContext toolContext) {
-        return listSchedulesRaw((String) toolContext.getContext().get("username"));
+        // BUG-15: 原 listSchedules 只按 username 过滤,会列出同用户其他会话的定时任务
+        // (跨会话越权)。ToolContext 携带 parentConversationId,用它构造精确前缀
+        // 过滤,只返回当前会话的任务。BFF 侧的 listSchedulesRaw 保持用户级聚合不变。
+        String username = readContextString(toolContext, "username");
+        String convId = readContextString(toolContext, "parentConversationId");
+        return listSchedulesInConversation(username, convId);
+    }
+
+    /**
+     * Lists schedules scoped to (username, conversationId). Used by the LLM tool
+     * path so a sub-task / main conversation only sees its own schedules.
+     */
+    private String listSchedulesInConversation(String username, String convId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("定时任务列表:%n%n"));
+        if (username == null || username.isBlank() || convId == null || convId.isBlank()) {
+            sb.append(String.format("(上下文缺失,无法列出)%n"));
+            return sb.toString();
+        }
+        String prefix = fullName(username, convId, "");
+        List<TaskInfo> all = flexService.listTasks();
+        int n = 0;
+        for (TaskInfo info : all) {
+            if (!info.taskName().startsWith(prefix)) continue;
+            sb.append(String.format("- %s (type=%s, schedule=%s)%n",
+                    info.taskName(), info.taskType(), info.schedule()));
+            n++;
+        }
+        if (n == 0) sb.append(String.format("(当前会话无定时任务)%n"));
+        return sb.toString();
     }
 
     @Override

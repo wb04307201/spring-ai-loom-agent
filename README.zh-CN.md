@@ -44,7 +44,7 @@
 | 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
 | 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
 | 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
-| 子任务 | `ISubTaskTool` | 1 | ✅ 启用 | `subtask.enabled` |
+| 子任务 | `ISubTaskTool` | 4 | ✅ 启用 | `subtask.enabled` |
 | 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
@@ -72,7 +72,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.34</version>
+    <version>1.1.35</version>
 </dependency>
 ```
 

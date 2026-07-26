@@ -87,7 +87,9 @@ class DefaultScheduleToolTest {
     }
 
     @Test
-    void listSchedulesFiltersByNamespacePrefix() {
+    void listSchedulesFiltersByConversation() {
+        // BUG-15: listSchedules should only return schedules in the current conversation,
+        // not all schedules for the same user.
         ToolContext ctx = new ToolContext(Map.of("username", "alice", "parentConversationId", "conv-1"));
         when(flexService.listTasks()).thenReturn(List.of(
                 new TaskInfo("loom-sched-alice-conv-1-remind", "FIXED_DELAY", null),
@@ -95,6 +97,22 @@ class DefaultScheduleToolTest {
                 new TaskInfo("loom-sched-bob-conv-1-foo", "CRON", null)));
 
         String response = tool.listSchedules(ctx);
+        assertThat(response).contains("remind");
+        // "other" belongs to conv-2 — should NOT appear for conv-1 caller
+        assertThat(response).doesNotContain("other");
+        assertThat(response).doesNotContain("foo");
+    }
+
+    @Test
+    void listSchedulesRawFiltersByUsernameOnly() {
+        // listSchedulesRaw is used by the BFF — it lists all schedules for a user
+        // across all conversations.
+        when(flexService.listTasks()).thenReturn(List.of(
+                new TaskInfo("loom-sched-alice-conv-1-remind", "FIXED_DELAY", null),
+                new TaskInfo("loom-sched-alice-conv-2-other", "FIXED_DELAY", null),
+                new TaskInfo("loom-sched-bob-conv-1-foo", "CRON", null)));
+
+        String response = tool.listSchedulesRaw("alice");
         assertThat(response).contains("remind");
         assertThat(response).contains("other");
         assertThat(response).doesNotContain("foo");

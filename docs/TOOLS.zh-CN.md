@@ -66,7 +66,7 @@ spring:
 | `ITimeTool`              | `DefaultTimeTool`                 | 2    | 启用        | 未设 `time.enabled` 时始终开启                     |
 | `ISkillTool`             | `DefaultSkillTool`                | 2    | 启用        | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
 | `IFileTool`              | `DefaultFileTool`                 | 16   | 启用        | 基于路径；根目录 = `{fileBasePath}/{username}/` |
-| `ISubTaskTool`           | `DefaultSubTaskTool`              | 1    | 启用        | `start_sub_task` — 把任务委派给子模型同步执行；子任务内不能再起子任务/定时 |
+| `ISubTaskTool`           | `DefaultSubTaskTool`              | 4    | 启用        | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool`          | `DefaultScheduleTool`             | 4    | 启用        | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
 | `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 28   | **禁用**    | 通过 `git.enabled=true` 开启                     |
 | `IMavenTool`             | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用**    | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
@@ -419,7 +419,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 | **默认实现** | `DefaultSubTaskTool`                                                   |
 | **覆盖方式** | 自定义 `@Bean ISubTaskTool`                                              |
 | **状态**   | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换                    |
-| **方法**   | `start_sub_task(prompt, systemContext)` — 把一段任务委派给"子模型"，通过 `ChatClient.call()` **同步执行**并返回最终文本 |
+| **方法**   | `start_sub_task(prompt, systemContext)` — 把一段任务委派给"子模型"同步执行<br/>`list_sub_tasks()` — 列出当前会话运行中的子任务<br/>`cancel_sub_task(subTaskId)` — 取消当前会话的子任务<br/>`get_sub_task_history(limit)` — 获取当前会话的子任务历史 |
 
 子任务运行在专用的 `loomSubTaskExecutor` 线程池（`ISubTaskExecutor` / `DefaultSubTaskExecutor`）上。其工具集会**排除自身工具**（`ISubTaskTool` / `IScheduleTool`），因此子任务无法再启子任务或定时（防递归）。子任务记忆命名空间为 `{conversationId}--sub--{subTaskId}`。
 

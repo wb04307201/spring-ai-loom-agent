@@ -66,7 +66,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 | `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call()`; tools filtered to exclude self-tools (no `ISubTaskTool`/`IScheduleTool`) to prevent recursion. Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
-| `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` — 主对话把一段任务委派给"子模型"同步执行，拿到最终文本。默认 enabled (`subtask.enabled=true`) |
+| `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` + `list_sub_tasks()` + `cancel_sub_task(subTaskId)` + `get_sub_task_history(limit)` — 委派/查询/取消/历史子任务，全部按 `(username, conversationId)` 严格隔离，防跨会话越权。默认 enabled (`subtask.enabled=true`) |
 | `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，V2.0 增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
