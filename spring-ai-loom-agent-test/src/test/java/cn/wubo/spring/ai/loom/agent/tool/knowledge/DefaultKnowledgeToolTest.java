@@ -59,10 +59,9 @@ class DefaultKnowledgeToolTest {
     @Test
     @DisplayName("listKnowledgeBases 列出当前用户的知识库")
     void listKnowledgeBases_listsUserKnowledgeBases() {
-        when(knowledge.list()).thenReturn(List.of(
+        when(knowledge.list("alice")).thenReturn(List.of(
                 new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档"),
-                new KnowledgeRecord("kb-2", "alice", "技术文档", "包含技术资料"),
-                new KnowledgeRecord("kb-3", "bob", "Bob的库", "不属于alice")
+                new KnowledgeRecord("kb-2", "alice", "技术文档", "包含技术资料")
         ));
 
         String result = tool.listKnowledgeBases(1, 20, ctx("alice"));
@@ -72,13 +71,13 @@ class DefaultKnowledgeToolTest {
         assertTrue(result.contains("kb-2"));
         assertTrue(result.contains("技术文档"));
         assertTrue(result.contains("共 2 个"), "应只列出 alice 的 2 个知识库: " + result);
-        assertFalse(result.contains("kb-3"), "Bob的知识库不应出现: " + result);
+        verify(knowledge).list("alice");
     }
 
     @Test
     @DisplayName("listKnowledgeBases 无知识库时显示空列表")
     void listKnowledgeBases_emptyList() {
-        when(knowledge.list()).thenReturn(List.of());
+        when(knowledge.list("bob")).thenReturn(List.of());
         String result = tool.listKnowledgeBases(1, 20, ctx("bob"));
         assertTrue(result.contains("共 0 个"), "应提示 0 个知识库: " + result);
         assertTrue(result.contains("暂无知识库"), "应提示暂无知识库: " + result);
@@ -87,7 +86,7 @@ class DefaultKnowledgeToolTest {
     @Test
     @DisplayName("listKnowledgeBases 默认 null 参数使用默认值")
     void listKnowledgeBases_defaultParams() {
-        when(knowledge.list()).thenReturn(List.of());
+        when(knowledge.list("dave")).thenReturn(List.of());
         String result = tool.listKnowledgeBases(null, null, ctx("dave"));
         assertTrue(result.contains("共 0 个"));
         assertTrue(result.contains("第 1/0 页"));
@@ -101,7 +100,7 @@ class DefaultKnowledgeToolTest {
                 new KnowledgeRecord("kb-2", "eve", "描述2", "详情2"),
                 new KnowledgeRecord("kb-3", "eve", "描述3", "详情3")
         );
-        when(knowledge.list()).thenReturn(kbs);
+        when(knowledge.list("eve")).thenReturn(kbs);
 
         String result = tool.listKnowledgeBases(1, -1, ctx("eve"));
         assertTrue(result.contains("kb-1"));
@@ -119,11 +118,32 @@ class DefaultKnowledgeToolTest {
                 new KnowledgeRecord("kb-2", "frank", "d2", "c2"),
                 new KnowledgeRecord("kb-3", "frank", "d3", "c3")
         );
-        when(knowledge.list()).thenReturn(kbs);
+        when(knowledge.list("frank")).thenReturn(kbs);
 
         String result = tool.listKnowledgeBases(1, 2, ctx("frank"));
         assertTrue(result.contains("第 1/2 页"), "应显示第1页: " + result);
         assertTrue(result.contains("下一页"), "应有下一页提示: " + result);
+    }
+
+    @Test
+    @DisplayName("listKnowledgeBases enabledKnowledgeIds 只列出选中的知识库")
+    void listKnowledgeBases_filtersByEnabledIds() {
+        when(knowledge.list("alice")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档"),
+                new KnowledgeRecord("kb-2", "alice", "技术文档", "包含技术资料"),
+                new KnowledgeRecord("kb-3", "alice", "其他", "其他内容")
+        ));
+
+        Map<String, Object> ctxMap = new HashMap<>();
+        ctxMap.put("username", "alice");
+        ctxMap.put("enabledKnowledgeIds", List.of("kb-1", "kb-3"));
+        ToolContext ctx = new ToolContext(ctxMap);
+
+        String result = tool.listKnowledgeBases(1, 20, ctx);
+        assertTrue(result.contains("kb-1"));
+        assertTrue(result.contains("kb-3"));
+        assertFalse(result.contains("技术文档"), "未选中的 kb-2 不应出现: " + result);
+        assertTrue(result.contains("共 2 个"), "应只列出 2 个启用的知识库: " + result);
     }
 
     // ──────────── searchKnowledge ────────────
@@ -177,5 +197,32 @@ class DefaultKnowledgeToolTest {
         String result = tool.searchKnowledge("kb-1", "产品", null, ctx("ivan"));
         assertTrue(result.contains("这是产品文档内容"), "应包含文档内容: " + result);
         assertTrue(result.contains("片段 1/1"), "应显示片段编号: " + result);
+    }
+
+    @Test
+    @DisplayName("searchKnowledge 未启用的知识库返回错误")
+    void searchKnowledge_rejectsDisabledKnowledgeId() {
+        Map<String, Object> ctxMap = new HashMap<>();
+        ctxMap.put("username", "alice");
+        ctxMap.put("enabledKnowledgeIds", List.of("kb-1", "kb-2"));
+        ToolContext ctx = new ToolContext(ctxMap);
+
+        String result = tool.searchKnowledge("kb-999", "产品", null, ctx);
+        assertTrue(result.contains("错误"), "应返回错误信息: " + result);
+        assertTrue(result.contains("kb-999"), "应包含被拒绝的 ID: " + result);
+        verifyNoInteractions(vectorStore);
+    }
+
+    @Test
+    @DisplayName("searchKnowledge enabledKnowledgeIds 为空时不做校验")
+    void searchKnowledge_noEnabledIds_noValidation() {
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        when(vectorStore.similaritySearch(captor.capture())).thenReturn(List.of());
+
+        tool.searchKnowledge("kb-1", "产品", null, ctx("alice"));
+
+        SearchRequest req = captor.getValue();
+        assertEquals("产品", req.getQuery());
+        verify(vectorStore).similaritySearch(any(SearchRequest.class));
     }
 }

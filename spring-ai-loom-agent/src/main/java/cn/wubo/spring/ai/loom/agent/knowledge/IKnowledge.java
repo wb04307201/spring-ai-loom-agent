@@ -8,6 +8,8 @@ public interface IKnowledge {
 
     List<KnowledgeRecord> list();
 
+    List<KnowledgeRecord> list(String username);
+
     KnowledgeRecord insert(String name, String description);
 
     int delete(String id);

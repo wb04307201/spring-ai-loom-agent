@@ -32,12 +32,16 @@ public class DefaultKnowledgeTool implements IKnowledgeTool {
         @ToolParam(description = "每页数量，-1表示全部") Integer size,
         ToolContext toolContext) {
         String username = (String) toolContext.getContext().get("username");
-        List<KnowledgeRecord> allKnowledgeBases = knowledge.list();
+        List<KnowledgeRecord> userKnowledgeBases = knowledge.list(username);
 
-        // Filter to current user's knowledge bases (IKnowledge.list() already does this, but be explicit)
-        List<KnowledgeRecord> userKnowledgeBases = allKnowledgeBases.stream()
-            .filter(kb -> username != null && username.equals(kb.username()))
-            .toList();
+        // 过滤：只展示用户本次对话启用的知识库
+        @SuppressWarnings("unchecked")
+        List<String> enabledIds = (List<String>) toolContext.getContext().get("enabledKnowledgeIds");
+        if (enabledIds != null && !enabledIds.isEmpty()) {
+            userKnowledgeBases = userKnowledgeBases.stream()
+                .filter(kb -> enabledIds.contains(kb.id()))
+                .toList();
+        }
 
         int total = userKnowledgeBases.size();
         int pageSize = (size == null || size <= 0) ? DEFAULT_PAGE_SIZE : size;
@@ -86,6 +90,14 @@ public class DefaultKnowledgeTool implements IKnowledgeTool {
         @ToolParam(description = "返回结果数量，不传则使用全局默认值") Integer topK,
         ToolContext toolContext) {
         String username = (String) toolContext.getContext().get("username");
+
+        // 校验：knowledgeId 必须在用户启用的知识库列表中（纵深防御）
+        @SuppressWarnings("unchecked")
+        List<String> enabledIds = (List<String>) toolContext.getContext().get("enabledKnowledgeIds");
+        if (enabledIds != null && !enabledIds.isEmpty() && !enabledIds.contains(knowledgeId)) {
+            return "错误：知识库ID " + knowledgeId + " 不在当前启用的知识库列表中。请先调用 @listKnowledgeBases 查看可用知识库。";
+        }
+
         int actualTopK = (topK == null || topK <= 0) ? ragProperty.getTopK() : topK;
         double threshold = ragProperty.getSimilarityThreshold();
 

@@ -39,6 +39,15 @@ public class DefaultKnowledge implements IKnowledge {
     }
 
     @Override
+    public List<KnowledgeRecord> list(String username) {
+        return jdbcTemplate.query(
+                "SELECT * FROM knowledge where username = ?",
+                this::mapKnowledgeRecord,
+                username
+        );
+    }
+
+    @Override
     public KnowledgeRecord insert(String name, String description) {
         String username = UserContextHolder.getCurrentUser();
         // Same-user duplicate is rejected with a clean 4xx instead of 500.

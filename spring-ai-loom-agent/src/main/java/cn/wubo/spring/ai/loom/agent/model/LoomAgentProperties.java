@@ -23,7 +23,7 @@ public class LoomAgentProperties {
             （MCP 工具列表，由系统动态注入）
 
             当用户意图匹配某项技能时，调用 @getSkill 获取详细执行指南。
-            当用户问题涉及某个知识库时，调用 @searchKnowledge 检索相关信息。
+            当用户问题涉及上方【知识库】中列出的知识库时，调用 @searchKnowledge 检索相关信息（knowledgeId 使用列出的 ID）。
             都不匹配时，直接基于通用知识回答。
             """;
     private boolean init = true;

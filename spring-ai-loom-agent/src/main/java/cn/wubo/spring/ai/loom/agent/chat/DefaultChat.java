@@ -74,7 +74,7 @@ public class DefaultChat implements IChat {
             userConversation.insert(new UserConversationRecord(username, conversationId));
         }
 
-        String dynamicSystemPrompt = buildDynamicSystemPrompt(username);
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(username, chatRequestRecord.enabledKnowledgeIds());
 
         // Prepare document content if files are attached (appended to dynamic system prompt)
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
@@ -127,6 +127,8 @@ public class DefaultChat implements IChat {
         // (用于 ChatMemory 命名空间 + 删除历史时的清理)。ISubTaskTool/IScheduleTool
         // 通过 toolContext.getContext().get("parentConversationId") 读取。
         props.put("parentConversationId", conversationId);
+        // 注入用户选中的知识库 ID 列表，让 IKnowledgeTool 可以过滤
+        props.put("enabledKnowledgeIds", chatRequestRecord.enabledKnowledgeIds());
         String scheme = request.getScheme();         // http 或 https
         String serverName = request.getServerName(); // localhost 或 IP
         int serverPort = request.getServerPort();    // 8080
@@ -144,7 +146,7 @@ public class DefaultChat implements IChat {
         return requestSpec.stream().chatResponse();
     }
 
-    private String buildDynamicSystemPrompt(String username) {
+    private String buildDynamicSystemPrompt(String username, List<String> enabledKnowledgeIds) {
         StringBuilder sb = new StringBuilder();
 
         // Base system prompt from properties
@@ -170,19 +172,20 @@ public class DefaultChat implements IChat {
             sb.append("\n");
         }
 
-        // Inject knowledge base summary (first 20)
-        List<KnowledgeRecord> knowledgeBases = knowledge.list();
-        if (!knowledgeBases.isEmpty()) {
-            sb.append("【知识库】（共 ").append(knowledgeBases.size()).append(" 个");
-            if (knowledgeBases.size() > 20) {
-                sb.append("，显示前 20 个");
+        // Inject knowledge base summary - only show user-selected KBs with their IDs
+        if (enabledKnowledgeIds != null && !enabledKnowledgeIds.isEmpty()) {
+            List<KnowledgeRecord> userKbs = knowledge.list(username);
+            List<KnowledgeRecord> enabledKbs = userKbs.stream()
+                    .filter(kb -> enabledKnowledgeIds.contains(kb.id()))
+                    .toList();
+            if (!enabledKbs.isEmpty()) {
+                sb.append("【知识库】（用户已启用 ").append(enabledKbs.size()).append(" 个）\n");
+                enabledKbs.forEach(kb ->
+                        sb.append("• ID=").append(kb.id())
+                                .append(", 名称=").append(kb.name())
+                                .append(", 描述=").append(kb.description()).append("\n"));
+                sb.append("\n当用户问题涉及以上知识库内容时，请调用 @searchKnowledge 检索相关信息（knowledgeId 使用以上列出的 ID）。\n\n");
             }
-            sb.append("）\n");
-
-            knowledgeBases.stream().limit(20).forEach(kb -> {
-                sb.append("• ").append(kb.name()).append(" - ").append(kb.description()).append("\n");
-            });
-            sb.append("\n");
         }
 
         return sb.toString();

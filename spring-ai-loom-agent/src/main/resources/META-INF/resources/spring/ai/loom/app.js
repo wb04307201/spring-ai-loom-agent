@@ -1466,18 +1466,18 @@ const knowledge = {
                 <span class="ks-item-name">${name}</span>
                 <span class="ks-item-desc">${kb.description || ''}</span>
                 <button class="ks-item-delete">&times;</button>`;
-            div.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+            const checkbox = div.querySelector('input[type="checkbox"]');
+            checkbox.addEventListener('change', () => {
                 this.toggleKnowledgeForChat(id);
             });
+            // 名称/描述点击：只显示右侧详情面板，不改变启用状态
             div.querySelector('.ks-item-name').addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.toggleKnowledgeForChat(id);
-                // Also open detail panel to show files
                 this.select(id, name);
             });
             div.querySelector('.ks-item-desc').addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.toggleKnowledgeForChat(id);
+                this.select(id, name);
             });
             div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
                 e.stopPropagation();
