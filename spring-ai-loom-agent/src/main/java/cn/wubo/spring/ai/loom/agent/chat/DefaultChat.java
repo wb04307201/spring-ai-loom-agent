@@ -14,11 +14,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
-import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.util.MimeTypeUtils;
-import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
@@ -26,22 +23,19 @@ import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 public class DefaultChat implements IChat {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultChat.class);
 
     private final ChatClient chatClient;
-    private final Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor;
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
     private final IUserConversation userConversation;
     private final IFile file;
 
-    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+    public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
         this.chatClient = chatClient;
-        this.retrievalAugmentationAdvisor = retrievalAugmentationAdvisor;
         this.mcp = mcp;
         this.embedTools = embedTools;
         this.userConversation = userConversation;
@@ -120,11 +114,6 @@ public class DefaultChat implements IChat {
         requestSpec.toolContext(props);
 
         requestSpec.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId));
-
-        if (retrievalAugmentationAdvisor.isPresent() && StringUtils.hasText(chatRequestRecord.knowledgeId())) {
-            requestSpec.advisors(retrievalAugmentationAdvisor.get());
-            requestSpec.advisors(advisor -> advisor.param(VectorStoreDocumentRetriever.FILTER_EXPRESSION, "type == 'knowledge' && knowledgeId == '" + chatRequestRecord.knowledgeId() + "' && username == '" + username + "'"));
-        }
 
         ToolCallbackProvider toolCallbackProvider = mcp.getVisibleToolCallbackProvider(username, chatRequestRecord.mcps());
 

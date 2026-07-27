@@ -29,6 +29,8 @@ import cn.wubo.spring.ai.loom.agent.tool.file.DefaultFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.IFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.DefaultGitTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.IGitTool;
+import cn.wubo.spring.ai.loom.agent.tool.knowledge.DefaultKnowledgeTool;
+import cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.DefaultMavenTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.DefaultSkillTool;
@@ -57,9 +59,6 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
-import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
-import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -103,7 +102,6 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @AutoConfiguration
@@ -293,7 +291,7 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IChat.class)
         @Bean
-        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp,
+        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, IMcp mcp,
                           // @Lazy on the tools list breaks a 3-hop circular dep:
                           // chat -> List<IEmbedTool> (eagerly resolves defaultSubTaskTool)
                           //   -> defaultSubTaskExecutor
@@ -303,7 +301,7 @@ public class LoomAgentConfiguration {
                           // DefaultChat.stream()) after every bean is fully constructed.
                           @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
                           IUserConversation userConversation, IFile file) {
-            return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file);
+            return new DefaultChat(chatClient, mcp, embedTools, userConversation, file);
         }
 
         @Slf4j
@@ -481,13 +479,6 @@ public class LoomAgentConfiguration {
         }
 
         @ConditionalOnBean(VectorStore.class)
-        @Bean
-        public RetrievalAugmentationAdvisor retrievalAugmentationAdvisor(VectorStore vectorStore, LoomAgentProperties properties) {
-            return RetrievalAugmentationAdvisor.builder().documentRetriever(VectorStoreDocumentRetriever.builder().similarityThreshold(properties.getRag().getSimilarityThreshold()).topK(properties.getRag().getTopK()).vectorStore(vectorStore).build()).queryAugmenter(ContextualQueryAugmenter.builder().promptTemplate(PromptTemplate.builder().template(properties.getRag().getDefaultPromptTemplate()).build()).emptyContextPromptTemplate(PromptTemplate.builder().template(properties.getRag().getDefaultEmptyContextPromptTemplate()).build()).allowEmptyContext(true).build()
-            ).build();
-        }
-
-        @ConditionalOnBean(VectorStore.class)
         @ConditionalOnMissingBean(IUpload.class)
         @Bean
         public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, LoomAgentProperties properties) {
@@ -608,6 +599,14 @@ public class LoomAgentConfiguration {
         @Bean
         public ICompileAndDeployTool defaultCompileAndDeployTool(LoomAgentProperties properties) {
             return new DefaultCompileAndDeployTool(properties);
+        }
+
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.knowledge.enabled", havingValue = "true", matchIfMissing = true)
+        @ConditionalOnMissingBean(IKnowledgeTool.class)
+        @ConditionalOnBean(VectorStore.class)
+        @Bean
+        public IKnowledgeTool defaultKnowledgeTool(IKnowledge knowledge, VectorStore vectorStore, LoomAgentProperties properties) {
+            return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag());
         }
     }
 
