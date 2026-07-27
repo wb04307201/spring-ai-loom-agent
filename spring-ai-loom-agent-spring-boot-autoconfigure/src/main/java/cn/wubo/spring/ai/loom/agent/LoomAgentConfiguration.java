@@ -300,8 +300,11 @@ public class LoomAgentConfiguration {
                           // With @Lazy, the list is materialised on first access (inside
                           // DefaultChat.stream()) after every bean is fully constructed.
                           @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
-                          IUserConversation userConversation, IFile file) {
-            return new DefaultChat(chatClient, mcp, embedTools, userConversation, file);
+                          IUserConversation userConversation, IFile file,
+                          ISkillStorage skillStorage, IKnowledge knowledge,
+                          LoomAgentProperties properties) {
+            return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
+                    skillStorage, knowledge, properties);
         }
 
         @Slf4j

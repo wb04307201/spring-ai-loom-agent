@@ -1,9 +1,14 @@
 package cn.wubo.spring.ai.loom.agent.chat;
 
+import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
+import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
 import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
+import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
+import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
+import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import cn.wubo.spring.ai.loom.agent.util.TikaUtils;
@@ -33,13 +38,22 @@ public class DefaultChat implements IChat {
     private final List<IEmbedTool> embedTools;
     private final IUserConversation userConversation;
     private final IFile file;
+    private final ISkillStorage skillStorage;
+    private final IKnowledge knowledge;
+    private final LoomAgentProperties properties;
 
-    public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+    public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
+                       IUserConversation userConversation, IFile file,
+                       ISkillStorage skillStorage, IKnowledge knowledge,
+                       LoomAgentProperties properties) {
         this.chatClient = chatClient;
         this.mcp = mcp;
         this.embedTools = embedTools;
         this.userConversation = userConversation;
         this.file = file;
+        this.skillStorage = skillStorage;
+        this.knowledge = knowledge;
+        this.properties = properties;
     }
 
     @Override
@@ -60,7 +74,9 @@ public class DefaultChat implements IChat {
             userConversation.insert(new UserConversationRecord(username, conversationId));
         }
 
-        ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt();
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(username);
+
+        // Prepare document content if files are attached (appended to dynamic system prompt)
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             StringBuilder extraText = new StringBuilder();
             for (String fileId : chatRequestRecord.fileIds()) {
@@ -81,9 +97,13 @@ public class DefaultChat implements IChat {
             }
             if (!extraText.isEmpty()){
                 extraText.append("\n\n以上是文档内容提取结果，请根据文档内容进行回答。");
-                requestSpec.system(extraText.toString());
+                dynamicSystemPrompt = dynamicSystemPrompt + "\n\n" + extraText;
             }
+        }
 
+        ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt().system(dynamicSystemPrompt);
+
+        if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             requestSpec.user(u -> {
                 u.text(chatRequestRecord.message());
                 for (String fileId : chatRequestRecord.fileIds()) {
@@ -122,6 +142,50 @@ public class DefaultChat implements IChat {
         }
 
         return requestSpec.stream().chatResponse();
+    }
+
+    private String buildDynamicSystemPrompt(String username) {
+        StringBuilder sb = new StringBuilder();
+
+        // Base system prompt from properties
+        sb.append(properties.getDefaultSystem()).append("\n\n");
+
+        // Inject skill summary (first 20)
+        List<SkillRecord> allSkills = skillStorage.list(username);
+        List<SkillRecord> skills = allSkills.stream()
+                .filter(SkillRecord::load)
+                .limit(20)
+                .toList();
+
+        if (!skills.isEmpty()) {
+            sb.append("【技能】（共 ").append(allSkills.size()).append(" 个");
+            if (skills.size() < allSkills.size()) {
+                sb.append("，显示前 ").append(skills.size()).append(" 个");
+            }
+            sb.append("）\n");
+
+            for (SkillRecord skill : skills) {
+                sb.append("• ").append(skill.name()).append(" - ").append(skill.description()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // Inject knowledge base summary (first 20)
+        List<KnowledgeRecord> knowledgeBases = knowledge.list();
+        if (!knowledgeBases.isEmpty()) {
+            sb.append("【知识库】（共 ").append(knowledgeBases.size()).append(" 个");
+            if (knowledgeBases.size() > 20) {
+                sb.append("，显示前 20 个");
+            }
+            sb.append("）\n");
+
+            knowledgeBases.stream().limit(20).forEach(kb -> {
+                sb.append("• ").append(kb.name()).append(" - ").append(kb.description()).append("\n");
+            });
+            sb.append("\n");
+        }
+
+        return sb.toString();
     }
 
     private boolean isImage(String mimeType) {
