@@ -59,9 +59,8 @@ const state = {
     conversationId: null,
     conversationTitle: null, // tracks the current conversation's title to gate auto-rename
     selectedMcps: [],
-    selectedKnowledgeId: null,
+    enabledKnowledgeIds: [],
     selectedSkill: null,
-    enableRag: false,
     isStreaming: false,
     controller: null, // AbortController for SSE
     mcps: [],
@@ -1319,8 +1318,7 @@ const chat = {
             message: text,
             conversationId: state.conversationId,
             mcps: state.selectedMcps,
-            enableRag: state.enableRag,
-            knowledgeId: state.selectedKnowledgeId || null,
+            enabledKnowledgeIds: state.enabledKnowledgeIds.length > 0 ? state.enabledKnowledgeIds : null,
             fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId).filter(Boolean) : null,
         };
 
@@ -1457,35 +1455,29 @@ const knowledge = {
         }
         container.innerHTML = '';
 
-        // "No knowledge base" option at top
-        const noneDiv = document.createElement('div');
-        noneDiv.className = 'ks-item' + (state.selectedKnowledgeId === null ? ' active' : '');
-        noneDiv.innerHTML = `
-            <input type="radio" name="ks-select" value="" ${state.selectedKnowledgeId === null ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
-            <span class="ks-item-name">不使用知识库</span>`;
-        noneDiv.querySelector('input[type="radio"]').addEventListener('change', () => this.selectKnowledgeForChat(null));
-        noneDiv.querySelector('.ks-item-name').addEventListener('click', () => this.selectKnowledgeForChat(null));
-        container.appendChild(noneDiv);
-
         for (const kb of list) {
             const id = kb.id;
             const name = kb.name;
+            const isChecked = state.enabledKnowledgeIds.includes(id);
             const div = document.createElement('div');
-            div.className = 'ks-item' + (state.selectedKnowledgeId === id ? ' active' : '');
+            div.className = 'ks-item' + (isChecked ? ' active' : '');
             div.innerHTML = `
-                <input type="radio" name="ks-select" value="${id}" ${state.selectedKnowledgeId === id ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
+                <input type="checkbox" ${isChecked ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
                 <span class="ks-item-name">${name}</span>
                 <span class="ks-item-desc">${kb.description || ''}</span>
                 <button class="ks-item-delete">&times;</button>`;
-            div.querySelector('input[type="radio"]').addEventListener('change', () => {
-                this.selectKnowledgeForChat(id);
-                this.select(id, name);
+            div.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+                this.toggleKnowledgeForChat(id);
             });
             div.querySelector('.ks-item-name').addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.selectKnowledgeForChat(id);
+                this.toggleKnowledgeForChat(id);
                 // Also open detail panel to show files
                 this.select(id, name);
+            });
+            div.querySelector('.ks-item-desc').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleKnowledgeForChat(id);
             });
             div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1495,25 +1487,22 @@ const knowledge = {
         }
     },
 
-    /** Select a knowledge base for chat (single-select / radio behavior) */
-    selectKnowledgeForChat(id) {
-        state.selectedKnowledgeId = id;
-        // Update active class on sidebar items directly (no re-render to preserve event listeners)
+    /** Toggle a knowledge base for chat (multi-select / checkbox behavior) */
+    toggleKnowledgeForChat(id) {
+        const index = state.enabledKnowledgeIds.indexOf(id);
+        if (index > -1) {
+            state.enabledKnowledgeIds.splice(index, 1);
+        } else {
+            state.enabledKnowledgeIds.push(id);
+        }
+        // Update active class on sidebar items directly (no full re-render)
         const items = document.querySelectorAll('#ks-sidebar .ks-item');
         items.forEach(item => {
-            const radio = item.querySelector('input[type="radio"]');
-            if (radio) {
-                const itemId = radio.value === '' ? null : radio.value;
-                const isActive = itemId === id;
-                item.classList.toggle('active', isActive);
-                radio.checked = isActive;
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                item.classList.toggle('active', checkbox.checked);
             }
         });
-        // If selecting "no knowledge base", clear the detail panel
-        if (id === null) {
-            const detail = document.getElementById('ks-detail');
-            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
-        }
     },
 
     async create() {
@@ -1561,10 +1550,11 @@ const knowledge = {
                 this.currentKbId = null;
                 document.getElementById('ks-detail').innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
             }
-            // BUG-KB-DELETE-ACTIVE: also clear the chat-bound KB if it matches,
+            // BUG-KB-DELETE-ACTIVE: also clear the chat-bound KB if it was enabled,
             // so the next message doesn't RAG-query a deleted KB.
-            if (state.selectedKnowledgeId === id) {
-                state.selectedKnowledgeId = null;
+            const idx = state.enabledKnowledgeIds.indexOf(id);
+            if (idx > -1) {
+                state.enabledKnowledgeIds.splice(idx, 1);
             }
             this.loadList();
             showToast('知识库已删除', 'success');
