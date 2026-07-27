@@ -23,7 +23,8 @@ public class DefaultKnowledge implements IKnowledge {
         return new KnowledgeRecord(
                 rs.getString("id"),
                 rs.getString("username"),
-                rs.getString("name")
+                rs.getString("name"),
+                rs.getString("description")
         );
     }
 
@@ -53,7 +54,8 @@ public class DefaultKnowledge implements IKnowledge {
         KnowledgeRecord knowledgeRecord = new KnowledgeRecord(
                 UUID.randomUUID().toString(),
                 username,
-                name
+                name,
+                null
         );
         try {
             jdbcTemplate.update(
