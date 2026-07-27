@@ -1021,10 +1021,6 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 |-----------------------------------------------------------|---------|---------|------------------------------------------------|
 | `spring.ai.loom.agent.rag.similarityThreshold`            | double  | `0.0`   | Vector retrieval similarity threshold          |
 | `spring.ai.loom.agent.rag.topK`                           | int     | `4`     | Number of top results to retrieve              |
-| `spring.ai.loom.agent.rag.defaultPromptTemplate`          | string  | —       | Default RAG prompt template                    |
-| `spring.ai.loom.agent.rag.defaultEmptyContextPromptTemplate` | string | —    | Default response when no context is available  |
-| `spring.ai.loom.agent.rag.enabledKeyword`                 | boolean | `false` | Whether to enable keyword retrieval            |
-| `spring.ai.loom.agent.rag.enabledSummary`                 | boolean | `false` | Whether to enable summary generation           |
 
 ### 10.3 MCP Configuration
 

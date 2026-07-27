@@ -63,10 +63,6 @@ All properties are prefixed with `spring.ai.loom.agent`.
 |-----------------------------------------|---------|--------------|--------------------------------------------------------------------|
 | `rag.similarityThreshold`               | double  | `0.0`        | Vector retrieval similarity threshold; documents below are filtered |
 | `rag.topK`                              | int     | `4`          | Number of documents to retrieve                                    |
-| `rag.defaultPromptTemplate`             | String  | (built-in)   | RAG prompt template when context is available; supports `{context}` and `{query}` |
-| `rag.defaultEmptyContextPromptTemplate` | String  | (built-in)   | Default reply template when no RAG context is found                |
-| `rag.enabledKeyword`                    | boolean | `false`      | Whether to enable keyword metadata enrichment                      |
-| `rag.enabledSummary`                    | boolean | `false`      | Whether to enable summary metadata enrichment                      |
 
 ### 1.3 JVector Vector Store Configuration (`jvector.*`)
 

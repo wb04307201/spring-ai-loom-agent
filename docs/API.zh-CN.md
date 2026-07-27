@@ -1350,10 +1350,6 @@ GET /spring/ai/chat/loom/mcp
 |---|---|---|---|
 | `spring.ai.loom.agent.rag.similarityThreshold` | double | `0.0` | 向量检索相似度阈值 |
 | `spring.ai.loom.agent.rag.topK` | int | `4` | 检索返回的顶部 K 条结果 |
-| `spring.ai.loom.agent.rag.defaultPromptTemplate` | string | — | RAG 默认提示词模板 |
-| `spring.ai.loom.agent.rag.defaultEmptyContextPromptTemplate` | string | — | 无上下文时的默认回复模板 |
-| `spring.ai.loom.agent.rag.enabledKeyword` | boolean | `false` | 是否启用关键词检索 |
-| `spring.ai.loom.agent.rag.enabledSummary` | boolean | `false` | 是否启用摘要生成 |
 
 ### 11.3 MCP 配置
 

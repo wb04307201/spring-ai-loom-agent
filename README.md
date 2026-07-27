@@ -159,26 +159,6 @@ spring:
         rag:
           similarityThreshold: 0.50   # Similarity threshold, default 0.0
           top-k: 4                    # Top-k results, default 4
-          defaultPromptTemplate: |
-            Context information is below.
-
-            ---------------------
-            {context}
-            ---------------------
-
-            Given the context information and no prior knowledge, answer the query.
-
-            Follow these rules:
-
-            1. If the answer is not in the context, just say that you don't know.
-            2. Avoid statements like "Based on the context..." or "The provided information...".
-
-            Query: {query}
-
-            Answer:
-          defaultEmptyContextPromptTemplate: |
-            The user query is outside your knowledge base.
-            Politely inform the user that you can't answer it.
 ```
 
 ## MCP Services

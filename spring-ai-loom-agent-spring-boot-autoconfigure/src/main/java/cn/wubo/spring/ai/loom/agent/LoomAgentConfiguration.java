@@ -477,8 +477,8 @@ public class LoomAgentConfiguration {
         @ConditionalOnBean(VectorStore.class)
         @ConditionalOnMissingBean(IDocumentRead.class)
         @Bean
-        public IDocumentRead defaultDocumentRead(ChatModel chatModel, LoomAgentProperties properties) {
-            return new DefaultDocumentRead(chatModel, properties.getRag());
+        public IDocumentRead defaultDocumentRead() {
+            return new DefaultDocumentRead();
         }
 
         @ConditionalOnBean(VectorStore.class)
