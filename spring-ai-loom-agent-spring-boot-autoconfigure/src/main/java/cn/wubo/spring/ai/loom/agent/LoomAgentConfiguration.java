@@ -2355,7 +2355,7 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
                 }
                 try {
-                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name()));
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name(), knowledgeRecord.description()));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
                     // 知识库名称冲突、参数错误等 → 明确的 4xx 而不是 500 (BUG-11)
                     Integer sc = e.getStatusCode();

@@ -39,7 +39,7 @@ public class DefaultKnowledge implements IKnowledge {
     }
 
     @Override
-    public KnowledgeRecord insert(String name) {
+    public KnowledgeRecord insert(String name, String description) {
         String username = UserContextHolder.getCurrentUser();
         // Same-user duplicate is rejected with a clean 4xx instead of 500.
         Integer dupCount = jdbcTemplate.queryForObject(
@@ -55,14 +55,15 @@ public class DefaultKnowledge implements IKnowledge {
                 UUID.randomUUID().toString(),
                 username,
                 name,
-                null
+                description
         );
         try {
             jdbcTemplate.update(
-                    "INSERT INTO knowledge (id, username, name) VALUES (?, ?, ?)",
+                    "INSERT INTO knowledge (id, username, name, description) VALUES (?, ?, ?, ?)",
                     knowledgeRecord.id(),
                     knowledgeRecord.username(),
-                    knowledgeRecord.name()
+                    knowledgeRecord.name(),
+                    knowledgeRecord.description()
             );
         } catch (DuplicateKeyException e) {
             // Race condition: another request created the same name between our

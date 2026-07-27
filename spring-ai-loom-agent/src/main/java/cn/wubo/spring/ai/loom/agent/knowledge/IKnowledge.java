@@ -8,7 +8,7 @@ public interface IKnowledge {
 
     List<KnowledgeRecord> list();
 
-    KnowledgeRecord insert(String name);
+    KnowledgeRecord insert(String name, String description);
 
     int delete(String id);
 
