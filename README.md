@@ -44,6 +44,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
 | File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
 | Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
+| Knowledge | `IKnowledgeTool` | 2 | ✅ enabled | `knowledge.enabled` |
 | Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
 | Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |

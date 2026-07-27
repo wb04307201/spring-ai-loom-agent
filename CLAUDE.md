@@ -58,7 +58,8 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IUserConversation` | `DefaultUserConversation` | User-to-conversation mapping |
 | `IEmbedTool` | _(marker interface)_ | Aggregate type for all embed tools, sub-interfaces extend it |
 | `ITimeTool` | `DefaultTimeTool` | Time tools: get current time, convert between timezones |
-| `ISkillTool` | `DefaultSkillTool` | Skill tools: list skills, get skill details |
+| `ISkillTool` | `DefaultSkillTool` | Skill tools: `listSkills(page, size)` 分页列出技能目录（默认每页20条，size=-1全部），`getSkill(skillName)` 获取技能详情 |
+| `IKnowledgeTool` | `DefaultKnowledgeTool` | Knowledge tools: `listKnowledgeBases(page, size)` 分页列出知识库（含名称+描述），`searchKnowledge(knowledgeId, query, topK?)` 在指定知识库中向量检索。Tool-based RAG 替代了旧的 RetrievalAugmentationAdvisor |
 | `IFileTool` | `DefaultFileTool` | 16 File tools: 基于路径的读写/编辑/搜索/目录浏览（readTextFile, readMediaFile, readMultipleFiles, writeFile, editFile, createDirectory, moveFile, searchFiles, listAllowedDirectories, listDirectory, listDirectoryWithSizes, directoryTree, getFileInfo, downloadFileUrl, viewFileUrl, deleteFileOrDirectory），预览/下载自动桥接 fileId，删除支持递归 + 显式确认 + 清理临时 file_info 记录 |
 | `IGitTool` | `DefaultGitTool` | 28 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions（**默认 disabled** — `git.enabled=false`；需要单点 git 操作时设 `true`），不依赖 IFile |
 | `IMavenTool` | `DefaultMavenTool` | 6 Maven tools: mavenExecute (generic), mavenBuild (compile), mavenPackage (package), mavenTest (run tests), mavenDependencyTree (dep tree), mavenValidate (validate) — based on maven-invoker, no shell needed（**默认 disabled** — `maven.enabled=false`；编译/打包请走 `ICompileAndDeployTool`，需要单点 mvn 命令时设 `true`） |
@@ -77,9 +78,9 @@ Organized into 7 nested static `@Configuration` classes:
 |-------------|----------------|
 | `InfrastructureConfiguration` | Properties binding, Flyway, ChatMemory, BeanFactoryPostProcessors |
 | `ChatConfiguration` | ChatClient, IChat, SseController |
-| `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, RAG Advisor, IUpload (all conditional on VectorStore) |
+| `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — `time/file/skill/compile` 默认 enabled；`git/maven` 默认 disabled。Each can be enabled/disabled via `spring.ai.loom.agent.{time,file,skill,git,maven,compile}.enabled=true/false`. IMavenTool additionally requires maven-invoker on the classpath. |
+| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — `time/file/skill/knowledge/compile` 默认 enabled；`git/maven` 默认 disabled。Each can be enabled/disabled via `spring.ai.loom.agent.{time,file,skill,knowledge,git,maven,compile}.enabled=true/false`. IMavenTool additionally requires maven-invoker on the classpath. |
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 10 RouterFunctions |
 
@@ -131,7 +132,7 @@ All under `spring.ai.loom.agent`:
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `init` — **Note**: The actual runtime gate for `ChatClient` creation is `spring.ai.chat.ui.init` (not `spring.ai.loom.agent.init`). Set `spring.ai.chat.ui.init=false` to prevent ChatClient auto-creation. Default: `true`
 - `user` — default username, nickname, authentication token (legacy)
-- `time` / `file` / `skill` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group
+- `time` / `file` / `skill` / `knowledge` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group
 - `git` — `enabled` (boolean, default **false** — opt-in), `username` / `token` for remote git authentication. Top-level `gitUsername` / `gitToken` are kept for backward compatibility
 - `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
 - `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)

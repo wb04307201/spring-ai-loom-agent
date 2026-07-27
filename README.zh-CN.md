@@ -44,6 +44,7 @@
 | 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
 | 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
 | 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
+| 知识库 | `IKnowledgeTool` | 2 | ✅ 启用 | `knowledge.enabled` |
 | 子任务 | `ISubTaskTool` | 4 | ✅ 启用 | `subtask.enabled` |
 | 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
