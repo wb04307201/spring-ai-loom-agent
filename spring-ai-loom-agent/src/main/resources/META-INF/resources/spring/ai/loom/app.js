@@ -445,11 +445,11 @@ const api = {
         const r = await apiFetch(API.listKnowledge);
         return r.ok ? r.json() : [];
     },
-    async createKnowledge(name) {
+    async createKnowledge(name, description) {
         const r = await apiFetch(API.createKnowledge, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name }),
+            body: JSON.stringify({ name, description }),
         });
         return r.ok ? r.json() : null;
     },
@@ -1475,6 +1475,7 @@ const knowledge = {
             div.innerHTML = `
                 <input type="radio" name="ks-select" value="${id}" ${state.selectedKnowledgeId === id ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
                 <span class="ks-item-name">${name}</span>
+                <span class="ks-item-desc">${kb.description || ''}</span>
                 <button class="ks-item-delete">&times;</button>`;
             div.querySelector('input[type="radio"]').addEventListener('change', () => {
                 this.selectKnowledgeForChat(id);
@@ -1520,11 +1521,24 @@ const knowledge = {
             title: '创建知识库',
             message: '请输入知识库名称：',
             placeholder: '例如：产品手册',
-            okText: '创建',
+            okText: '下一步',
             defaultValue: '',
         });
         if (!name) return;
-        const data = await api.createKnowledge(name);
+
+        const description = await dialog.prompt({
+            title: '创建知识库',
+            message: '请输入知识库描述：',
+            placeholder: '例如：包含公司产品文档和使用手册',
+            okText: '创建',
+            defaultValue: '',
+        });
+        if (!description) {
+            showToast('知识库描述不能为空', 'warning');
+            return;
+        }
+
+        const data = await api.createKnowledge(name, description);
         if (data) {
             showToast('知识库创建成功', 'success');
             this.loadList();
