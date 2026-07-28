@@ -34,11 +34,17 @@ spring:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY}
       chat:
+        enabled: false  # 禁用 DashScope ChatModel，只用 Anthropic
+      embedding:
+        options:
+          model: text-embedding-v4
+    anthropic:
+      api-key: ${NEW_API_KEY}
+      base-url: http://123.56.128.32:3000
+      chat:
         options:
           model: qwen3.7-plus
-          multi_model: true
-          enable_thinking: true
-#    ollama:
+    #    ollama:
 #      chat:
 #        options:
 #          model: qwen3
@@ -58,6 +64,8 @@ spring:
 #        collection-name: qwen-collection-name
     mcp:
       client:
+        enabled: false
+        request-timeout: 60s
         stdio:
           servers-configuration: classpath:mcp-servers.json
     loom:

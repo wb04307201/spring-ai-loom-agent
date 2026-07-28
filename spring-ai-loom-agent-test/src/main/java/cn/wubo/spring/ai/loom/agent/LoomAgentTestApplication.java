@@ -4,7 +4,9 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+    com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeChatAutoConfiguration.class
+})
 @EnableScheduling
 public class LoomAgentTestApplication {
 

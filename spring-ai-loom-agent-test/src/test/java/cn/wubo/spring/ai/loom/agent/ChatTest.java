@@ -32,8 +32,8 @@ class ChatTest {
         Flux<String> response = chatClient
                 .prompt()
                 .user(u -> u.text("都是什么?")
-                        .media(MimeTypeUtils.ALL, imageResource1)
-                        .media(MimeTypeUtils.ALL, imageResource2)
+                        .media(MimeTypeUtils.IMAGE_JPEG, imageResource1)
+                        .media(MimeTypeUtils.IMAGE_JPEG, imageResource2)
                 )
                 .stream()
                 .content();
