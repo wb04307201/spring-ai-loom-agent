@@ -83,6 +83,37 @@ public class DefaultKnowledge implements IKnowledge {
     }
 
     @Override
+    public KnowledgeRecord update(String id, String name, String description) {
+        String username = UserContextHolder.getCurrentUser();
+        // Check for duplicate name among other knowledge bases (exclude self)
+        Integer dupCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knowledge WHERE username = ? AND name = ? AND id != ?",
+                Integer.class,
+                username,
+                name,
+                id
+        );
+        if (dupCount != null && dupCount > 0) {
+            throw new LoomAgentRuntimeException(409, "知识库名称重复：" + name);
+        }
+        try {
+            int rows = jdbcTemplate.update(
+                    "UPDATE knowledge SET name = ?, description = ? WHERE id = ? AND username = ?",
+                    name,
+                    description,
+                    id,
+                    username
+            );
+            if (rows == 0) {
+                throw new LoomAgentRuntimeException(404, "知识库不存在：" + id);
+            }
+            return new KnowledgeRecord(id, username, name, description);
+        } catch (DuplicateKeyException e) {
+            throw new LoomAgentRuntimeException(409, "知识库名称重复：" + name);
+        }
+    }
+
+    @Override
     public int delete(String id) {
         // BUG-12: cross-user KB delete. Scope by the current authenticated
         // user so a USER cannot DELETE another user's knowledge by guessing

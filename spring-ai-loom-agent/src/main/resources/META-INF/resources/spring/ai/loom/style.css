@@ -1462,8 +1462,24 @@ textarea::placeholder {
     transition: color var(--transition-fast);
 }
 
+.ks-item-edit {
+    opacity: 0;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: color var(--transition-fast);
+}
+
+.ks-item:hover .ks-item-edit,
 .ks-item:hover .ks-item-delete {
     opacity: 1;
+}
+
+.ks-item-edit:hover {
+    color: var(--primary-color);
 }
 
 .ks-item-delete:hover {

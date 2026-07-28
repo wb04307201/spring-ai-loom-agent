@@ -40,6 +40,7 @@ const API = {
     listKnowledge: '/spring/ai/loom/knowledge',
     createKnowledge: '/spring/ai/loom/knowledge',
     deleteKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
+    updateKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
     uploadToKnowledge: (id) => `/spring/ai/loom/knowledge/${id}/upload`,
     listKnowledgeFiles: (id) => `/spring/ai/loom/knowledge/${id}/file`,
     deleteKnowledgeFile: (knowledgeId, fileId) => `/spring/ai/loom/knowledge/${knowledgeId}/file/${fileId}`,
@@ -455,6 +456,16 @@ const api = {
     async deleteKnowledge(id) {
         const r = await apiFetch(API.deleteKnowledge(id), {method: 'DELETE'});
         return r.ok ? r.json() : null;
+    },
+    async updateKnowledge(id, name, description) {
+        const r = await apiFetch(API.updateKnowledge(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description }),
+        });
+        if (r.ok) return { ok: true };
+        const err = await r.json().catch(() => ({}));
+        return { ok: false, message: err.message || '修改失败' };
     },
     async listKnowledgeFiles(id) {
         const r = await apiFetch(API.listKnowledgeFiles(id));
@@ -1427,6 +1438,7 @@ const chat = {
 // ===================== §8 Knowledge Space =====================
 const knowledge = {
     currentKbId: null,
+    _kbList: [],
 
     openPanel() {
         ui.showModal('ks-modal-overlay');
@@ -1440,9 +1452,11 @@ const knowledge = {
     async loadList() {
         try {
             const data = await api.listKnowledge();
-            this.renderList(data);
+            this._kbList = data || [];
+            this.renderList(this._kbList);
         } catch (e) {
             console.warn('[knowledge.loadList] failed:', e);
+            this._kbList = [];
             this.renderList([]);
         }
     },
@@ -1465,6 +1479,7 @@ const knowledge = {
                 <input type="checkbox" ${isChecked ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
                 <span class="ks-item-name">${name}</span>
                 <span class="ks-item-desc">${kb.description || ''}</span>
+                <button class="ks-item-edit" title="编辑">✎</button>
                 <button class="ks-item-delete">&times;</button>`;
             const checkbox = div.querySelector('input[type="checkbox"]');
             checkbox.addEventListener('change', () => {
@@ -1478,6 +1493,10 @@ const knowledge = {
             div.querySelector('.ks-item-desc').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.select(id, name);
+            });
+            div.querySelector('.ks-item-edit').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.edit(id);
             });
             div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1563,6 +1582,44 @@ const knowledge = {
         }
     },
 
+    async edit(id) {
+        const kb = this._kbList.find(k => k.id === id);
+        if (!kb) return;
+
+        const name = await dialog.prompt({
+            title: '编辑知识库',
+            message: '修改知识库名称：',
+            placeholder: '请输入新名称',
+            okText: '下一步',
+            defaultValue: kb.name,
+        });
+        if (!name) return;
+
+        const description = await dialog.prompt({
+            title: '编辑知识库',
+            message: '修改知识库描述：',
+            placeholder: '请输入新描述',
+            okText: '保存',
+            defaultValue: kb.description || '',
+        });
+        if (!description) {
+            showToast('描述不能为空', 'warning');
+            return;
+        }
+
+        const data = await api.updateKnowledge(id, name, description);
+        if (data.ok) {
+            showToast('修改成功', 'success');
+            // Refresh list and re-select if this KB was open in detail panel
+            await this.loadList();
+            if (this.currentKbId === id) {
+                this.select(id, name);
+            }
+        } else {
+            showToast(data.message || '修改失败', 'error');
+        }
+    },
+
     async select(id, name) {
         this.currentKbId = id;
 
@@ -1572,6 +1629,7 @@ const knowledge = {
             <div class="ks-detail-header">
                 <span class="ks-detail-title">${name}</span>
                 <div>
+                    <button class="ks-edit-btn" id="ks-edit-btn">✎ 编辑</button>
                     <button class="ks-upload-btn" id="ks-upload-btn">+ 上传文件</button>
                     <input type="file" id="ks-file-input" style="display:none;">
                 </div>
@@ -1580,8 +1638,10 @@ const knowledge = {
 
         const uploadBtn = detail.querySelector('#ks-upload-btn');
         const fileInput = detail.querySelector('#ks-file-input');
+        const editBtn = detail.querySelector('#ks-edit-btn');
         uploadBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', (e) => this.uploadFile(id, e));
+        editBtn.addEventListener('click', () => this.edit(id));
 
         this.loadFiles(id);
     },

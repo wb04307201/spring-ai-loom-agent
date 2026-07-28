@@ -12,6 +12,8 @@ public interface IKnowledge {
 
     KnowledgeRecord insert(String name, String description);
 
+    KnowledgeRecord update(String id, String name, String description);
+
     int delete(String id);
 
 }

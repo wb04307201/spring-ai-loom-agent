@@ -2372,6 +2372,34 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("message", "数据约束失败: " + e.getMostSpecificCause().getMessage()));
                 }
             });
+            builder.PATCH("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
+                String knowledgeId = request.pathVariable("knowledgeId");
+                // 使用 Map 接收部分更新数据，避免 Java record 要求所有字段都存在的问题
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                if (body == null || !body.containsKey("name") || body.get("name") == null) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
+                }
+                String name = String.valueOf(body.get("name"));
+                if (name.isBlank()) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
+                }
+                String description = body.containsKey("description") && body.get("description") != null
+                        ? String.valueOf(body.get("description")) : null;
+                try {
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                            .body(knowledge.update(knowledgeId, name, description));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    Integer sc = e.getStatusCode();
+                    HttpStatus status = sc != null ? HttpStatus.valueOf(sc) : HttpStatus.BAD_REQUEST;
+                    return ServerResponse.status(status).contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage() == null ? "请求失败" : e.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "数据约束失败: " + e.getMostSpecificCause().getMessage()));
+                }
+            });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
                 String knowledgeId = request.pathVariable("knowledgeId");
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.deleteAllKnowledge(knowledgeId));
