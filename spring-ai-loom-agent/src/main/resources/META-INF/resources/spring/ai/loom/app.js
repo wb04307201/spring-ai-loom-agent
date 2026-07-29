@@ -531,7 +531,8 @@ const api = {
     },
     async listAccessibleKnowledge() {
         const r = await apiFetch(API.listAccessibleKnowledge);
-        return r.ok ? r.json() : [];
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
     },
 
     async uploadFile(file) {
@@ -1780,6 +1781,7 @@ const knowledge = {
         try {
             await api.submitToMarket(id);
             showToast(`已将「${kb.name}」共享到市场`, 'success');
+            this.loadList();
         } catch (e) {
             showToast('共享失败：' + e.message, 'error');
         }
@@ -1859,9 +1861,7 @@ const knowledge = {
         try {
             await api.pullMarketKnowledge(id);
             showToast('已添加到我的知识库', 'success');
-            // Refresh the knowledge sidebar list
-            this.loadList();
-            // Re-render market browse to update button state
+            await this.loadList();
             this._renderMarketBrowse();
         } catch (e) {
             showToast('添加失败：' + e.message, 'error');
