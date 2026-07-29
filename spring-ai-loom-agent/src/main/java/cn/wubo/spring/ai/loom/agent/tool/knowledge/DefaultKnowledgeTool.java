@@ -91,18 +91,18 @@ public class DefaultKnowledgeTool implements IKnowledgeTool {
         ToolContext toolContext) {
         String username = (String) toolContext.getContext().get("username");
 
-        // 校验：knowledgeId 必须在用户启用的知识库列表中（纵深防御）
-        @SuppressWarnings("unchecked")
-        List<String> enabledIds = (List<String>) toolContext.getContext().get("enabledKnowledgeIds");
-        if (enabledIds != null && !enabledIds.isEmpty() && !enabledIds.contains(knowledgeId)) {
-            return "错误：知识库ID " + knowledgeId + " 不在当前启用的知识库列表中。请先调用 @listKnowledgeBases 查看可用知识库。";
+        // 检查用户是否有权限访问该知识库（自己的、订阅的、角色授予的）
+        List<KnowledgeRecord> accessible = knowledge.listAccessible(username);
+        boolean hasAccess = accessible.stream().anyMatch(kb -> kb.id().equals(knowledgeId));
+        if (!hasAccess) {
+            return "没有权限访问该知识库";
         }
 
         int actualTopK = (topK == null || topK <= 0) ? ragProperty.getTopK() : topK;
         double threshold = ragProperty.getSimilarityThreshold();
 
-        // Build SpEL filter expression: type == 'knowledge' && knowledgeId == ? && username == ?
-        String filterExpression = "type == 'knowledge' && knowledgeId == '" + knowledgeId + "' && username == '" + username + "'";
+        // Build SpEL filter expression: type == 'knowledge' && knowledgeId == ?
+        String filterExpression = "type == 'knowledge' && knowledgeId == '" + knowledgeId + "'";
 
         List<Document> results = vectorStore.similaritySearch(
             SearchRequest.builder()

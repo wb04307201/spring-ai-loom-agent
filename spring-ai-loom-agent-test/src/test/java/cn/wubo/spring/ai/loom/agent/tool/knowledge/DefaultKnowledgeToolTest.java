@@ -149,8 +149,11 @@ class DefaultKnowledgeToolTest {
     // ──────────── searchKnowledge ────────────
 
     @Test
-    @DisplayName("searchKnowledge 构建正确的 filterExpression")
+    @DisplayName("searchKnowledge 构建 filterExpression 不再包含 username")
     void searchKnowledge_buildsFilterExpression() {
+        when(knowledge.listAccessible("alice")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档")
+        ));
         ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
         when(vectorStore.similaritySearch(captor.capture())).thenReturn(List.of());
 
@@ -163,13 +166,17 @@ class DefaultKnowledgeToolTest {
         assertNotNull(filter, "filterExpression 不应为 null");
         String filterStr = filter.toString();
         assertTrue(filterStr.contains("kb-1"), "应包含 knowledgeId: " + filterStr);
-        assertTrue(filterStr.contains("alice"), "应包含 username: " + filterStr);
+        assertFalse(filterStr.contains("alice"), "不应包含 username: " + filterStr);
         assertTrue(filterStr.contains("type") && filterStr.contains("knowledge"), "应包含 type 过滤: " + filterStr);
+        verify(knowledge).listAccessible("alice");
     }
 
     @Test
     @DisplayName("searchKnowledge 使用自定义 topK")
     void searchKnowledge_customTopK() {
+        when(knowledge.listAccessible("grace")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "grace", "KB", "desc")
+        ));
         ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
         when(vectorStore.similaritySearch(captor.capture())).thenReturn(List.of());
 
@@ -182,6 +189,9 @@ class DefaultKnowledgeToolTest {
     @Test
     @DisplayName("searchKnowledge 空结果提示")
     void searchKnowledge_emptyResults() {
+        when(knowledge.listAccessible("henry")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "henry", "KB", "desc")
+        ));
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
 
         String result = tool.searchKnowledge("kb-1", "不存在的内容", null, ctx("henry"));
@@ -191,6 +201,9 @@ class DefaultKnowledgeToolTest {
     @Test
     @DisplayName("searchKnowledge 有结果时显示文档片段")
     void searchKnowledge_withResults() {
+        when(knowledge.listAccessible("ivan")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "ivan", "KB", "desc")
+        ));
         Document doc = new Document("这是产品文档内容");
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(doc));
 
@@ -200,22 +213,23 @@ class DefaultKnowledgeToolTest {
     }
 
     @Test
-    @DisplayName("searchKnowledge 未启用的知识库返回错误")
-    void searchKnowledge_rejectsDisabledKnowledgeId() {
-        Map<String, Object> ctxMap = new HashMap<>();
-        ctxMap.put("username", "alice");
-        ctxMap.put("enabledKnowledgeIds", List.of("kb-1", "kb-2"));
-        ToolContext ctx = new ToolContext(ctxMap);
+    @DisplayName("searchKnowledge 权限不足时返回错误信息")
+    void searchKnowledge_rejectsWithoutAccess() {
+        when(knowledge.listAccessible("alice")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档")
+        ));
 
-        String result = tool.searchKnowledge("kb-999", "产品", null, ctx);
-        assertTrue(result.contains("错误"), "应返回错误信息: " + result);
-        assertTrue(result.contains("kb-999"), "应包含被拒绝的 ID: " + result);
+        String result = tool.searchKnowledge("kb-999", "产品", null, ctx("alice"));
+        assertTrue(result.contains("没有权限访问该知识库"), "应返回权限错误: " + result);
         verifyNoInteractions(vectorStore);
     }
 
     @Test
-    @DisplayName("searchKnowledge enabledKnowledgeIds 为空时不做校验")
-    void searchKnowledge_noEnabledIds_noValidation() {
+    @DisplayName("searchKnowledge 有权限时正常检索")
+    void searchKnowledge_withAccess_searches() {
+        when(knowledge.listAccessible("alice")).thenReturn(List.of(
+                new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档")
+        ));
         ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
         when(vectorStore.similaritySearch(captor.capture())).thenReturn(List.of());
 

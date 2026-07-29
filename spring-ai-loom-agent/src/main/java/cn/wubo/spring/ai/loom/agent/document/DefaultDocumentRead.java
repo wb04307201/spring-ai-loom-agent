@@ -1,6 +1,5 @@
 package cn.wubo.spring.ai.loom.agent.document;
 
-import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.ExtractedTextFormatter;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
@@ -26,12 +25,10 @@ public class DefaultDocumentRead implements IDocumentRead {
         TikaDocumentReader tikaDocumentReader = new TikaDocumentReader(fileResource, extractedTextFormatter);
         List<Document> documentList = tikaDocumentReader.read();
         List<Document> documents = tokenTextSplitter.apply(documentList);
-        String username = UserContextHolder.getCurrentUser();
         documents
                 .forEach(document -> {
                     document.getMetadata().put("type", "knowledge");
                     document.getMetadata().put("knowledgeId", knowledgeId);
-                    document.getMetadata().put("username", username);
                 });
 
         return documents;
