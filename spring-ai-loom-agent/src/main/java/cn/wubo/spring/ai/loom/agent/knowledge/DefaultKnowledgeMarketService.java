@@ -5,6 +5,7 @@ import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -108,10 +109,19 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
             throw new LoomAgentRuntimeException(409, "已存在同名知识库提交：name=" + kb.name());
         }
 
-        String marketId = UUID.randomUUID().toString();
+        // 删除被拒绝的旧条目，允许重新提交
         jdbcTemplate.update(
-                "INSERT INTO loom_market_knowledge (id, username, name, description, status) VALUES (?, ?, ?, ?, 'PENDING')",
-                marketId, username, kb.name(), kb.description());
+                "DELETE FROM loom_market_knowledge WHERE username = ? AND name = ? AND status = 'REJECTED'",
+                username, kb.name());
+
+        String marketId = UUID.randomUUID().toString();
+        try {
+            jdbcTemplate.update(
+                    "INSERT INTO loom_market_knowledge (id, username, name, description, status) VALUES (?, ?, ?, ?, 'PENDING')",
+                    marketId, username, kb.name(), kb.description());
+        } catch (DuplicateKeyException e) {
+            throw new LoomAgentRuntimeException(409, "已存在同名知识库提交：name=" + kb.name());
+        }
 
         return getById(marketId);
     }
