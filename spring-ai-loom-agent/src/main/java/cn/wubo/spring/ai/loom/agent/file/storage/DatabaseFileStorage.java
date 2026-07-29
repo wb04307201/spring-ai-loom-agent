@@ -1,0 +1,76 @@
+package cn.wubo.spring.ai.loom.agent.file.storage;
+
+import cn.wubo.spring.ai.loom.agent.file.IFileStorage;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.sql.SQLException;
+import java.sql.SQLNonTransientConnectionException;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 基于 H2 数据库的文件存储实现。
+ * <p>
+ * 文件二进制内容存储在 {@code loom_file_content} 表中，
+ * 元数据（路径、大小等）仍由 {@code file_info} 管理。
+ * <p>
+ * 这是默认实现（{@code @ConditionalOnMissingBean}），
+ * 用户可通过自定义 {@code IFileStorage} bean 替换为 S3/MinIO 等。
+ */
+@Component
+@ConditionalOnMissingBean(IFileStorage.class)
+public class DatabaseFileStorage implements IFileStorage {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public DatabaseFileStorage(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @Override
+    public String save(String knowledgeId, String fileName, InputStream inputStream, String mimeType) {
+        String fileId = UUID.randomUUID().toString();
+        byte[] content;
+        try {
+            content = inputStream.readAllBytes();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read input stream", e);
+        }
+
+        jdbcTemplate.update(
+                "INSERT INTO loom_file_content (file_id, content, mime_type, knowledge_id) VALUES (?, ?, ?, ?)",
+                fileId, content, mimeType, knowledgeId);
+        return fileId;
+    }
+
+    @Override
+    public byte[] read(String location) {
+        return jdbcTemplate.queryForObject(
+                "SELECT content FROM loom_file_content WHERE file_id = ?",
+                new Object[]{location},
+                byte[].class);
+    }
+
+    @Override
+    public void delete(String location) {
+        jdbcTemplate.update("DELETE FROM loom_file_content WHERE file_id = ?", location);
+    }
+
+    @Override
+    public void deleteByKnowledgeId(String knowledgeId) {
+        // First get all file IDs for this knowledge base
+        List<String> fileIds = jdbcTemplate.queryForList(
+                "SELECT file_id FROM loom_file_content WHERE knowledge_id = ?",
+                String.class, knowledgeId);
+
+        if (!fileIds.isEmpty()) {
+            // Delete in batches to avoid large IN clauses
+            jdbcTemplate.update("DELETE FROM loom_file_content WHERE knowledge_id = ?", knowledgeId);
+        }
+    }
+}

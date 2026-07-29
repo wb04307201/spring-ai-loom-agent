@@ -9,6 +9,7 @@ import cn.wubo.spring.ai.loom.agent.model.FileRecord;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.util.StringUtils;
 
@@ -30,17 +31,17 @@ public class DefaultUpload implements IUpload {
     private final IDocumentRead documentRead;
     private final VectorStore vectorStore;
     private final IKnowledge knowledge;
+    private final IFileStorage fileStorage;
     private final String fileBasePath;
-    private final String knowledgeBasePath;
 
-    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, String fileBasePath, String knowledgeBasePath) {
+    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, IFileStorage fileStorage, String fileBasePath) {
         this.file = file;
         this.fileDocument = fileDocument;
         this.documentRead = documentRead;
         this.vectorStore = vectorStore;
         this.knowledge = knowledge;
+        this.fileStorage = fileStorage;
         this.fileBasePath = fileBasePath;
-        this.knowledgeBasePath = knowledgeBasePath;
     }
 
     /**
@@ -129,24 +130,13 @@ public class DefaultUpload implements IUpload {
     public String uploadWithKnowledge(InputStream is, String fileName, String mimeType, String knowledgeId) {
         String username = UserContextHolder.getCurrentUser();
         try {
-            Path knowledgeDir = Paths.get(knowledgeBasePath, username, knowledgeId);
-            Files.createDirectories(knowledgeDir);
-            Path filePath = getUniquePath(knowledgeDir, fileName);
-            Files.copy(is, filePath, StandardCopyOption.REPLACE_EXISTING);
-            String fileId = UUID.randomUUID().toString();
-            FileRecord fileRecord = new FileRecord(
-                    fileId,
-                    knowledgeId,
-                    filePath.getFileName().toString(),
-                    filePath.toFile().length(),
-                    LocalDateTime.now(),
-                    filePath.toString(),
-                    "knowledge",
-                    resolveMimeType(filePath.getFileName().toString(), mimeType)
-            );
-            file.insert(fileRecord, username);
+            // 通过 IFileStorage 保存文件内容（数据库或磁盘）
+            String fileId = fileStorage.save(knowledgeId, fileName, is, mimeType);
 
-            Resource resource = file.getResourceById(fileId, username);
+            // 读取文件内容用于向量化
+            byte[] content = fileStorage.read(fileId);
+            String resolvedMimeType = resolveMimeType(fileName, mimeType);
+            Resource resource = new InputStreamResource(new java.io.ByteArrayInputStream(content), fileName);
             List<Document> documents = documentRead.read(resource, knowledgeId);
             vectorStore.add(documents);
 
@@ -157,7 +147,7 @@ public class DefaultUpload implements IUpload {
 
             fileDocument.insert(fileDocumentRecords);
             return fileId;
-        } catch (IOException e) {
+        } catch (Exception e) {
             throw new LoomAgentRuntimeException(e);
         }
     }
@@ -170,32 +160,34 @@ public class DefaultUpload implements IUpload {
             List<FileDocumentRecord> fileDocumentRecords = fileDocument.getListByFileId(fileId);
             vectorStore.delete(fileDocumentRecords.stream().map(FileDocumentRecord::documentId).toList());
             fileDocument.deleteByFileId(fileId);
-        }
-        try {
-            Files.deleteIfExists(Paths.get(fileRecord.path()));
-        } catch (IOException e) {
-            throw new LoomAgentRuntimeException(e);
+            // 通过 IFileStorage 删除实际文件内容
+            fileStorage.delete(fileId);
+        } else {
+            // 非知识库文件，从磁盘删除
+            try {
+                Files.deleteIfExists(Paths.get(fileRecord.path()));
+            } catch (IOException e) {
+                throw new LoomAgentRuntimeException(e);
+            }
         }
         return file.delete(fileId, username);
     }
 
     @Override
     public int deleteAllKnowledge(String knowledgeId) {
-        List<FileRecord> fileRecords = file.list(knowledgeId, UserContextHolder.getCurrentUser());
+        String username = UserContextHolder.getCurrentUser();
+        List<FileRecord> fileRecords = file.list(knowledgeId, username);
         for (FileRecord fileRecord : fileRecords) {
             delete(fileRecord.id());
         }
+        // 通过 IFileStorage 删除知识库所有文件（清理残留）
+        fileStorage.deleteByKnowledgeId(knowledgeId);
         return knowledge.delete(knowledgeId);
     }
 
     @Override
     public byte[] getContentByLocation(String location) {
-        Path path = Path.of(location);
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException e) {
-            throw new LoomAgentRuntimeException(e);
-        }
+        return fileStorage.read(location);
     }
 
 }

@@ -484,8 +484,8 @@ public class LoomAgentConfiguration {
         @ConditionalOnBean(VectorStore.class)
         @ConditionalOnMissingBean(IUpload.class)
         @Bean
-        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, LoomAgentProperties properties) {
-            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, properties.getFileBasePath(), properties.getKnowledgeBasePath());
+        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage, LoomAgentProperties properties) {
+            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, fileStorage, properties.getFileBasePath());
         }
     }
 
@@ -1146,6 +1146,16 @@ public class LoomAgentConfiguration {
         @Bean
         public IFile defaultFile(JdbcTemplate jdbcTemplate) {
             return new DefaultFile(jdbcTemplate);
+        }
+
+        /**
+         * 默认文件存储实现：基于 H2 数据库存储知识库文件内容。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为 S3/MinIO 等实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.file.IFileStorage.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.file.IFileStorage loomFileStorage(JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.file.storage.DatabaseFileStorage(jdbcTemplate);
         }
 
         /**
