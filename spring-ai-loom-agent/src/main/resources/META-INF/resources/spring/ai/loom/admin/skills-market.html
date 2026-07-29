@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>Skill 市场 - 灵梭管理控制台</title>
+    <title>技能市场 - 灵梭管理控制台</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/spring/ai/loom/style.css">
@@ -12,12 +12,13 @@
     <aside class="admin-sidebar">
         <div class="admin-sidebar-header">
             <h2 class="admin-sidebar-title">管理控制台</h2>
-            <span class="admin-sidebar-subtitle">用户 · 角色 · Skill · MCP</span>
+            <span class="admin-sidebar-subtitle">用户 · 角色 · 技能 · MCP · 知识库</span>
         </div>
         <nav class="admin-sidebar-nav">
             <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
             <a href="roles.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
-            <a href="skills-market.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🏪</span><span>Skill 市场</span></a>
+            <a href="skills-market.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a>
+            <a href="knowledge-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📚</span><span>知识库市场</span></a>
             <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
             <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>用量统计</span></a>
             <div class="admin-sidebar-divider"></div>
@@ -27,8 +28,8 @@
     <div class="admin-main-wrap">
         <header class="admin-header">
             <div class="admin-header-left">
-                <h1>Skill 市场</h1>
-                <span class="admin-subtitle">管理审批中的提交 + 直接 CRUD 市场 Skill</span>
+                <h1>技能市场</h1>
+                <span class="admin-subtitle">管理审批中的提交 + 直接 CRUD 市场技能</span>
             </div>
             <div class="admin-header-right">
                 <span id="admin-username" class="admin-username"></span>
@@ -37,12 +38,12 @@
 
         <main class="admin-main">
             <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
-                <strong>admin 特权</strong> —— 可直接新增 / 编辑 / 删除市场 Skill（绕过审批，立即生效），也可审批其他用户的 PENDING 提交。
-                任何用户在自己聊天界面「提交」Tab 提交的 Skill 都需要先在这里审批通过。
+                <strong>admin 特权</strong> —— 可直接新增 / 编辑 / 删除市场技能（绕过审批，立即生效），也可审批其他用户的 PENDING 提交。
+                任何用户在自己聊天界面「提交」Tab 提交的技能都需要先在这里审批通过。
             </div>
 
             <div class="admin-toolbar">
-                <button id="create-skill-btn" class="primary-btn">+ 新建 Skill</button>
+                <button id="create-skill-btn" class="primary-btn">+ 新建技能</button>
                 <button id="refresh-btn" class="secondary-btn">刷新</button>
                 <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="pending-count-label"></span>
             </div>
@@ -54,11 +55,11 @@
     </div>
 </div>
 
-<!-- 编辑/创建 Skill 模态框 -->
+<!-- 编辑/创建技能模态框 -->
 <div id="edit-skill-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content" style="max-width: 720px; max-height: 85vh;">
         <div class="modal-header">
-            <h3 id="edit-skill-title">编辑 Skill</h3>
+            <h3 id="edit-skill-title">编辑技能</h3>
             <div class="close-button" id="edit-skill-close">&times;</div>
         </div>
         <div class="modal-body" style="padding: 24px 32px; overflow-y: auto; max-height: 70vh;">
@@ -91,13 +92,13 @@
 <div id="reject-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content" style="max-width: 480px;">
         <div class="modal-header">
-            <h3>拒绝 Skill</h3>
+            <h3>拒绝技能</h3>
             <div class="close-button" id="reject-close">&times;</div>
         </div>
         <div class="modal-body" style="padding: 24px 32px;">
             <div class="form-group">
                 <label>拒绝原因（将记入审批记录）</label>
-                <textarea id="reject-comment" class="form-input" rows="3" placeholder="例如：内容与现有 Skill 重复"></textarea>
+                <textarea id="reject-comment" class="form-input" rows="3" placeholder="例如：内容与现有技能重复"></textarea>
             </div>
         </div>
         <div class="modal-footer">

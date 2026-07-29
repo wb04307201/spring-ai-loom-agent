@@ -1,9 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.file.storage;
 
 import cn.wubo.spring.ai.loom.agent.file.IFileStorage;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
 import java.util.UUID;
@@ -14,11 +12,9 @@ import java.util.UUID;
  * 文件二进制内容存储在 {@code loom_file_content} 表中，
  * 元数据（路径、大小等）仍由 {@code file_info} 管理。
  * <p>
- * 这是默认实现（{@code @ConditionalOnMissingBean}），
+ * 这是默认实现（通过 {@code LoomAgentConfiguration} 中的 {@code @Bean} 方法注册），
  * 用户可通过自定义 {@code IFileStorage} bean 替换为 S3/MinIO 等。
  */
-@Component
-@ConditionalOnMissingBean(IFileStorage.class)
 public class DatabaseFileStorage implements IFileStorage {
 
     private final JdbcTemplate jdbcTemplate;

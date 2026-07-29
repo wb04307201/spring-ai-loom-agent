@@ -3146,8 +3146,8 @@ const skills = {
             const userCreated = (mine || []).filter(s => s.source === 'USER_CREATED');
             container.innerHTML = '';
             if (userCreated.length === 0) {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有自建 Skill。<br>切到「我的」→ 新建一个再来提交</div>';
-                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">请选择要提交到市场的自建 Skill</div>';
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有自建 Skill。<br>切到「我的」→ 新建一个再来共享</div>';
+                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">请选择要共享到市场的自建 Skill</div>';
                 return;
             }
             for (const s of userCreated) {
@@ -3160,7 +3160,7 @@ const skills = {
                 item.addEventListener('click', () => this._showSubmitForm(s, detail));
                 container.appendChild(item);
             }
-            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建 Skill 提交到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后状态为 PENDING，<br>需管理员在控制台「Skill 市场」审批通过后，<br>其他用户才能在「市场」Tab 拉取。</p></div>';
+            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建 Skill 共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">共享后状态为 PENDING，<br>需管理员在控制台「Skill 市场」审批通过后，<br>其他用户才能在「市场」Tab 拉取。</p></div>';
         });
     },
 

@@ -12,12 +12,13 @@
     <aside class="admin-sidebar">
         <div class="admin-sidebar-header">
             <h2 class="admin-sidebar-title">管理控制台</h2>
-            <span class="admin-sidebar-subtitle">用户 · 角色 · Skill · MCP</span>
+            <span class="admin-sidebar-subtitle">用户 · 角色 · 技能 · MCP · 知识库</span>
         </div>
         <nav class="admin-sidebar-nav">
             <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
             <a href="roles.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
-            <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>Skill 市场</span></a>
+            <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a>
+            <a href="knowledge-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📚</span><span>知识库市场</span></a>
             <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
             <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>用量统计</span></a>
             <div class="admin-sidebar-divider"></div>
@@ -28,7 +29,7 @@
         <header class="admin-header">
             <div class="admin-header-left">
                 <h1>角色管理</h1>
-                <span class="admin-subtitle">业务角色 + 给角色授权 MCP / Skill</span>
+                <span class="admin-subtitle">业务角色 + 给角色授权 MCP / 技能 / 知识库</span>
             </div>
             <div class="admin-header-right">
                 <span id="admin-username" class="admin-username"></span>
@@ -112,8 +113,15 @@
             </div>
 
             <div class="form-group" style="margin-top: 16px;">
-                <label>授权 Skill（来源：已审批的 Skill 市场）</label>
+                <label>授权技能（来源：已审批的技能市场）</label>
                 <div id="rd-skills" style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; max-height: 280px; overflow-y: auto;">
+                    加载中...
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+                <label>授权知识库（来源：已审批的知识库市场）</label>
+                <div id="rd-knowledge" style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; max-height: 280px; overflow-y: auto;">
                     加载中...
                 </div>
             </div>

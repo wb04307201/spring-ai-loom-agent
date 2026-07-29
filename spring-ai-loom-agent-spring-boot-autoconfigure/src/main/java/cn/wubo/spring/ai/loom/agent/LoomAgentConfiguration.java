@@ -1184,6 +1184,28 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * 知识库市场服务：支持发布、审批、订阅、角色分配。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService defaultKnowledgeMarketService(
+                JdbcTemplate jdbcTemplate, IKnowledge knowledge, IUser user) {
+            return new cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService(jdbcTemplate, knowledge, user);
+        }
+
+        /**
+         * 知识库角色管理：支持角色-知识库关联和同步。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin defaultKnowledgeRoleAdmin(
+                JdbcTemplate jdbcTemplate, cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService marketService) {
+            return new cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeRoleAdmin(jdbcTemplate, marketService);
+        }
+
+        /**
          * 文件下载与预览：通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
          * 依赖 {@code IFileStorage}（数据库或磁盘）透明读取知识库文件内容。
          */
@@ -2201,6 +2223,30 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
+        /** 角色授权知识库（仅 admin） */
+        @Bean("loomAgentKnowledgeRoleAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentKnowledgeRoleAdminRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin knowledgeRoleAdmin,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("spring/ai/loom/admin/roles/{code}/knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String code = request.pathVariable("code");
+                return ServerResponse.ok().body(knowledgeRoleAdmin.getRoleKnowledges(code));
+            });
+            builder.PUT("spring/ai/loom/admin/roles/{code}/knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String code = request.pathVariable("code");
+                cn.wubo.spring.ai.loom.agent.model.SetRoleKnowledgeRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleKnowledgeRequest.class);
+                knowledgeRoleAdmin.setRoleKnowledges(code, body == null ? null : body.items());
+                return ServerResponse.ok().body(true);
+            });
+            return builder.build();
+        }
+
         @Bean("loomAgentFileRouter")
         public RouterFunction<ServerResponse> loomAgentFileRouter(IFile file, LoomAgentProperties properties) {
             RouterFunctions.Builder builder = RouterFunctions.route();
@@ -2490,6 +2536,107 @@ public class LoomAgentConfiguration {
                     return ServerResponse.notFound().build();
                 }
             });
+            return builder.build();
+        }
+
+        /**
+         * 知识库市场路由：提供市场浏览、提交、审批、订阅、撤回等功能。
+         * 依赖 IKnowledgeMarketService 和 IKnowledgeRoleAdmin。
+         */
+        @Bean("loomAgentKnowledgeMarketRouter")
+        public RouterFunction<ServerResponse> loomAgentKnowledgeMarketRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService marketService,
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin roleAdmin,
+                IKnowledge knowledge) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+
+            // 获取用户可访问的知识库列表（自己的 + 订阅的 + 角色授予的）
+            builder.GET("/spring/ai/loom/api/knowledge/accessible", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(knowledge.listAccessible(username));
+            });
+
+            // 获取市场已审批的知识库列表（分页）
+            builder.GET("/spring/ai/loom/api/knowledge-market", request -> {
+                String pageParam = request.param("page").orElse("1");
+                String sizeParam = request.param("size").orElse("20");
+                int page = Integer.parseInt(pageParam);
+                int size = Integer.parseInt(sizeParam);
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(marketService.listApproved(page, size));
+            });
+
+            // 从市场订阅知识库
+            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/pull", request -> {
+                String marketId = request.pathVariable("marketId");
+                String username = UserContextHolder.getCurrentUser();
+                try {
+                    marketService.pull(username, marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("success", true));
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 提交知识库到市场
+            builder.POST("/spring/ai/loom/api/knowledge/{knowledgeId}/submit", request -> {
+                String knowledgeId = request.pathVariable("knowledgeId");
+                try {
+                    var result = marketService.submit(knowledgeId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 撤回我的市场提交
+            builder.DELETE("/spring/ai/loom/api/knowledge-market/{marketId}", request -> {
+                String marketId = request.pathVariable("marketId");
+                try {
+                    marketService.withdraw(marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("success", true));
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 管理员审批市场提交
+            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/approve", request -> {
+                String marketId = request.pathVariable("marketId");
+                try {
+                    var result = marketService.approve(marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 管理员拒绝市场提交
+            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/reject", request -> {
+                String marketId = request.pathVariable("marketId");
+                try {
+                    var result = marketService.reject(marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 获取我订阅的知识库列表
+            builder.GET("/spring/ai/loom/api/knowledge-market/my-pulled", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(marketService.listMyPulled(username));
+            });
+
             return builder.build();
         }
 

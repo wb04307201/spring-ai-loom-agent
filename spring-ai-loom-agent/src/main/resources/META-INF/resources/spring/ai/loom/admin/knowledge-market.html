@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>MCP 描述维护 - 灵梭管理控制台</title>
+    <title>知识库市场 - 灵梭管理控制台</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/spring/ai/loom/style.css">
@@ -18,8 +18,8 @@
             <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
             <a href="roles.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
             <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a>
-            <a href="knowledge-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📚</span><span>知识库市场</span></a>
-            <a href="mcps.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
+            <a href="knowledge-market.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">📚</span><span>知识库市场</span></a>
+            <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
             <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>用量统计</span></a>
             <div class="admin-sidebar-divider"></div>
             <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a>
@@ -28,8 +28,8 @@
     <div class="admin-main-wrap">
         <header class="admin-header">
             <div class="admin-header-left">
-                <h1>MCP 描述维护</h1>
-                <span class="admin-subtitle">SDK 系统所有 mcp 服务（合并 DB 元数据）</span>
+                <h1>知识库市场</h1>
+                <span class="admin-subtitle">审批用户提交的知识库 + 直接 CRUD 市场知识库</span>
             </div>
             <div class="admin-header-right">
                 <span id="admin-username" class="admin-username"></span>
@@ -37,48 +37,52 @@
         </header>
 
         <main class="admin-main">
-            <div class="admin-toolbar">
-                <button id="refresh-btn" class="secondary-btn">刷新</button>
+            <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+                <strong>admin 特权</strong> —— 可直接新增 / 编辑 / 删除市场知识库（绕过审批，立即生效），也可审批其他用户的 PENDING 提交。
+                任何用户在知识空间点击 🔗 按钮提交的知识库都需要先在这里审批通过。
             </div>
 
-            <div id="mcp-table-container" class="table-container">
+            <div class="admin-toolbar">
+                <button id="refresh-btn" class="secondary-btn">刷新</button>
+                <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="pending-count-label"></span>
+            </div>
+
+            <div id="knowledge-table-container" class="table-container">
                 <div class="loading-indicator">加载中...</div>
             </div>
         </main>
     </div>
 </div>
 
-<!-- 编辑 MCP 模态框 -->
-<div id="edit-mcp-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="max-width: 720px; max-height: 85vh;">
+<!-- 编辑/新建知识库模态框 -->
+<div id="edit-knowledge-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 560px;">
         <div class="modal-header">
-            <h3 id="edit-mcp-title">编辑 MCP</h3>
-            <div class="close-button" id="edit-mcp-close">&times;</div>
+            <h3 id="edit-knowledge-title">新建知识库</h3>
+            <div class="close-button" id="edit-knowledge-close">&times;</div>
         </div>
-        <div class="modal-body" style="padding: 24px 32px; overflow-y: auto; max-height: 70vh;">
+        <div class="modal-body" style="padding: 24px 32px;">
             <div class="form-group">
-                <label>服务名（code，不可改）</label>
-                <input type="text" id="em-name" class="form-input" disabled>
-            </div>
-            <div class="form-group">
-                <label>显示标题</label>
-                <input type="text" id="em-title" class="form-input" placeholder="如 必应搜索（留空 = 用 SDK 默认）">
+                <label>名称 <span style="color: var(--error-color);">*</span></label>
+                <input type="text" id="ek-name" class="form-input" placeholder="知识库名称">
             </div>
             <div class="form-group">
                 <label>描述</label>
-                <textarea id="em-desc" class="form-input" rows="3" placeholder="功能描述（留空 = 用 SDK 默认）"></textarea>
+                <textarea id="ek-description" class="form-input" rows="3" placeholder="可选"></textarea>
             </div>
-            <div style="margin-top: 16px;">
-                <strong>工具描述（留空 = 用 SDK 默认）</strong>
-                <div id="em-tools" style="margin-top: 8px; max-height: 280px; overflow-y: auto;">
-                    加载中...
-                </div>
+            <div class="form-group">
+                <label>状态</label>
+                <select id="ek-status" class="form-input">
+                    <option value="APPROVED">APPROVED（已审批）</option>
+                    <option value="PENDING">PENDING（待审批）</option>
+                    <option value="REJECTED">REJECTED（已拒绝）</option>
+                </select>
             </div>
-            <div id="em-error" class="error-msg" style="display: none;"></div>
+            <div id="edit-knowledge-error" class="error-msg" style="display: none;"></div>
         </div>
         <div class="modal-footer">
-            <button class="secondary-btn" id="em-cancel">取消</button>
-            <button class="primary-btn" id="em-save">保存</button>
+            <button class="secondary-btn" id="edit-knowledge-cancel">取消</button>
+            <button class="primary-btn" id="edit-knowledge-submit">保存</button>
         </div>
     </div>
 </div>
@@ -100,8 +104,9 @@
     </div>
 </div>
 
+<!-- Toast -->
 <div id="toast-notification" class="toast"></div>
 
-<script src="mcps.js"></script>
+<script src="knowledge-market.js"></script>
 </body>
 </html>
