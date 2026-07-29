@@ -7,8 +7,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -124,12 +122,6 @@ class DatabaseFileStorageTest {
     @Test
     @DisplayName("deleteByKnowledgeId 删除知识库所有文件")
     void testDeleteByKnowledgeId() {
-        List<String> fileIds = new ArrayList<>();
-        fileIds.add("file-1");
-        fileIds.add("file-2");
-
-        when(jdbcTemplate.queryForList(anyString(), eq(String.class), eq("kb-1")))
-                .thenReturn(fileIds);
         when(jdbcTemplate.update(eq("DELETE FROM loom_file_content WHERE knowledge_id = ?"), eq("kb-1")))
                 .thenReturn(2);
 
@@ -141,17 +133,17 @@ class DatabaseFileStorageTest {
     }
 
     @Test
-    @DisplayName("deleteByKnowledgeId 空知识库时不执行删除")
+    @DisplayName("deleteByKnowledgeId 空知识库时直接删除无异常")
     void testDeleteByKnowledgeId_emptyKnowledgeBase() {
-        when(jdbcTemplate.queryForList(anyString(), eq(String.class), eq("kb-empty")))
-                .thenReturn(new ArrayList<>());
+        when(jdbcTemplate.update(eq("DELETE FROM loom_file_content WHERE knowledge_id = ?"), eq("kb-empty")))
+                .thenReturn(0);
 
         storage.deleteByKnowledgeId("kb-empty");
 
-        // Should not execute the DELETE when there are no files
-        verify(jdbcTemplate, never()).update(
-                eq("DELETE FROM loom_file_content WHERE knowledge_id = ?"),
-                anyString());
+        // DELETE is executed directly (0 rows affected for empty KB)
+        verify(jdbcTemplate).update(
+                "DELETE FROM loom_file_content WHERE knowledge_id = ?",
+                "kb-empty");
     }
 
     @Test

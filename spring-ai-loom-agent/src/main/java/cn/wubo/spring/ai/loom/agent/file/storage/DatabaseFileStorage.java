@@ -1,16 +1,11 @@
 package cn.wubo.spring.ai.loom.agent.file.storage;
 
 import cn.wubo.spring.ai.loom.agent.file.IFileStorage;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.sql.SQLException;
-import java.sql.SQLNonTransientConnectionException;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -38,7 +33,7 @@ public class DatabaseFileStorage implements IFileStorage {
         byte[] content;
         try {
             content = inputStream.readAllBytes();
-        } catch (IOException e) {
+        } catch (java.io.IOException e) {
             throw new RuntimeException("Failed to read input stream", e);
         }
 
@@ -63,14 +58,6 @@ public class DatabaseFileStorage implements IFileStorage {
 
     @Override
     public void deleteByKnowledgeId(String knowledgeId) {
-        // First get all file IDs for this knowledge base
-        List<String> fileIds = jdbcTemplate.queryForList(
-                "SELECT file_id FROM loom_file_content WHERE knowledge_id = ?",
-                String.class, knowledgeId);
-
-        if (!fileIds.isEmpty()) {
-            // Delete in batches to avoid large IN clauses
-            jdbcTemplate.update("DELETE FROM loom_file_content WHERE knowledge_id = ?", knowledgeId);
-        }
+        jdbcTemplate.update("DELETE FROM loom_file_content WHERE knowledge_id = ?", knowledgeId);
     }
 }

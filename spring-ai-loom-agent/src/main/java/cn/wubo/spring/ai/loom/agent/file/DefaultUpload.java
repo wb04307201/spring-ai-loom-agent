@@ -13,6 +13,7 @@ import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.util.StringUtils;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLConnection;
@@ -131,23 +132,37 @@ public class DefaultUpload implements IUpload {
         String username = UserContextHolder.getCurrentUser();
         try {
             // 通过 IFileStorage 保存文件内容（数据库或磁盘）
-            String fileId = fileStorage.save(knowledgeId, fileName, is, mimeType);
+            String location = fileStorage.save(knowledgeId, fileName, is, mimeType);
 
             // 读取文件内容用于向量化
-            byte[] content = fileStorage.read(fileId);
+            byte[] content = fileStorage.read(location);
             String resolvedMimeType = resolveMimeType(fileName, mimeType);
-            Resource resource = new InputStreamResource(new java.io.ByteArrayInputStream(content), fileName);
+            Resource resource = new InputStreamResource(new ByteArrayInputStream(content), fileName);
             List<Document> documents = documentRead.read(resource, knowledgeId);
             vectorStore.add(documents);
+
+            // 生成唯一 fileId 用于元数据关联
+            String fileId = UUID.randomUUID().toString();
 
             List<FileDocumentRecord> fileDocumentRecords = documents
                     .stream()
                     .map(document -> new FileDocumentRecord(fileId, document.getId()))
                     .toList();
 
+            // 写入 file_info 元数据行（无论数据库还是磁盘实现都需要）
+            FileRecord fileRecord = new FileRecord(
+                    fileId,
+                    knowledgeId,
+                    fileName,
+                    content.length,
+                    LocalDateTime.now(),
+                    location,       // 数据库实现 = fileId；磁盘实现 = 磁盘路径
+                    "knowledge",
+                    resolvedMimeType);
+            file.insert(fileRecord, username);
             fileDocument.insert(fileDocumentRecords);
             return fileId;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             throw new LoomAgentRuntimeException(e);
         }
     }

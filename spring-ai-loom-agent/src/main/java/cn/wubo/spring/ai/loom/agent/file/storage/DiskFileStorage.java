@@ -1,11 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.file.storage;
 
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
-import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.file.IFileStorage;
-import cn.wubo.spring.ai.loom.agent.model.FileRecord;
-import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
@@ -15,52 +11,35 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
 
 /**
  * 基于磁盘文件系统的文件存储实现。
  * <p>
  * 将现有 {@code DefaultUpload} 的磁盘操作逻辑迁移至此，
- * 作为可选实现保留。通过 {@code @ConditionalOnMissingBean} 保证
- * 在 {@code DatabaseFileStorage} 未被注册时才生效。
+ * 作为可选实现保留。如需启用，注册为 Bean 即可覆盖默认的
+ * {@code DatabaseFileStorage}。
+ * <p>
+ * 注意：{@code save()} 只负责写磁盘，不插入元数据。
+ * 元数据由调用方（{@code DefaultUpload.uploadWithKnowledge()}）统一插入。
  */
-// @Component // commented out: DatabaseFileStorage is the default; enable this if you want disk as fallback
-@ConditionalOnMissingBean(IFileStorage.class)
 public class DiskFileStorage implements IFileStorage {
 
-    private final IFile file;
-    private final String fileBasePath;
     private final String knowledgeBasePath;
 
-    public DiskFileStorage(IFile file, String fileBasePath, String knowledgeBasePath) {
-        this.file = file;
-        this.fileBasePath = fileBasePath;
+    public DiskFileStorage(String knowledgeBasePath) {
         this.knowledgeBasePath = knowledgeBasePath;
     }
 
     @Override
     public String save(String knowledgeId, String fileName, InputStream inputStream, String mimeType) {
-        String username = UserContextHolder.getCurrentUser();
+        String username = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
         try {
             Path knowledgeDir = Paths.get(knowledgeBasePath, username, knowledgeId);
             Files.createDirectories(knowledgeDir);
             Path filePath = getUniquePath(knowledgeDir, fileName);
             Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);
-
-            String fileId = UUID.randomUUID().toString();
-            FileRecord fileRecord = new FileRecord(
-                    fileId,
-                    knowledgeId,
-                    filePath.getFileName().toString(),
-                    filePath.toFile().length(),
-                    LocalDateTime.now(),
-                    filePath.toString(),
-                    "knowledge",
-                    resolveMimeType(filePath.getFileName().toString(), mimeType));
-            file.insert(fileRecord, username);
-            return fileId;
+            // 返回磁盘路径，供 read() 使用
+            return filePath.toString();
         } catch (IOException e) {
             throw new LoomAgentRuntimeException(e);
         }
@@ -87,7 +66,7 @@ public class DiskFileStorage implements IFileStorage {
 
     @Override
     public void deleteByKnowledgeId(String knowledgeId) {
-        String username = UserContextHolder.getCurrentUser();
+        String username = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
         Path knowledgeDir = Paths.get(knowledgeBasePath, username, knowledgeId);
         if (Files.exists(knowledgeDir)) {
             try {
