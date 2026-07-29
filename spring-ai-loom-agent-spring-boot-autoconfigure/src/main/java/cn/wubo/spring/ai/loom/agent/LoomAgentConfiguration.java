@@ -2024,6 +2024,33 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body(java.util.Map.of("error", "字段缺失（name/description/content 必填）"));
                 }
             });
+            // 任意用户：查看自己提交的 Skill
+            builder.GET("spring/ai/loom/user/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().body(marketService.listMySubmitted(username));
+            });
+            // 任意用户：撤回 PENDING 状态的提交
+            builder.DELETE("spring/ai/loom/user/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    boolean ok = marketService.withdraw(username, id);
+                    if (!ok) {
+                        return ServerResponse.badRequest().body(java.util.Map.of("error", "只能撤回 PENDING 状态的提交"));
+                    }
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
             return builder.build();
         }
 

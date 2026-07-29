@@ -37,6 +37,8 @@ const API = {
     listMarketSkills: '/spring/ai/loom/market-skills',
     pullMarketSkill: (id) => `/spring/ai/loom/market-skills/${id}/pull`,
     submitMarketSkill: '/spring/ai/loom/user/market-skills',
+    listMySubmittedSkills: '/spring/ai/loom/user/market-skills',
+    withdrawMarketSkill: (id) => `/spring/ai/loom/user/market-skills/${id}`,
     listKnowledge: '/spring/ai/loom/knowledge',
     createKnowledge: '/spring/ai/loom/knowledge',
     deleteKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
@@ -438,6 +440,16 @@ const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async listMySubmittedSkills() {
+        const r = await apiFetch(API.listMySubmittedSkills);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async withdrawMarketSkill(id) {
+        const r = await apiFetch(API.withdrawMarketSkill(id), {method: 'DELETE'});
         if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
         return r.json();
     },
@@ -2787,6 +2799,7 @@ const skills = {
         if (this.currentTab === 'mine') this._renderMineTab(container);
         else if (this.currentTab === 'market') this._renderMarketTab(container);
         else if (this.currentTab === 'submit') this._renderSubmitTab(container, detail);
+        else if (this.currentTab === 'mysubmit') this._renderMySubmissions(container, detail);
     },
 
     _renderMineTab(container) {
@@ -2910,6 +2923,83 @@ const skills = {
             }
             detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建 Skill 提交到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后状态为 PENDING，<br>需管理员在控制台「Skill 市场」审批通过后，<br>其他用户才能在「市场」Tab 拉取。</p></div>';
         });
+    },
+
+    _statusLabel(status) {
+        switch (status) {
+            case 'PENDING':   return {text: '审核中', bg: '#fef3c7', color: '#92400e'};
+            case 'APPROVED':  return {text: '已通过', bg: '#d1fae5', color: '#065f46'};
+            case 'REJECTED':  return {text: '已拒绝', bg: '#fee2e2', color: '#991b1b'};
+            default:          return {text: status, bg: '#f1f5f9', color: '#475569'};
+        }
+    },
+
+    _renderMySubmissions(container, detail) {
+        api.listMySubmittedSkills().then(data => {
+            container.innerHTML = '';
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有向市场发布 Skill<br><br>切到「提交」Tab 从自建 Skill 发起提交</div>';
+                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择左侧 Skill 查看详情</div>';
+                return;
+            }
+            for (const s of data) {
+                const item = document.createElement('div');
+                item.className = 'skill-item';
+                const st = this._statusLabel(s.status);
+                item.innerHTML = `
+                    <div class="skill-item-name">${escapeHtml(s.name)} <span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
+                    <div class="skill-item-desc">${escapeHtml(s.description || '')}</div>
+                `;
+                item.addEventListener('click', () => this._showMySubmissionDetail(s, item, detail));
+                container.appendChild(item);
+            }
+            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个 Skill 查看详情</div>';
+        });
+    },
+
+    _showMySubmissionDetail(skill, element, detail) {
+        document.querySelectorAll('#skills-list .skill-item').forEach(i => i.classList.remove('selected'));
+        element.classList.add('selected');
+        const st = this._statusLabel(skill.status);
+        let html = `
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
+                    <div>名称：${escapeHtml(skill.name)}</div>
+                    <div>版本：v${escapeHtml(skill.version)}</div>
+                    <div>状态：<span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
+                    <div>提交时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : '-'}</div>
+                    ${skill.reviewedAt ? '<div>审核时间：' + new Date(skill.reviewedAt).toLocaleString() + '</div>' : ''}
+                    ${skill.reviewedBy ? '<div>审核人：' + escapeHtml(skill.reviewedBy) + '</div>' : ''}
+                    ${skill.reviewComment ? '<div>审核意见：' + escapeHtml(skill.reviewComment) + '</div>' : ''}
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted);">${escapeHtml(skill.description || '无说明')}</div>
+                <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(skill.content || '')}</div>
+        `;
+        if (skill.status === 'PENDING') {
+            html += `
+                <div style="display: flex; gap: 12px; margin-top: 8px;">
+                    <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回提交</button>
+                </div>
+            `;
+        }
+        html += '</div>';
+        detail.innerHTML = html;
+
+        const withdrawBtn = document.getElementById('withdraw-skill-btn');
+        if (withdrawBtn) {
+            withdrawBtn.addEventListener('click', () => this.handleWithdraw(skill));
+        }
+    },
+
+    async handleWithdraw(skill) {
+        if (!confirm(`确认撤回「${skill.name}」的提交？`)) return;
+        try {
+            await api.withdrawMarketSkill(skill.id);
+            showToast(`已撤回「${skill.name}」`, 'success');
+            this.renderModal();
+        } catch (e) {
+            showToast('撤回失败：' + e.message, 'error');
+        }
     },
 
     _showSubmitForm(skill, detail) {

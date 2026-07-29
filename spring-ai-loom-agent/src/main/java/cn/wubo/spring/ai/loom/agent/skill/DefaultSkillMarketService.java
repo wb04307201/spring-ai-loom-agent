@@ -219,6 +219,24 @@ public class DefaultSkillMarketService implements ISkillMarketService {
         return getUserSkill(id);
     }
 
+    /* ===== 用户查看/撤回 ===== */
+
+    @Override
+    public List<MarketSkill> listMySubmitted(String username) {
+        return jdbcTemplate.query(
+                "SELECT * FROM market_skill WHERE author = ? ORDER BY submitted_at DESC",
+                this::mapMarketSkill, username);
+    }
+
+    @Override
+    @Transactional
+    public boolean withdraw(String username, Long marketSkillId) {
+        int rows = jdbcTemplate.update(
+                "DELETE FROM market_skill WHERE id = ? AND author = ? AND status = 'PENDING'",
+                marketSkillId, username);
+        return rows > 0;
+    }
+
     private UserSkill getUserSkill(Long id) {
         return jdbcTemplate.queryForObject(
                 "SELECT * FROM user_skill WHERE id = ?",

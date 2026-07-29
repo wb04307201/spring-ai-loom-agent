@@ -50,4 +50,12 @@ public interface ISkillMarketService {
      * 若同 name 已是 MARKET_PULLED，刷新 content。
      */
     UserSkill pull(String username, Long marketSkillId);
+
+    /* ===== 用户查看/撤回 ===== */
+
+    /** 查看我提交到市场的技能（含 PENDING/APPROVED/REJECTED） */
+    List<MarketSkill> listMySubmitted(String username);
+
+    /** 撤回 PENDING 状态的提交（仅 author 本人可操作） */
+    boolean withdraw(String username, Long marketSkillId);
 }
