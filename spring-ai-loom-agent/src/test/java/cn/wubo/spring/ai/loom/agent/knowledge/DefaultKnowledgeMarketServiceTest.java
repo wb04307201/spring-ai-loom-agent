@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -107,6 +108,25 @@ class DefaultKnowledgeMarketServiceTest {
     }
 
     @Test
+    @DisplayName("submit 被拒绝的条目允许重新提交")
+    void testSubmit_rejectedCanBeResubmitted() {
+        String kbId = "kb-001";
+        KnowledgeRecord kb = new KnowledgeRecord(kbId, "testuser", "测试知识库", "描述");
+        when(knowledge.list("testuser")).thenReturn(List.of(kb));
+        // COUNT returns 0 (only rejected entries exist, not counted)
+        when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
+
+        MarketKnowledgeRecord result = new MarketKnowledgeRecord(
+                "market-002", "testuser", "测试知识库", "描述",
+                "PENDING", null, null, null, null);
+        when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
+
+        MarketKnowledgeRecord returned = marketService.submit(kbId);
+
+        assertEquals(MarketKnowledgeRecord.STATUS_PENDING, returned.status());
+    }
+
+    @Test
     @DisplayName("submit 知识库不属于当前用户")
     void testSubmit_knowledgeNotOwned() {
         when(knowledge.list("testuser")).thenReturn(List.of(
@@ -118,6 +138,7 @@ class DefaultKnowledgeMarketServiceTest {
     @Test
     @DisplayName("approve 审批通过")
     void testApprove_setsApprovedStatus() {
+        when(user.isAdmin("testuser")).thenReturn(true);
         MarketKnowledgeRecord result = new MarketKnowledgeRecord(
                 "market-001", "testuser", "测试知识库", "描述",
                 "APPROVED", null, null, null, null);
@@ -129,8 +150,39 @@ class DefaultKnowledgeMarketServiceTest {
     }
 
     @Test
+    @DisplayName("approve 非管理员抛异常")
+    void testApprove_nonAdminThrows() {
+        when(user.isAdmin("testuser")).thenReturn(false);
+        MarketKnowledgeRecord result = new MarketKnowledgeRecord(
+                "market-001", "testuser", "测试知识库", "描述",
+                "APPROVED", null, null, null, null);
+        lenient().when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
+
+        LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+                () -> marketService.approve("market-001"));
+        assertTrue(ex.getMessage().contains("管理员"));
+    }
+
+    @Test
+    @DisplayName("approve 对非PENDING条目抛异常")
+    void testApprove_nonPendingThrows() {
+        when(user.isAdmin("testuser")).thenReturn(true);
+        // UPDATE returns 0 rows (not PENDING)
+        doAnswer(inv -> 0).when(jdbcTemplate.mock).update(anyString(), (Object) any(), (Object) any());
+        MarketKnowledgeRecord result = new MarketKnowledgeRecord(
+                "market-001", "testuser", "测试知识库", "描述",
+                "APPROVED", null, null, null, null);
+        when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
+
+        LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+                () -> marketService.approve("market-001"));
+        assertTrue(ex.getMessage().contains("只能审批"));
+    }
+
+    @Test
     @DisplayName("reject 拒绝提交")
     void testReject_setsRejectedStatus() {
+        when(user.isAdmin("testuser")).thenReturn(true);
         MarketKnowledgeRecord result = new MarketKnowledgeRecord(
                 "market-001", "testuser", "测试知识库", "描述",
                 "REJECTED", null, null, null, null);
@@ -139,6 +191,35 @@ class DefaultKnowledgeMarketServiceTest {
         MarketKnowledgeRecord returned = marketService.reject("market-001");
 
         assertEquals(MarketKnowledgeRecord.STATUS_REJECTED, returned.status());
+    }
+
+    @Test
+    @DisplayName("reject 非管理员抛异常")
+    void testReject_nonAdminThrows() {
+        when(user.isAdmin("testuser")).thenReturn(false);
+        MarketKnowledgeRecord result = new MarketKnowledgeRecord(
+                "market-001", "testuser", "测试知识库", "描述",
+                "REJECTED", null, null, null, null);
+        lenient().when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
+
+        LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+                () -> marketService.reject("market-001"));
+        assertTrue(ex.getMessage().contains("管理员"));
+    }
+
+    @Test
+    @DisplayName("reject 对非PENDING条目抛异常")
+    void testReject_nonPendingThrows() {
+        when(user.isAdmin("testuser")).thenReturn(true);
+        doAnswer(inv -> 0).when(jdbcTemplate.mock).update(anyString(), (Object) any(), (Object) any());
+        MarketKnowledgeRecord result = new MarketKnowledgeRecord(
+                "market-001", "testuser", "测试知识库", "描述",
+                "APPROVED", null, null, null, null);
+        when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
+
+        LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+                () -> marketService.reject("market-001"));
+        assertTrue(ex.getMessage().contains("只能拒绝"));
     }
 
     @Test
@@ -190,6 +271,51 @@ class DefaultKnowledgeMarketServiceTest {
 
         assertEquals(1, result.size());
         assertEquals("KB1", result.get(0).name());
+    }
+
+    @Test
+    @DisplayName("pull 订阅已审批的市场知识库")
+    void testPull_subscribesToApproved() {
+        MarketKnowledgeRecord approved = new MarketKnowledgeRecord(
+                "market-001", "author1", "公共知识库", "描述",
+                "APPROVED", null, null, null, null);
+        when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
+        // No existing subscription
+        when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
+        // No locked conflicts
+        when(jdbcTemplate.mock.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
+
+        marketService.pull("testuser", "market-001");
+
+        verify(jdbcTemplate.mock).update(
+                argThat((String s) -> s.contains("INSERT INTO loom_user_knowledge")), any(Object[].class));
+    }
+
+    @Test
+    @DisplayName("pull 不能订阅未审批的知识库")
+    void testPull_rejectsNonApproved() {
+        MarketKnowledgeRecord pending = new MarketKnowledgeRecord(
+                "market-001", "author1", "待审批", "描述",
+                "PENDING", null, null, null, null);
+        when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(pending);
+
+        LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+                () -> marketService.pull("testuser", "market-001"));
+        assertTrue(ex.getMessage().contains("只能订阅已审批"));
+    }
+
+    @Test
+    @DisplayName("pull 重复订阅抛异常")
+    void testPull_duplicateSubscription() {
+        MarketKnowledgeRecord approved = new MarketKnowledgeRecord(
+                "market-001", "author1", "公共知识库", "描述",
+                "APPROVED", null, null, null, null);
+        when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
+        when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(1);
+
+        LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+                () -> marketService.pull("testuser", "market-001"));
+        assertTrue(ex.getMessage().contains("已订阅"));
     }
 
     @Test

@@ -54,7 +54,7 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
         if (size < 1) size = 20;
         int offset = (page - 1) * size;
         return jdbcTemplate.query(
-                "SELECT * FROM market_knowledge WHERE status = 'APPROVED' ORDER BY submitted_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM loom_market_knowledge WHERE status = 'APPROVED' ORDER BY submitted_at DESC LIMIT ? OFFSET ?",
                 this::mapMarketKnowledgeRecord, size, offset);
     }
 
@@ -62,7 +62,7 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
     public MarketKnowledgeRecord getById(String marketKnowledgeId) {
         try {
             return jdbcTemplate.queryForObject(
-                    "SELECT * FROM market_knowledge WHERE id = ?",
+                    "SELECT * FROM loom_market_knowledge WHERE id = ?",
                     this::mapMarketKnowledgeRecord, marketKnowledgeId);
         } catch (EmptyResultDataAccessException e) {
             throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + marketKnowledgeId);
@@ -72,14 +72,14 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
     @Override
     public List<MarketKnowledgeRecord> listAllForAdmin() {
         return jdbcTemplate.query(
-                "SELECT * FROM market_knowledge ORDER BY status, submitted_at DESC",
+                "SELECT * FROM loom_market_knowledge ORDER BY status, submitted_at DESC",
                 this::mapMarketKnowledgeRecord);
     }
 
     @Override
     public List<MarketKnowledgeRecord> listPending() {
         return jdbcTemplate.query(
-                "SELECT * FROM market_knowledge WHERE status = 'PENDING' ORDER BY submitted_at",
+                "SELECT * FROM loom_market_knowledge WHERE status = 'PENDING' ORDER BY submitted_at",
                 this::mapMarketKnowledgeRecord);
     }
 
@@ -100,9 +100,9 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
                 .findFirst()
                 .orElseThrow(() -> new LoomAgentRuntimeException(404, "知识库不存在或不属于当前用户: " + knowledgeId));
 
-        // 检查是否已提交
+        // 检查是否已提交（排除 REJECTED，允许重新提交被拒的条目）
         Integer dup = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM market_knowledge WHERE username = ? AND name = ?",
+                "SELECT COUNT(*) FROM loom_market_knowledge WHERE username = ? AND name = ? AND status IN ('PENDING', 'APPROVED')",
                 Integer.class, username, kb.name());
         if (dup != null && dup > 0) {
             throw new LoomAgentRuntimeException(409, "已存在同名知识库提交：name=" + kb.name());
@@ -110,7 +110,7 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
 
         String marketId = UUID.randomUUID().toString();
         jdbcTemplate.update(
-                "INSERT INTO market_knowledge (id, username, name, description, status) VALUES (?, ?, ?, ?, 'PENDING')",
+                "INSERT INTO loom_market_knowledge (id, username, name, description, status) VALUES (?, ?, ?, ?, 'PENDING')",
                 marketId, username, kb.name(), kb.description());
 
         return getById(marketId);
@@ -122,10 +122,16 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
     @Transactional
     public MarketKnowledgeRecord approve(String marketKnowledgeId) {
         String adminUsername = UserContextHolder.getCurrentUser();
-        jdbcTemplate.update(
-                "UPDATE market_knowledge SET status = 'APPROVED', reviewed_at = CURRENT_TIMESTAMP, " +
+        if (!user.isAdmin(adminUsername)) {
+            throw new LoomAgentRuntimeException(403, "需要管理员权限");
+        }
+        int rows = jdbcTemplate.update(
+                "UPDATE loom_market_knowledge SET status = 'APPROVED', reviewed_at = CURRENT_TIMESTAMP, " +
                         "reviewed_by = ? WHERE id = ? AND status = 'PENDING'",
                 adminUsername, marketKnowledgeId);
+        if (rows == 0) {
+            throw new LoomAgentRuntimeException(400, "只能审批待审批的条目: id=" + marketKnowledgeId);
+        }
         return getById(marketKnowledgeId);
     }
 
@@ -133,10 +139,16 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
     @Transactional
     public MarketKnowledgeRecord reject(String marketKnowledgeId) {
         String adminUsername = UserContextHolder.getCurrentUser();
-        jdbcTemplate.update(
-                "UPDATE market_knowledge SET status = 'REJECTED', reviewed_at = CURRENT_TIMESTAMP, " +
+        if (!user.isAdmin(adminUsername)) {
+            throw new LoomAgentRuntimeException(403, "需要管理员权限");
+        }
+        int rows = jdbcTemplate.update(
+                "UPDATE loom_market_knowledge SET status = 'REJECTED', reviewed_at = CURRENT_TIMESTAMP, " +
                         "reviewed_by = ? WHERE id = ? AND status = 'PENDING'",
                 adminUsername, marketKnowledgeId);
+        if (rows == 0) {
+            throw new LoomAgentRuntimeException(400, "只能拒绝待审批的条目: id=" + marketKnowledgeId);
+        }
         return getById(marketKnowledgeId);
     }
 
@@ -151,8 +163,8 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
             throw new LoomAgentRuntimeException(403, "只能撤回自己的提交");
         }
         // 清除用户订阅引用
-        jdbcTemplate.update("DELETE FROM user_knowledge WHERE market_knowledge_id = ?", marketKnowledgeId);
-        int rows = jdbcTemplate.update("DELETE FROM market_knowledge WHERE id = ? AND username = ?",
+        jdbcTemplate.update("DELETE FROM loom_user_knowledge WHERE market_knowledge_id = ?", marketKnowledgeId);
+        int rows = jdbcTemplate.update("DELETE FROM loom_market_knowledge WHERE id = ? AND username = ?",
                 marketKnowledgeId, username);
         if (rows == 0) {
             throw new LoomAgentRuntimeException(404, "市场知识库不存在: " + marketKnowledgeId);
@@ -171,7 +183,7 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
 
         // 检查是否已存在
         Integer existingCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM user_knowledge WHERE username = ? AND market_knowledge_id = ?",
+                "SELECT COUNT(*) FROM loom_user_knowledge WHERE username = ? AND market_knowledge_id = ?",
                 Integer.class, username, marketKnowledgeId);
         if (existingCount != null && existingCount > 0) {
             throw new LoomAgentRuntimeException(409, "已订阅该知识库");
@@ -179,8 +191,8 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
 
         // 检查是否有 ROLE_GRANTED 锁定的同名订阅
         List<Map<String, Object>> lockedRows = jdbcTemplate.queryForList(
-                "SELECT uk.* FROM user_knowledge uk " +
-                        "JOIN market_knowledge mk ON uk.market_knowledge_id = mk.id " +
+                "SELECT uk.* FROM loom_user_knowledge uk " +
+                        "JOIN loom_market_knowledge mk ON uk.market_knowledge_id = mk.id " +
                         "WHERE uk.username = ? AND mk.name = ? AND uk.locked = TRUE",
                 username, mk.name());
         if (!lockedRows.isEmpty()) {
@@ -188,15 +200,15 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
         }
 
         jdbcTemplate.update(
-                "INSERT INTO user_knowledge (username, market_knowledge_id, source, locked) VALUES (?, ?, 'MARKET_PULLED', FALSE)",
+                "INSERT INTO loom_user_knowledge (username, market_knowledge_id, source, locked) VALUES (?, ?, 'MARKET_PULLED', FALSE)",
                 username, marketKnowledgeId);
     }
 
     @Override
     public List<MarketKnowledgeRecord> listMyPulled(String username) {
         return jdbcTemplate.query(
-                "SELECT mk.* FROM market_knowledge mk " +
-                        "JOIN user_knowledge uk ON mk.id = uk.market_knowledge_id " +
+                "SELECT mk.* FROM loom_market_knowledge mk " +
+                        "JOIN loom_user_knowledge uk ON mk.id = uk.market_knowledge_id " +
                         "WHERE uk.username = ? AND uk.source = 'MARKET_PULLED' " +
                         "ORDER BY mk.submitted_at DESC",
                 this::mapMarketKnowledgeRecord, username);
@@ -216,8 +228,8 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
         }
 
         // 清引用
-        jdbcTemplate.update("DELETE FROM user_knowledge WHERE market_knowledge_id = ?", marketKnowledgeId);
-        jdbcTemplate.update("DELETE FROM role_knowledge WHERE market_knowledge_id = ?", marketKnowledgeId);
-        jdbcTemplate.update("DELETE FROM market_knowledge WHERE id = ?", marketKnowledgeId);
+        jdbcTemplate.update("DELETE FROM loom_user_knowledge WHERE market_knowledge_id = ?", marketKnowledgeId);
+        jdbcTemplate.update("DELETE FROM loom_role_knowledge WHERE market_knowledge_id = ?", marketKnowledgeId);
+        jdbcTemplate.update("DELETE FROM loom_market_knowledge WHERE id = ?", marketKnowledgeId);
     }
 }

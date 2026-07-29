@@ -24,7 +24,7 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
     @Override
     public List<RoleKnowledgeItem> getRoleKnowledges(String roleCode) {
         return jdbcTemplate.query(
-                "SELECT market_knowledge_id, default_enabled FROM role_knowledge WHERE role_code = ? ORDER BY sort_order, market_knowledge_id",
+                "SELECT market_knowledge_id, default_enabled FROM loom_role_knowledge WHERE role_code = ? ORDER BY sort_order, market_knowledge_id",
                 (rs, rowNum) -> new RoleKnowledgeItem(rs.getString(1), rs.getBoolean(2)),
                 roleCode);
     }
@@ -32,36 +32,23 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
     @Override
     public List<MarketKnowledgeRecord> listRoleKnowledges(String roleCode) {
         return jdbcTemplate.query(
-                "SELECT mk.* FROM market_knowledge mk " +
-                        "JOIN role_knowledge rk ON rk.market_knowledge_id = mk.id " +
+                "SELECT mk.* FROM loom_market_knowledge mk " +
+                        "JOIN loom_role_knowledge rk ON rk.market_knowledge_id = mk.id " +
                         "WHERE rk.role_code = ? ORDER BY rk.sort_order, mk.id",
-                (rs, rowNum) -> {
-                    java.sql.Timestamp submittedAt = rs.getTimestamp("submitted_at");
-                    java.sql.Timestamp reviewedAt = rs.getTimestamp("reviewed_at");
-                    return new MarketKnowledgeRecord(
-                            rs.getString("id"),
-                            rs.getString("username"),
-                            rs.getString("name"),
-                            rs.getString("description"),
-                            rs.getString("status"),
-                            submittedAt == null ? null : submittedAt.toLocalDateTime(),
-                            reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
-                            rs.getString("reviewed_by"),
-                            rs.getString("review_comment"));
-                },
+                this::mapMarketKnowledgeRecord,
                 roleCode);
     }
 
     @Override
     public void setRoleKnowledges(String roleCode, List<RoleKnowledgeItem> items) {
-        jdbcTemplate.update("DELETE FROM role_knowledge WHERE role_code = ?", roleCode);
+        jdbcTemplate.update("DELETE FROM loom_role_knowledge WHERE role_code = ?", roleCode);
         if (items != null && !items.isEmpty()) {
             int sort = 0;
             for (RoleKnowledgeItem it : items) {
                 if (it == null || it.marketKnowledgeId() == null || it.marketKnowledgeId().isBlank()) continue;
                 boolean def = it.defaultEnabled() == null ? false : it.defaultEnabled();
                 jdbcTemplate.update(
-                        "INSERT INTO role_knowledge (role_code, market_knowledge_id, sort_order, default_enabled) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO loom_role_knowledge (role_code, market_knowledge_id, sort_order, default_enabled) VALUES (?, ?, ?, ?)",
                         roleCode, it.marketKnowledgeId(), sort++, def);
             }
         }
@@ -81,7 +68,7 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
         for (String role : roles) {
             List<Map<String, Object>> roleKbs = jdbcTemplate.queryForList(
                     "SELECT rk.market_knowledge_id AS mid, rk.default_enabled AS def, mk.name " +
-                            "FROM role_knowledge rk JOIN market_knowledge mk ON rk.market_knowledge_id = mk.id " +
+                            "FROM loom_role_knowledge rk JOIN loom_market_knowledge mk ON rk.market_knowledge_id = mk.id " +
                             "WHERE rk.role_code = ?", role);
 
             for (Map<String, Object> rk : roleKbs) {
@@ -91,20 +78,20 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
 
                 // Check if user already has this exact subscription
                 Integer exists = jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM user_knowledge WHERE username = ? AND market_knowledge_id = ?",
+                        "SELECT COUNT(*) FROM loom_user_knowledge WHERE username = ? AND market_knowledge_id = ?",
                         Integer.class, username, kbId);
                 if (exists != null && exists > 0) {
                     // Already subscribed, ensure locked status is correct
                     jdbcTemplate.update(
-                            "UPDATE user_knowledge SET source = 'ROLE_GRANTED', locked = TRUE WHERE username = ? AND market_knowledge_id = ?",
+                            "UPDATE loom_user_knowledge SET source = 'ROLE_GRANTED', locked = TRUE WHERE username = ? AND market_knowledge_id = ?",
                             username, kbId);
                     continue;
                 }
 
                 // Check for name conflict with locked entry
                 List<Map<String, Object>> lockedByName = jdbcTemplate.queryForList(
-                        "SELECT uk.* FROM user_knowledge uk " +
-                                "JOIN market_knowledge mk ON uk.market_knowledge_id = mk.id " +
+                        "SELECT uk.market_knowledge_id FROM loom_user_knowledge uk " +
+                                "JOIN loom_market_knowledge mk ON uk.market_knowledge_id = mk.id " +
                                 "WHERE uk.username = ? AND mk.name = ? AND uk.locked = TRUE",
                         username, name);
                 if (!lockedByName.isEmpty()) {
@@ -113,23 +100,40 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
                 }
 
                 // Check for name conflict with non-locked entry
+                // FIX #5: Use two-step approach (SELECT then UPDATE) instead of self-referential subquery
                 List<Map<String, Object>> existingByName = jdbcTemplate.queryForList(
-                        "SELECT uk.* FROM user_knowledge uk " +
-                                "JOIN market_knowledge mk ON uk.market_knowledge_id = mk.id " +
+                        "SELECT uk.market_knowledge_id AS existing_id FROM loom_user_knowledge uk " +
+                                "JOIN loom_market_knowledge mk ON uk.market_knowledge_id = mk.id " +
                                 "WHERE uk.username = ? AND mk.name = ? AND uk.locked = FALSE",
                         username, name);
                 if (!existingByName.isEmpty()) {
                     // Update existing non-locked entry to ROLE_GRANTED
+                    String existingId = (String) existingByName.get(0).get("existing_id");
                     jdbcTemplate.update(
-                            "UPDATE user_knowledge SET source = 'ROLE_GRANTED', market_knowledge_id = ?, locked = TRUE WHERE username = ? AND market_knowledge_id = (SELECT market_knowledge_id FROM user_knowledge WHERE username = ? AND locked = FALSE AND market_knowledge_id IN (SELECT id FROM market_knowledge WHERE name = ?))",
-                            kbId, username, username, name);
+                            "UPDATE loom_user_knowledge SET source = 'ROLE_GRANTED', market_knowledge_id = ?, locked = TRUE WHERE username = ? AND market_knowledge_id = ?",
+                            kbId, username, existingId);
                 } else {
                     // Insert new
                     jdbcTemplate.update(
-                            "INSERT INTO user_knowledge (username, market_knowledge_id, source, locked) VALUES (?, ?, 'ROLE_GRANTED', TRUE)",
+                            "INSERT INTO loom_user_knowledge (username, market_knowledge_id, source, locked) VALUES (?, ?, 'ROLE_GRANTED', TRUE)",
                             username, kbId);
                 }
             }
         }
+    }
+
+    private MarketKnowledgeRecord mapMarketKnowledgeRecord(ResultSet rs, int rowNum) throws SQLException {
+        java.sql.Timestamp submittedAt = rs.getTimestamp("submitted_at");
+        java.sql.Timestamp reviewedAt = rs.getTimestamp("reviewed_at");
+        return new MarketKnowledgeRecord(
+                rs.getString("id"),
+                rs.getString("username"),
+                rs.getString("name"),
+                rs.getString("description"),
+                rs.getString("status"),
+                submittedAt == null ? null : submittedAt.toLocalDateTime(),
+                reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
+                rs.getString("reviewed_by"),
+                rs.getString("review_comment"));
     }
 }

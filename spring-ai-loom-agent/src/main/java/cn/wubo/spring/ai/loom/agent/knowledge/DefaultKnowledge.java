@@ -8,7 +8,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public class DefaultKnowledge implements IKnowledge {
@@ -126,4 +129,62 @@ public class DefaultKnowledge implements IKnowledge {
         );
     }
 
+    @Override
+    public List<KnowledgeRecord> listAccessible(String username) {
+        // 1) Own knowledge bases
+        List<KnowledgeRecord> result = new ArrayList<>(list(username));
+        Set<String> seenIds = new HashSet<>();
+        for (KnowledgeRecord kr : result) {
+            seenIds.add(kr.id());
+        }
+
+        // 2) Market-pulled knowledge bases (from loom_user_knowledge JOIN loom_market_knowledge)
+        List<KnowledgeRecord> pulled = jdbcTemplate.query(
+                "SELECT mk.id, mk.username, mk.name, mk.description FROM loom_market_knowledge mk " +
+                        "JOIN loom_user_knowledge uk ON mk.id = uk.market_knowledge_id " +
+                        "WHERE uk.username = ? AND uk.source = 'MARKET_PULLED'",
+                this::mapMarketToKnowledgeRecord, username);
+        for (KnowledgeRecord kr : pulled) {
+            if (!seenIds.contains(kr.id())) {
+                result.add(kr);
+                seenIds.add(kr.id());
+            }
+        }
+
+        // 3) Role-granted knowledge bases
+        List<KnowledgeRecord> roleGranted = jdbcTemplate.query(
+                "SELECT mk.id, mk.username, mk.name, mk.description FROM loom_market_knowledge mk " +
+                        "JOIN loom_user_knowledge uk ON mk.id = uk.market_knowledge_id " +
+                        "WHERE uk.username = ? AND uk.source = 'ROLE_GRANTED'",
+                this::mapMarketToKnowledgeRecord, username);
+        for (KnowledgeRecord kr : roleGranted) {
+            if (!seenIds.contains(kr.id())) {
+                result.add(kr);
+                seenIds.add(kr.id());
+            }
+        }
+
+        return result;
+    }
+
+    @Override
+    public boolean canEdit(String knowledgeId) {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null || username.isBlank()) {
+            return false;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knowledge WHERE id = ? AND username = ?",
+                Integer.class, knowledgeId, username);
+        return count != null && count > 0;
+    }
+
+    private KnowledgeRecord mapMarketToKnowledgeRecord(ResultSet rs, int rowNum) throws SQLException {
+        return new KnowledgeRecord(
+                rs.getString("id"),
+                rs.getString("username"),
+                rs.getString("name"),
+                rs.getString("description")
+        );
+    }
 }
