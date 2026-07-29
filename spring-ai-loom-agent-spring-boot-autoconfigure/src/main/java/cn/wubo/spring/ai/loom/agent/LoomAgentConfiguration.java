@@ -2449,6 +2449,11 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("message", "数据约束失败: " + e.getMostSpecificCause().getMessage()));
                 }
             });
+            builder.GET("/spring/ai/loom/knowledge/{knowledgeId}/can-edit", request -> {
+                String knowledgeId = request.pathVariable("knowledgeId");
+                boolean canEdit = knowledge.canEdit(knowledgeId);
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(Map.of("canEdit", canEdit));
+            });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
                 String knowledgeId = request.pathVariable("knowledgeId");
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.deleteAllKnowledge(knowledgeId));

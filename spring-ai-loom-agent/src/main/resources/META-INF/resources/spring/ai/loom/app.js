@@ -43,6 +43,7 @@ const API = {
     createKnowledge: '/spring/ai/loom/knowledge',
     deleteKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
     updateKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
+    canEditKnowledge: (id) => `/spring/ai/loom/knowledge/${id}/can-edit`,
     uploadToKnowledge: (id) => `/spring/ai/loom/knowledge/${id}/upload`,
     listKnowledgeFiles: (id) => `/spring/ai/loom/knowledge/${id}/file`,
     deleteKnowledgeFile: (knowledgeId, fileId) => `/spring/ai/loom/knowledge/${knowledgeId}/file/${fileId}`,
@@ -485,6 +486,12 @@ const api = {
         if (r.ok) return { ok: true };
         const err = await r.json().catch(() => ({}));
         return { ok: false, message: err.message || '修改失败' };
+    },
+    async canEditKnowledge(id) {
+        const r = await apiFetch(API.canEditKnowledge(id));
+        if (!r.ok) return false;
+        const data = await r.json();
+        return data.canEdit;
     },
     async listKnowledgeFiles(id) {
         const r = await apiFetch(API.listKnowledgeFiles(id));
@@ -1532,9 +1539,9 @@ const knowledge = {
                 <input type="checkbox" ${isChecked ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
                 <span class="ks-item-name">${name}</span>
                 <span class="ks-item-desc">${kb.description || ''}</span>
-                <button class="ks-item-edit" title="编辑">✎</button>
+                ${isCreator ? '<button class="ks-item-edit" title="编辑">&#x270E;</button>' : ''}
                 ${isCreator ? '<button class="ks-item-share" title="共享到市场">&#x1f517;</button>' : ''}
-                <button class="ks-item-delete">&times;</button>`;
+                ${isCreator ? '<button class="ks-item-delete">&times;</button>' : ''}`;
             const checkbox = div.querySelector('input[type="checkbox"]');
             checkbox.addEventListener('change', () => {
                 this.toggleKnowledgeForChat(id);
@@ -1548,20 +1555,24 @@ const knowledge = {
                 e.stopPropagation();
                 this.select(id, name);
             });
-            div.querySelector('.ks-item-edit').addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.edit(id);
-            });
+            if (isCreator) {
+                div.querySelector('.ks-item-edit').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.edit(id);
+                });
+            }
             if (isCreator) {
                 div.querySelector('.ks-item-share').addEventListener('click', (e) => {
                     e.stopPropagation();
                     this.shareToMarket(id);
                 });
             }
-            div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.delete(id);
-            });
+            if (isCreator) {
+                div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.delete(id);
+                });
+            }
             container.appendChild(div);
         }
     },
