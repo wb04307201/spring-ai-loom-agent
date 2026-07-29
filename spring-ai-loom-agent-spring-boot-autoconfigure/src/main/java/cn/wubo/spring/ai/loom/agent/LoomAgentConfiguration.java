@@ -75,6 +75,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
@@ -1180,6 +1181,17 @@ public class LoomAgentConfiguration {
         @Bean
         public IKnowledge defaultKnowledge(JdbcTemplate jdbcTemplate) {
             return new DefaultKnowledge(jdbcTemplate);
+        }
+
+        /**
+         * 文件下载与预览：通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         * 依赖 {@code IFileStorage}（数据库或磁盘）透明读取知识库文件内容。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.file.IFileDownload.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.file.IFileDownload defaultFileDownload(
+                IFile file, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage) {
+            return new cn.wubo.spring.ai.loom.agent.file.DefaultFileDownload(file, fileStorage);
         }
     }
 
@@ -2447,6 +2459,58 @@ public class LoomAgentConfiguration {
                 }
             });
             return builder.build();
+        }
+
+        /**
+         * 文件下载/预览路由：为知识库文件提供 attachment 下载和 inline 预览端点。
+         * 通过 IFileDownload 透明处理数据库存储和磁盘存储两种模式。
+         */
+        @Bean("loomAgentFileDownloadRouter")
+        public RouterFunction<ServerResponse> loomAgentFileDownloadRouter(
+                cn.wubo.spring.ai.loom.agent.file.IFileDownload fileDownload) {
+            return RouterFunctions.route()
+                    .GET("/spring/ai/loom/api/file/{fileId}/download", request -> {
+                        String fileId = request.pathVariable("fileId");
+                        String username = UserContextHolder.getCurrentUser();
+                        try {
+                            FileRecord record = fileDownload.getFileRecord(fileId, username);
+                            byte[] content = fileDownload.readFileContent(fileId, username);
+                            MediaType contentType = resolveContentType(record);
+                            ByteArrayResource resource = new ByteArrayResource(content) {
+                                @Override
+                                public String getFilename() {
+                                    return record.fileName();
+                                }
+                            };
+                            return ServerResponse.ok()
+                                    .header("Content-Disposition", buildContentDisposition(record.fileName()))
+                                    .contentType(contentType)
+                                    .body(resource);
+                        } catch (IllegalArgumentException e) {
+                            return ServerResponse.notFound().build();
+                        }
+                    })
+                    .GET("/spring/ai/loom/api/file/{fileId}/preview", request -> {
+                        String fileId = request.pathVariable("fileId");
+                        String username = UserContextHolder.getCurrentUser();
+                        try {
+                            FileRecord record = fileDownload.getFileRecord(fileId, username);
+                            byte[] content = fileDownload.readFileContent(fileId, username);
+                            MediaType contentType = resolveContentType(record);
+                            ByteArrayResource resource = new ByteArrayResource(content) {
+                                @Override
+                                public String getFilename() {
+                                    return record.fileName();
+                                }
+                            };
+                            return ServerResponse.ok()
+                                    .contentType(contentType)
+                                    .body(resource);
+                        } catch (IllegalArgumentException e) {
+                            return ServerResponse.notFound().build();
+                        }
+                    })
+                    .build();
         }
 
         /**

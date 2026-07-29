@@ -1666,8 +1666,12 @@ const knowledge = {
                     <td>${truncateText(f.fileName || f.name || '', 30)}</td>
                     <td>${formatFileSize(f.size || 0)}</td>
                     <td>${formatDate(f.uploadTime || f.createTime)}</td>
-                    <td><button class="action-btn" data-file-id="${f.id}">删除</button></td>`;
-                row.querySelector('.action-btn').addEventListener('click', () => this.deleteFile(kbId, f.id, row));
+                    <td>
+                        <button class="action-btn" onclick="previewFile('${f.id}')">预览</button>
+                        <button class="action-btn" onclick="downloadFile('${f.id}')">下载</button>
+                        <button class="action-btn" data-file-id="${f.id}">删除</button>
+                    </td>`;
+                row.querySelector('[data-file-id]').addEventListener('click', () => this.deleteFile(kbId, f.id, row));
                 tbody.appendChild(row);
             }
         } catch (e) {
@@ -3635,3 +3639,15 @@ if (document.readyState === 'loading') {
 // Expose to global for testing/debugging
 window._loomAgent = {state, api, imageUpload, auth, chat, conversation, ui, fileMgr};
 window.ui = ui;
+
+// ===================== §11 File Download/Preview Globals =====================
+window.previewFile = (fileId) => {
+    window.open(`/spring/ai/loom/api/file/${fileId}/preview`, '_blank');
+};
+
+window.downloadFile = (fileId) => {
+    const link = document.createElement('a');
+    link.href = `/spring/ai/loom/api/file/${fileId}/download`;
+    link.download = '';
+    link.click();
+};
