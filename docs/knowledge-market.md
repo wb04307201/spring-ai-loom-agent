@@ -131,12 +131,18 @@ Deduplication is by knowledge ID (`seenIds` Set).
 
 ### Change: Removed Username Filter
 
-The RAG search filter in `DefaultKnowledgeTool.searchKnowledge` was optimized to filter by `knowledgeId` only, removing the redundant `username` filter:
+The RAG search filter in `DefaultKnowledgeTool.searchKnowledge` was optimized to filter by `knowledgeId` only, removing the redundant `username` filter.
+
+**Before** — SpEL filter included both `knowledgeId` and `username`:
 
 ```java
-// Before: filter by both knowledgeId AND username
-// After: filter by knowledgeId only
-// "knowledgeId already implies ownership — no need to double-filter by username"
+// 'type' eq 'knowledge' and 'metadata.knowledgeId' eq '{knowledgeId}' and 'metadata.username' eq '{username}'
+```
+
+**After** — SpEL filter contains only `knowledgeId` and `type`:
+
+```java
+// 'type' eq 'knowledge' and 'metadata.knowledgeId' eq '{knowledgeId}'
 ```
 
 The filter expression now contains:
@@ -184,4 +190,5 @@ All paths are under `~/.loom/`:
 | Migration | Content |
 |---|---|
 | `V1.0__init.sql` | Base schema: `knowledge`, `knowledge_file`, `user_info`, `role`, `user_role` |
+| `V2.0__subtask_and_schedule.sql` | Sub-task/history/schedule tables, conversation sidebar columns, `SPRING_AI_CHAT_MEMORY` widen |
 | `V3.0__knowledge_market.sql` | Market tables: `loom_market_knowledge`, `loom_user_knowledge`, `loom_role_knowledge`, `loom_file_content` |

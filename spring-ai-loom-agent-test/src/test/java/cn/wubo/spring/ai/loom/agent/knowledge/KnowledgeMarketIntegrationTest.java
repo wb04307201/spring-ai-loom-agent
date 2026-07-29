@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.knowledge;
 
+import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.model.RoleKnowledgeItem;
@@ -291,7 +292,8 @@ class KnowledgeMarketIntegrationTest {
         marketService.submit(kb.id());
 
         assertThatThrownBy(() -> marketService.submit(kb.id()))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(LoomAgentRuntimeException.class)
+                .hasMessageContaining("已存在同名知识库提交");
         UserContextHolder.clear();
     }
 
@@ -306,7 +308,8 @@ class KnowledgeMarketIntegrationTest {
         // Non-admin should fail
         UserContextHolder.setCurrentUser(USER_A);
         assertThatThrownBy(() -> marketService.approve(submitted.id()))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(LoomAgentRuntimeException.class)
+                .hasMessageContaining("需要管理员权限");
         UserContextHolder.clear();
     }
 
@@ -324,7 +327,8 @@ class KnowledgeMarketIntegrationTest {
         marketService.delete(marketId);
 
         assertThatThrownBy(() -> marketService.getById(marketId))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(LoomAgentRuntimeException.class)
+                .hasMessageContaining("市场知识库不存在");
         UserContextHolder.clear();
     }
 }
