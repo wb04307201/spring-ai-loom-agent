@@ -112,6 +112,10 @@
                         <span>📚</span>
                         <span>知识空间</span>
                     </button>
+                    <button class="toolbar-btn" id="km-button">
+                        <span>🏪</span>
+                        <span>知识市场</span>
+                    </button>
                     <button class="toolbar-btn" id="mcp-button">
                         <span>🔧</span>
                         <span>MCP服务</span>
@@ -293,6 +297,29 @@
                             <p style="font-size: 16px; margin-bottom: 8px;">选择一个知识库查看文件</p>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Knowledge Market Modal -->
+    <div id="km-modal-overlay" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 1000px; max-height: 85vh;">
+            <div class="modal-header">
+                <h3>知识库市场</h3>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <button class="close-button" id="km-close-btn">&times;</button>
+                </div>
+            </div>
+            <!-- Tab switching: market / subscriptions / submissions -->
+            <div class="km-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary, #f8fafc);">
+                <button class="km-tab active" data-tab="market" style="flex: 1; padding: 10px 4px; border: none; background: transparent; cursor: pointer; font-size: 13px; border-bottom: 2px solid var(--primary-color); color: var(--primary-color);">市场</button>
+                <button class="km-tab" data-tab="subscriptions" style="flex: 1; padding: 10px 4px; border: none; background: transparent; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; color: var(--text-muted);">我的订阅</button>
+                <button class="km-tab" data-tab="submissions" style="flex: 1; padding: 10px 4px; border: none; background: transparent; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; color: var(--text-muted);">我的发布</button>
+            </div>
+            <div class="modal-body" style="padding: 0; flex: 1; display: flex; flex-direction: column;">
+                <div class="km-list" id="km-list" style="flex: 1; overflow: auto; padding: 16px;">
+                    <div class="loading-indicator">加载中...</div>
                 </div>
             </div>
         </div>

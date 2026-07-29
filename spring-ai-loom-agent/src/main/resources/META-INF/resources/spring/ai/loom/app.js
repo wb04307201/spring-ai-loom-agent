@@ -48,6 +48,13 @@ const API = {
     deleteKnowledgeFile: (knowledgeId, fileId) => `/spring/ai/loom/knowledge/${knowledgeId}/file/${fileId}`,
     uploadFile: '/spring/ai/loom/file/upload',
     checkKnowledgeUpload: '/spring/ai/loom/knowledge/checkKnowledgeUpload',
+    // Knowledge market
+    listMarketKnowledge: '/spring/ai/loom/api/knowledge-market',
+    pullMarketKnowledge: (id) => `/spring/ai/loom/api/knowledge-market/${id}/pull`,
+    submitToMarket: (id) => `/spring/ai/loom/api/knowledge/${id}/submit`,
+    listMySubmittedKnowledge: '/spring/ai/loom/api/knowledge-market/my-submitted',
+    withdrawMarketKnowledge: (id) => `/spring/ai/loom/api/knowledge-market/${id}`,
+    listAccessibleKnowledge: '/spring/ai/loom/api/knowledge/accessible',
     titleMaxLength: 20,
     sseTimeout: 0,
 };
@@ -495,6 +502,38 @@ const api = {
         });
         return r.ok ? r.json() : null;
     },
+
+    // Knowledge market
+    async listMarketKnowledge(page = 1, size = 20) {
+        const r = await apiFetch(`${API.listMarketKnowledge}?page=${page}&size=${size}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async pullMarketKnowledge(id) {
+        const r = await apiFetch(API.pullMarketKnowledge(id), { method: 'POST' });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async submitToMarket(knowledgeId) {
+        const r = await apiFetch(API.submitToMarket(knowledgeId), { method: 'POST' });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async listMySubmittedKnowledge() {
+        const r = await apiFetch(API.listMySubmittedKnowledge);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async withdrawMarketKnowledge(id) {
+        const r = await apiFetch(API.withdrawMarketKnowledge(id), { method: 'DELETE' });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async listAccessibleKnowledge() {
+        const r = await apiFetch(API.listAccessibleKnowledge);
+        return r.ok ? r.json() : [];
+    },
+
     async uploadFile(file) {
         const fd = new FormData();
         fd.append('file', file);
@@ -1485,6 +1524,7 @@ const knowledge = {
             const id = kb.id;
             const name = kb.name;
             const isChecked = state.enabledKnowledgeIds.includes(id);
+            const isCreator = kb.username === state.username;
             const div = document.createElement('div');
             div.className = 'ks-item' + (isChecked ? ' active' : '');
             div.innerHTML = `
@@ -1492,6 +1532,7 @@ const knowledge = {
                 <span class="ks-item-name">${name}</span>
                 <span class="ks-item-desc">${kb.description || ''}</span>
                 <button class="ks-item-edit" title="编辑">✎</button>
+                ${isCreator ? '<button class="ks-item-share" title="共享到市场">&#x1f517;</button>' : ''}
                 <button class="ks-item-delete">&times;</button>`;
             const checkbox = div.querySelector('input[type="checkbox"]');
             checkbox.addEventListener('change', () => {
@@ -1510,6 +1551,12 @@ const knowledge = {
                 e.stopPropagation();
                 this.edit(id);
             });
+            if (isCreator) {
+                div.querySelector('.ks-item-share').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.shareToMarket(id);
+                });
+            }
             div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.delete(id);
@@ -1679,10 +1726,12 @@ const knowledge = {
                     <td>${formatFileSize(f.size || 0)}</td>
                     <td>${formatDate(f.uploadTime || f.createTime)}</td>
                     <td>
-                        <button class="action-btn" onclick="previewFile('${f.id}')">预览</button>
-                        <button class="action-btn" onclick="downloadFile('${f.id}')">下载</button>
-                        <button class="action-btn" data-file-id="${f.id}">删除</button>
+                        <button class="action-btn action-btn-preview" data-file-preview="${f.id}">预览</button>
+                        <button class="action-btn action-btn-download" data-file-download="${f.id}">下载</button>
+                        <button class="action-btn action-btn-delete" data-file-id="${f.id}">删除</button>
                     </td>`;
+                row.querySelector('[data-file-preview]').addEventListener('click', () => window.previewFile(f.id));
+                row.querySelector('[data-file-download]').addEventListener('click', () => window.downloadFile(f.id));
                 row.querySelector('[data-file-id]').addEventListener('click', () => this.deleteFile(kbId, f.id, row));
                 tbody.appendChild(row);
             }
@@ -1716,6 +1765,185 @@ const knowledge = {
             }
         } catch (e) {
             showToast('删除失败', 'error');
+        }
+    },
+
+    async shareToMarket(id) {
+        const kb = this._kbList.find(k => k.id === id);
+        if (!kb) return;
+        const ok = await dialog.confirm({
+            title: '共享到知识库市场',
+            message: `确认将「${kb.name}」共享到市场？共享后其他用户可浏览并添加到自己的知识库。`,
+            okText: '共享',
+        });
+        if (!ok) return;
+        try {
+            await api.submitToMarket(id);
+            showToast(`已将「${kb.name}」共享到市场`, 'success');
+        } catch (e) {
+            showToast('共享失败：' + e.message, 'error');
+        }
+    },
+
+    /** Open the knowledge market modal */
+    openMarket() {
+        ui.showModal('km-modal-overlay');
+        this._kmCurrentTab = this._kmCurrentTab || 'market';
+        this._renderMarketModal();
+    },
+
+    closeMarket() {
+        ui.hideModal('km-modal-overlay');
+    },
+
+    _kmCurrentTab: 'market',
+
+    _bindMarketTabs() {
+        if (this._kmTabsBound) return;
+        document.querySelectorAll('#km-modal-overlay .km-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this._kmCurrentTab = btn.getAttribute('data-tab');
+                document.querySelectorAll('#km-modal-overlay .km-tab').forEach(b => {
+                    const active = b.getAttribute('data-tab') === this._kmCurrentTab;
+                    b.classList.toggle('active', active);
+                    b.style.borderBottomColor = active ? 'var(--primary-color)' : 'transparent';
+                    b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
+                });
+                this._renderMarketModal();
+            });
+        });
+        this._kmTabsBound = true;
+    },
+
+    _renderMarketModal() {
+        this._bindMarketTabs();
+        const tab = this._kmCurrentTab;
+        if (tab === 'market') this._renderMarketBrowse();
+        else if (tab === 'subscriptions') this._renderMySubscriptions();
+        else if (tab === 'submissions') this._renderMySubmissions();
+    },
+
+    async _renderMarketBrowse() {
+        const list = document.getElementById('km-list');
+        list.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        try {
+            const data = await api.listMarketKnowledge(1, 50);
+            const items = (data && data.content) || data || [];
+            if (!items || items.length === 0) {
+                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+                return;
+            }
+            list.innerHTML = items.map(kb => {
+                const pulled = kb.pulled;
+                return `
+                    <div class="km-item">
+                        <div class="km-item-header">
+                            <span class="km-item-name">${escapeHtml(kb.name)}</span>
+                            <span class="km-item-author">by ${escapeHtml(kb.username || kb.author)}</span>
+                        </div>
+                        <p class="km-item-desc">${escapeHtml(kb.description || '')}</p>
+                        <button class="km-pull-btn" data-km-pull="${kb.id}" ${pulled ? 'disabled' : ''}>
+                            ${pulled ? '已添加' : '添加到我的知识库'}
+                        </button>
+                    </div>`;
+            }).join('');
+            for (const btn of list.querySelectorAll('[data-km-pull]')) {
+                btn.addEventListener('click', () => this._pullMarketKnowledge(btn.getAttribute('data-km-pull')));
+            }
+        } catch (e) {
+            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    async _pullMarketKnowledge(id) {
+        try {
+            await api.pullMarketKnowledge(id);
+            showToast('已添加到我的知识库', 'success');
+            // Refresh the knowledge sidebar list
+            this.loadList();
+            // Re-render market browse to update button state
+            this._renderMarketBrowse();
+        } catch (e) {
+            showToast('添加失败：' + e.message, 'error');
+        }
+    },
+
+    async _renderMySubscriptions() {
+        const list = document.getElementById('km-list');
+        list.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        try {
+            const items = await api.listAccessibleKnowledge();
+            const pulled = (items || []).filter(kb => kb.source === 'MARKET_PULLED' || kb.fromMarket);
+            if (pulled.length === 0) {
+                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有从市场添加的知识库</div>';
+                return;
+            }
+            list.innerHTML = pulled.map(kb => `
+                <div class="km-item">
+                    <div class="km-item-header">
+                        <span class="km-item-name">${escapeHtml(kb.name)}</span>
+                    </div>
+                    <p class="km-item-desc">${escapeHtml(kb.description || '')}</p>
+                    <span class="km-status-badge" style="background: #d1fae5; color: #065f46;">已订阅</span>
+                </div>
+            `).join('');
+        } catch (e) {
+            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    _kmStatusLabel(status) {
+        switch (status) {
+            case 'PENDING':  return { text: '审核中', bg: '#fef3c7', color: '#92400e' };
+            case 'APPROVED': return { text: '已通过', bg: '#d1fae5', color: '#065f46' };
+            case 'REJECTED': return { text: '已拒绝', bg: '#fee2e2', color: '#991b1b' };
+            default:         return { text: status || '未知', bg: '#f1f5f9', color: '#475569' };
+        }
+    },
+
+    async _renderMySubmissions() {
+        const list = document.getElementById('km-list');
+        list.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        try {
+            const items = await api.listMySubmittedKnowledge();
+            if (!items || items.length === 0) {
+                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有提交到市场的知识库<br><br>在知识空间列表中点击 🔗 按钮共享到市场</div>';
+                return;
+            }
+            list.innerHTML = items.map(kb => {
+                const st = this._kmStatusLabel(kb.status);
+                return `
+                    <div class="km-item">
+                        <div class="km-item-header">
+                            <span class="km-item-name">${escapeHtml(kb.name)}</span>
+                            <span class="km-status-badge" style="background: ${st.bg}; color: ${st.color};">${st.text}</span>
+                        </div>
+                        <p class="km-item-desc">${escapeHtml(kb.description || '')}</p>
+                        ${kb.status === 'PENDING' ? `<button class="km-withdraw-btn" data-km-withdraw="${kb.id}">撤回</button>` : ''}
+                    </div>`;
+            }).join('');
+            for (const btn of list.querySelectorAll('[data-km-withdraw]')) {
+                btn.addEventListener('click', () => this._withdrawMarketKnowledge(btn.getAttribute('data-km-withdraw')));
+            }
+        } catch (e) {
+            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    async _withdrawMarketKnowledge(id) {
+        const ok = await dialog.confirm({
+            title: '撤回提交',
+            message: '确认撤回该知识库的市场提交？',
+            okText: '撤回',
+            danger: true,
+        });
+        if (!ok) return;
+        try {
+            await api.withdrawMarketKnowledge(id);
+            showToast('已撤回提交', 'success');
+            this._renderMarketModal();
+        } catch (e) {
+            showToast('撤回失败：' + e.message, 'error');
         }
     },
 
@@ -3668,6 +3896,9 @@ const bindAllEvents = () => {
     safeBindById('ks-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) knowledge.closePanel();
     });
+    safeBindById('km-modal-overlay', 'click', (e) => {
+        if (e.target === e.currentTarget) knowledge.closeMarket();
+    });
     safeBindById('file-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) fileMgr.closeModal();
     });
@@ -3701,6 +3932,7 @@ const bindAllEvents = () => {
     addIf('#new-chat-btn', () => conversation.createNew());
     addIf('#sidebar-toggle', () => ui.toggleSidebar());
     addIf('#ks-button', () => knowledge.openPanel());
+    addIf('#km-button', () => knowledge.openMarket());
     addIf('#mcp-button', () => mcp.openModal());
     addIf('#skills-button', () => skills.openModal());
     addIf('#file-manager-button', () => fileMgr.openModal());
@@ -3714,6 +3946,8 @@ const bindAllEvents = () => {
     addIf('#skill-add-btn', () => skills.showCreateForm());
     addIf('.ks-create-btn', () => knowledge.create());
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
+    addIf('#km-modal-overlay .close-button', () => knowledge.closeMarket());
+    addIf('#km-close-btn', () => knowledge.closeMarket());
 };
 
 // Init trigger — type="module" scripts are deferred, so by the time this
