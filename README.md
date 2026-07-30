@@ -22,12 +22,12 @@
 
 ## Features
 
-> **Core capabilities**: 💬 Streaming chat · 🖼 Multimodal · 📚 RAG · 🔧 MCP tools · 🧠 Skill library + market · 🧩 Sub-tasks · ⏰ Scheduled tasks · 🛡 RBAC · 🎛 Admin console — one dependency, batteries included.
+> **Core capabilities**: 💬 Streaming chat · 🖼 Multimodal · 📚 RAG · 🔧 MCP tools · 🧠 Skill market · 📦 Knowledge market · 🧩 Sub-tasks · ⏰ Scheduled tasks · 🛡 RBAC · 🎛 Admin console — one dependency, batteries included.
 
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
 - **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
-- **🧠 Skill Library + Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`
+- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / MCP descriptions / usage stats; admin-gated
@@ -225,7 +225,7 @@ spring:
                 description: Convert time between different time zones
 ```
 
-## Skill Library & Skill Market
+## Skill Market
 
 Skills are prompt templates that the LLM uses for recurring workflows. The data is **fully managed in the database** (no more yml `skills[]` block) and lives in three tables:
 
