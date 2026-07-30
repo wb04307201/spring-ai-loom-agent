@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.35
+> **Version**: 1.1.36
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -484,6 +484,143 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ---
 
+### 5.8 Knowledge Market
+
+> Knowledge market enables sharing knowledge bases across users. Workflow: submit → PENDING → admin approve → APPROVED → other users can subscribe.
+
+#### 5.8.1 Browse Approved Market Knowledge Bases
+
+```
+GET /spring/ai/loom/api/knowledge-market?page=1&size=20
+```
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description                |
+|-----------|--------|----------|----------------------------|
+| `page`    | int    | No       | Page number (default 1)    |
+| `size`    | int    | No       | Items per page (default 20)|
+
+**Response**: `MarketKnowledgeRecord[]` — Approved market knowledge bases.
+
+| Field          | Type   | Description                    |
+|----------------|--------|--------------------------------|
+| `id`           | string | Market knowledge ID            |
+| `username`     | string | Original author username       |
+| `name`         | string | Knowledge base name            |
+| `description`  | string | Knowledge base description     |
+| `status`       | string | `APPROVED`                     |
+| `submittedAt`  | string | Submission timestamp           |
+| `reviewedAt`   | string | Review timestamp               |
+
+---
+
+#### 5.8.2 Subscribe to Market Knowledge Base
+
+```
+POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description             |
+|-----------|--------|-------------------------|
+| `marketId`| string | Market knowledge ID     |
+
+**Response**: `{"success": true}` on success. Creates a subscription in `loom_user_knowledge` with `source=MARKET_PULLED`.
+
+---
+
+#### 5.8.3 Submit Knowledge Base to Market
+
+```
+POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
+```
+
+**Path Parameters**:
+
+| Parameter     | Type   | Description       |
+|---------------|--------|-------------------|
+| `knowledgeId` | string | Knowledge base ID |
+
+**Response**: `MarketKnowledgeRecord` — The created market entry with `status=PENDING`.
+
+**Constraints**: `(username, name)` must be unique. Duplicate submissions return 409.
+
+---
+
+#### 5.8.4 Withdraw Market Submission
+
+```
+DELETE /spring/ai/loom/api/knowledge-market/{marketId}
+```
+
+**Path Parameters**:
+
+| Parameter  | Type   | Description         |
+|------------|--------|---------------------|
+| `marketId` | string | Market knowledge ID |
+
+**Response**: `{"success": true}` on success. Only the original submitter can withdraw.
+
+---
+
+#### 5.8.5 Admin Approve Market Submission
+
+```
+POST /spring/ai/loom/api/knowledge-market/{marketId}/approve
+```
+
+**Path Parameters**:
+
+| Parameter  | Type   | Description         |
+|------------|--------|---------------------|
+| `marketId` | string | Market knowledge ID |
+
+**Response**: `MarketKnowledgeRecord` — Updated record with `status=APPROVED`.
+
+**Permission**: Admin only. Returns 403 for non-admin users.
+
+---
+
+#### 5.8.6 Admin Reject Market Submission
+
+```
+POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
+```
+
+**Path Parameters**:
+
+| Parameter  | Type   | Description         |
+|------------|--------|---------------------|
+| `marketId` | string | Market knowledge ID |
+
+**Response**: `MarketKnowledgeRecord` — Updated record with `status=REJECTED`.
+
+**Permission**: Admin only. Returns 403 for non-admin users.
+
+---
+
+#### 5.8.7 List My Subscribed Knowledge Bases
+
+```
+GET /spring/ai/loom/api/knowledge-market/my-pulled
+```
+
+**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has subscribed to from the market.
+
+---
+
+#### 5.8.8 List My Market Submissions
+
+```
+GET /spring/ai/loom/api/knowledge-market/my-submitted
+```
+
+**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (all statuses: PENDING / APPROVED / REJECTED).
+
+---
+
 ## 6. Skill Management
 
 > All skills live in the database (tables `market_skill` / `user_skill` / `role_skill`). The yml `skills[]` block is no longer read — it was replaced by 6 system-seeded `market_skill` rows plus an admin-controlled market workflow.
@@ -743,7 +880,7 @@ GET /spring/ai/chat/loom/mcp
   {
     "name": "weather-mcp",
     "title": "Weather",
-    "version": "1.1.35",
+    "version": "1.1.36",
     "description": "Provides real-time weather query service",
     "defaultSelected": true,
     "tools": [
@@ -1251,6 +1388,14 @@ spring:
 | 13 | `POST`   | `/spring/ai/loom/knowledge/{id}/upload`                 | Upload file to knowledge base        |
 | 14 | `GET`    | `/spring/ai/loom/knowledge/{id}/file`                   | List files in knowledge base         |
 | 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}`         | Delete file from knowledge base      |
+| 15a| `GET`    | `/spring/ai/loom/api/knowledge-market`                  | Browse approved market knowledge (paginated) |
+| 15b| `POST`   | `/spring/ai/loom/api/knowledge-market/{marketId}/pull`  | Subscribe to market knowledge        |
+| 15c| `POST`   | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit`    | Submit knowledge to market           |
+| 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}`       | Withdraw market submission           |
+| 15e| `POST`   | `/spring/ai/loom/api/knowledge-market/{marketId}/approve`| Admin approve market submission       |
+| 15f| `POST`   | `/spring/ai/loom/api/knowledge-market/{marketId}/reject`| Admin reject market submission       |
+| 15g| `GET`    | `/spring/ai/loom/api/knowledge-market/my-pulled`        | List my subscribed market knowledge  |
+| 15h| `GET`    | `/spring/ai/loom/api/knowledge-market/my-submitted`     | List my market submissions           |
 | 16 | `GET`    | `/spring/ai/chat/loom/mcp`                              | Get MCP servers and tools            |
 | 17 | `GET`    | `/spring/ai/loom/skill`                                 | List all skills                      |
 | 18 | `PUT`    | `/spring/ai/loom/skill`                                 | Create or update a skill             |

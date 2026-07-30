@@ -47,16 +47,16 @@ ZONE 1: HERO (top third of the poster, centered). In this order top to bottom:
   - One very large bold white single-line title: Spring AI LoomAgent
   - One smaller cyan tagline directly below: Spring Boot AI Agent Out-of-the-Box Solution
   - A clear empty gap
-  - At the center, a thin horizontal outline pill (a rounded rectangle with a hairline cyan border, no fill) containing on a single line, in small uppercase: 04 PILLARS  -  08 TOOLS  -  05 ON  -  02 OPT-IN
+  - At the center, a thin horizontal outline pill (a rounded rectangle with a hairline cyan border, no fill) containing on a single line, in small uppercase: 05 PILLARS  -  08 TOOLS  -  06 ON  -  02 OPT-IN
 
-ZONE 2: small uppercase section label on the left in cyan: 01 PILLARS. Below it one horizontal row of four plain rounded rectangle cards, all cyan, all the same size, in this exact order from left to right: Chat, Knowledge, MCP, Skill Market.
+ZONE 2: small uppercase section label on the left in cyan: 01 PILLARS. Below it one horizontal row of five plain rounded rectangle cards, all cyan, all the same size, in this exact order from left to right: Chat, Knowledge, Files, MCP, Skill Market.
 
-ZONE 3: small uppercase section label on the left in cyan: 02 TOOLS. To the right of that label on the same horizontal line, a small caption reading: 5 on  2 opt-in. Below the label, one horizontal row of eight plain rounded rectangle cards, all cyan, all the same size, in this exact order from left to right. Every card is equal to every other card (no card is highlighted, no card is a different color, no card has a star):
+ZONE 3: small uppercase section label on the left in cyan: 02 TOOLS. To the right of that label on the same horizontal line, a small caption reading: 6 on  2 opt-in. Below the label, one horizontal row of eight plain rounded rectangle cards, all cyan, all the same size, in this exact order from left to right. Every card is equal to every other card (no card is highlighted, no card is a different color, no card has a star):
   Files, Git, Maven, Deploy, Time, Skill, Sub-task, Schedule
-  For each of these eight cards, put a small badge with the tool count (just the digit) inside the icon area at the top: 16, 28, 6, 1, 2, 2, 1, 4. The card label sits at the bottom edge.
+  For each of these eight cards, put a small badge with the tool count (just the digit) inside the icon area at the top: 16, 28, 6, 1, 2, 2, 4, 4. The card label sits at the bottom edge.
 
 ZONE 4: small uppercase section label on the left in cyan: 03 PLATFORM. Below it, two stacked rows:
-  Row A: one horizontal row of five small chip rectangles on the left in this order: Users, Roles, MCP, Market, Sessions. With a clear gap to the right on the same horizontal line, two filled pills: the LEFT pill is the ONLY orange-filled element on the whole poster and is labelled Admin. The right pill is cyan-filled and labelled User.
+  Row A: one horizontal row of six small chip rectangles on the left in this order: Users, Roles, MCP, Market, KB Market, Sessions. With a clear gap to the right on the same horizontal line, two filled pills: the LEFT pill is the ONLY orange-filled element on the whole poster and is labelled Admin. The right pill is cyan-filled and labelled User.
   Row B: one horizontal row of thin cyan pill labels in this exact order: Spring Boot, Spring AI, JDK 17, JVector, JGit, H2, Flyway, ChatMemory. JVector is one seven-letter word starting with capital J, then capital V, then lower-case e c t o r.
 
 ZONE 5: small uppercase section label on the left in cyan: 04 BUILD. Below it, one horizontal row of four plain rounded rectangle boxes connected by right-pointing arrows, in this order: core, config, starter, test.
@@ -78,16 +78,16 @@ ZH_LAYOUT = """\
   - 一行超大白色粗体标题：Spring AI LoomAgent
   - 紧接下方一行较小的青色副标题：Spring Boot AI Agent 开箱即用方案
   - 一段空白
-  - 居中位置一个细轮廓横向胶囊（圆角矩形，只有青色描边，没有填充），里面单行小号大写英文：04 PILLARS  -  08 TOOLS  -  05 ON  -  02 OPT-IN
+  - 居中位置一个细轮廓横向胶囊（圆角矩形，只有青色描边，没有填充），里面单行小号大写英文：05 PILLARS  -  08 TOOLS  -  06 ON  -  02 OPT-IN
 
-02 区：左侧一行青色小号大写章节标签：01 核心。其下方一行四张圆角矩形卡片，全部青色等大，从左到右依次为：对话、知识库、MCP、技能市场。
+02 区：左侧一行青色小号大写章节标签：01 核心。其下方一行五张圆角矩形卡片，全部青色等大，从左到右依次为：对话、知识库、文件、MCP、技能市场。
 
-03 区：左侧一行青色小号大写章节标签：02 工具。在章节标签右侧同一行小号说明文字：5 启用  2 手动。下方一行八张圆角矩形卡片，全部青色等大，从左到右依次为。每张卡片完全相同（没有高亮、没有其他颜色、没有五角星）：
+03 区：左侧一行青色小号大写章节标签：02 工具。在章节标签右侧同一行小号说明文字：6 启用  2 手动。下方一行八张圆角矩形卡片，全部青色等大，从左到右依次为。每张卡片完全相同（没有高亮、没有其他颜色、没有五角星）：
   文件、Git、Maven、部署、时间、技能、子任务、定时
-  每张卡片在图标区顶端放一个小数字徽章：16、28、6、1、2、2、1、4。卡片标签贴在底部。
+  每张卡片在图标区顶端放一个小数字徽章：16、28、6、1、2、2、4、4。卡片标签贴在底部。
 
 04 区：左侧一行青色小号大写章节标签：03 平台。其下方两行堆叠：
-  第 A 行：左侧一行五个小芯片矩形，依次为：用户、角色、MCP、市场、会话。右侧有明显间隔距离，两个填充胶囊：左边那个是全海报 EXACTLY 唯一的橙色填充胶囊，标"管理员"。右边那个青色填充胶囊标"普通用户"。
+  第 A 行：左侧一行六个小芯片矩形，依次为：用户、角色、MCP、市场、知识库市场、会话。右侧有明显间隔距离，两个填充胶囊：左边那个是全海报 EXACTLY 唯一的橙色填充胶囊，标"管理员"。右边那个青色填充胶囊标"普通用户"。
   第 B 行：一行细青色胶囊标签，依次为：Spring Boot、Spring AI、JDK 17、JVector、JGit、H2、Flyway、ChatMemory。JVector 是一个单词：以大写 J 和大写 V 开头，后接小写 e、c、t、o、r。
 
 05 区：左侧一行青色小号大写章节标签：04 构建。其下方一行四个圆角矩形方框，用向右箭头连接，从左到右：核心、配置、启动、测试。
@@ -228,7 +228,7 @@ def call_qwen_image_fallback(prompt: str, api_key: str) -> bytes:
     raise RuntimeError("Task timeout")
 
 
-def generate_one(lang: str, prompt: str, api_key: str, workspace_id: str, out_path: Path) -> None:
+def generate_one(prompt: str, api_key: str, workspace_id: str, out_path: Path) -> None:
     """优先 wan2.7-image，失败回退 qwen-image。"""
     if workspace_id:
         try:
@@ -298,7 +298,7 @@ def main():
         if suffix:
             out = out_dir / f"project-overview-en{suffix}.png"
         print(f"[GEN] en -> {out}", file=sys.stderr)
-        generate_one("en", en_prompt, args.api_key, args.workspace_id, out)
+        generate_one(en_prompt, args.api_key, args.workspace_id, out)
         print(f"[OK]  en: {out}", file=sys.stderr)
 
     if args.only in ("zh", "both"):
@@ -306,7 +306,7 @@ def main():
         if suffix:
             out = out_dir / f"project-overview-zh{suffix}.png"
         print(f"[GEN] zh -> {out}", file=sys.stderr)
-        generate_one("zh", zh_prompt, args.api_key, args.workspace_id, out)
+        generate_one(zh_prompt, args.api_key, args.workspace_id, out)
         print(f"[OK]  zh: {out}", file=sys.stderr)
 
     print("[DONE]", file=sys.stderr)

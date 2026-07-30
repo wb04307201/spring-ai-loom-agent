@@ -73,7 +73,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.35</version>
+    <version>1.1.36</version>
 </dependency>
 ```
 
@@ -228,7 +228,7 @@ spring:
 ### 普通用户的技能生命周期
 
 1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`。写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）。
-2. **提交到市场** — 技能库 → **提交** Tab，选自己的 Skill + 填版本号（如 `1.0.0`）。写入 `market_skill`，`status=PENDING`。
+2. **提交到市场** — 技能库 → **共享** Tab，选自己的 Skill + 填版本号（如 `1.0.0`）。写入 `market_skill`，`status=PENDING`。
 3. **等待审批** — admin 在 **控制台 → Skill 市场** 审。`PENDING` → `APPROVED` 后才对全员可见。
 4. **从市场拉取** — 技能库 → **市场** Tab，点 **拉取**。写入 `user_skill`，`source=MARKET_PULLED`。可改 `description` 和 `default_loaded`，**不能改 content**（要更新就重新拉取）。
 5. **通过角色授权获得** — admin 在角色管理里给某角色授权某 market_skill，登录后自动注入到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是具体版本）。
@@ -253,15 +253,29 @@ spring:
 
 ### 聊天 UI 用法
 
-点 **🧠 技能库** 按钮打开 —— 三个 Tab：
+点 **🧠 技能库** 按钮打开 —— 四个 Tab：
 
 - **我的** — 你的 `user_skill`（admin 还会看到 union view）。点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）。
 - **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下。
-- **提交** — 选自建 skill + 填版本号，提交到 PENDING。
+- **共享** — 选自建 skill + 填版本号，提交到 PENDING，等 admin 审批。
+- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED），可撤回 PENDING 的。
 
 `content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）。
 
 完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
+
+## 知识库 & 知识市场
+
+知识库存储用于 RAG 检索的文档。知识空间弹窗有四个 Tab：
+
+- **我的** — 自己的知识库。创建、上传文档、删除。
+- **市场** — 浏览已审批的市场知识库，**添加到我的知识库**（订阅）。
+- **共享** — 自己尚未共享的知识库，点 **共享到市场** 提交给 admin 审批。
+- **我的发布** — 查看自己提交到市场的知识库状态（PENDING / APPROVED / REJECTED），可撤回 PENDING 的。
+
+市场流程：提交 → PENDING → admin 审批 → APPROVED → 其他用户可订阅。也可通过角色授权自动下发知识库给用户（类似技能）。
+
+知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)。
 
 ---
 

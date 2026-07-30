@@ -1,4 +1,10 @@
 -- V3.0__knowledge_market.sql
+-- 知识库增加描述字段
+ALTER TABLE knowledge ADD COLUMN description VARCHAR(500) NULL;
+
+-- 对话增加启用知识库ID列表（JSON格式存储）
+ALTER TABLE user_conversation ADD COLUMN enabled_knowledge_ids VARCHAR(1000) NULL;
+
 -- 知识库存储抽象：新增 loom_file_content 表用于数据库模式下的文件内容存储
 -- 知识库市场：新增 loom_market_knowledge / loom_user_knowledge / loom_role_knowledge 表
 
