@@ -2637,6 +2637,13 @@ public class LoomAgentConfiguration {
                         .body(marketService.listMyPulled(username));
             });
 
+            // 获取我提交到市场的知识库列表
+            builder.GET("/spring/ai/loom/api/knowledge-market/my-submitted", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(marketService.listMySubmitted(username));
+            });
+
             return builder.build();
         }
 

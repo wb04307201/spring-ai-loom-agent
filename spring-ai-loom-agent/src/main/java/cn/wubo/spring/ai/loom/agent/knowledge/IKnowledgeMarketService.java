@@ -26,6 +26,9 @@ public interface IKnowledgeMarketService {
     /** 提交知识库到市场（status=PENDING） */
     MarketKnowledgeRecord submit(String knowledgeId);
 
+    /** 列出当前用户提交的市场知识库（含所有状态） */
+    List<MarketKnowledgeRecord> listMySubmitted(String username);
+
     /* ===== admin 审批 ===== */
 
     /** 审批通过 */

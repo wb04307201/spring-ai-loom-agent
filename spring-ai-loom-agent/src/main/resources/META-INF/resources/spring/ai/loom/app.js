@@ -1498,6 +1498,7 @@ const chat = {
 const knowledge = {
     currentKbId: null,
     _kbList: [],
+    currentTab: 'mine',
 
     openPanel() {
         ui.showModal('ks-modal-overlay');
@@ -1512,11 +1513,44 @@ const knowledge = {
         try {
             const data = await api.listKnowledge();
             this._kbList = data || [];
-            this.renderList(this._kbList);
+            this._renderCurrentTab();
         } catch (e) {
             console.warn('[knowledge.loadList] failed:', e);
             this._kbList = [];
-            this.renderList([]);
+            this._renderCurrentTab();
+        }
+    },
+
+    _bindTabs() {
+        if (this._tabsBound) return;
+        document.querySelectorAll('#ks-modal-overlay .ks-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.currentTab = btn.getAttribute('data-tab');
+                document.querySelectorAll('#ks-modal-overlay .ks-tab').forEach(b => {
+                    const active = b.getAttribute('data-tab') === this.currentTab;
+                    b.classList.toggle('active', active);
+                    b.style.borderBottomColor = active ? 'var(--primary-color)' : 'transparent';
+                    b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
+                });
+                this._renderCurrentTab();
+            });
+        });
+        this._tabsBound = true;
+    },
+
+    _renderCurrentTab() {
+        this._bindTabs();
+        const container = document.getElementById('ks-sidebar');
+        const detail = document.getElementById('ks-detail');
+
+        if (this.currentTab === 'mine') {
+            this.renderList(this._kbList);
+        } else if (this.currentTab === 'market') {
+            this._renderMarketTab(container, detail);
+        } else if (this.currentTab === 'share') {
+            this._renderShareTab(container, detail);
+        } else if (this.currentTab === 'mypublish') {
+            this._renderMyPublishTab(container, detail);
         }
     },
 
@@ -1540,7 +1574,6 @@ const knowledge = {
                 <span class="ks-item-name">${name}</span>
                 <span class="ks-item-desc">${kb.description || ''}</span>
                 ${isCreator ? '<button class="ks-item-edit" title="编辑">&#x270E;</button>' : ''}
-                ${isCreator ? '<button class="ks-item-share" title="共享到市场">&#x1f517;</button>' : ''}
                 ${isCreator ? '<button class="ks-item-delete">&times;</button>' : ''}`;
             const checkbox = div.querySelector('input[type="checkbox"]');
             checkbox.addEventListener('change', () => {
@@ -1559,12 +1592,6 @@ const knowledge = {
                 div.querySelector('.ks-item-edit').addEventListener('click', (e) => {
                     e.stopPropagation();
                     this.edit(id);
-                });
-            }
-            if (isCreator) {
-                div.querySelector('.ks-item-share').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.shareToMarket(id);
                 });
             }
             if (isCreator) {
@@ -1798,111 +1825,6 @@ const knowledge = {
         }
     },
 
-    /** Open the knowledge market modal */
-    openMarket() {
-        ui.showModal('km-modal-overlay');
-        this._kmCurrentTab = this._kmCurrentTab || 'market';
-        this._renderMarketModal();
-    },
-
-    closeMarket() {
-        ui.hideModal('km-modal-overlay');
-    },
-
-    _kmCurrentTab: 'market',
-
-    _bindMarketTabs() {
-        if (this._kmTabsBound) return;
-        document.querySelectorAll('#km-modal-overlay .km-tab').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this._kmCurrentTab = btn.getAttribute('data-tab');
-                document.querySelectorAll('#km-modal-overlay .km-tab').forEach(b => {
-                    const active = b.getAttribute('data-tab') === this._kmCurrentTab;
-                    b.classList.toggle('active', active);
-                    b.style.borderBottomColor = active ? 'var(--primary-color)' : 'transparent';
-                    b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
-                });
-                this._renderMarketModal();
-            });
-        });
-        this._kmTabsBound = true;
-    },
-
-    _renderMarketModal() {
-        this._bindMarketTabs();
-        const tab = this._kmCurrentTab;
-        if (tab === 'market') this._renderMarketBrowse();
-        else if (tab === 'subscriptions') this._renderMySubscriptions();
-        else if (tab === 'submissions') this._renderMySubmissions();
-    },
-
-    async _renderMarketBrowse() {
-        const list = document.getElementById('km-list');
-        list.innerHTML = '<div class="loading-indicator">加载中...</div>';
-        try {
-            const data = await api.listMarketKnowledge(1, 50);
-            const items = (data && data.content) || data || [];
-            if (!items || items.length === 0) {
-                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
-                return;
-            }
-            list.innerHTML = items.map(kb => {
-                const pulled = kb.pulled;
-                return `
-                    <div class="km-item">
-                        <div class="km-item-header">
-                            <span class="km-item-name">${escapeHtml(kb.name)}</span>
-                            <span class="km-item-author">by ${escapeHtml(kb.username || kb.author)}</span>
-                        </div>
-                        <p class="km-item-desc">${escapeHtml(kb.description || '')}</p>
-                        <button class="km-pull-btn" data-km-pull="${kb.id}" ${pulled ? 'disabled' : ''}>
-                            ${pulled ? '已添加' : '添加到我的知识库'}
-                        </button>
-                    </div>`;
-            }).join('');
-            for (const btn of list.querySelectorAll('[data-km-pull]')) {
-                btn.addEventListener('click', () => this._pullMarketKnowledge(btn.getAttribute('data-km-pull')));
-            }
-        } catch (e) {
-            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
-        }
-    },
-
-    async _pullMarketKnowledge(id) {
-        try {
-            await api.pullMarketKnowledge(id);
-            showToast('已添加到我的知识库', 'success');
-            await this.loadList();
-            this._renderMarketBrowse();
-        } catch (e) {
-            showToast('添加失败：' + e.message, 'error');
-        }
-    },
-
-    async _renderMySubscriptions() {
-        const list = document.getElementById('km-list');
-        list.innerHTML = '<div class="loading-indicator">加载中...</div>';
-        try {
-            const items = await api.listAccessibleKnowledge();
-            const pulled = (items || []).filter(kb => kb.source === 'MARKET_PULLED' || kb.fromMarket);
-            if (pulled.length === 0) {
-                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有从市场添加的知识库</div>';
-                return;
-            }
-            list.innerHTML = pulled.map(kb => `
-                <div class="km-item">
-                    <div class="km-item-header">
-                        <span class="km-item-name">${escapeHtml(kb.name)}</span>
-                    </div>
-                    <p class="km-item-desc">${escapeHtml(kb.description || '')}</p>
-                    <span class="km-status-badge" style="background: #d1fae5; color: #065f46;">已订阅</span>
-                </div>
-            `).join('');
-        } catch (e) {
-            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
-        }
-    },
-
     _kmStatusLabel(status) {
         switch (status) {
             case 'PENDING':  return { text: '审核中', bg: '#fef3c7', color: '#92400e' };
@@ -1912,47 +1834,119 @@ const knowledge = {
         }
     },
 
-    async _renderMySubmissions() {
-        const list = document.getElementById('km-list');
-        list.innerHTML = '<div class="loading-indicator">加载中...</div>';
+    async _renderMarketTab(container, detail) {
+        container.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
+        try {
+            const data = await api.listMarketKnowledge(1, 50);
+            const items = (data && data.content) || data || [];
+            if (!items || items.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+                return;
+            }
+            container.innerHTML = '';
+            for (const kb of items) {
+                const pulled = kb.pulled;
+                const div = document.createElement('div');
+                div.className = 'ks-item';
+                div.innerHTML = `
+                    <span class="ks-item-name">${escapeHtml(kb.name)}</span>
+                    <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author)}</span>
+                    <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+                    <button class="ks-market-pull-btn" data-market-id="${kb.id}" ${pulled ? 'disabled' : ''} style="margin-top: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;">
+                        ${pulled ? '已添加' : '添加到我的知识库'}
+                    </button>
+                `;
+                div.querySelector('.ks-market-pull-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._pullMarketKnowledge(kb.id);
+                });
+                container.appendChild(div);
+            }
+        } catch (e) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    async _pullMarketKnowledge(id) {
+        try {
+            await api.pullMarketKnowledge(id);
+            showToast('已添加到我的知识库', 'success');
+            await this.loadList();
+            this._renderCurrentTab();
+        } catch (e) {
+            showToast('添加失败：' + e.message, 'error');
+        }
+    },
+
+    async _renderShareTab(container, detail) {
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库共享到市场</div>';
+        const ownKbs = (this._kbList || []).filter(kb => kb.username === state.username);
+        if (ownKbs.length === 0) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有自建的知识库<br>切到「我的」→ 创建一个再来共享</div>';
+            return;
+        }
+        container.innerHTML = '';
+        for (const kb of ownKbs) {
+            const div = document.createElement('div');
+            div.className = 'ks-item';
+            div.innerHTML = `
+                <span class="ks-item-name">${escapeHtml(kb.name)}</span>
+                <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+                <button class="ks-share-btn" data-kb-id="${kb.id}" style="margin-top: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;">共享到市场</button>
+            `;
+            div.querySelector('.ks-share-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.shareToMarket(kb.id);
+            });
+            container.appendChild(div);
+        }
+    },
+
+    async _renderMyPublishTab(container, detail) {
+        container.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>';
         try {
             const items = await api.listMySubmittedKnowledge();
             if (!items || items.length === 0) {
-                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有提交到市场的知识库<br><br>在知识空间列表中点击 🔗 按钮共享到市场</div>';
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有共享到市场的知识库<br><br>切到「共享」Tab 从自建知识库发起共享</div>';
                 return;
             }
-            list.innerHTML = items.map(kb => {
+            container.innerHTML = '';
+            for (const kb of items) {
                 const st = this._kmStatusLabel(kb.status);
-                return `
-                    <div class="km-item">
-                        <div class="km-item-header">
-                            <span class="km-item-name">${escapeHtml(kb.name)}</span>
-                            <span class="km-status-badge" style="background: ${st.bg}; color: ${st.color};">${st.text}</span>
-                        </div>
-                        <p class="km-item-desc">${escapeHtml(kb.description || '')}</p>
-                        ${kb.status === 'PENDING' ? `<button class="km-withdraw-btn" data-km-withdraw="${kb.id}">撤回</button>` : ''}
-                    </div>`;
-            }).join('');
-            for (const btn of list.querySelectorAll('[data-km-withdraw]')) {
-                btn.addEventListener('click', () => this._withdrawMarketKnowledge(btn.getAttribute('data-km-withdraw')));
+                const div = document.createElement('div');
+                div.className = 'ks-item';
+                div.innerHTML = `
+                    <span class="ks-item-name">${escapeHtml(kb.name)} <span class="km-status-badge" style="background: ${st.bg}; color: ${st.color}; padding: 1px 6px; border-radius: 3px; font-size: 10px;">${st.text}</span></span>
+                    <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+                    ${kb.status === 'PENDING' ? `<button class="ks-withdraw-btn" data-market-id="${kb.id}" style="margin-top: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; background: var(--warning-color, #f59e0b); color: white; border: none; border-radius: 3px;">撤回</button>` : ''}
+                `;
+                if (kb.status === 'PENDING') {
+                    div.querySelector('.ks-withdraw-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this._withdrawMarketKnowledge(kb.id);
+                    });
+                }
+                container.appendChild(div);
             }
         } catch (e) {
-            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
         }
     },
 
     async _withdrawMarketKnowledge(id) {
         const ok = await dialog.confirm({
-            title: '撤回提交',
-            message: '确认撤回该知识库的市场提交？',
+            title: '撤回共享',
+            message: '确认撤回该知识库的市场共享？',
             okText: '撤回',
             danger: true,
         });
         if (!ok) return;
         try {
             await api.withdrawMarketKnowledge(id);
-            showToast('已撤回提交', 'success');
-            this._renderMarketModal();
+            showToast('已撤回共享', 'success');
+            this._renderCurrentTab();
         } catch (e) {
             showToast('撤回失败：' + e.message, 'error');
         }
@@ -3141,7 +3135,7 @@ const skills = {
     },
 
     _renderSubmitTab(container, detail) {
-        // 列出自建的 Skill（source=USER_CREATED）作为"可选提交"
+        // 列出自建的 Skill（source=USER_CREATED）作为"可选共享"
         api.listSkills().then(mine => {
             const userCreated = (mine || []).filter(s => s.source === 'USER_CREATED');
             container.innerHTML = '';
@@ -3177,7 +3171,7 @@ const skills = {
         api.listMySubmittedSkills().then(data => {
             container.innerHTML = '';
             if (!data || data.length === 0) {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有向市场发布 Skill<br><br>切到「提交」Tab 从自建 Skill 发起提交</div>';
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有向市场共享 Skill<br><br>切到「共享」Tab 从自建 Skill 发起共享</div>';
                 detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择左侧 Skill 查看详情</div>';
                 return;
             }
@@ -3206,7 +3200,7 @@ const skills = {
                     <div>名称：${escapeHtml(skill.name)}</div>
                     <div>版本：v${escapeHtml(skill.version)}</div>
                     <div>状态：<span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
-                    <div>提交时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : '-'}</div>
+                    <div>共享时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : '-'}</div>
                     ${skill.reviewedAt ? '<div>审核时间：' + new Date(skill.reviewedAt).toLocaleString() + '</div>' : ''}
                     ${skill.reviewedBy ? '<div>审核人：' + escapeHtml(skill.reviewedBy) + '</div>' : ''}
                     ${skill.reviewComment ? '<div>审核意见：' + escapeHtml(skill.reviewComment) + '</div>' : ''}
@@ -3217,7 +3211,7 @@ const skills = {
         if (skill.status === 'PENDING') {
             html += `
                 <div style="display: flex; gap: 12px; margin-top: 8px;">
-                    <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回提交</button>
+                    <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享</button>
                 </div>
             `;
         }
@@ -3231,7 +3225,7 @@ const skills = {
     },
 
     async handleWithdraw(skill) {
-        if (!confirm(`确认撤回「${skill.name}」的提交？`)) return;
+        if (!confirm(`确认撤回「${skill.name}」的共享？`)) return;
         try {
             await api.withdrawMarketSkill(skill.id);
             showToast(`已撤回「${skill.name}」`, 'success');
@@ -3246,18 +3240,18 @@ const skills = {
         detail.innerHTML = `
             <div style="display: flex; flex-direction: column; gap: 16px;">
                 <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
-                    提交「<strong>${escapeHtml(skill.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 拉取；<br>
-                    你的本地实例保持不变，提交不影响你的使用。
+                    共享「<strong>${escapeHtml(skill.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 拉取；<br>
+                    你的本地实例保持不变，共享不影响你的使用。
                 </div>
                 <div>
                     <label class="param-label">版本号 <span style="color: var(--error-color);">*</span></label>
                     <input type="text" id="submit-skill-version" class="param-input" placeholder="例如 1.0.0（语义化版本）" value="1.0.0">
                 </div>
                 <div style="font-size: 12px; color: var(--text-muted);">
-                    提交后状态为 PENDING。同名+同版本号不能重复提交。
+                    共享后状态为 PENDING。同名+同版本号不能重复共享。
                 </div>
                 <div style="display: flex; gap: 12px;">
-                    <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">提交到市场</button>
+                    <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">共享到市场</button>
                 </div>
             </div>
         `;
@@ -3274,10 +3268,10 @@ const skills = {
                 content: skill.content,
                 version: version,
             });
-            showToast(`已提交「${skill.name}」v${version}，等待管理员审批`, 'success');
+            showToast(`已共享「${skill.name}」v${version}，等待管理员审批`, 'success');
             this.renderModal();
         } catch (e) {
-            showToast('提交失败：' + e.message, 'error');
+            showToast('共享失败：' + e.message, 'error');
         }
     },
 
@@ -3907,9 +3901,6 @@ const bindAllEvents = () => {
     safeBindById('ks-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) knowledge.closePanel();
     });
-    safeBindById('km-modal-overlay', 'click', (e) => {
-        if (e.target === e.currentTarget) knowledge.closeMarket();
-    });
     safeBindById('file-modal-overlay', 'click', (e) => {
         if (e.target === e.currentTarget) fileMgr.closeModal();
     });
@@ -3943,7 +3934,6 @@ const bindAllEvents = () => {
     addIf('#new-chat-btn', () => conversation.createNew());
     addIf('#sidebar-toggle', () => ui.toggleSidebar());
     addIf('#ks-button', () => knowledge.openPanel());
-    addIf('#km-button', () => knowledge.openMarket());
     addIf('#mcp-button', () => mcp.openModal());
     addIf('#skills-button', () => skills.openModal());
     addIf('#file-manager-button', () => fileMgr.openModal());
@@ -3957,8 +3947,6 @@ const bindAllEvents = () => {
     addIf('#skill-add-btn', () => skills.showCreateForm());
     addIf('.ks-create-btn', () => knowledge.create());
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
-    addIf('#km-modal-overlay .close-button', () => knowledge.closeMarket());
-    addIf('#km-close-btn', () => knowledge.closeMarket());
 };
 
 // Init trigger — type="module" scripts are deferred, so by the time this

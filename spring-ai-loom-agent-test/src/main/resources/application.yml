@@ -64,8 +64,6 @@ spring:
 #        collection-name: qwen-collection-name
     mcp:
       client:
-        enabled: false
-        request-timeout: 60s
         stdio:
           servers-configuration: classpath:mcp-servers.json
     loom:

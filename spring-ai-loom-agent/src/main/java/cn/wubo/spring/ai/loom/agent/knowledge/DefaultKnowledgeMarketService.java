@@ -126,6 +126,13 @@ public class DefaultKnowledgeMarketService implements IKnowledgeMarketService {
         return getById(marketId);
     }
 
+    @Override
+    public List<MarketKnowledgeRecord> listMySubmitted(String username) {
+        return jdbcTemplate.query(
+                "SELECT * FROM loom_market_knowledge WHERE username = ? ORDER BY submitted_at DESC",
+                this::mapMarketKnowledgeRecord, username);
+    }
+
     /* ===== admin 审批 ===== */
 
     @Override
