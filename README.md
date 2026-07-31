@@ -22,7 +22,9 @@
 
 ## Features
 
-> **Core capabilities**: 💬 Streaming chat · 🖼 Multimodal · 📚 RAG · 🔧 MCP tools · 🧠 Skill market · 📦 Knowledge market · 🧩 Sub-tasks · ⏰ Scheduled tasks · 🛡 RBAC · 🎛 Admin console — one dependency, batteries included.
+> **6 Pillars**: 💬 Chat ·  Knowledge · 📁 Files · 🔧 MCP · 🧠 Skill · 🛡 RBAC
+> **Platform**: 🧠 Skill Market ·  Knowledge Market · 🎛 Admin Console
+> **Advanced**: 🧩 Sub-tasks · ⏰ Scheduled tasks · 🖼 Multimodal — one dependency, batteries included.
 
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
 - **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
