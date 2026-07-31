@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API 文档
 
 > **Base URL**: `http://localhost:8080`（测试环境默认端口）
-> **版本**: 1.1.35
+> **版本**: 1.1.36
 > **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
@@ -482,6 +482,143 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ---
 
+### 5.8 知识市场
+
+> 知识市场支持跨用户共享知识库。流程：提交 → PENDING → admin 审批 → APPROVED → 其他用户可订阅。
+
+#### 5.8.1 浏览已审批的市场知识库
+
+```
+GET /spring/ai/loom/api/knowledge-market?page=1&size=20
+```
+
+**查询参数**:
+
+| 参数   | 类型 | 必填 | 说明               |
+|--------|------|------|--------------------|
+| `page` | int  | 否   | 页码（默认 1）     |
+| `size` | int  | 否   | 每页条数（默认 20）|
+
+**响应**: `MarketKnowledgeRecord[]` — 已审批的市场知识库列表。
+
+| 字段          | 类型   | 说明             |
+|---------------|--------|------------------|
+| `id`          | string | 市场知识库 ID    |
+| `username`    | string | 原始作者用户名   |
+| `name`        | string | 知识库名称       |
+| `description` | string | 知识库描述       |
+| `status`      | string | `APPROVED`       |
+| `submittedAt` | string | 提交时间         |
+| `reviewedAt`  | string | 审核时间         |
+
+---
+
+#### 5.8.2 订阅市场知识库
+
+```
+POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
+```
+
+**路径参数**:
+
+| 参数       | 类型   | 说明           |
+|------------|--------|----------------|
+| `marketId` | string | 市场知识库 ID  |
+
+**响应**: 成功返回 `{"success": true}`。在 `loom_user_knowledge` 表中创建 `source=MARKET_PULLED` 的订阅记录。
+
+---
+
+#### 5.8.3 提交知识库到市场
+
+```
+POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
+```
+
+**路径参数**:
+
+| 参数          | 类型   | 说明       |
+|---------------|--------|------------|
+| `knowledgeId` | string | 知识库 ID  |
+
+**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status=PENDING`。
+
+**约束**: `(username, name)` 必须唯一，重复提交返回 409。
+
+---
+
+#### 5.8.4 撤回市场提交
+
+```
+DELETE /spring/ai/loom/api/knowledge-market/{marketId}
+```
+
+**路径参数**:
+
+| 参数       | 类型   | 说明           |
+|------------|--------|----------------|
+| `marketId` | string | 市场知识库 ID  |
+
+**响应**: 成功返回 `{"success": true}`。仅原始提交者可撤回。
+
+---
+
+#### 5.8.5 管理员审批市场提交
+
+```
+POST /spring/ai/loom/api/knowledge-market/{marketId}/approve
+```
+
+**路径参数**:
+
+| 参数       | 类型   | 说明           |
+|------------|--------|----------------|
+| `marketId` | string | 市场知识库 ID  |
+
+**响应**: `MarketKnowledgeRecord` — 更新后的记录，`status=APPROVED`。
+
+**权限**: 仅管理员。非管理员返回 403。
+
+---
+
+#### 5.8.6 管理员拒绝市场提交
+
+```
+POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
+```
+
+**路径参数**:
+
+| 参数       | 类型   | 说明           |
+|------------|--------|----------------|
+| `marketId` | string | 市场知识库 ID  |
+
+**响应**: `MarketKnowledgeRecord` — 更新后的记录，`status=REJECTED`。
+
+**权限**: 仅管理员。非管理员返回 403。
+
+---
+
+#### 5.8.7 查看我订阅的知识库
+
+```
+GET /spring/ai/loom/api/knowledge-market/my-pulled
+```
+
+**响应**: `MarketKnowledgeRecord[]` — 当前用户从市场订阅的知识库列表。
+
+---
+
+#### 5.8.8 查看我的市场提交
+
+```
+GET /spring/ai/loom/api/knowledge-market/my-submitted
+```
+
+**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（所有状态：PENDING / APPROVED / REJECTED）。
+
+---
+
 ## 6. 技能管理
 
 > 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 改为 6 个 system seed 进 `market_skill`，加一套 admin 管理的市场流程。
@@ -741,7 +878,7 @@ GET /spring/ai/chat/loom/mcp
   {
     "name": "weather-mcp",
     "title": "天气查询",
-    "version": "1.1.35",
+    "version": "1.1.36",
     "description": "提供实时天气查询服务",
     "defaultSelected": true,
     "tools": [
@@ -1350,10 +1487,6 @@ GET /spring/ai/chat/loom/mcp
 |---|---|---|---|
 | `spring.ai.loom.agent.rag.similarityThreshold` | double | `0.0` | 向量检索相似度阈值 |
 | `spring.ai.loom.agent.rag.topK` | int | `4` | 检索返回的顶部 K 条结果 |
-| `spring.ai.loom.agent.rag.defaultPromptTemplate` | string | — | RAG 默认提示词模板 |
-| `spring.ai.loom.agent.rag.defaultEmptyContextPromptTemplate` | string | — | 无上下文时的默认回复模板 |
-| `spring.ai.loom.agent.rag.enabledKeyword` | boolean | `false` | 是否启用关键词检索 |
-| `spring.ai.loom.agent.rag.enabledSummary` | boolean | `false` | 是否启用摘要生成 |
 
 ### 11.3 MCP 配置
 
@@ -1533,6 +1666,14 @@ spring:
 | 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | 上传文件到知识库 |
 | 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | 获取知识库文件列表 |
 | 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | 删除知识库文件 |
+| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | 浏览已审批的市场知识库（分页） |
+| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | 订阅市场知识库 |
+| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | 提交知识库到市场 |
+| 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}` | 撤回市场提交 |
+| 15e| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/approve` | 管理员审批市场提交 |
+| 15f| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/reject` | 管理员拒绝市场提交 |
+| 15g| `GET` | `/spring/ai/loom/api/knowledge-market/my-pulled` | 查看我订阅的市场知识库 |
+| 15h| `GET` | `/spring/ai/loom/api/knowledge-market/my-submitted` | 查看我的市场提交 |
 | 16 | `GET` | `/spring/ai/chat/loom/mcp` | 获取 MCP 工具列表 |
 | 17 | `GET` | `/spring/ai/loom/skill` | 获取技能列表 |
 | 18 | `PUT` | `/spring/ai/loom/skill` | 创建/更新技能 |

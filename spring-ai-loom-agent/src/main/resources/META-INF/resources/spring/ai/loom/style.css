@@ -1462,12 +1462,55 @@ textarea::placeholder {
     transition: color var(--transition-fast);
 }
 
-.ks-item:hover .ks-item-delete {
+.ks-item-edit {
+    opacity: 0;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: color var(--transition-fast);
+}
+
+.ks-item-share {
+    opacity: 0;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: color var(--transition-fast);
+}
+
+.ks-item:hover .ks-item-edit,
+.ks-item:hover .ks-item-delete,
+.ks-item:hover .ks-item-share {
     opacity: 1;
+}
+
+.ks-item-share:hover {
+    color: var(--primary-color);
+}
+
+.ks-item-edit:hover {
+    color: var(--primary-color);
 }
 
 .ks-item-delete:hover {
     color: var(--error-color);
+}
+
+.ks-item-desc {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted, #9ca3af);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
 }
 
 .ks-detail {
@@ -1489,6 +1532,21 @@ textarea::placeholder {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
+}
+
+.ks-edit-btn {
+    padding: 6px 12px;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.ks-edit-btn:hover {
+    background: var(--primary-hover);
 }
 
 .ks-upload-btn {
@@ -2718,4 +2776,123 @@ textarea::placeholder {
 @media (prefers-reduced-motion: reduce) {
     .modal-overlay.console-host .modal-content.operations-modal { animation: none; }
     .modal-overlay.console-host .console-card.status-running .console-status .dot { animation: none; }
+}
+
+/* ===== Knowledge Market ===== */
+.km-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.km-item {
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    transition: all var(--transition-fast);
+}
+
+.km-item:hover {
+    border-color: var(--primary-color);
+    background: var(--bg-secondary);
+}
+
+.km-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.km-item-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.km-item-author {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.km-item-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 4px 0 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.km-pull-btn {
+    padding: 8px 16px;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.km-pull-btn:hover:not(:disabled) {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.km-pull-btn:disabled {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    border: 1px solid var(--border-color);
+}
+
+.km-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.km-withdraw-btn {
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--error-color);
+    color: var(--error-color);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    margin-top: 8px;
+}
+
+.km-withdraw-btn:hover {
+    background: var(--error-color);
+    color: white;
+}
+
+/* Action button variants for file list */
+.action-btn-preview:hover {
+    background: var(--primary-color) !important;
+    color: white !important;
+    border-color: var(--primary-color) !important;
+}
+
+.action-btn-download:hover {
+    background: var(--success-color) !important;
+    color: white !important;
+    border-color: var(--success-color) !important;
+}
+
+.action-btn-delete:hover {
+    background: var(--error-color) !important;
+    color: white !important;
+    border-color: var(--error-color) !important;
 }

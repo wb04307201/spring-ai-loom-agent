@@ -197,11 +197,12 @@
                     <h3>技能库</h3>
                     <button class="skill-add-btn" id="skill-add-btn" title="新增技能">+ 新增</button>
                 </div>
-                <!-- Tab 切换：我的 / 市场 / 提交 -->
+                <!-- Tab 切换：我的 / 市场 / 共享 -->
                 <div class="skill-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary, #f8fafc);">
                     <button class="skill-tab active" data-tab="mine" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid var(--primary-color); color: var(--primary-color);">我的</button>
                     <button class="skill-tab" data-tab="market" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">市场</button>
-                    <button class="skill-tab" data-tab="submit" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">提交</button>
+                    <button class="skill-tab" data-tab="submit" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">共享</button>
+                    <button class="skill-tab" data-tab="mysubmit" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">我的发布</button>
                 </div>
                 <div class="skills-list" id="skills-list"></div>
             </div>
@@ -273,24 +274,33 @@
         </div>
     </div>
 
-    <!-- Knowledge Space Modal (full-screen panel) -->
-    <div id="ks-modal-overlay" class="modal-overlay" style="display: none;">        <div class="modal-content" style="max-width: 1000px; max-height: 85vh;">
-            <div class="modal-header">
-                <h3>知识空间</h3>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <button class="ks-create-btn">+ 创建知识库</button>
-                    <div class="close-button">&times;</div>
+    <!-- Knowledge Space Modal (two-panel layout like skills modal) -->
+    <div id="ks-modal-overlay" class="modal-overlay" style="display: none;">
+        <div class="modal-content skills-modal-layout">
+            <div class="skills-sidebar">
+                <div class="skills-sidebar-header">
+                    <h3>知识空间</h3>
+                    <button class="ks-create-btn skill-add-btn">+ 创建知识库</button>
+                </div>
+                <!-- Tab 切换：我的 / 市场 / 共享 / 我的发布 -->
+                <div class="ks-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary, #f8fafc);">
+                    <button class="ks-tab active" data-tab="mine" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid var(--primary-color); color: var(--primary-color);">我的</button>
+                    <button class="ks-tab" data-tab="market" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">市场</button>
+                    <button class="ks-tab" data-tab="share" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">共享</button>
+                    <button class="ks-tab" data-tab="mypublish" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">我的发布</button>
+                </div>
+                <div class="ks-sidebar-list" id="ks-sidebar">
+                    <div class="sidebar-empty" style="padding: 40px 16px;">暂无知识库</div>
                 </div>
             </div>
-            <div class="modal-body" style="padding: 0; flex: 1; display: flex; flex-direction: column;">
-                <div class="ks-body" style="flex: 1; min-height: 500px;">
-                    <div class="ks-sidebar" id="ks-sidebar">
-                        <div class="sidebar-empty" style="padding: 40px 16px;">暂无知识库</div>
-                    </div>
-                    <div class="ks-detail" id="ks-detail">
-                        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
-                            <p style="font-size: 16px; margin-bottom: 8px;">选择一个知识库查看文件</p>
-                        </div>
+            <div class="skills-detail-panel">
+                <div class="skills-detail-header">
+                    <h3 class="skills-detail-title" id="ks-detail-title">知识库详情</h3>
+                    <div class="close-button" id="ks-close-btn">&times;</div>
+                </div>
+                <div class="skills-detail-body" id="ks-detail">
+                    <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+                        <p style="font-size: 16px; margin-bottom: 8px;">选择一个知识库查看文件</p>
                     </div>
                 </div>
             </div>

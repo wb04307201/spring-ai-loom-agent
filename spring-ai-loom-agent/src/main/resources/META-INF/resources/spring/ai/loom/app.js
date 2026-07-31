@@ -37,14 +37,25 @@ const API = {
     listMarketSkills: '/spring/ai/loom/market-skills',
     pullMarketSkill: (id) => `/spring/ai/loom/market-skills/${id}/pull`,
     submitMarketSkill: '/spring/ai/loom/user/market-skills',
+    listMySubmittedSkills: '/spring/ai/loom/user/market-skills',
+    withdrawMarketSkill: (id) => `/spring/ai/loom/user/market-skills/${id}`,
     listKnowledge: '/spring/ai/loom/knowledge',
     createKnowledge: '/spring/ai/loom/knowledge',
     deleteKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
+    updateKnowledge: (id) => `/spring/ai/loom/knowledge/${id}`,
+    canEditKnowledge: (id) => `/spring/ai/loom/knowledge/${id}/can-edit`,
     uploadToKnowledge: (id) => `/spring/ai/loom/knowledge/${id}/upload`,
     listKnowledgeFiles: (id) => `/spring/ai/loom/knowledge/${id}/file`,
     deleteKnowledgeFile: (knowledgeId, fileId) => `/spring/ai/loom/knowledge/${knowledgeId}/file/${fileId}`,
     uploadFile: '/spring/ai/loom/file/upload',
     checkKnowledgeUpload: '/spring/ai/loom/knowledge/checkKnowledgeUpload',
+    // Knowledge market
+    listMarketKnowledge: '/spring/ai/loom/api/knowledge-market',
+    pullMarketKnowledge: (id) => `/spring/ai/loom/api/knowledge-market/${id}/pull`,
+    submitToMarket: (id) => `/spring/ai/loom/api/knowledge/${id}/submit`,
+    listMySubmittedKnowledge: '/spring/ai/loom/api/knowledge-market/my-submitted',
+    withdrawMarketKnowledge: (id) => `/spring/ai/loom/api/knowledge-market/${id}`,
+    listAccessibleKnowledge: '/spring/ai/loom/api/knowledge/accessible',
     titleMaxLength: 20,
     sseTimeout: 0,
 };
@@ -59,9 +70,8 @@ const state = {
     conversationId: null,
     conversationTitle: null, // tracks the current conversation's title to gate auto-rename
     selectedMcps: [],
-    selectedKnowledgeId: null,
+    enabledKnowledgeIds: [],
     selectedSkill: null,
-    enableRag: false,
     isStreaming: false,
     controller: null, // AbortController for SSE
     mcps: [],
@@ -441,21 +451,47 @@ const api = {
         if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
         return r.json();
     },
+    async listMySubmittedSkills() {
+        const r = await apiFetch(API.listMySubmittedSkills);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async withdrawMarketSkill(id) {
+        const r = await apiFetch(API.withdrawMarketSkill(id), {method: 'DELETE'});
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
     async listKnowledge() {
         const r = await apiFetch(API.listKnowledge);
         return r.ok ? r.json() : [];
     },
-    async createKnowledge(name) {
+    async createKnowledge(name, description) {
         const r = await apiFetch(API.createKnowledge, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name }),
+            body: JSON.stringify({ name, description }),
         });
         return r.ok ? r.json() : null;
     },
     async deleteKnowledge(id) {
         const r = await apiFetch(API.deleteKnowledge(id), {method: 'DELETE'});
         return r.ok ? r.json() : null;
+    },
+    async updateKnowledge(id, name, description) {
+        const r = await apiFetch(API.updateKnowledge(id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description }),
+        });
+        if (r.ok) return { ok: true };
+        const err = await r.json().catch(() => ({}));
+        return { ok: false, message: err.message || '修改失败' };
+    },
+    async canEditKnowledge(id) {
+        const r = await apiFetch(API.canEditKnowledge(id));
+        if (!r.ok) return false;
+        const data = await r.json();
+        return data.canEdit;
     },
     async listKnowledgeFiles(id) {
         const r = await apiFetch(API.listKnowledgeFiles(id));
@@ -473,6 +509,39 @@ const api = {
         });
         return r.ok ? r.json() : null;
     },
+
+    // Knowledge market
+    async listMarketKnowledge(page = 1, size = 20) {
+        const r = await apiFetch(`${API.listMarketKnowledge}?page=${page}&size=${size}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async pullMarketKnowledge(id) {
+        const r = await apiFetch(API.pullMarketKnowledge(id), { method: 'POST' });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async submitToMarket(knowledgeId) {
+        const r = await apiFetch(API.submitToMarket(knowledgeId), { method: 'POST' });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async listMySubmittedKnowledge() {
+        const r = await apiFetch(API.listMySubmittedKnowledge);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async withdrawMarketKnowledge(id) {
+        const r = await apiFetch(API.withdrawMarketKnowledge(id), { method: 'DELETE' });
+        if (!r.ok) throw new Error((await r.text()) || 'HTTP ' + r.status);
+        return r.json();
+    },
+    async listAccessibleKnowledge() {
+        const r = await apiFetch(API.listAccessibleKnowledge);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+
     async uploadFile(file) {
         const fd = new FormData();
         fd.append('file', file);
@@ -1319,8 +1388,7 @@ const chat = {
             message: text,
             conversationId: state.conversationId,
             mcps: state.selectedMcps,
-            enableRag: state.enableRag,
-            knowledgeId: state.selectedKnowledgeId || null,
+            enabledKnowledgeIds: state.enabledKnowledgeIds.length > 0 ? state.enabledKnowledgeIds : null,
             fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId).filter(Boolean) : null,
         };
 
@@ -1429,6 +1497,8 @@ const chat = {
 // ===================== §8 Knowledge Space =====================
 const knowledge = {
     currentKbId: null,
+    _kbList: [],
+    currentTab: 'mine',
 
     openPanel() {
         ui.showModal('ks-modal-overlay');
@@ -1442,10 +1512,45 @@ const knowledge = {
     async loadList() {
         try {
             const data = await api.listKnowledge();
-            this.renderList(data);
+            this._kbList = data || [];
+            this._renderCurrentTab();
         } catch (e) {
             console.warn('[knowledge.loadList] failed:', e);
-            this.renderList([]);
+            this._kbList = [];
+            this._renderCurrentTab();
+        }
+    },
+
+    _bindTabs() {
+        if (this._tabsBound) return;
+        document.querySelectorAll('#ks-modal-overlay .ks-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.currentTab = btn.getAttribute('data-tab');
+                document.querySelectorAll('#ks-modal-overlay .ks-tab').forEach(b => {
+                    const active = b.getAttribute('data-tab') === this.currentTab;
+                    b.classList.toggle('active', active);
+                    b.style.borderBottomColor = active ? 'var(--primary-color)' : 'transparent';
+                    b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
+                });
+                this._renderCurrentTab();
+            });
+        });
+        this._tabsBound = true;
+    },
+
+    _renderCurrentTab() {
+        this._bindTabs();
+        const container = document.getElementById('ks-sidebar');
+        const detail = document.getElementById('ks-detail');
+
+        if (this.currentTab === 'mine') {
+            this.renderList(this._kbList);
+        } else if (this.currentTab === 'market') {
+            this._renderMarketTab(container, detail);
+        } else if (this.currentTab === 'share') {
+            this._renderShareTab(container, detail);
+        } else if (this.currentTab === 'mypublish') {
+            this._renderMyPublishTab(container, detail);
         }
     },
 
@@ -1457,62 +1562,64 @@ const knowledge = {
         }
         container.innerHTML = '';
 
-        // "No knowledge base" option at top
-        const noneDiv = document.createElement('div');
-        noneDiv.className = 'ks-item' + (state.selectedKnowledgeId === null ? ' active' : '');
-        noneDiv.innerHTML = `
-            <input type="radio" name="ks-select" value="" ${state.selectedKnowledgeId === null ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
-            <span class="ks-item-name">不使用知识库</span>`;
-        noneDiv.querySelector('input[type="radio"]').addEventListener('change', () => this.selectKnowledgeForChat(null));
-        noneDiv.querySelector('.ks-item-name').addEventListener('click', () => this.selectKnowledgeForChat(null));
-        container.appendChild(noneDiv);
-
         for (const kb of list) {
             const id = kb.id;
             const name = kb.name;
+            const isChecked = state.enabledKnowledgeIds.includes(id);
+            const isCreator = kb.username === state.username;
             const div = document.createElement('div');
-            div.className = 'ks-item' + (state.selectedKnowledgeId === id ? ' active' : '');
+            div.className = 'ks-item' + (isChecked ? ' active' : '');
             div.innerHTML = `
-                <input type="radio" name="ks-select" value="${id}" ${state.selectedKnowledgeId === id ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
+                <input type="checkbox" ${isChecked ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
                 <span class="ks-item-name">${name}</span>
-                <button class="ks-item-delete">&times;</button>`;
-            div.querySelector('input[type="radio"]').addEventListener('change', () => {
-                this.selectKnowledgeForChat(id);
-                this.select(id, name);
+                <span class="ks-item-desc">${kb.description || ''}</span>
+                ${isCreator ? '<button class="ks-item-edit" title="编辑">&#x270E;</button>' : ''}
+                ${isCreator ? '<button class="ks-item-delete">&times;</button>' : ''}`;
+            const checkbox = div.querySelector('input[type="checkbox"]');
+            checkbox.addEventListener('change', () => {
+                this.toggleKnowledgeForChat(id);
             });
+            // 名称/描述点击：只显示右侧详情面板，不改变启用状态
             div.querySelector('.ks-item-name').addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.selectKnowledgeForChat(id);
-                // Also open detail panel to show files
                 this.select(id, name);
             });
-            div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
+            div.querySelector('.ks-item-desc').addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.delete(id);
+                this.select(id, name);
             });
+            if (isCreator) {
+                div.querySelector('.ks-item-edit').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.edit(id);
+                });
+            }
+            if (isCreator) {
+                div.querySelector('.ks-item-delete').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.delete(id);
+                });
+            }
             container.appendChild(div);
         }
     },
 
-    /** Select a knowledge base for chat (single-select / radio behavior) */
-    selectKnowledgeForChat(id) {
-        state.selectedKnowledgeId = id;
-        // Update active class on sidebar items directly (no re-render to preserve event listeners)
+    /** Toggle a knowledge base for chat (multi-select / checkbox behavior) */
+    toggleKnowledgeForChat(id) {
+        const index = state.enabledKnowledgeIds.indexOf(id);
+        if (index > -1) {
+            state.enabledKnowledgeIds.splice(index, 1);
+        } else {
+            state.enabledKnowledgeIds.push(id);
+        }
+        // Update active class on sidebar items directly (no full re-render)
         const items = document.querySelectorAll('#ks-sidebar .ks-item');
         items.forEach(item => {
-            const radio = item.querySelector('input[type="radio"]');
-            if (radio) {
-                const itemId = radio.value === '' ? null : radio.value;
-                const isActive = itemId === id;
-                item.classList.toggle('active', isActive);
-                radio.checked = isActive;
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                item.classList.toggle('active', checkbox.checked);
             }
         });
-        // If selecting "no knowledge base", clear the detail panel
-        if (id === null) {
-            const detail = document.getElementById('ks-detail');
-            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
-        }
     },
 
     async create() {
@@ -1520,11 +1627,24 @@ const knowledge = {
             title: '创建知识库',
             message: '请输入知识库名称：',
             placeholder: '例如：产品手册',
-            okText: '创建',
+            okText: '下一步',
             defaultValue: '',
         });
         if (!name) return;
-        const data = await api.createKnowledge(name);
+
+        const description = await dialog.prompt({
+            title: '创建知识库',
+            message: '请输入知识库描述：',
+            placeholder: '例如：包含公司产品文档和使用手册',
+            okText: '创建',
+            defaultValue: '',
+        });
+        if (!description) {
+            showToast('知识库描述不能为空', 'warning');
+            return;
+        }
+
+        const data = await api.createKnowledge(name, description);
         if (data) {
             showToast('知识库创建成功', 'success');
             this.loadList();
@@ -1547,15 +1667,54 @@ const knowledge = {
                 this.currentKbId = null;
                 document.getElementById('ks-detail').innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库查看文件</div>';
             }
-            // BUG-KB-DELETE-ACTIVE: also clear the chat-bound KB if it matches,
+            // BUG-KB-DELETE-ACTIVE: also clear the chat-bound KB if it was enabled,
             // so the next message doesn't RAG-query a deleted KB.
-            if (state.selectedKnowledgeId === id) {
-                state.selectedKnowledgeId = null;
+            const idx = state.enabledKnowledgeIds.indexOf(id);
+            if (idx > -1) {
+                state.enabledKnowledgeIds.splice(idx, 1);
             }
             this.loadList();
             showToast('知识库已删除', 'success');
         } else {
             showToast('删除失败', 'error');
+        }
+    },
+
+    async edit(id) {
+        const kb = this._kbList.find(k => k.id === id);
+        if (!kb) return;
+
+        const name = await dialog.prompt({
+            title: '编辑知识库',
+            message: '修改知识库名称：',
+            placeholder: '请输入新名称',
+            okText: '下一步',
+            defaultValue: kb.name,
+        });
+        if (!name) return;
+
+        const description = await dialog.prompt({
+            title: '编辑知识库',
+            message: '修改知识库描述：',
+            placeholder: '请输入新描述',
+            okText: '保存',
+            defaultValue: kb.description || '',
+        });
+        if (!description) {
+            showToast('描述不能为空', 'warning');
+            return;
+        }
+
+        const data = await api.updateKnowledge(id, name, description);
+        if (data.ok) {
+            showToast('修改成功', 'success');
+            // Refresh list and re-select if this KB was open in detail panel
+            await this.loadList();
+            if (this.currentKbId === id) {
+                this.select(id, name);
+            }
+        } else {
+            showToast(data.message || '修改失败', 'error');
         }
     },
 
@@ -1568,6 +1727,7 @@ const knowledge = {
             <div class="ks-detail-header">
                 <span class="ks-detail-title">${name}</span>
                 <div>
+                    <button class="ks-edit-btn" id="ks-edit-btn">✎ 编辑</button>
                     <button class="ks-upload-btn" id="ks-upload-btn">+ 上传文件</button>
                     <input type="file" id="ks-file-input" style="display:none;">
                 </div>
@@ -1576,8 +1736,10 @@ const knowledge = {
 
         const uploadBtn = detail.querySelector('#ks-upload-btn');
         const fileInput = detail.querySelector('#ks-file-input');
+        const editBtn = detail.querySelector('#ks-edit-btn');
         uploadBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', (e) => this.uploadFile(id, e));
+        editBtn.addEventListener('click', () => this.edit(id));
 
         this.loadFiles(id);
     },
@@ -1602,8 +1764,14 @@ const knowledge = {
                     <td>${truncateText(f.fileName || f.name || '', 30)}</td>
                     <td>${formatFileSize(f.size || 0)}</td>
                     <td>${formatDate(f.uploadTime || f.createTime)}</td>
-                    <td><button class="action-btn" data-file-id="${f.id}">删除</button></td>`;
-                row.querySelector('.action-btn').addEventListener('click', () => this.deleteFile(kbId, f.id, row));
+                    <td>
+                        <button class="action-btn action-btn-preview" data-file-preview="${f.id}">预览</button>
+                        <button class="action-btn action-btn-download" data-file-download="${f.id}">下载</button>
+                        <button class="action-btn action-btn-delete" data-file-id="${f.id}">删除</button>
+                    </td>`;
+                row.querySelector('[data-file-preview]').addEventListener('click', () => window.previewFile(f.id));
+                row.querySelector('[data-file-download]').addEventListener('click', () => window.downloadFile(f.id));
+                row.querySelector('[data-file-id]').addEventListener('click', () => this.deleteFile(kbId, f.id, row));
                 tbody.appendChild(row);
             }
         } catch (e) {
@@ -1636,6 +1804,151 @@ const knowledge = {
             }
         } catch (e) {
             showToast('删除失败', 'error');
+        }
+    },
+
+    async shareToMarket(id) {
+        const kb = this._kbList.find(k => k.id === id);
+        if (!kb) return;
+        const ok = await dialog.confirm({
+            title: '共享到知识库市场',
+            message: `确认将「${kb.name}」共享到市场？共享后其他用户可浏览并添加到自己的知识库。`,
+            okText: '共享',
+        });
+        if (!ok) return;
+        try {
+            await api.submitToMarket(id);
+            showToast(`已将「${kb.name}」共享到市场`, 'success');
+            this.loadList();
+        } catch (e) {
+            showToast('共享失败：' + e.message, 'error');
+        }
+    },
+
+    _kmStatusLabel(status) {
+        switch (status) {
+            case 'PENDING':  return { text: '审核中', bg: '#fef3c7', color: '#92400e' };
+            case 'APPROVED': return { text: '已通过', bg: '#d1fae5', color: '#065f46' };
+            case 'REJECTED': return { text: '已拒绝', bg: '#fee2e2', color: '#991b1b' };
+            default:         return { text: status || '未知', bg: '#f1f5f9', color: '#475569' };
+        }
+    },
+
+    async _renderMarketTab(container, detail) {
+        container.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
+        try {
+            const data = await api.listMarketKnowledge(1, 50);
+            const items = (data && data.content) || data || [];
+            if (!items || items.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+                return;
+            }
+            container.innerHTML = '';
+            for (const kb of items) {
+                const pulled = kb.pulled;
+                const div = document.createElement('div');
+                div.className = 'ks-item';
+                div.innerHTML = `
+                    <span class="ks-item-name">${escapeHtml(kb.name)}</span>
+                    <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author)}</span>
+                    <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+                    <button class="ks-market-pull-btn" data-market-id="${kb.id}" ${pulled ? 'disabled' : ''} style="margin-top: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;">
+                        ${pulled ? '已添加' : '添加到我的知识库'}
+                    </button>
+                `;
+                div.querySelector('.ks-market-pull-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._pullMarketKnowledge(kb.id);
+                });
+                container.appendChild(div);
+            }
+        } catch (e) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    async _pullMarketKnowledge(id) {
+        try {
+            await api.pullMarketKnowledge(id);
+            showToast('已添加到我的知识库', 'success');
+            await this.loadList();
+            this._renderCurrentTab();
+        } catch (e) {
+            showToast('添加失败：' + e.message, 'error');
+        }
+    },
+
+    async _renderShareTab(container, detail) {
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个知识库共享到市场</div>';
+        const ownKbs = (this._kbList || []).filter(kb => kb.username === state.username);
+        if (ownKbs.length === 0) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有自建的知识库<br>切到「我的」→ 创建一个再来共享</div>';
+            return;
+        }
+        container.innerHTML = '';
+        for (const kb of ownKbs) {
+            const div = document.createElement('div');
+            div.className = 'ks-item';
+            div.innerHTML = `
+                <span class="ks-item-name">${escapeHtml(kb.name)}</span>
+                <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+                <button class="ks-share-btn" data-kb-id="${kb.id}" style="margin-top: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;">共享到市场</button>
+            `;
+            div.querySelector('.ks-share-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.shareToMarket(kb.id);
+            });
+            container.appendChild(div);
+        }
+    },
+
+    async _renderMyPublishTab(container, detail) {
+        container.innerHTML = '<div class="loading-indicator">加载中...</div>';
+        detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>';
+        try {
+            const items = await api.listMySubmittedKnowledge();
+            if (!items || items.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">还没有共享到市场的知识库<br><br>切到「共享」Tab 从自建知识库发起共享</div>';
+                return;
+            }
+            container.innerHTML = '';
+            for (const kb of items) {
+                const st = this._kmStatusLabel(kb.status);
+                const div = document.createElement('div');
+                div.className = 'ks-item';
+                div.innerHTML = `
+                    <span class="ks-item-name">${escapeHtml(kb.name)} <span class="km-status-badge" style="background: ${st.bg}; color: ${st.color}; padding: 1px 6px; border-radius: 3px; font-size: 10px;">${st.text}</span></span>
+                    <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+                    ${kb.status === 'PENDING' ? `<button class="ks-withdraw-btn" data-market-id="${kb.id}" style="margin-top: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; background: var(--warning-color, #f59e0b); color: white; border: none; border-radius: 3px;">撤回</button>` : ''}
+                `;
+                if (kb.status === 'PENDING') {
+                    div.querySelector('.ks-withdraw-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this._withdrawMarketKnowledge(kb.id);
+                    });
+                }
+                container.appendChild(div);
+            }
+        } catch (e) {
+            container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    },
+
+    async _withdrawMarketKnowledge(id) {
+        const ok = await dialog.confirm({
+            title: '撤回共享',
+            message: '确认撤回该知识库的市场共享？',
+            okText: '撤回',
+            danger: true,
+        });
+        if (!ok) return;
+        try {
+            await api.withdrawMarketKnowledge(id);
+            showToast('已撤回共享', 'success');
+            this._renderCurrentTab();
+        } catch (e) {
+            showToast('撤回失败：' + e.message, 'error');
         }
     },
 
@@ -2719,6 +3032,7 @@ const skills = {
         if (this.currentTab === 'mine') this._renderMineTab(container);
         else if (this.currentTab === 'market') this._renderMarketTab(container);
         else if (this.currentTab === 'submit') this._renderSubmitTab(container, detail);
+        else if (this.currentTab === 'mysubmit') this._renderMySubmissions(container, detail);
     },
 
     _renderMineTab(container) {
@@ -2821,13 +3135,13 @@ const skills = {
     },
 
     _renderSubmitTab(container, detail) {
-        // 列出自建的 Skill（source=USER_CREATED）作为"可选提交"
+        // 列出自建的 Skill（source=USER_CREATED）作为"可选共享"
         api.listSkills().then(mine => {
             const userCreated = (mine || []).filter(s => s.source === 'USER_CREATED');
             container.innerHTML = '';
             if (userCreated.length === 0) {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有自建 Skill。<br>切到「我的」→ 新建一个再来提交</div>';
-                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">请选择要提交到市场的自建 Skill</div>';
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有自建 Skill。<br>切到「我的」→ 新建一个再来共享</div>';
+                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">请选择要共享到市场的自建 Skill</div>';
                 return;
             }
             for (const s of userCreated) {
@@ -2840,8 +3154,85 @@ const skills = {
                 item.addEventListener('click', () => this._showSubmitForm(s, detail));
                 container.appendChild(item);
             }
-            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建 Skill 提交到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后状态为 PENDING，<br>需管理员在控制台「Skill 市场」审批通过后，<br>其他用户才能在「市场」Tab 拉取。</p></div>';
+            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建 Skill 共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">共享后状态为 PENDING，<br>需管理员在控制台「Skill 市场」审批通过后，<br>其他用户才能在「市场」Tab 拉取。</p></div>';
         });
+    },
+
+    _statusLabel(status) {
+        switch (status) {
+            case 'PENDING':   return {text: '审核中', bg: '#fef3c7', color: '#92400e'};
+            case 'APPROVED':  return {text: '已通过', bg: '#d1fae5', color: '#065f46'};
+            case 'REJECTED':  return {text: '已拒绝', bg: '#fee2e2', color: '#991b1b'};
+            default:          return {text: status, bg: '#f1f5f9', color: '#475569'};
+        }
+    },
+
+    _renderMySubmissions(container, detail) {
+        api.listMySubmittedSkills().then(data => {
+            container.innerHTML = '';
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">还没有向市场共享 Skill<br><br>切到「共享」Tab 从自建 Skill 发起共享</div>';
+                detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择左侧 Skill 查看详情</div>';
+                return;
+            }
+            for (const s of data) {
+                const item = document.createElement('div');
+                item.className = 'skill-item';
+                const st = this._statusLabel(s.status);
+                item.innerHTML = `
+                    <div class="skill-item-name">${escapeHtml(s.name)} <span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
+                    <div class="skill-item-desc">${escapeHtml(s.description || '')}</div>
+                `;
+                item.addEventListener('click', () => this._showMySubmissionDetail(s, item, detail));
+                container.appendChild(item);
+            }
+            detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个 Skill 查看详情</div>';
+        });
+    },
+
+    _showMySubmissionDetail(skill, element, detail) {
+        document.querySelectorAll('#skills-list .skill-item').forEach(i => i.classList.remove('selected'));
+        element.classList.add('selected');
+        const st = this._statusLabel(skill.status);
+        let html = `
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
+                    <div>名称：${escapeHtml(skill.name)}</div>
+                    <div>版本：v${escapeHtml(skill.version)}</div>
+                    <div>状态：<span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
+                    <div>共享时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : '-'}</div>
+                    ${skill.reviewedAt ? '<div>审核时间：' + new Date(skill.reviewedAt).toLocaleString() + '</div>' : ''}
+                    ${skill.reviewedBy ? '<div>审核人：' + escapeHtml(skill.reviewedBy) + '</div>' : ''}
+                    ${skill.reviewComment ? '<div>审核意见：' + escapeHtml(skill.reviewComment) + '</div>' : ''}
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted);">${escapeHtml(skill.description || '无说明')}</div>
+                <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(skill.content || '')}</div>
+        `;
+        if (skill.status === 'PENDING') {
+            html += `
+                <div style="display: flex; gap: 12px; margin-top: 8px;">
+                    <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享</button>
+                </div>
+            `;
+        }
+        html += '</div>';
+        detail.innerHTML = html;
+
+        const withdrawBtn = document.getElementById('withdraw-skill-btn');
+        if (withdrawBtn) {
+            withdrawBtn.addEventListener('click', () => this.handleWithdraw(skill));
+        }
+    },
+
+    async handleWithdraw(skill) {
+        if (!confirm(`确认撤回「${skill.name}」的共享？`)) return;
+        try {
+            await api.withdrawMarketSkill(skill.id);
+            showToast(`已撤回「${skill.name}」`, 'success');
+            this.renderModal();
+        } catch (e) {
+            showToast('撤回失败：' + e.message, 'error');
+        }
     },
 
     _showSubmitForm(skill, detail) {
@@ -2849,18 +3240,18 @@ const skills = {
         detail.innerHTML = `
             <div style="display: flex; flex-direction: column; gap: 16px;">
                 <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
-                    提交「<strong>${escapeHtml(skill.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 拉取；<br>
-                    你的本地实例保持不变，提交不影响你的使用。
+                    共享「<strong>${escapeHtml(skill.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 拉取；<br>
+                    你的本地实例保持不变，共享不影响你的使用。
                 </div>
                 <div>
                     <label class="param-label">版本号 <span style="color: var(--error-color);">*</span></label>
                     <input type="text" id="submit-skill-version" class="param-input" placeholder="例如 1.0.0（语义化版本）" value="1.0.0">
                 </div>
                 <div style="font-size: 12px; color: var(--text-muted);">
-                    提交后状态为 PENDING。同名+同版本号不能重复提交。
+                    共享后状态为 PENDING。同名+同版本号不能重复共享。
                 </div>
                 <div style="display: flex; gap: 12px;">
-                    <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">提交到市场</button>
+                    <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">共享到市场</button>
                 </div>
             </div>
         `;
@@ -2877,10 +3268,10 @@ const skills = {
                 content: skill.content,
                 version: version,
             });
-            showToast(`已提交「${skill.name}」v${version}，等待管理员审批`, 'success');
+            showToast(`已共享「${skill.name}」v${version}，等待管理员审批`, 'success');
             this.renderModal();
         } catch (e) {
-            showToast('提交失败：' + e.message, 'error');
+            showToast('共享失败：' + e.message, 'error');
         }
     },
 
@@ -3571,3 +3962,15 @@ if (document.readyState === 'loading') {
 // Expose to global for testing/debugging
 window._loomAgent = {state, api, imageUpload, auth, chat, conversation, ui, fileMgr};
 window.ui = ui;
+
+// ===================== §11 File Download/Preview Globals =====================
+window.previewFile = (fileId) => {
+    window.open(`/spring/ai/loom/api/file/${fileId}/preview`, '_blank');
+};
+
+window.downloadFile = (fileId) => {
+    const link = document.createElement('a');
+    link.href = `/spring/ai/loom/api/file/${fileId}/download`;
+    link.download = '';
+    link.click();
+};

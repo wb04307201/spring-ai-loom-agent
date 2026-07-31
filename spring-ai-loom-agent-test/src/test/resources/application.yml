@@ -1,15 +1,11 @@
 spring:
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+    anthropic:
+      api-key: ${NEW_API_KEY}
+      base-url: http://123.56.128.32:3000
       chat:
         options:
           model: qwen3.7-plus
-          multi_model: true
-          enable_thinking: true
-      embedding:
-        options:
-          model: text-embedding-v4
 server:
   port: 8080
 logging:

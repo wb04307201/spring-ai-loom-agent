@@ -29,6 +29,8 @@ import cn.wubo.spring.ai.loom.agent.tool.file.DefaultFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.IFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.DefaultGitTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.IGitTool;
+import cn.wubo.spring.ai.loom.agent.tool.knowledge.DefaultKnowledgeTool;
+import cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.DefaultMavenTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.DefaultSkillTool;
@@ -57,9 +59,6 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
-import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
-import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -76,6 +75,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
@@ -103,7 +103,6 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @AutoConfiguration
@@ -293,7 +292,7 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(IChat.class)
         @Bean
-        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp,
+        public IChat chat(@Qualifier("chatClient") ChatClient chatClient, IMcp mcp,
                           // @Lazy on the tools list breaks a 3-hop circular dep:
                           // chat -> List<IEmbedTool> (eagerly resolves defaultSubTaskTool)
                           //   -> defaultSubTaskExecutor
@@ -302,8 +301,11 @@ public class LoomAgentConfiguration {
                           // With @Lazy, the list is materialised on first access (inside
                           // DefaultChat.stream()) after every bean is fully constructed.
                           @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
-                          IUserConversation userConversation, IFile file) {
-            return new DefaultChat(chatClient, retrievalAugmentationAdvisor, mcp, embedTools, userConversation, file);
+                          IUserConversation userConversation, IFile file,
+                          ISkillStorage skillStorage, IKnowledge knowledge,
+                          LoomAgentProperties properties) {
+            return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
+                    skillStorage, knowledge, properties);
         }
 
         @Slf4j
@@ -476,22 +478,15 @@ public class LoomAgentConfiguration {
         @ConditionalOnBean(VectorStore.class)
         @ConditionalOnMissingBean(IDocumentRead.class)
         @Bean
-        public IDocumentRead defaultDocumentRead(ChatModel chatModel, LoomAgentProperties properties) {
-            return new DefaultDocumentRead(chatModel, properties.getRag());
-        }
-
-        @ConditionalOnBean(VectorStore.class)
-        @Bean
-        public RetrievalAugmentationAdvisor retrievalAugmentationAdvisor(VectorStore vectorStore, LoomAgentProperties properties) {
-            return RetrievalAugmentationAdvisor.builder().documentRetriever(VectorStoreDocumentRetriever.builder().similarityThreshold(properties.getRag().getSimilarityThreshold()).topK(properties.getRag().getTopK()).vectorStore(vectorStore).build()).queryAugmenter(ContextualQueryAugmenter.builder().promptTemplate(PromptTemplate.builder().template(properties.getRag().getDefaultPromptTemplate()).build()).emptyContextPromptTemplate(PromptTemplate.builder().template(properties.getRag().getDefaultEmptyContextPromptTemplate()).build()).allowEmptyContext(true).build()
-            ).build();
+        public IDocumentRead defaultDocumentRead() {
+            return new DefaultDocumentRead();
         }
 
         @ConditionalOnBean(VectorStore.class)
         @ConditionalOnMissingBean(IUpload.class)
         @Bean
-        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, LoomAgentProperties properties) {
-            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, properties.getFileBasePath(), properties.getKnowledgeBasePath());
+        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage, LoomAgentProperties properties) {
+            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, fileStorage, properties.getFileBasePath());
         }
     }
 
@@ -608,6 +603,14 @@ public class LoomAgentConfiguration {
         @Bean
         public ICompileAndDeployTool defaultCompileAndDeployTool(LoomAgentProperties properties) {
             return new DefaultCompileAndDeployTool(properties);
+        }
+
+        @ConditionalOnProperty(name = "spring.ai.loom.agent.knowledge.enabled", havingValue = "true", matchIfMissing = true)
+        @ConditionalOnMissingBean(IKnowledgeTool.class)
+        @ConditionalOnBean(VectorStore.class)
+        @Bean
+        public IKnowledgeTool defaultKnowledgeTool(IKnowledge knowledge, VectorStore vectorStore, LoomAgentProperties properties) {
+            return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag());
         }
     }
 
@@ -1147,6 +1150,16 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * 默认文件存储实现：基于 H2 数据库存储知识库文件内容。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为 S3/MinIO 等实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.file.IFileStorage.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.file.IFileStorage loomFileStorage(JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.file.storage.DatabaseFileStorage(jdbcTemplate);
+        }
+
+        /**
          * 显式注册 file-view 的 IFileStorage 桥接实现，避免 file-view 默认的内存版
          * {@code LocalFileStorageImpl} 覆盖本实现（{@code @Service} 在跨包扫描时不会生效）。
          * 没有这一项，{@code /file/view/{id}} 与 {@code /wopi/files/{id}/contents}
@@ -1168,6 +1181,39 @@ public class LoomAgentConfiguration {
         @Bean
         public IKnowledge defaultKnowledge(JdbcTemplate jdbcTemplate) {
             return new DefaultKnowledge(jdbcTemplate);
+        }
+
+        /**
+         * 知识库市场服务：支持发布、审批、订阅、角色分配。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService defaultKnowledgeMarketService(
+                JdbcTemplate jdbcTemplate, IKnowledge knowledge, IUser user) {
+            return new cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService(jdbcTemplate, knowledge, user);
+        }
+
+        /**
+         * 知识库角色管理：支持角色-知识库关联和同步。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin defaultKnowledgeRoleAdmin(
+                JdbcTemplate jdbcTemplate, cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService marketService) {
+            return new cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeRoleAdmin(jdbcTemplate, marketService);
+        }
+
+        /**
+         * 文件下载与预览：通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         * 依赖 {@code IFileStorage}（数据库或磁盘）透明读取知识库文件内容。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.file.IFileDownload.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.file.IFileDownload defaultFileDownload(
+                IFile file, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage) {
+            return new cn.wubo.spring.ai.loom.agent.file.DefaultFileDownload(file, fileStorage);
         }
     }
 
@@ -2000,6 +2046,33 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body(java.util.Map.of("error", "字段缺失（name/description/content 必填）"));
                 }
             });
+            // 任意用户：查看自己提交的 Skill
+            builder.GET("spring/ai/loom/user/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().body(marketService.listMySubmitted(username));
+            });
+            // 任意用户：撤回 PENDING 状态的提交
+            builder.DELETE("spring/ai/loom/user/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    boolean ok = marketService.withdraw(username, id);
+                    if (!ok) {
+                        return ServerResponse.badRequest().body(java.util.Map.of("error", "只能撤回 PENDING 状态的提交"));
+                    }
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
             return builder.build();
         }
 
@@ -2145,6 +2218,30 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.model.SetRoleSkillsRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleSkillsRequest.class);
                 roleAdmin.setRoleSkills(code, body == null ? null : body.items());
+                return ServerResponse.ok().body(true);
+            });
+            return builder.build();
+        }
+
+        /** 角色授权知识库（仅 admin） */
+        @Bean("loomAgentKnowledgeRoleAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentKnowledgeRoleAdminRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin knowledgeRoleAdmin,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("spring/ai/loom/admin/roles/{code}/knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String code = request.pathVariable("code");
+                return ServerResponse.ok().body(knowledgeRoleAdmin.getRoleKnowledges(code));
+            });
+            builder.PUT("spring/ai/loom/admin/roles/{code}/knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String code = request.pathVariable("code");
+                cn.wubo.spring.ai.loom.agent.model.SetRoleKnowledgeRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleKnowledgeRequest.class);
+                knowledgeRoleAdmin.setRoleKnowledges(code, body == null ? null : body.items());
                 return ServerResponse.ok().body(true);
             });
             return builder.build();
@@ -2355,7 +2452,7 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
                 }
                 try {
-                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name()));
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.insert(knowledgeRecord.name(), knowledgeRecord.description()));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
                     // 知识库名称冲突、参数错误等 → 明确的 4xx 而不是 500 (BUG-11)
                     Integer sc = e.getStatusCode();
@@ -2369,6 +2466,39 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
                             .body(java.util.Map.of("message", "数据约束失败: " + e.getMostSpecificCause().getMessage()));
                 }
+            });
+            builder.PATCH("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
+                String knowledgeId = request.pathVariable("knowledgeId");
+                // 使用 Map 接收部分更新数据，避免 Java record 要求所有字段都存在的问题
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                if (body == null || !body.containsKey("name") || body.get("name") == null) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
+                }
+                String name = String.valueOf(body.get("name"));
+                if (name.isBlank()) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库名称(name)不能为空"));
+                }
+                String description = body.containsKey("description") && body.get("description") != null
+                        ? String.valueOf(body.get("description")) : null;
+                try {
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                            .body(knowledge.update(knowledgeId, name, description));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    Integer sc = e.getStatusCode();
+                    HttpStatus status = sc != null ? HttpStatus.valueOf(sc) : HttpStatus.BAD_REQUEST;
+                    return ServerResponse.status(status).contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage() == null ? "请求失败" : e.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "数据约束失败: " + e.getMostSpecificCause().getMessage()));
+                }
+            });
+            builder.GET("/spring/ai/loom/knowledge/{knowledgeId}/can-edit", request -> {
+                String knowledgeId = request.pathVariable("knowledgeId");
+                boolean canEdit = knowledge.canEdit(knowledgeId);
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(Map.of("canEdit", canEdit));
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
                 String knowledgeId = request.pathVariable("knowledgeId");
@@ -2407,6 +2537,166 @@ public class LoomAgentConfiguration {
                 }
             });
             return builder.build();
+        }
+
+        /**
+         * 知识库市场路由：提供市场浏览、提交、审批、订阅、撤回等功能。
+         * 依赖 IKnowledgeMarketService 和 IKnowledgeRoleAdmin。
+         */
+        @Bean("loomAgentKnowledgeMarketRouter")
+        public RouterFunction<ServerResponse> loomAgentKnowledgeMarketRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService marketService,
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin roleAdmin,
+                IKnowledge knowledge) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+
+            // 获取用户可访问的知识库列表（自己的 + 订阅的 + 角色授予的）
+            builder.GET("/spring/ai/loom/api/knowledge/accessible", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(knowledge.listAccessible(username));
+            });
+
+            // 获取市场已审批的知识库列表（分页）
+            builder.GET("/spring/ai/loom/api/knowledge-market", request -> {
+                String pageParam = request.param("page").orElse("1");
+                String sizeParam = request.param("size").orElse("20");
+                int page = Integer.parseInt(pageParam);
+                int size = Integer.parseInt(sizeParam);
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(marketService.listApproved(page, size));
+            });
+
+            // 从市场订阅知识库
+            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/pull", request -> {
+                String marketId = request.pathVariable("marketId");
+                String username = UserContextHolder.getCurrentUser();
+                try {
+                    marketService.pull(username, marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("success", true));
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 提交知识库到市场
+            builder.POST("/spring/ai/loom/api/knowledge/{knowledgeId}/submit", request -> {
+                String knowledgeId = request.pathVariable("knowledgeId");
+                try {
+                    var result = marketService.submit(knowledgeId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 撤回我的市场提交
+            builder.DELETE("/spring/ai/loom/api/knowledge-market/{marketId}", request -> {
+                String marketId = request.pathVariable("marketId");
+                try {
+                    marketService.withdraw(marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("success", true));
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 管理员审批市场提交
+            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/approve", request -> {
+                String marketId = request.pathVariable("marketId");
+                try {
+                    var result = marketService.approve(marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 管理员拒绝市场提交
+            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/reject", request -> {
+                String marketId = request.pathVariable("marketId");
+                try {
+                    var result = marketService.reject(marketId);
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", e.getMessage()));
+                }
+            });
+
+            // 获取我订阅的知识库列表
+            builder.GET("/spring/ai/loom/api/knowledge-market/my-pulled", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(marketService.listMyPulled(username));
+            });
+
+            // 获取我提交到市场的知识库列表
+            builder.GET("/spring/ai/loom/api/knowledge-market/my-submitted", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(marketService.listMySubmitted(username));
+            });
+
+            return builder.build();
+        }
+
+        /**
+         * 文件下载/预览路由：为知识库文件提供 attachment 下载和 inline 预览端点。
+         * 通过 IFileDownload 透明处理数据库存储和磁盘存储两种模式。
+         */
+        @Bean("loomAgentFileDownloadRouter")
+        public RouterFunction<ServerResponse> loomAgentFileDownloadRouter(
+                cn.wubo.spring.ai.loom.agent.file.IFileDownload fileDownload) {
+            return RouterFunctions.route()
+                    .GET("/spring/ai/loom/api/file/{fileId}/download", request -> {
+                        String fileId = request.pathVariable("fileId");
+                        String username = UserContextHolder.getCurrentUser();
+                        try {
+                            FileRecord record = fileDownload.getFileRecord(fileId, username);
+                            byte[] content = fileDownload.readFileContent(fileId, username);
+                            MediaType contentType = resolveContentType(record);
+                            ByteArrayResource resource = new ByteArrayResource(content) {
+                                @Override
+                                public String getFilename() {
+                                    return record.fileName();
+                                }
+                            };
+                            return ServerResponse.ok()
+                                    .header("Content-Disposition", buildContentDisposition(record.fileName()))
+                                    .contentType(contentType)
+                                    .body(resource);
+                        } catch (IllegalArgumentException e) {
+                            return ServerResponse.notFound().build();
+                        }
+                    })
+                    .GET("/spring/ai/loom/api/file/{fileId}/preview", request -> {
+                        String fileId = request.pathVariable("fileId");
+                        String username = UserContextHolder.getCurrentUser();
+                        try {
+                            FileRecord record = fileDownload.getFileRecord(fileId, username);
+                            byte[] content = fileDownload.readFileContent(fileId, username);
+                            MediaType contentType = resolveContentType(record);
+                            ByteArrayResource resource = new ByteArrayResource(content) {
+                                @Override
+                                public String getFilename() {
+                                    return record.fileName();
+                                }
+                            };
+                            return ServerResponse.ok()
+                                    .contentType(contentType)
+                                    .body(resource);
+                        } catch (IllegalArgumentException e) {
+                            return ServerResponse.notFound().build();
+                        }
+                    })
+                    .build();
         }
 
         /**

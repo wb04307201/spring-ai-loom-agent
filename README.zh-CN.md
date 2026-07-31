@@ -22,12 +22,14 @@
 
 ## 功能特性
 
-> **核心能力**：💬 流式对话 · 🖼 多模态图文 · 📚 RAG 知识库 · 🔧 MCP 工具 · 🧠 Skill 库 + 市场 · 🧩 子任务 · ⏰ 定时任务 · 🛡 RBAC 权限 · 🎛 管理控制台 —— 引一个依赖，开箱即用。
+> **6 大核心**：💬 对话 · 📚 知识库 ·  文件 · 🔧 MCP · 🧠 技能 · 🛡 权限
+> **平台功能**：🧠 技能市场 ·  知识市场 · 🎛 管理控制台
+> **高级特性**：🧩 子任务 · ⏰ 定时任务 · 🖼 多模态 —— 引一个依赖，开箱即用。
 
 - **💬 流式对话** — SSE 多轮聊天，推理过程折叠展示，消息复制/下载；支持图片 + 文档**多模态混合输入**
 - **📚 RAG 知识库** — 多知识库管理，Tika 解析 + 向量化，内置 JVector 本地向量库（可替换为任意 Spring AI 向量存储）
 - **🔧 MCP 工具集成** — 同步/异步双模式；可用工具按**角色授权**下发，会话内按需勾选启用
-- **🧠 Skill 库 + 市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权），带版本号与 admin 审批流；技能用 `@工具名` 调用 MCP
+- **🧠 技能市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权），带版本号与 admin 审批流；技能用 `@工具名` 调用 MCP
 - **🧩 子任务 & ⏰ 定时任务** — 主对话把任务委派给"子模型"同步执行；LLM 可创建定时任务，触发时以子任务运行，重启自动恢复
 - **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
 - **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / MCP 描述 / 用量统计 五大模块，admin 路径鉴权
@@ -44,6 +46,7 @@
 | 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
 | 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
 | 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
+| 知识库 | `IKnowledgeTool` | 2 | ✅ 启用 | `knowledge.enabled` |
 | 子任务 | `ISubTaskTool` | 4 | ✅ 启用 | `subtask.enabled` |
 | 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
@@ -72,7 +75,7 @@
 <dependency>
     <groupId>io.github.wb04307201</groupId>
     <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-    <version>1.1.35</version>
+    <version>1.1.36</version>
 </dependency>
 ```
 
@@ -153,26 +156,6 @@ spring:
         rag:
           similarityThreshold: 0.50   # 相似度阈值,默认0.0
           top-k: 4                    # top-k，默认4
-          defaultPromptTemplate: |
-            Context information is below.
-
-            ---------------------
-            {context}
-            ---------------------
-
-            Given the context information and no prior knowledge, answer the query.
-
-            Follow these rules:
-
-            1. If the answer is not in the context, just say that you don't know.
-            2. Avoid statements like "Based on the context..." or "The provided information...".
-
-            Query: {query}
-
-            Answer:
-          defaultEmptyContextPromptTemplate: |
-            The user query is outside your knowledge base.
-            Politely inform the user that you can't answer it.
 ```
 
 ## MCP服务
@@ -230,7 +213,7 @@ spring:
                 description: 在不同时区之间转换时间
 ```
 
-## 技能库 & Skill 市场
+## 技能市场
 
 技能是给 LLM 用的 prompt 模板，描述固定的工作流。**数据完全在数据库里**（不再读 yml 的 `skills[]` 段），分三张表：
 
@@ -247,7 +230,7 @@ spring:
 ### 普通用户的技能生命周期
 
 1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`。写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）。
-2. **提交到市场** — 技能库 → **提交** Tab，选自己的 Skill + 填版本号（如 `1.0.0`）。写入 `market_skill`，`status=PENDING`。
+2. **提交到市场** — 技能库 → **共享** Tab，选自己的 Skill + 填版本号（如 `1.0.0`）。写入 `market_skill`，`status=PENDING`。
 3. **等待审批** — admin 在 **控制台 → Skill 市场** 审。`PENDING` → `APPROVED` 后才对全员可见。
 4. **从市场拉取** — 技能库 → **市场** Tab，点 **拉取**。写入 `user_skill`，`source=MARKET_PULLED`。可改 `description` 和 `default_loaded`，**不能改 content**（要更新就重新拉取）。
 5. **通过角色授权获得** — admin 在角色管理里给某角色授权某 market_skill，登录后自动注入到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是具体版本）。
@@ -272,15 +255,29 @@ spring:
 
 ### 聊天 UI 用法
 
-点 **🧠 技能库** 按钮打开 —— 三个 Tab：
+点 **🧠 技能库** 按钮打开 —— 四个 Tab：
 
 - **我的** — 你的 `user_skill`（admin 还会看到 union view）。点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）。
 - **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下。
-- **提交** — 选自建 skill + 填版本号，提交到 PENDING。
+- **共享** — 选自建 skill + 填版本号，提交到 PENDING，等 admin 审批。
+- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED），可撤回 PENDING 的。
 
 `content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）。
 
 完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
+
+## 知识库 & 知识市场
+
+知识库存储用于 RAG 检索的文档。知识空间弹窗有四个 Tab：
+
+- **我的** — 自己的知识库。创建、上传文档、删除。
+- **市场** — 浏览已审批的市场知识库，**添加到我的知识库**（订阅）。
+- **共享** — 自己尚未共享的知识库，点 **共享到市场** 提交给 admin 审批。
+- **我的发布** — 查看自己提交到市场的知识库状态（PENDING / APPROVED / REJECTED），可撤回 PENDING 的。
+
+市场流程：提交 → PENDING → admin 审批 → APPROVED → 其他用户可订阅。也可通过角色授权自动下发知识库给用户（类似技能）。
+
+知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)。
 
 ---
 

@@ -1,9 +1,14 @@
 package cn.wubo.spring.ai.loom.agent.chat;
 
+import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
+import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
 import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
+import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
+import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
+import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import cn.wubo.spring.ai.loom.agent.util.TikaUtils;
@@ -14,11 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
-import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.util.MimeTypeUtils;
-import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
@@ -26,26 +28,32 @@ import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 public class DefaultChat implements IChat {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultChat.class);
 
     private final ChatClient chatClient;
-    private final Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor;
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
     private final IUserConversation userConversation;
     private final IFile file;
+    private final ISkillStorage skillStorage;
+    private final IKnowledge knowledge;
+    private final LoomAgentProperties properties;
 
-    public DefaultChat(ChatClient chatClient, Optional<RetrievalAugmentationAdvisor> retrievalAugmentationAdvisor, IMcp mcp, List<IEmbedTool> embedTools, IUserConversation userConversation, IFile file) {
+    public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
+                       IUserConversation userConversation, IFile file,
+                       ISkillStorage skillStorage, IKnowledge knowledge,
+                       LoomAgentProperties properties) {
         this.chatClient = chatClient;
-        this.retrievalAugmentationAdvisor = retrievalAugmentationAdvisor;
         this.mcp = mcp;
         this.embedTools = embedTools;
         this.userConversation = userConversation;
         this.file = file;
+        this.skillStorage = skillStorage;
+        this.knowledge = knowledge;
+        this.properties = properties;
     }
 
     @Override
@@ -66,7 +74,9 @@ public class DefaultChat implements IChat {
             userConversation.insert(new UserConversationRecord(username, conversationId));
         }
 
-        ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt();
+        String dynamicSystemPrompt = buildDynamicSystemPrompt(username, chatRequestRecord.enabledKnowledgeIds());
+
+        // Prepare document content if files are attached (appended to dynamic system prompt)
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             StringBuilder extraText = new StringBuilder();
             for (String fileId : chatRequestRecord.fileIds()) {
@@ -87,9 +97,13 @@ public class DefaultChat implements IChat {
             }
             if (!extraText.isEmpty()){
                 extraText.append("\n\n以上是文档内容提取结果，请根据文档内容进行回答。");
-                requestSpec.system(extraText.toString());
+                dynamicSystemPrompt = dynamicSystemPrompt + "\n\n" + extraText;
             }
+        }
 
+        ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt().system(dynamicSystemPrompt);
+
+        if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             requestSpec.user(u -> {
                 u.text(chatRequestRecord.message());
                 for (String fileId : chatRequestRecord.fileIds()) {
@@ -113,6 +127,8 @@ public class DefaultChat implements IChat {
         // (用于 ChatMemory 命名空间 + 删除历史时的清理)。ISubTaskTool/IScheduleTool
         // 通过 toolContext.getContext().get("parentConversationId") 读取。
         props.put("parentConversationId", conversationId);
+        // 注入用户选中的知识库 ID 列表，让 IKnowledgeTool 可以过滤
+        props.put("enabledKnowledgeIds", chatRequestRecord.enabledKnowledgeIds());
         String scheme = request.getScheme();         // http 或 https
         String serverName = request.getServerName(); // localhost 或 IP
         int serverPort = request.getServerPort();    // 8080
@@ -121,11 +137,6 @@ public class DefaultChat implements IChat {
 
         requestSpec.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId));
 
-        if (retrievalAugmentationAdvisor.isPresent() && StringUtils.hasText(chatRequestRecord.knowledgeId())) {
-            requestSpec.advisors(retrievalAugmentationAdvisor.get());
-            requestSpec.advisors(advisor -> advisor.param(VectorStoreDocumentRetriever.FILTER_EXPRESSION, "type == 'knowledge' && knowledgeId == '" + chatRequestRecord.knowledgeId() + "' && username == '" + username + "'"));
-        }
-
         ToolCallbackProvider toolCallbackProvider = mcp.getVisibleToolCallbackProvider(username, chatRequestRecord.mcps());
 
         if (toolCallbackProvider != null) {
@@ -133,6 +144,51 @@ public class DefaultChat implements IChat {
         }
 
         return requestSpec.stream().chatResponse();
+    }
+
+    private String buildDynamicSystemPrompt(String username, List<String> enabledKnowledgeIds) {
+        StringBuilder sb = new StringBuilder();
+
+        // Base system prompt from properties
+        sb.append(properties.getDefaultSystem()).append("\n\n");
+
+        // Inject skill summary (first 20)
+        List<SkillRecord> allSkills = skillStorage.list(username);
+        List<SkillRecord> skills = allSkills.stream()
+                .filter(SkillRecord::load)
+                .limit(20)
+                .toList();
+
+        if (!skills.isEmpty()) {
+            sb.append("【技能】（共 ").append(allSkills.size()).append(" 个");
+            if (skills.size() < allSkills.size()) {
+                sb.append("，显示前 ").append(skills.size()).append(" 个");
+            }
+            sb.append("）\n");
+
+            for (SkillRecord skill : skills) {
+                sb.append("• ").append(skill.name()).append(" - ").append(skill.description()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // Inject knowledge base summary - only show user-selected KBs with their IDs
+        if (enabledKnowledgeIds != null && !enabledKnowledgeIds.isEmpty()) {
+            List<KnowledgeRecord> userKbs = knowledge.list(username);
+            List<KnowledgeRecord> enabledKbs = userKbs.stream()
+                    .filter(kb -> enabledKnowledgeIds.contains(kb.id()))
+                    .toList();
+            if (!enabledKbs.isEmpty()) {
+                sb.append("【知识库】（用户已启用 ").append(enabledKbs.size()).append(" 个）\n");
+                enabledKbs.forEach(kb ->
+                        sb.append("• ID=").append(kb.id())
+                                .append(", 名称=").append(kb.name())
+                                .append(", 描述=").append(kb.description()).append("\n"));
+                sb.append("\n当用户问题涉及以上知识库内容时，请调用 @searchKnowledge 检索相关信息（knowledgeId 使用以上列出的 ID）。\n\n");
+            }
+        }
+
+        return sb.toString();
     }
 
     private boolean isImage(String mimeType) {

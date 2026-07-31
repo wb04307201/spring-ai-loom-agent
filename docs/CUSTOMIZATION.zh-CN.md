@@ -63,10 +63,6 @@ spring-ai-loom-agent/
 |-----------------------------------------|---------|---------|-----------------------------------------------|
 | `rag.similarityThreshold`               | double  | `0.0`   | 向量检索相似度阈值，低于此值的文档将被过滤                         |
 | `rag.topK`                              | int     | `4`     | 检索返回的文档数量                                     |
-| `rag.defaultPromptTemplate`             | String  | (内置模板)  | RAG 有上下文时的提示词模板，支持 `{context}` 和 `{query}` 变量 |
-| `rag.defaultEmptyContextPromptTemplate` | String  | (内置模板)  | RAG 无上下文时的默认回复模板                              |
-| `rag.enabledKeyword`                    | boolean | `false` | 是否启用关键词元数据增强                                  |
-| `rag.enabledSummary`                    | boolean | `false` | 是否启用摘要元数据增强                                   |
 
 ### 1.3 JVector 向量库配置 (`jvector.*`)
 

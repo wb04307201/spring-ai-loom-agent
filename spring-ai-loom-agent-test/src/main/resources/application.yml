@@ -34,11 +34,17 @@ spring:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY}
       chat:
+        enabled: false  # 禁用 DashScope ChatModel，只用 Anthropic
+      embedding:
+        options:
+          model: text-embedding-v4
+    anthropic:
+      api-key: ${NEW_API_KEY}
+      base-url: http://123.56.128.32:3000
+      chat:
         options:
           model: qwen3.7-plus
-          multi_model: true
-          enable_thinking: true
-#    ollama:
+    #    ollama:
 #      chat:
 #        options:
 #          model: qwen3
@@ -89,26 +95,6 @@ spring:
         rag:
           similarityThreshold: 0.50
           top-k: 4
-          defaultPromptTemplate: |
-            Context information is below.
-            
-            ---------------------
-            {context}
-            ---------------------
-            
-            Given the context information and no prior knowledge, answer the query.
-            
-            Follow these rules:
-            
-            1. If the answer is not in the context, just say that you don't know.
-            2. Avoid statements like "Based on the context..." or "The provided information...".
-            
-            Query: {query}
-            
-            Answer:
-          defaultEmptyContextPromptTemplate: |
-            The user query is outside your knowledge base.
-            Politely inform the user that you can't answer it.
         # mcp 元数据已迁移到数据库（V5__add_roles_and_mcp_metadata.sql 默认种子 + admin 控制台可改）
         # skills 已迁移到数据库（V10__skill_market.sql 默认 seed 6 个 system skill + admin 控制台管理市场）
   servlet:

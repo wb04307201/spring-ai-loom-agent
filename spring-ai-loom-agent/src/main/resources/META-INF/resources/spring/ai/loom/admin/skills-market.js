@@ -77,7 +77,7 @@
 
     function renderTable() {
         if (!allSkills || allSkills.length === 0) {
-            tableContainer.innerHTML = '<div class="empty-state">市场暂无任何 Skill</div>';
+            tableContainer.innerHTML = '<div class="empty-state">市场暂无任何技能</div>';
             pendingCountLabel.textContent = '';
             return;
         }
@@ -182,7 +182,7 @@
         const m = allSkills.find(x => x.id === id);
         if (!m) return;
         currentEdit = {id};
-        document.getElementById('edit-skill-title').textContent = '编辑 Skill';
+        document.getElementById('edit-skill-title').textContent = '编辑技能';
         document.getElementById('es-name').value = m.name;
         document.getElementById('es-name').disabled = true;  // 编辑模式：name 不能改（PK 关联）
         document.getElementById('es-desc').value = m.description || '';
@@ -195,7 +195,7 @@
 
     function openCreate() {
         currentEdit = null;
-        document.getElementById('edit-skill-title').textContent = '新建 Skill（直接 APPROVED）';
+        document.getElementById('edit-skill-title').textContent = '新建技能（直接 APPROVED）';
         document.getElementById('es-name').value = '';
         document.getElementById('es-name').disabled = false;
         document.getElementById('es-desc').value = '';
@@ -253,7 +253,7 @@
         const m = allSkills.find(x => x.id === id);
         if (!m) return;
         const ok = await confirmDialog({
-            title: '删除 Skill',
+            title: '删除技能',
             message: `确定要删除「${m.name} v${m.version}」？\n\n会同时清理所有 user_skill / role_skill 里对它的引用。`,
             okText: '删除',
         });

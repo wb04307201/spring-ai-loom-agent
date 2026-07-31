@@ -22,12 +22,14 @@
 
 ## Features
 
-> **Core capabilities**: 💬 Streaming chat · 🖼 Multimodal · 📚 RAG · 🔧 MCP tools · 🧠 Skill library + market · 🧩 Sub-tasks · ⏰ Scheduled tasks · 🛡 RBAC · 🎛 Admin console — one dependency, batteries included.
+> **6 Pillars**: 💬 Chat ·  Knowledge · 📁 Files · 🔧 MCP · 🧠 Skill · 🛡 RBAC
+> **Platform**: 🧠 Skill Market ·  Knowledge Market · 🎛 Admin Console
+> **Advanced**: 🧩 Sub-tasks · ⏰ Scheduled tasks · 🖼 Multimodal — one dependency, batteries included.
 
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
 - **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
-- **🧠 Skill Library + Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`
+- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / MCP descriptions / usage stats; admin-gated
@@ -44,6 +46,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
 | File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
 | Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
+| Knowledge | `IKnowledgeTool` | 2 | ✅ enabled | `knowledge.enabled` |
 | Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
 | Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
@@ -73,7 +76,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
   <groupId>io.github.wb04307201</groupId>
   <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
-  <version>1.1.35</version>
+  <version>1.1.36</version>
 </dependency>
 ```
 
@@ -159,26 +162,6 @@ spring:
         rag:
           similarityThreshold: 0.50   # Similarity threshold, default 0.0
           top-k: 4                    # Top-k results, default 4
-          defaultPromptTemplate: |
-            Context information is below.
-
-            ---------------------
-            {context}
-            ---------------------
-
-            Given the context information and no prior knowledge, answer the query.
-
-            Follow these rules:
-
-            1. If the answer is not in the context, just say that you don't know.
-            2. Avoid statements like "Based on the context..." or "The provided information...".
-
-            Query: {query}
-
-            Answer:
-          defaultEmptyContextPromptTemplate: |
-            The user query is outside your knowledge base.
-            Politely inform the user that you can't answer it.
 ```
 
 ## MCP Services
@@ -244,7 +227,7 @@ spring:
                 description: Convert time between different time zones
 ```
 
-## Skill Library & Skill Market
+## Skill Market
 
 Skills are prompt templates that the LLM uses for recurring workflows. The data is **fully managed in the database** (no more yml `skills[]` block) and lives in three tables:
 
@@ -261,7 +244,7 @@ On first launch, the init migration seeds 6 system skills (author=`system`, stat
 ### Skill lifecycle for a normal user
 
 1. **Create** — In the chat UI's Skill Library → **我的** tab → **+ 新增**, or `PUT /spring/ai/loom/skill`. The skill is stored in `user_skill` with `source=USER_CREATED`. Fully editable (name / desc / content / default-loaded).
-2. **Submit to market** — Library → **提交** tab. Choose your own skill + a version number (e.g. `1.0.0`). Stored in `market_skill` with `status=PENDING`.
+2. **Submit to market** — Library → **共享** tab. Choose your own skill + a version number (e.g. `1.0.0`). Stored in `market_skill` with `status=PENDING`.
 3. **Wait for admin approval** — Admins review on **控制台 → Skill 市场**. `PENDING` → `APPROVED` makes it visible to everyone.
 4. **Pull from market** — Library → **市场** tab. Click **拉取**. Creates a `user_skill` row with `source=MARKET_PULLED`. You can edit `description` and `default_loaded` but **not** the content (to update, re-pull).
 5. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-injected into your `user_skill` on every login with `source=ROLE_GRANTED, locked=true`. **You cannot edit or delete it** (it's the version the role pins).
@@ -286,17 +269,31 @@ On first launch, the init migration seeds 6 system skills (author=`system`, stat
 
 ### Using skills in the chat UI
 
-Open the Skill Library button (🧠) — three tabs:
+Open the Skill Library button (🧠) — four tabs:
 
 - **我的** — your local `user_skill` (plus admin's union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
 - **市场** — browse all `APPROVED` market skills and **拉取** them into your `user_skill`.
-- **提交** — submit a `USER_CREATED` skill to the market with a version number.
+- **共享** — submit a `USER_CREATED` skill to the market with a version number. Status becomes `PENDING` until admin approves.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED). Withdraw PENDING items to edit and re-submit.
 
 Inside `content` you can reference MCP tools by `@tool_name` — the available tools come from the role-based `mcps` authorization, not from yml.
 
 For the full REST API, see [docs/API.md → §6 Skill Management](docs/API.md#6-skill-management).
 
 ![img_4.png](docs/img_4.png)
+
+## Knowledge Base & Knowledge Market
+
+Knowledge bases store documents for RAG retrieval. The knowledge space modal has four tabs:
+
+- **我的** — your own knowledge bases. Create, upload documents, delete.
+- **市场** — browse approved market knowledge bases and **添加到我的知识库** (subscribe).
+- **共享** — your own knowledge bases not yet shared. Click **共享到市场** to submit for admin approval.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED). Withdraw PENDING items.
+
+Market workflow: submit → PENDING → admin approve → APPROVED → other users can subscribe. Role-based authorization can also auto-grant knowledge bases to users (similar to skills).
+
+For the knowledge market REST API, see [docs/API.md → §5.8 Knowledge Market](docs/API.md#58-knowledge-market).
 
 ---
 
