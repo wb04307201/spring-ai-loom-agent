@@ -128,7 +128,10 @@ public class DefaultChat implements IChat {
         // 通过 toolContext.getContext().get("parentConversationId") 读取。
         props.put("parentConversationId", conversationId);
         // 注入用户选中的知识库 ID 列表，让 IKnowledgeTool 可以过滤
-        props.put("enabledKnowledgeIds", chatRequestRecord.enabledKnowledgeIds());
+        // toolContext 不允许 null 值（Spring AI 断言），前端未选知识库时发 null —— 缺省即“不过滤”，与工具侧读取语义一致
+        if (chatRequestRecord.enabledKnowledgeIds() != null) {
+            props.put("enabledKnowledgeIds", chatRequestRecord.enabledKnowledgeIds());
+        }
         String scheme = request.getScheme();         // http 或 https
         String serverName = request.getServerName(); // localhost 或 IP
         int serverPort = request.getServerPort();    // 8080
