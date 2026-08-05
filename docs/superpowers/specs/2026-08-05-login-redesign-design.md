@@ -76,7 +76,9 @@
 1. `login.html` — 结构重写：加顶栏、换真实 logo（两处）、加 footer slogan、内联织线 SVG；表单 id/结构保持与 `login.js` 兼容（`login-form`/`username`/`password`/`submit-btn`/`error-msg`）。
 2. `login.css` — 整体重写：新 token、顶栏/卡片/输入/按钮/错误条/footer 样式、fadeUp 动画；移除紫色渐变与空 logo 方块样式。
 
-**不动**：`login.js`（登录/自动登录/错误处理逻辑一行不改）、`index.html`、`style.css`、后端、API、其他页面。
+**几乎不动**：`login.js` 仅改一处纯文案 —— `finally` 里按钮复位文本 `'登 录'` → `'登录'`（与去空格文案一致；登录/自动登录/错误处理逻辑零改动）。
+
+**不动**：`index.html`、`style.css`、后端、API、其他页面。
 
 ## 验证计划
 
