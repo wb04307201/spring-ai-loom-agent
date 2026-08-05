@@ -146,7 +146,49 @@ public class DefaultChat implements IChat {
             requestSpec.toolCallbacks(toolCallbackProvider);
         }
 
-        return requestSpec.stream().chatResponse();
+        return requestSpec.stream().chatResponse()
+                .onErrorResume(err -> reactor.core.publisher.Flux.just(toErrorResponse(err)));
+    }
+
+    /**
+     * 把上游 AI 调用失败映射为单条 ChatResponse，让前端以「助手气泡」展示可读错误，
+     * 避免 SseController 直接 completeWithError 后浏览器只看到模糊的 HTTP 500。
+     */
+    private org.springframework.ai.chat.model.ChatResponse toErrorResponse(Throwable err) {
+        String msg = friendlyMessage(err);
+        log.warn("聊天上游失败，转为可读错误返回前端：{}", msg, err);
+        org.springframework.ai.chat.model.Generation gen =
+                new org.springframework.ai.chat.model.Generation(new org.springframework.ai.chat.messages.AssistantMessage(msg));
+        return new org.springframework.ai.chat.model.ChatResponse(java.util.List.of(gen));
+    }
+
+    private String friendlyMessage(Throwable err) {
+        Throwable t = err;
+        while (t != null) {
+            String name = t.getClass().getSimpleName();
+            String message = t.getMessage();
+            if (message != null && (message.contains("Arrearage") || message.contains("账户欠费") || message.contains("overdue"))) {
+                return "模型服务暂不可用（账户欠费），请联系管理员充值后重试。";
+            }
+            if (name.contains("NonTransientAiException") && message != null && (message.contains("400") || message.contains("Bad Request"))) {
+                return "上游模型服务拒绝了请求（" + abbr(message) + "），请调整消息后重试。";
+            }
+            if (name.contains("WebClientRequestException") || message != null && message.contains("Connection reset")) {
+                return "网络异常连接被重置，请稍后重试。";
+            }
+            if (name.contains("ResourceAccessException") || (message != null && message.contains("Connection refused"))) {
+                return "无法连接模型服务，请检查网络或稍后重试。";
+            }
+            t = t.getCause();
+        }
+        String name = err.getClass().getSimpleName();
+        return "聊天服务异常（" + (name != null && !name.isBlank() ? name : "Unknown") + "），请稍后重试。";
+    }
+
+    private String abbr(String s) {
+        if (s == null) return "";
+        String oneLine = s.replace('\n', ' ').trim();
+        return oneLine.length() > 120 ? oneLine.substring(0, 120) + "…" : oneLine;
     }
 
     private String buildDynamicSystemPrompt(String username, List<String> enabledKnowledgeIds) {

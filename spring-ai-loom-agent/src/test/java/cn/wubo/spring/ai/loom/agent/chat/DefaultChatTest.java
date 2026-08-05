@@ -139,4 +139,31 @@ class DefaultChatTest {
 
         verify(userConversation, never()).insert(any());
     }
+
+    @Test
+    @DisplayName("上游 Arrearage：Flux 转为可读中文错误，不再抛异常")
+    void upstreamArrearageBecomesReadable() {
+        ChatClient.ChatClientRequestSpec spec = requestSpec;
+        ChatClient.StreamResponseSpec streamSpec = mock(ChatClient.StreamResponseSpec.class);
+        // 覆盖到 onErrorResume 分支，需要重置 spec 上的 stub 并重新打桩（setUp 中其它 stub 失效可接受）
+        org.mockito.Mockito.reset(spec);
+        RuntimeException ex = new RuntimeException(
+                "HTTP 400 - {\"code\":\"Arrearage\",\"message\":\"Access denied, please make sure your account is in good standing.\"}");
+        when(spec.system(anyString())).thenReturn(spec);
+        when(spec.user(anyString())).thenReturn(spec);
+        when(spec.tools(any())).thenReturn(spec);
+        when(spec.toolContext(any())).thenReturn(spec);
+        when(spec.advisors(any(java.util.function.Consumer.class))).thenReturn(spec);
+        when(spec.stream()).thenReturn(streamSpec);
+        when(streamSpec.chatResponse()).thenReturn(reactor.core.publisher.Flux.error(ex));
+
+        ChatRequestRecord record = new ChatRequestRecord("hi", "conv-err", null, null, null);
+        reactor.core.publisher.Flux<org.springframework.ai.chat.model.ChatResponse> flux = chat.stream(record, "alice", request);
+
+        java.util.List<org.springframework.ai.chat.model.ChatResponse> out = flux.collectList().block();
+        assertNotNull(out);
+        assertEquals(1, out.size(), "上游异常应被转换为单条 ChatResponse");
+        String text = out.get(0).getResult().getOutput().getText();
+        assertTrue(text.contains("欠费") || text.contains("充值"), "应给出可读的中文错误消息，实际：" + text);
+    }
 }
