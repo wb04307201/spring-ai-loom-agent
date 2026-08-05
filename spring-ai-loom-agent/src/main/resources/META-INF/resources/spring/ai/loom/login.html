@@ -7,10 +7,29 @@
     <link rel="stylesheet" href="login.css">
 </head>
 <body>
-<div class="login-container">
+<svg class="threads" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke-linecap="round">
+        <path d="M-60 640 C 260 560, 520 720, 860 640 S 1300 540, 1500 620" stroke="#6366f1" stroke-width="1.5" opacity=".10"/>
+        <path d="M-60 668 C 260 588, 520 748, 860 668 S 1300 568, 1500 648" stroke="#6366f1" stroke-width="1.5" opacity=".08"/>
+        <path d="M-60 696 C 260 616, 520 776, 860 696 S 1300 596, 1500 676" stroke="#818cf8" stroke-width="1.5" opacity=".07"/>
+        <path d="M-60 724 C 260 644, 520 804, 860 724 S 1300 624, 1500 704" stroke="#a78bfa" stroke-width="1.5" opacity=".06"/>
+        <path d="M-60 752 C 260 672, 520 832, 860 752 S 1300 652, 1500 732" stroke="#a855f7" stroke-width="1.5" opacity=".05"/>
+        <path d="M900 -40 C 1000 160, 1200 120, 1500 220" stroke="#6366f1" stroke-width="1.5" opacity=".07"/>
+        <path d="M960 -60 C 1060 140, 1260 100, 1560 200" stroke="#a78bfa" stroke-width="1.5" opacity=".06"/>
+        <path d="M1020 -80 C 1120 120, 1320 80, 1620 180" stroke="#a855f7" stroke-width="1.5" opacity=".05"/>
+    </g>
+</svg>
+<header class="app-header">
+    <div class="header-left">
+        <img src="../../../static/logo.png" alt="灵梭 logo">
+        <span class="header-title">灵梭</span>
+    </div>
+    <div class="header-right">Spring AI LoomAgent</div>
+</header>
+<main class="login-main">
     <div class="login-card">
         <div class="login-header">
-            <div class="logo"></div>
+            <img class="brand-logo" src="../../../static/logo.png" alt="灵梭 logo">
             <h1>灵梭</h1>
             <p>Spring AI LoomAgent</p>
         </div>
@@ -24,10 +43,11 @@
                 <input type="password" id="password" name="password" placeholder="请输入密码" required>
             </div>
             <div id="error-msg" class="error-msg" style="display: none;"></div>
-            <button type="submit" id="submit-btn" class="submit-btn">登 录</button>
+            <button type="submit" id="submit-btn" class="submit-btn">登录</button>
         </form>
+        <div class="login-footer">一线一梭 · 织就智能</div>
     </div>
-</div>
+</main>
 <script src="login.js"></script>
 </body>
 </html>

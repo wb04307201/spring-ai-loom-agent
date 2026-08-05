@@ -60,7 +60,7 @@
             showError('网络错误：' + (err.message || err));
         } finally {
             submitBtn.disabled = false;
-            submitBtn.textContent = '登 录';
+            submitBtn.textContent = '登录';
         }
     });
 })();
