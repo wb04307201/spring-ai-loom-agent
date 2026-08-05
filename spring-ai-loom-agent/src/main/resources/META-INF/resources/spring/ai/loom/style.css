@@ -2896,3 +2896,24 @@ textarea::placeholder {
     color: white !important;
     border-color: var(--error-color) !important;
 }
+
+/* ===== Toast 通知（app.js showToast） ===== */
+.toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 2000;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    padding: 12px 20px;
+    border-radius: 6px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+    display: none;
+    animation: slideIn 0.2s;
+}
+.toast.show { display: block; }
+.toast.success { border-left: 4px solid #22c55e; }
+.toast.error { border-left: 4px solid var(--error-color, #ef4444); }
+@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
