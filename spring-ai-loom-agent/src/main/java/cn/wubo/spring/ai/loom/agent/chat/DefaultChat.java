@@ -249,10 +249,13 @@ public class DefaultChat implements IChat {
             if (!enabledKbs.isEmpty()) {
                 sb.append("【知识库】（用户已启用 ").append(enabledKbs.size()).append(" 个）\n");
                 enabledKbs.forEach(kb ->
-                        sb.append("• ID=").append(kb.id())
-                                .append(", 名称=").append(kb.name())
-                                .append(", 描述=").append(kb.description()).append("\n"));
-                sb.append("\n当用户问题涉及以上知识库内容时，请调用 @searchKnowledge 检索相关信息（knowledgeId 使用以上列出的 ID）。\n\n");
+                        sb.append("• ").append(kb.name())
+                                .append("（ID=").append(kb.id()).append("）\n")
+                                .append("  描述：").append(kb.description()).append("\n"));
+                sb.append("\n⚠️ 用户已显式启用以上知识库，期望从中获取信息：\n")
+                  .append("  1. **优先**调用 @searchKnowledge(knowledgeId, query, topK) 检索相关内容\n")
+                  .append("  2. 即便技能列表里看似有相关 skill，也要先查知识库——这是用户主动启用的，比 skill 简介更精确\n")
+                  .append("  3. 知识库结果（哪怕只有 0 条）要明示告知用户；不可用通用知识兜底\n\n");
             }
         }
 
