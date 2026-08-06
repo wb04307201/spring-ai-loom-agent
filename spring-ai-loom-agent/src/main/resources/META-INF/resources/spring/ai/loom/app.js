@@ -71,7 +71,7 @@ const state = {
     conversationTitle: null, // tracks the current conversation's title to gate auto-rename
     selectedMcps: [],
     enabledKnowledgeIds: [],
-    selectedSkill: null,
+    selectedSkill: null, // {name, description} | null，用户通过 / 命令精准选中的 Skill
     isStreaming: false,
     controller: null, // AbortController for SSE
     mcps: [],
