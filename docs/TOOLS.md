@@ -64,7 +64,7 @@ spring:
 | Sub-Interface             | Default Impl                | Methods | Default State | Notes                                          |
 |---------------------------|-----------------------------|---------|---------------|------------------------------------------------|
 | `ITimeTool`               | `DefaultTimeTool`           | 2       | enabled       | Always on when `time.enabled` is unset        |
-| `ISkillTool`              | `DefaultSkillTool`          | 2       | enabled       | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read |
+| `ISkillTool`              | `DefaultSkillTool`          | 3       | enabled       | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read |
 | `IFileTool`               | `DefaultFileTool`           | 16      | enabled       | Path-based; root = `{fileBasePath}/{username}/` |
 | `ISubTaskTool`            | `DefaultSubTaskTool`        | 4       | enabled       | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool`           | `DefaultScheduleTool`       | 4       | enabled       | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
@@ -94,7 +94,7 @@ spring:
 | **Default**     | `DefaultSkillTool`                                                                    |
 | **Override**    | Custom `@Bean ISkillTool`                                                             |
 | **State**       | Enabled by default; toggle with `spring.ai.loom.agent.skill.enabled`                   |
-| **Methods**     | `skillContents` — list available skills for current user; `getSkill` — get one skill's content |
+| **Methods**     | `listSkills(keyword, source, maxCount)` — progressive-disclosure listing; defaults to returning all (cap 200), filterable by `keyword` (substring on name/description) and `source` (`USER_CREATED` / `MARKET_VIEW` / `ROLE_GRANTED` / `MARKET_PULLED`); `getSkill(skillName)` — get one skill's full content; `createOrUpdateSkill(name, description, content)` — create or overwrite a user-owned skill (ROLE_GRANTED / MARKET_PULLED entries are locked and will return 403) |
 | **Data source** | `user_skill` (DB). On every call, `DefaultSkillStorage` auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries). For admins, also includes a **union view** of all `APPROVED` market skills + own PENDING (source=`MARKET_VIEW`). |
 
 ---
@@ -182,7 +182,26 @@ spring:
 
 ---
 
-## 8. `ICompileAndDeployTool` — End-to-End Deployment
+## 8. `IKnowledgeTool` — Knowledge RAG Retrieval
+
+`IKnowledgeTool` provides tool-based RAG: the LLM invokes `searchKnowledge` to pull relevant chunks from a specific knowledge base on demand. It replaces the older `RetrievalAugmentationAdvisor` pattern (which pre-injected all chunks into the system prompt) with explicit tool calls that the LLM can decide when to use.
+
+| Item            | Details                                                                                |
+|-----------------|----------------------------------------------------------------------------------------|
+| **Interface**   | `cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool`                           |
+| **Default**     | `DefaultKnowledgeTool`                                                                 |
+| **Override**    | Custom `@Bean IKnowledgeTool`                                                          |
+| **State**       | Enabled by default; toggle with `spring.ai.loom.agent.knowledge.enabled`                |
+| **Methods**     | `searchKnowledge(knowledgeId, query, topK?)` — vector-search a single KB and return top-k chunks with similarity score |
+| **Access check**| Each call verifies the user has access to the target KB (own / subscribed / role-granted); returns "没有权限访问该知识库" if not       |
+| **Filter**      | Built SpEL filter `type == 'knowledge' && knowledgeId == ?` so search is scoped to the requested KB only |
+| **KB discovery**| The list of **enabled** KBs is auto-injected into the system prompt under the `【知识库】` section (ID + name + summary) — the LLM does not need a `listKnowledgeBases` tool to discover them; the previous `listKnowledgeBases` tool was removed (Sep 2025) as redundant with the system prompt injection |
+
+> KB `description` field is treated as a **content summary** for the LLM (not a topic label). Good descriptions read like "本知识库收录产品保修条款、售后流程：保修期限（主机 36 个月/电池 12 个月/配件 6 个月）...". Auto-summary via LLM is planned.
+
+---
+
+## 10. `ICompileAndDeployTool` — End-to-End Deployment
 
 `ICompileAndDeployTool` runs the full pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. It is the **supported entry point** for `git clone → build → docker run` workflows — LLM only needs to supply the parameters and read back the `accessUrl`.
 
@@ -195,7 +214,7 @@ spring:
 | **Method**      | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
 | **Workspace**   | Each call creates an isolated work dir under `{fileBasePath}/{username}/compile-deploy-<uuid>/` |
 
-### 8.1 Tool-call Parameters
+### 10.1 Tool-call Parameters
 
 `params` is a case-insensitive Map. Required: `gitUrl`, `port`, `containerPort`. Others are optional.
 
@@ -215,7 +234,7 @@ spring:
 | `baseImage`      | no       | Template alias (`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`) or full image name (e.g. `openjdk:17-slim`). Default per `buildTool`: `maven→java17`, `npm→node20`, `npm-frontend→node20-serve`, `pip→python3`. |
 | `runCommand`     | no       | String array overriding the template's default ENTRYPOINT (rare)                                                     |
 
-### 8.2 Configuration
+### 10.2 Configuration
 
 All settings live under `spring.ai.loom.agent.compile.*`.
 
@@ -233,7 +252,7 @@ All settings live under `spring.ai.loom.agent.compile.*`.
 | `spring.ai.loom.agent.compile.imageTemplates`     | map      | (6 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
 | `spring.ai.loom.agent.compile.extraRunArgs`       | string[] | `[]`                             | Extra `docker run` args injected between `--name` and the image name                                         |
 
-### 8.3 Base-image Templates (built-in)
+### 10.3 Base-image Templates (built-in)
 
 | Alias             | Image                                | Default ENTRYPOINT                          |
 |-------------------|--------------------------------------|---------------------------------------------|
@@ -263,7 +282,7 @@ spring:
 
 Pass the alias to `baseImage` to select a template, or pass a full image name (e.g. `openjdk:17-slim`) to use it directly — `command` falls back to `java17`.
 
-### 8.4 Example Invocation
+### 10.4 Example Invocation
 
 ```json
 {
@@ -277,7 +296,7 @@ Pass the alias to `baseImage` to select a template, or pass a full image name (e
 }
 ```
 
-### 8.5 End-to-End Conversation Examples
+### 10.5 End-to-End Conversation Examples
 
 Below are three complete walkthroughs showing how a user describes a deployment in chat, how the LLM extracts and asks clarifying questions, and how it finally invokes the end-to-end deployment tool (`ICompileAndDeployTool` — the actual registered tool name is auto-derived from the method by Spring AI; do not hardcode it in skill templates).
 
@@ -440,7 +459,7 @@ The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor
 
 ---
 
-## 10. `IScheduleTool` — Scheduled Tasks
+## 11. `IScheduleTool` — Scheduled Tasks
 
 | Item            | Details                                                                               |
 |-----------------|---------------------------------------------------------------------------------------|
@@ -480,7 +499,7 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 
 ---
 
-## 11. Replacing a Sub-Tool
+## 12. Replacing a Sub-Tool
 
 Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a custom implementation wins automatically:
 

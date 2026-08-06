@@ -29,10 +29,10 @@
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
 - **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
-- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`
+- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted), versioning + admin approval; skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
-- **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / MCP descriptions / usage stats; admin-gated
+- **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
 - **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / end-to-end deploy (on by default), git / maven (opt-in); see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
@@ -45,8 +45,8 @@ All tools follow the **interface + default implementation** pattern. Every compo
 |------|-----------|---------|---------|-----------------|
 | Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
 | File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
-| Skill | `ISkillTool` | 2 | ✅ enabled | `skill.enabled` |
-| Knowledge | `IKnowledgeTool` | 2 | ✅ enabled | `knowledge.enabled` |
+| Skill | `ISkillTool` | 3 | ✅ enabled | `skill.enabled` |
+| Knowledge | `IKnowledgeTool` | 1 | ✅ enabled | `knowledge.enabled` |
 | Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
 | Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
