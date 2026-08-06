@@ -2917,3 +2917,43 @@ textarea::placeholder {
 .toast.success { border-left: 4px solid #22c55e; }
 .toast.error { border-left: 4px solid var(--error-color, #ef4444); }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+/* ===== Chat Selected Skill Tag ===== */
+.chat-selected-skill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-secondary, #f1f5f9);
+    border: 1px solid var(--primary-color, #6366f1);
+    border-radius: var(--radius-sm, 6px);
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+}
+
+.chat-selected-skill.hidden {
+    display: none;
+}
+
+.chat-selected-skill .skill-tag {
+    font-weight: 500;
+    color: var(--primary-color, #6366f1);
+}
+
+.chat-selected-skill .skill-tag-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+    border-radius: 4px;
+    transition: all var(--transition-fast, 0.15s ease);
+}
+
+.chat-selected-skill .skill-tag-close:hover {
+    background: var(--bg-primary, #fff);
+    color: var(--error-color, #ef4444);
+}
