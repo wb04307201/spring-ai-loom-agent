@@ -64,7 +64,7 @@ spring:
 | 子接口                       | 默认实现                              | 方法数  | 默认状态      | 备注                                          |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool`              | `DefaultTimeTool`                 | 2    | 启用        | 未设 `time.enabled` 时始终开启                     |
-| `ISkillTool`             | `DefaultSkillTool`                | 2    | 启用        | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
+| `ISkillTool`             | `DefaultSkillTool`                | 3    | 启用        | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
 | `IFileTool`              | `DefaultFileTool`                 | 16   | 启用        | 基于路径；根目录 = `{fileBasePath}/{username}/` |
 | `ISubTaskTool`           | `DefaultSubTaskTool`              | 4    | 启用        | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool`          | `DefaultScheduleTool`             | 4    | 启用        | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
@@ -94,7 +94,7 @@ spring:
 | **默认实现** | `DefaultSkillTool`                                                     |
 | **覆盖方式** | 自定义 `@Bean ISkillTool`                                                 |
 | **状态**   | 默认启用；通过 `spring.ai.loom.agent.skill.enabled` 切换                      |
-| **方法**   | `skillContents`（列出当前用户可用技能）、`getSkill`（根据名称获取技能详情） |
+| **方法**   | `listSkills(keyword, source, maxCount)`（渐进式披露：默认全返回，上限 200；按 `keyword` 模糊匹配 `name`/`description`，按 `source` 过滤）、`getSkill`（根据名称获取技能详情）、`createOrUpdateSkill(name, description, content)`（创建或覆盖自建技能；`ROLE_GRANTED` / `MARKET_PULLED` 锁定返回 403） |
 | **数据源** | `user_skill`（数据库）。每次调用前 `DefaultSkillStorage` 自动 sync `role_skill` → `user_skill`（locked 的 ROLE_GRANTED 条目）。对 admin 还会附带** union view**：所有 APPROVED + 自己的 PENDING（source=`MARKET_VIEW`）。 |
 
 ---
@@ -182,7 +182,43 @@ spring:
 
 ---
 
-## 8. `ICompileAndDeployTool` — 端到端部署
+## 8. `IKnowledgeTool` — 知识库 RAG 检索
+
+`IKnowledgeTool` 提供工具化 RAG：LLM 调 `searchKnowledge` 按需从指定知识库拉取相关 chunk。替代了旧的 `RetrievalAugmentationAdvisor` 模式（旧的模式是把所有 chunk 预注入到 system prompt 里）。
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool`           |
+| **默认实现** | `DefaultKnowledgeTool`                                                   |
+| **覆盖方式** | 自定义 `@Bean IKnowledgeTool`                                              |
+| **状态**   | 默认启用；通过 `spring.ai.loom.agent.knowledge.enabled` 切换                  |
+| **方法**   | `searchKnowledge(knowledgeId, query, topK?)`（向量检索指定知识库，返回 top-k chunk 含相似度分数） |
+| **权限检查** | 每次调用校验用户对目标知识库的访问权限（own / subscribed / role-granted）；否则返回 "没有权限访问该知识库"  |
+| **过滤**   | 内置 SpEL 过滤 `type == 'knowledge' && knowledgeId == ?` 限定只在请求的知识库内检索 |
+| **KB 发现** | 已启用的知识库列表在 system prompt `【知识库】` 段自动展示（ID + 名称 + 摘要）—— LLM 不需要 `listKnowledgeBases` 工具来发现它们；该工具已于 2025-09 移除 |
+
+> KB `description` 字段作为 LLM 用的**内容摘要**（不是主题标签）。好例子：「本知识库收录产品保修条款、售后流程：保修期限（主机 36 个月/电池 12 个月/配件 6 个月）...」。未来 LLM 自动生成摘要。
+
+---
+
+## 11. `ISubTaskTool` — 子任务委派
+
+`ISubTaskTool` 让主对话把一段任务委派给同步运行的"子模型"，跑在独立线程池上。子任务不能再触发子任务或定时任务（递归防御）。
+
+| 项目       | 内容                                                                     |
+|----------|------------------------------------------------------------------------|
+| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.subtask.ISubTaskTool`                |
+| **默认实现** | `DefaultSubTaskTool`                                                     |
+| **覆盖方式** | 自定义 `@Bean ISubTaskTool`                                                 |
+| **状态**   | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换                  |
+| **方法(4)** | `start_sub_task(prompt, systemContext?)`（在 `loomSubTaskExecutor` 上启动子任务）；`list_sub_tasks()`（列出当前会话的活跃子任务）；`cancel_sub_task(subTaskId)`（取消运行中的子任务）；`get_sub_task_history(limit?)`（最近已完成/已取消的子任务） |
+| **隔离**   | 严格按 `(username, conversationId)` 隔离；子任务 memory 用 `{conversationId}--sub--{subTaskId}` 命名空间，避免污染父会话历史 |
+| **工具过滤** | 子任务运行时 self-tools（`ISubTaskTool` / `IScheduleTool`）被过滤掉，防止递归 |
+| **并发**   | 通过 `spring.ai.loom.agent.subtask.max-concurrent`（默认 4）控制；历史通过 `max-history`（默认 200）控制 |
+
+---
+
+## 12. `ICompileAndDeployTool` — 端到端部署
 
 `ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`。是 `git clone → build → docker run` 工作流的**推荐入口** —— LLM 只需传参，工具返回 `accessUrl`。
 
@@ -195,7 +231,7 @@ spring:
 | **方法**   | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
 | **工作区** | 每次调用在 `{fileBasePath}/{username}/compile-deploy-<uuid>/` 下创建独立工作区               |
 
-### 8.1 工具入参
+### 10.1 工具入参
 
 `params` 是大小写不敏感的 Map。必填：`gitUrl`、`port`、`containerPort`。其他按需提供。
 
@@ -215,7 +251,7 @@ spring:
 | `baseImage`        | 否    | 基础镜像；支持模板别名（`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`）或完整镜像名（如 `openjdk:17-slim`）。缺省按 `buildTool` 自动选（`maven→java17`、`npm→node20`、`npm-frontend→node20-serve`、`pip→python3`）。 |
 | `runCommand`       | 否    | 字符串数组，覆盖模板的默认 ENTRYPOINT（极少用）                                                                                       |
 
-### 8.2 配置属性
+### 10.2 配置属性
 
 所有配置位于 `spring.ai.loom.agent.compile.*` 下。
 
@@ -233,7 +269,7 @@ spring:
 | `spring.ai.loom.agent.compile.imageTemplates`             | map     | （6 个预置模板）                  | 按别名预置的基础镜像模板，见下                                                                                     |
 | `spring.ai.loom.agent.compile.extraRunArgs`               | string[]| `[]`                      | 注入到 `--name` 与镜像名之间的额外 `docker run` 参数                                                                   |
 
-### 8.3 预置基础镜像模板
+### 10.3 预置基础镜像模板
 
 | 别名               | 镜像                                | 默认 ENTRYPOINT                          |
 |------------------|-----------------------------------|---------------------------------------------|
@@ -263,7 +299,7 @@ spring:
 
 工具入参 `baseImage` 传别名即选中对应模板；传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 `java17` 兜底。
 
-### 8.4 工具入参示例
+### 10.4 工具入参示例
 
 ```json
 {
@@ -277,7 +313,7 @@ spring:
 }
 ```
 
-### 8.5 端到端对话示例
+### 10.5 端到端对话示例
 
 下面是一个**完整的对话场景**，展示用户如何在聊天中向 LLM 描述部署需求，LLM 如何追问缺失字段、抽取参数、调用端到端部署工具（即 `ICompileAndDeployTool`，注册名由 Spring AI 按方法名自动生成）。
 
@@ -411,29 +447,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ---
 
-## 9. `ISubTaskTool` — 子任务委派
-
-| 项目       | 内容                                                                     |
-|----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool`                    |
-| **默认实现** | `DefaultSubTaskTool`                                                   |
-| **覆盖方式** | 自定义 `@Bean ISubTaskTool`                                              |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换                    |
-| **方法**   | `start_sub_task(prompt, systemContext)` — 把一段任务委派给"子模型"同步执行<br/>`list_sub_tasks()` — 列出当前会话运行中的子任务<br/>`cancel_sub_task(subTaskId)` — 取消当前会话的子任务<br/>`get_sub_task_history(limit)` — 获取当前会话的子任务历史 |
-
-子任务运行在专用的 `loomSubTaskExecutor` 线程池（`ISubTaskExecutor` / `DefaultSubTaskExecutor`）上。其工具集会**排除自身工具**（`ISubTaskTool` / `IScheduleTool`），因此子任务无法再启子任务或定时（防递归）。子任务记忆命名空间为 `{conversationId}--sub--{subTaskId}`。
-
-**配置**：
-
-| 属性                       | 默认值   | 说明                              |
-|--------------------------|-------|---------------------------------|
-| `subtask.enabled`        | `true` | 启用 `start_sub_task` 工具          |
-| `subtask.max-concurrent` | `4`   | 最大并发子任务数                       |
-| `subtask.max-history`    | `200` | 保留的子任务历史条数                     |
-
----
-
-## 10. `IScheduleTool` — 定时任务
+## 13. `IScheduleTool` — 定时任务
 
 | 项目       | 内容                                                                     |
 |----------|------------------------------------------------------------------------|
@@ -456,7 +470,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ---
 
-## 11. 替换子工具
+## 14. 替换子工具
 
 每个子工具接口都通过 `@ConditionalOnMissingBean` 注册，自定义实现自动优先生效：
 
