@@ -1,4 +1,24 @@
-/* admin console 专属样式（其他复用 style.css） */
+/* admin console 专属样式（其他复用 style.css）
+ *
+ * 模态宽度约定：
+ *   .modal-sm   440px  — 确认对话框
+ *   .modal-md   480px  — 简单表单（1-2 字段）
+ *   .modal-lg   720px  — 列表 / 多字段
+ *   .modal-xl   800px  — 详情编辑
+ *
+ * 按钮约定：
+ *   .primary-btn    — 蓝色填充（主操作：保存 / 创建 / 通过）
+ *   .secondary-btn  — 灰底白边（次操作：刷新 / 取消 / 编辑）
+ *   .delete-btn / .danger-btn — 红边框白底（删除 / 拒绝）
+ *   .danger-solid   — 红底白字（确认对话框的「确定」红底按钮）
+ *   .btn-sm         — 表格行内按钮（4-12px padding / 12px font-size）
+ *
+ * 表格约定：
+ *   .user-table     — 所有 admin 列表页统一表
+ *
+ * 提示横幅：
+ *   .info-banner    — 蓝色说明性 banner
+ */
 
 * { box-sizing: border-box; }
 
@@ -7,6 +27,31 @@ body {
     background: var(--bg-secondary, #f8fafc);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
+
+/* ===== 通用：信息横幅 ===== */
+.info-banner {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e40af;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
+/* ===== 通用：按钮小尺寸（表格行内） ===== */
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+/* ===== 通用：危险动作实心按钮（确认对话框的「确定」红底） ===== */
+.danger-solid {
+    background: var(--error-color, #ef4444);
+    border-color: var(--error-color, #ef4444);
+}
+.danger-solid:hover { background: #dc2626; border-color: #dc2626; }
 
 /* ===== 布局：5 个列表页（带侧边栏）+ 2 个详情页（满宽）===== */
 

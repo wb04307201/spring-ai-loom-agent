@@ -104,7 +104,7 @@
                     ${m.status === 'PENDING' ? `<button class="primary-btn approve-btn" data-id="${m.id}" style="padding:4px 10px;font-size:12px;margin-right:4px;">通过</button>
                        <button class="secondary-btn reject-btn" data-id="${m.id}" style="padding:4px 10px;font-size:12px;color:var(--error-color,#ef4444);">拒绝</button>` : ''}
                     <button class="secondary-btn edit-btn" data-id="${m.id}" style="padding:4px 10px;font-size:12px;margin-top:4px;">编辑</button>
-                    <button class="secondary-btn del-btn" data-id="${m.id}" style="padding:4px 10px;font-size:12px;color:var(--error-color,#ef4444);margin-top:4px;">删除</button>
+                    <button class="delete-btn del-btn btn-sm" data-id="${m.id}" style="margin-top:4px;">删除</button>
                 </td>
             </tr>`;
         }).join('');

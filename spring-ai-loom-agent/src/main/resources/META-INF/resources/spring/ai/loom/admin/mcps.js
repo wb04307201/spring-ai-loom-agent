@@ -141,7 +141,7 @@
                 ? '<span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">(未维护，显示 SDK 默认)</span>'
                 : '';
             const deleteBtn = unmaintained ? '' :
-                `<button class="secondary-btn delete-tool-btn" data-tool-id="${t.id}" style="padding: 2px 8px; font-size: 11px; color: var(--error-color, #ef4444);">删除维护</button>`;
+                `<button class="delete-btn delete-tool-btn btn-sm" data-tool-id="${t.id}">删除维护</button>`;
             return `<div style="padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 8px;">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                     <span style="font-weight: 600; font-size: 13px; color: var(--primary-color);">${escapeHtml(t.name)}</span>

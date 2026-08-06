@@ -86,13 +86,13 @@
                         ${isPending ? `<button class="primary-btn" data-act="approve" data-id="${k.id}">通过</button>
                                        <button class="secondary-btn" data-act="reject" data-id="${k.id}">拒绝</button>` : ''}
                         <button class="secondary-btn" data-act="edit" data-id="${k.id}">编辑</button>
-                        <button class="danger-btn" data-act="delete" data-id="${k.id}">删除</button>
+                        <button class="delete-btn" data-act="delete" data-id="${k.id}">删除</button>
                     </td>
                 </tr>`;
         }).join('');
 
         c.innerHTML = `
-            <table class="admin-table">
+            <table class="user-table">
                 <thead>
                     <tr>
                         <th style="width:18%;">名称 / 版本</th>
