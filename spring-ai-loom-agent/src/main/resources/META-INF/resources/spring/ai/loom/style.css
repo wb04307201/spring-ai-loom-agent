@@ -3012,3 +3012,22 @@ textarea::placeholder {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.skill-detail-secondary-btn {
+    padding: 14px 18px;
+    background: var(--bg-primary, #fff);
+    color: var(--text-primary, #1e293b);
+    border: 2px solid var(--border-color, #e2e8f0);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.skill-detail-secondary-btn:hover {
+    border-color: var(--primary-color, #6366f1);
+    color: var(--primary-color, #6366f1);
+    transform: translateY(-1px);
+}
