@@ -496,6 +496,7 @@ body {
     padding: 16px 24px;
     background: var(--bg-primary);
     flex-shrink: 0;
+    position: relative; /* slash-picker 等 absolute 子元素的定位锚点 */
 }
 
 .toolbar {

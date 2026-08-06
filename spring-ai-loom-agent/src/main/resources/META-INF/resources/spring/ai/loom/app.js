@@ -3154,6 +3154,7 @@ const skills = {
                 b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
             });
             this.renderModal();
+            state._skillListCache = null; // 市场拉取会写入/更新 Skill，slash picker 缓存需失效
         } catch (e) {
             showToast('拉取失败：' + e.message, 'error');
         }
@@ -3469,6 +3470,7 @@ const skills = {
             showToast('技能创建成功', 'success');
             this.editingSkill = null;
             this.renderModal();
+            state._skillListCache = null; // 新建 Skill，slash picker 缓存需失效
         } else {
             showToast('创建失败，请重试', 'error');
         }
@@ -3507,6 +3509,7 @@ const skills = {
         if (result !== null) {
             showToast('技能已删除', 'success');
             this.renderModal();
+            state._skillListCache = null; // 删除 Skill，slash picker 缓存需失效
         } else {
             showToast('删除失败，请重试', 'error');
         }
@@ -3588,18 +3591,20 @@ const skills = {
             const status = r && r.status ? r.status : 'imported';
             showToast(`已${status === 'updated' ? '覆盖' : '导入'}技能 ${parsed.name}`, 'success');
             this.renderModal();
+            state._skillListCache = null; // 导入/覆盖 Skill，slash picker 缓存需失效
         } catch (e) {
             showToast('导入失败：' + (e.message || e), 'error');
         }
     },
 
     _showImportConflictDialog(parsed, existing) {
-        const m = document.getElementById('confirm-modal');
-        const titleEl = document.getElementById('confirm-title');
-        const msgEl = document.getElementById('confirm-message');
-        const ok = document.getElementById('confirm-ok');
-        const cancel = document.getElementById('confirm-cancel');
-        const closeBtn = document.getElementById('confirm-close');
+        // index.html (line 320-334) 的 id 已重构为 confirm-modal-* 前缀；保持与 CSS/HTML 一致
+        const m = document.getElementById('confirm-modal-overlay');
+        const titleEl = document.getElementById('confirm-modal-title');
+        const msgEl = document.getElementById('confirm-modal-message');
+        const ok = document.getElementById('confirm-modal-ok');
+        const cancel = document.getElementById('confirm-modal-cancel');
+        const closeBtn = document.getElementById('confirm-modal-close');
         titleEl.textContent = `技能「${parsed.name}」已存在`;
         msgEl.innerHTML =
             `同名技能已存在，请选择处理方式：<br><br><b>覆盖</b>：直接替换现有内容<br>` +
