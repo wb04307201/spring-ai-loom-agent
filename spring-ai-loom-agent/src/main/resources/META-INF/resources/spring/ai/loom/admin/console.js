@@ -112,8 +112,8 @@
         }
         const rows = users.map(u => {
             const typeLabel = u.type === 'ADMIN' ? '管理员' : '普通用户';
-            return `<tr data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}" data-expanded="false">
-                <td><a class="user-link user-name-toggle" data-username="${escapeHtml(u.username)}" href="user.html?username=${encodeURIComponent(u.username)}" onclick="event.preventDefault();"><strong>${escapeHtml(u.username)}</strong> ▾</a></td>
+            return `<tr data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">
+                <td><span><strong>${escapeHtml(u.username)}</strong></span></td>
                 <td>${escapeHtml(u.nickname || '')}</td>
                 <td><span class="type-badge ${u.type}">${typeLabel}</span></td>
                 <td class="usage-cell" data-username="${escapeHtml(u.username)}">-</td>
@@ -144,93 +144,10 @@
                 });
             });
         });
-        // 绑定用户名点击 → 行内展开该用户会话
-        tableContainer.querySelectorAll('.user-name-toggle').forEach(a => {
-            a.addEventListener('click', (e) => {
-                e.preventDefault();
-                const username = a.getAttribute('data-username');
-                const tr = a.closest('tr');
-                const expanded = tr.getAttribute('data-expanded') === 'true';
-                if (expanded) {
-                    collapseUserRow(tr);
-                } else {
-                    expandUserRow(tr, username);
-                }
-            });
-        });
         // 绑定"分配角色"按钮
         tableContainer.querySelectorAll('.assign-role-btn').forEach(btn => {
             btn.addEventListener('click', () => openAssignRole(btn.getAttribute('data-username'), btn.getAttribute('data-type')));
         });
-    }
-
-    function collapseUserRow(tr) {
-        const next = tr.nextElementSibling;
-        if (next && next.classList.contains('user-detail-row')) next.remove();
-        tr.setAttribute('data-expanded', 'false');
-        const arrow = tr.querySelector('.user-name-toggle');
-        if (arrow) arrow.innerHTML = arrow.innerHTML.replace('▴', '▾');
-    }
-
-    async function expandUserRow(tr, username) {
-        tr.setAttribute('data-expanded', 'true');
-        const arrow = tr.querySelector('.user-name-toggle');
-        if (arrow) arrow.innerHTML = arrow.innerHTML.replace('▾', '▴');
-        // 插入占位行
-        const detailTr = document.createElement('tr');
-        detailTr.className = 'user-detail-row';
-        detailTr.innerHTML = `<td colspan="5" style="background: #f8fafc; padding: 12px 24px;">
-            <div data-user-conv="${escapeHtml(username)}"><div class="loading-indicator">加载中...</div></div>
-        </td>`;
-        tr.after(detailTr);
-        // 拉该用户全部会话
-        try {
-            const r = await fetch(`/spring/ai/loom/admin/users/${encodeURIComponent(username)}/conversations`, {credentials: 'include'});
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            const list = await r.json();
-            renderUserConversations(detailTr, username, list);
-        } catch (e) {
-            detailTr.innerHTML = `<td colspan="5" style="background: #f8fafc; color: var(--error-color);">加载失败：${escapeHtml(e.message)}</td>`;
-        }
-    }
-
-    function renderUserConversations(detailTr, username, list) {
-        if (!list || list.length === 0) {
-            detailTr.innerHTML = `<td colspan="5" style="background: #f8fafc; padding: 12px 24px; color: var(--text-muted);">该用户暂无会话</td>`;
-            return;
-        }
-        // 按内容状态分组：未清理 vs 已清理
-        const cleanable = list.filter(c => !c.contentCleaned);
-        const cleaned = list.filter(c => c.contentCleaned);
-        let html = '<div style="background: #f8fafc; padding: 12px 24px;">';
-        html += `<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-            <strong>${escapeHtml(username)}</strong>
-            <span style="font-size: 12px; color: var(--text-muted);">共 ${list.length} 条</span>
-        </div>`;
-        const renderItem = (c) => {
-            const state = c.deletedAt ? '已软删' : '正常';
-            const stateColor = c.deletedAt ? '#fee2e2' : '#d1fae5';
-            const stateText = c.deletedAt ? '#991b1b' : '#065f46';
-            const cleanedTag = c.contentCleaned ? '<span class="type-badge USER" style="background:#d1fae5;color:#065f46;">已清理</span>' : '<span class="type-badge USER" style="background:#fef3c7;color:#92400e;">待清理</span>';
-            return `<tr>
-                <td><a class="user-link" href="conversation.html?id=${encodeURIComponent(c.conversationId)}&username=${encodeURIComponent(username)}">${escapeHtml(c.conversationId.substring(0, 8))}…</a></td>
-                <td>${escapeHtml(c.preview || '')}</td>
-                <td><span class="type-badge" style="background:${stateColor};color:${stateText};">${state}</span> ${cleanedTag}</td>
-                <td>${escapeHtml(c.deletedAt ? new Date(c.deletedAt).toLocaleString('zh-CN') : '-')}</td>
-            </tr>`;
-        };
-        html += '<table class="user-table" style="background: white; margin-top: 8px;"><thead><tr><th>会话 ID</th><th>预览</th><th>状态</th><th>删除时间</th></tr></thead><tbody>';
-        if (cleanable.length > 0) {
-            html += '<tr><td colspan="4" style="background: #fef3c7; font-size: 12px; color: #92400e; padding: 4px 12px;">▼ 待清理 (' + cleanable.length + ' 条)</td></tr>';
-            cleanable.forEach(c => { html += renderItem(c); });
-        }
-        if (cleaned.length > 0) {
-            html += '<tr><td colspan="4" style="background: #d1fae5; font-size: 12px; color: #065f46; padding: 4px 12px;">▼ 已清理 (' + cleaned.length + ' 条)</td></tr>';
-            cleaned.forEach(c => { html += renderItem(c); });
-        }
-        html += '</tbody></table></div>';
-        detailTr.innerHTML = `<td colspan="5" style="padding: 0;">${html}</td>`;
-        // 清理入口：整合到控制台顶部"批量清理"按钮（user.html / conversation.html / 这里都不再单独触发清理弹窗）
     }
 
     async function deleteUser(username) {
