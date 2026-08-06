@@ -19,4 +19,12 @@ public interface ISkillTool extends IEmbedTool {
         @ToolParam(description = "技能名") String name,
         ToolContext toolContext
     );
+
+    @Tool(description = "创建或更新一个属于当前用户的技能。name 重复时覆盖现有内容（已审批的市场技能和已锁定的角色授权技能除外）。")
+    String createOrUpdateSkill(
+        @ToolParam(description = "技能名（必填，字母/数字/中划线/下划线/中文，最长 128）") String name,
+        @ToolParam(description = "技能描述（必填）") String description,
+        @ToolParam(description = "技能 Prompt 内容（必填）") String content,
+        ToolContext toolContext
+    );
 }
