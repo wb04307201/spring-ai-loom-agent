@@ -1299,6 +1299,8 @@ const conversation = {
         // abort any ongoing stream
         chat.abortStream();
 
+        selectedSkillTag.onConversationSwitch();
+
         state.conversationId = id;
         try { subtaskPanel.setConvId(id); } catch (_) {}
         try { schedulePanel.setConvId(id); } catch (_) {}
@@ -3864,6 +3866,34 @@ const init = async () => {
     // chat.send() below provides a defensive fallback for Enter/send calls without a current id.
 };
 
+// ===================== §X Chat Selected Skill Tag =====================
+// 管理输入框上方的 [name ×] 标签条。state.selectedSkill = {name, description} 时显示。
+const selectedSkillTag = {
+    set(skill) {
+        state.selectedSkill = skill;
+        this.update();
+    },
+    clear() {
+        state.selectedSkill = null;
+        this.update();
+    },
+    update() {
+        const el = document.getElementById('chat-selected-skill');
+        if (!el) return;
+        const nameEl = document.getElementById('chat-selected-skill-name');
+        if (state.selectedSkill) {
+            if (nameEl) nameEl.textContent = state.selectedSkill.name;
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    },
+    /** 在 chat.send() 成功回调中调用 */
+    onSendSuccess() { this.clear(); },
+    /** 切换对话时调用，避免跨会话污染 */
+    onConversationSwitch() { this.clear(); },
+};
+
 const bindAllEvents = () => {
     const safeBind = (sel, type, handler) => {
         const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
@@ -3875,6 +3905,10 @@ const bindAllEvents = () => {
 
     const ta = document.getElementById('textarea');
     safeBind(ta, 'keydown', (event) => {
+        if (event.key === 'Backspace' && ta.value === '' && state.selectedSkill) {
+            event.preventDefault();
+            selectedSkillTag.clear();
+        }
         if (event.key === 'Enter' && event.ctrlKey) {
             event.preventDefault();
             const start = ta.selectionStart;
@@ -3890,6 +3924,8 @@ const bindAllEvents = () => {
 
     safeBindById('send-btn', 'click', () => chat.send());
     safeBindById('stop-btn', 'click', () => chat.stopStream());
+
+    safeBindById('chat-selected-skill-clear', 'click', () => selectedSkillTag.clear());
 
     // Modal overlay click-to-close
     safeBindById('mcp-modal-overlay', 'click', (e) => {
