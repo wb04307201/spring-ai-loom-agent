@@ -41,7 +41,12 @@ INSERT INTO mcp_tool (mcp_name, name, description, sort_order) VALUES
 ('spring-ai-mcp-client - memory', 'delete_relations',  '从知识图谱中删除多个关系',         6),
 ('spring-ai-mcp-client - memory', 'read_graph',        '读取整个知识图谱',                  7),
 ('spring-ai-mcp-client - memory', 'search_nodes',      '基于查询在知识图谱中搜索节点',       8),
-('spring-ai-mcp-client - memory', 'open_nodes',        '通过名称打开知识图谱中的特定节点',   9);
+('spring-ai-mcp-client - memory', 'open_nodes',        '通过名称打开知识图谱中的特定节点',   9),
+
+-- bing-cn-mcp 上游 description 是 GBK 编码，Spring AI 当 UTF-8 读会乱码。
+-- 在 DB 层覆盖（DB 描述优先于 SDK fallback）。
+('spring-ai-mcp-client - bing-search', 'bing_search',    '使用必应（Bing）搜索引擎执行中英文网页搜索，返回搜索结果摘要与链接。支持关键词组合与自然语言查询。', 1),
+('spring-ai-mcp-client - bing-search', 'crawl_webpage',  '根据搜索结果中的 UUID 抓取对应网页的正文内容。支持批量抓取多个网页，自动跳过黑名单站点（如知乎、小红书等）。', 2);
 
 
 -- =============================================================
