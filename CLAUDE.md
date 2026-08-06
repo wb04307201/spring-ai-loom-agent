@@ -56,7 +56,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IUpload` | `DefaultUpload` | File upload pipeline: 上传文件存储到 `fileBasePath/{username}/`，知识库文件存储到 `knowledgeBasePath/{username}/{knowledgeId}/`，重名自动追加序号 |
 | `IUser` | `DefaultUser` | BFF + HttpOnly cookie session auth + auto-login |
 | `IUserConversation` | `DefaultUserConversation` | User-to-conversation mapping |
-| `IEmbedTool` | _(marker interface)_ | Aggregate type for all embed tools, sub-interfaces extend it |
+| **登录页 (`login.html` / `login.css`)** | A+B 组合布局：主应用同款 60px 白顶栏（logo + 灵梭 + Spring AI LoomAgent）+ 居中品牌卡（圆形 logo + 灵梭 + English caption + 表单 + 织线纹理背景 + 底部 slogan）。所有视觉 token 复用主应用 `style.css`（`--primary #6366f1` / `--bg #f8fafc` 等），登录后跳 `index.html` 无感切换。 |
 | `ITimeTool` | `DefaultTimeTool` | Time tools: get current time, convert between timezones |
 | `ISkillTool` | `DefaultSkillTool` | Skill tools: `listSkills(page, size)` 分页列出技能目录（默认每页20条，size=-1全部），`getSkill(skillName)` 获取技能详情 |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | Knowledge tools: `listKnowledgeBases(page, size)` 分页列出知识库（含名称+描述），`searchKnowledge(knowledgeId, query, topK?)` 在指定知识库中向量检索。Tool-based RAG 替代了旧的 RetrievalAugmentationAdvisor |
@@ -82,7 +82,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `McpConfiguration` | SyncMcp / ASyncMcp |
 | `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — `time/file/skill/knowledge/compile` 默认 enabled；`git/maven` 默认 disabled。Each can be enabled/disabled via `spring.ai.loom.agent.{time,file,skill,knowledge,git,maven,compile}.enabled=true/false`. IMavenTool additionally requires maven-invoker on the classpath. |
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
-| `WebConfiguration` | AuthenticationFilter, 10 RouterFunctions |
+| `WebConfiguration` | AuthenticationFilter, 14 RouterFunctions + `SseController` |
 
 - `@AutoConfigureAfter` all Spring AI model/embedding/vectorstore/memory/MCP auto-configurations
 - Creates `ChatClient` with `MessageChatMemoryAdvisor` and `SimpleLoggerAdvisor`

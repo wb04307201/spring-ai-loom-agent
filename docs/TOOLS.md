@@ -424,6 +424,20 @@ The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor
 | `subtask.max-concurrent`       | `4`     | Max concurrent sub-tasks                 |
 | `subtask.max-history`          | `200`   | Retained sub-task history entries        |
 
+**Error codes** (thrown as `LoomAgentRuntimeException` and mapped to HTTP status by the route layer):
+
+| Code | HTTP | Trigger |
+| --- | --- | --- |
+| `TASK_NOT_FOUND`              | 404 | `cancel_sub_task` / `get_sub_task_history` with an unknown `id` |
+| `CROSS_CONVERSATION_FORBIDDEN`| 403 | `cancel_sub_task` where the task's `conversationId` ≠ current user's conversation |
+
+**Namespaces**
+
+| Resource | Format | Notes |
+| --- | --- | --- |
+| Sub-task memory (ChatMemory) | `{conversationId}--sub--{subTaskId}` | Each sub-task gets its own memory slice so it doesn't leak into the main conversation |
+| Sub-task pool                | `loomSubTaskExecutor` (4 threads, queue 50) | Sub-tasks block the LLM call until completion (synchronous) |
+
 ---
 
 ## 10. `IScheduleTool` — Scheduled Tasks
@@ -446,6 +460,23 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 | `flex.schedule.limits.min-interval` | `10m` | Minimum trigger interval             |
 | `flex.schedule.limits.max-lifetime` | `72h` | Max task lifetime (accumulates across restarts) |
 | `flex.schedule.limits.mode`    | `strict`| `strict` = exceeding a limit throws      |
+
+**Error codes** (thrown as `LoomAgentRuntimeException`):
+
+| Code | HTTP | Trigger |
+| --- | --- | --- |
+| `TASK_NOT_FOUND`        | 404 | `cancelSchedule` / `getScheduleHistory` with an unknown task |
+| `OWNERSHIP_VIOLATION`   | 403 | `cancelSchedule` / `getScheduleHistory` where the task's `username` ≠ caller |
+| `NAME_TAKEN`            | 400 | `createSchedule` with a name that already exists for the same `(user, conversation)` |
+| `INTERVAL_TOO_SHORT`    | 400 | `createSchedule` with interval < `flex.schedule.limits.min-interval` (default 10m) |
+| `LIFETIME_EXCEEDED`     | 400 | `createSchedule` with end-before-start or > `max-lifetime` |
+
+**Namespaces**
+
+| Resource | Format | Notes |
+| --- | --- | --- |
+| Schedule task name      | `loom-sched-{username}-{conversationId}-{name}` | Frontend POSTs the full name to `/spring/ai/loom/schedule/cancel` (body field `name`) |
+| Persistence             | `loom_scheduled_task` table (V2.0 migration)     | `ScheduleRestoreListener` rehydrates on `ApplicationReadyEvent`, preserving `createdAt` so `max-lifetime` accumulates across restarts; rows exceeding the ceiling are auto-cleaned on startup |
 
 ---
 

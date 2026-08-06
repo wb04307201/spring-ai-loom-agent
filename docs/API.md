@@ -16,8 +16,10 @@
 - [6. Skill Management](#6-skill-management)
 - [7. MCP Tools](#7-mcp-tools)
 - [8. Terminal Management](#8-terminal-management)
-- [9. Data Models](#9-data-models)
-- [10. Configuration Properties](#10-configuration-properties)
+- [9. Sub-task & Schedule APIs](#9-sub-task--schedule-apis)
+- [10. Admin APIs](#10-admin-apis)
+- [11. Data Models](#11-data-models)
+- [12. Configuration Properties](#12-configuration-properties)
 
 ---
 
@@ -1030,7 +1032,148 @@ Force-terminate a system process by PID.
 
 ---
 
-## 9. Data Models
+## 9. Sub-task & Schedule APIs
+
+Sub-tasks are per-conversation (`loom-subtask-{user}-{conv}-{taskId}`); schedules are per-conversation (`loom-sched-{user}-{conv}-{name}`) and persist to the loom-agent-owned `loom_scheduled_task` table (V2.0 migration). The `flex.schedule.limits` constraints are **10m min-interval / 72h max-lifetime / strict mode** by default in the test app.
+
+### 9.1 List Sub-task Limits
+
+```http
+GET /spring/ai/loom/subtask/limits
+```
+
+**Response**: `{ "maxConcurrent": int, "maxHistory": int }`
+
+### 9.2 List Active Sub-tasks
+
+```http
+GET /spring/ai/loom/subtask/list/active?conversationId=...
+```
+
+### 9.3 List Sub-task History
+
+```http
+GET /spring/ai/loom/subtask/list/history?conversationId=...&limit=...
+```
+
+### 9.4 Kill a Sub-task
+
+```http
+POST /spring/ai/loom/subtask/kill/{id}
+```
+
+**Permission**: Owner only. Cross-conversation kill returns 403.
+
+### 9.5 Delete a Sub-task History Entry
+
+```http
+DELETE /spring/ai/loom/subtask/history/{id}
+```
+
+### 9.6 List Schedule Limits
+
+```http
+GET /spring/ai/loom/schedule/limits
+```
+
+**Response**: `{ "minInterval": "PT10M", "maxLifetime": "PT72H", "mode": "strict" }` (ISO 8601 durations)
+
+### 9.7 List All Schedules
+
+```http
+GET /spring/ai/loom/schedule/list
+```
+
+**Response**: `TaskInfo[]` — all schedules visible to the current user.
+
+### 9.8 Cancel a Schedule
+
+```http
+POST /spring/ai/loom/schedule/cancel
+Content-Type: application/json
+
+{ "name": "loom-sched-alice-conv-1-防干眼提醒" }
+```
+
+**Note**: The body field is **`name`**, not `taskName`. The value is the FULL namespaced name (returned by `list`). Returns 403 for non-owner or non-existent task. Also deletes the corresponding `loom_scheduled_task` row so the `ScheduleRestoreListener` doesn't resurrect it on restart.
+
+### 9.9 Cancel All Schedules for a Conversation
+
+```http
+POST /spring/ai/loom/schedule/by-conversation/{conversationId}/cancel-all
+```
+
+### 9.10 Get Schedule Execution History
+
+```http
+GET /spring/ai/loom/schedule/history/{name}
+```
+
+**Permission**: Owner only (returns 403 for non-owner).
+
+### 9.11 Get Schedule History for a Conversation
+
+```http
+GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
+```
+
+---
+
+## 10. Admin APIs
+
+All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-admin access returns 403 (`{"message": "无权限"}`). The admin pages under `admin/*.html` are the canonical UI for these endpoints.
+
+### 10.1 User Management
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/users` | List all users |
+| POST | `/admin/users` | Create user (body: `CreateUserRequest` — username, nickname, password, type). Returns 400 if name taken |
+| DELETE | `/admin/users/{username}` | Delete user; refuses to delete self |
+| GET | `/admin/users/{username}/conversations` | List a user's conversations (admin view) |
+| GET | `/admin/users/{username}/roles` | Get user's roles |
+| PUT | `/admin/users/{username}/roles` | Replace user's roles (body: array of role codes) |
+
+### 10.2 Conversation Management (admin)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/conversations/{conversationId}/turns` | List every turn with token usage |
+| GET | `/admin/conversations/{conversationId}/messages` | List raw `ChatMessage`s |
+| POST | `/admin/conversations/clean-batch` | Hard-delete soft-deleted conversations in batch |
+
+### 10.3 Token Usage Statistics
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
+
+### 10.4 Role / MCP / Skill / Knowledge Management
+
+All under `/admin/...` and already documented in:
+
+- [§ 5 Knowledge Base Management](#5-knowledge-base-management) — `admin/knowledge*`, `/api/knowledge-market*`
+- [§ 6 Skill Management](#6-skill-management) — `admin/market-skills*`, `/admin/roles/{code}/skills`
+- [§ 7 MCP Tools](#7-mcp-tools) — `admin/mcps*`, `admin/mcp-tools*`
+- See `docs/knowledge-market.md` for the Knowledge Market flow.
+
+### 10.5 Admin UI Pages (`admin/*.html`)
+
+| Page | Purpose |
+| --- | --- |
+| `admin/console.html` (→ user.html) | User list + role assignment + batch content cleanup |
+| `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
+| `admin/skills-market.html` | Approve / reject / directly CRUD Skill |
+| `admin/knowledge-market.html` | Approve / reject / directly CRUD Knowledge |
+| `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
+| `admin/conversation.html` | Drill into any user's conversation turns (admin only) |
+| `admin/stats.html` | Monthly Token usage (year + month filter) |
+
+All admin pages share a fixed left sidebar (see README "Admin Console" section). `D2` (V1.1.37) fixed the previously dead `admin/knowledge-market.html` page (the JS file was missing).
+
+---
+
+## 11. Data Models
 
 ### ChatRequestRecord
 
@@ -1141,7 +1284,7 @@ Force-terminate a system process by PID.
 
 ---
 
-## 10. Configuration Properties
+## 12. Configuration Properties
 
 All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 

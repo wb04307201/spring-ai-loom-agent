@@ -174,6 +174,21 @@ boolean canEdit(String knowledgeId) {
 
 The frontend conditionally shows edit/delete buttons based on the `canEdit` endpoint response. Subscribers see read-only view of knowledge bases with search/retrieve capability but no edit controls.
 
+## Admin Knowledge Market UI
+
+`admin/knowledge-market.html` (with `admin/knowledge-market.js`) — added in **V1.1.37**. Before that the page was a 404 (the JS file was missing, the HTML referenced it). The admin UI provides full CRUD + approval workflow without going through the REST API:
+
+| Action | UI | Backend endpoint |
+| --- | --- | --- |
+| List all (PENDING / APPROVED / REJECTED) | main table (with `pending-count-label` badge) | `GET /admin/market-skills` |
+| New knowledge (bypass approval → `APPROVED`) | "+ 新建知识库" → modal (name / description / content / version / status) | `POST /admin/market-skills` (body: `MarketSkillUpsertRequest`) |
+| Edit (any field) | row "编辑" button | `PUT /admin/market-skills/{id}` |
+| Delete (cascade → `user_knowledge` + `role_knowledge`) | row "×" button → confirm modal | `DELETE /admin/market-skills/{id}` |
+| Approve a PENDING submission | row "通过" button | `POST /admin/market-skills/{id}/approve` |
+| Reject a PENDING submission | row "拒绝" button | `POST /admin/market-skills/{id}/reject` (body: `{comment}`) |
+
+The edit modal **requires `content`** (no classpath: lookup at runtime). Toast feedback on every action (`成功` / `失败 + 后端 message`). Description column is line-clamped to 80 chars (admin skill list has the same).
+
 ## Configuration
 
 All paths are under `~/.loom/`:
