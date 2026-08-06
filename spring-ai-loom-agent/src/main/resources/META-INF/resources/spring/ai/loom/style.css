@@ -2957,3 +2957,58 @@ textarea::placeholder {
     background: var(--bg-primary, #fff);
     color: var(--error-color, #ef4444);
 }
+
+/* ===== Slash Picker ===== */
+.slash-picker {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    box-shadow: var(--shadow-lg, 0 10px 25px rgba(0, 0, 0, 0.1));
+    z-index: 1000;
+    margin-bottom: 4px;
+}
+
+.slash-picker.hidden {
+    display: none;
+}
+
+.slash-picker-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.slash-picker-item:last-child {
+    border-bottom: none;
+}
+
+.slash-picker-item.active {
+    background: var(--primary-color, #6366f1);
+    color: #fff;
+}
+
+.slash-picker-item.active .slash-picker-item-desc {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.slash-picker-item-name {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.slash-picker-item-desc {
+    font-size: 11px;
+    color: var(--text-muted, #64748b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
