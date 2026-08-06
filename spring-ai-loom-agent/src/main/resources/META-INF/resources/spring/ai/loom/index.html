@@ -133,7 +133,12 @@
                         <span>定时</span>
                     </button>
                 </div>
+                <div id="chat-selected-skill" class="chat-selected-skill hidden">
+                    <span class="skill-tag" id="chat-selected-skill-name"></span>
+                    <button class="skill-tag-close" id="chat-selected-skill-clear" title="移除">&times;</button>
+                </div>
                 <textarea id="textarea" placeholder="输入消息... (Ctrl+Enter 换行，Enter 发送)"></textarea>
+                <div id="slash-picker" class="slash-picker hidden"></div>
                 <div class="image-upload-area" id="image-upload-area" style="display: none;">
                     <div class="image-thumbnails" id="image-thumbnails"></div>
                 </div>
@@ -195,8 +200,12 @@
             <div class="skills-sidebar">
                 <div class="skills-sidebar-header">
                     <h3>技能库</h3>
-                    <button class="skill-add-btn" id="skill-add-btn" title="新增技能">+ 新增</button>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="skill-add-btn" id="skill-import-btn" title="从 .skill.md 导入技能">↑ 导入</button>
+                        <button class="skill-add-btn" id="skill-add-btn" title="新增技能">+ 新增</button>
+                    </div>
                 </div>
+                <input type="file" id="skill-import-file-input" accept=".md,.skill.md" style="display: none;">
                 <!-- Tab 切换：我的 / 市场 / 共享 -->
                 <div class="skill-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary, #f8fafc);">
                     <button class="skill-tab active" data-tab="mine" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid var(--primary-color); color: var(--primary-color);">我的</button>

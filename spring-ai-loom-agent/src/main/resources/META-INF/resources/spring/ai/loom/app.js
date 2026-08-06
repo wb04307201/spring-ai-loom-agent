@@ -71,7 +71,7 @@ const state = {
     conversationTitle: null, // tracks the current conversation's title to gate auto-rename
     selectedMcps: [],
     enabledKnowledgeIds: [],
-    selectedSkill: null,
+    selectedSkill: null, // {name, description} | null，用户通过 / 命令精准选中的 Skill
     isStreaming: false,
     controller: null, // AbortController for SSE
     mcps: [],
@@ -401,6 +401,24 @@ const api = {
     async listSkills() {
         const r = await apiFetch(API.listSkills);
         return r.ok ? r.json() : [];
+    },
+    async getSkill(name) {
+        const r = await apiFetch(API.getSkill(name));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async upsertSkill(skill) {
+        const r = await apiFetch('/spring/ai/loom/skill/upsert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(skill),
+        });
+        if (!r.ok) {
+            let msg = 'HTTP ' + r.status;
+            try { const j = await r.json(); if (j.error) msg = j.error; } catch (_) {}
+            throw new Error(msg);
+        }
+        return r.json();
     },
     async createSkill(skill) {
         const r = await apiFetch(API.createSkill, {
@@ -1299,6 +1317,8 @@ const conversation = {
         // abort any ongoing stream
         chat.abortStream();
 
+        selectedSkillTag.onConversationSwitch();
+
         state.conversationId = id;
         try { subtaskPanel.setConvId(id); } catch (_) {}
         try { schedulePanel.setConvId(id); } catch (_) {}
@@ -1390,6 +1410,7 @@ const chat = {
             mcps: state.selectedMcps,
             enabledKnowledgeIds: state.enabledKnowledgeIds.length > 0 ? state.enabledKnowledgeIds : null,
             fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId).filter(Boolean) : null,
+            selectedSkillName: state.selectedSkill ? state.selectedSkill.name : null,
         };
 
         // Clear pending image after capturing fileId
@@ -1427,6 +1448,7 @@ const chat = {
                     ui.enableSend();
                     ui.setStopButtonVisible(false);
                     conversation.loadList();
+                    selectedSkillTag.onSendSuccess();
                     // Auto-rename from the first user message if the conversation still
                     // carries its default placeholder title. Fire-and-forget; the title
                     // update will refresh the sidebar once the PATCH lands.
@@ -1634,8 +1656,8 @@ const knowledge = {
 
         const description = await dialog.prompt({
             title: '创建知识库',
-            message: '请输入知识库描述：',
-            placeholder: '例如：包含公司产品文档和使用手册',
+            message: '请输入知识库内容摘要（LLM 据此决定是否检索本库）：',
+            placeholder: '例如：本知识库收录产品保修条款、故障排查流程、退换货政策',
             okText: '创建',
             defaultValue: '',
         });
@@ -3111,9 +3133,12 @@ const skills = {
             </div>
             <div style="margin-top: 24px;">
                 <button class="send-skill-btn" id="pull-skill-btn" style="flex: 1;">${already ? '已拉取（点击更新）' : '拉取到我的 Skill'}</button>
+                <button class="skill-detail-secondary-btn" id="skill-detail-download-btn" title="下载为 .skill.md 文件">⬇ 下载</button>
             </div>
         `;
         detail.querySelector('#pull-skill-btn').addEventListener('click', () => this.handlePull(marketSkill));
+        const dlBtn = detail.querySelector('#skill-detail-download-btn');
+        if (dlBtn) dlBtn.addEventListener('click', () => this.handleDownload(marketSkill));
     },
 
     async handlePull(marketSkill) {
@@ -3129,6 +3154,7 @@ const skills = {
                 b.style.color = active ? 'var(--primary-color)' : 'var(--text-muted)';
             });
             this.renderModal();
+            state._skillListCache = null; // 市场拉取会写入/更新 Skill，slash picker 缓存需失效
         } catch (e) {
             showToast('拉取失败：' + e.message, 'error');
         }
@@ -3328,10 +3354,11 @@ const skills = {
             </div>`;
         }
 
-        // Action buttons: 应用 / 复制（所有 source 都能用）
+        // Action buttons: 应用 / 复制 / 下载（所有 source 都能用）
         html += `<div style="margin-top: 12px; display: flex; gap: 12px;">
             <button class="send-skill-btn" id="apply-skill-btn" style="flex: 1;">应用</button>
             <button class="send-skill-btn" id="copy-skill-btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary); border: 2px solid var(--border-color);">复制</button>
+            <button class="skill-detail-secondary-btn" id="user-skill-download-btn" title="下载为 .skill.md 文件">⬇ 下载</button>
         </div>`;
 
         detail.innerHTML = html;
@@ -3344,6 +3371,9 @@ const skills = {
 
         detail.querySelector('#apply-skill-btn').addEventListener('click', () => this.apply(skill, {}));
         detail.querySelector('#copy-skill-btn').addEventListener('click', () => this.copyToTextarea(skill, {}));
+
+        const userDlBtn = detail.querySelector('#user-skill-download-btn');
+        if (userDlBtn) userDlBtn.addEventListener('click', () => this.handleDownload(skill));
     },
 
     showEditForm(skill) {
@@ -3440,6 +3470,7 @@ const skills = {
             showToast('技能创建成功', 'success');
             this.editingSkill = null;
             this.renderModal();
+            state._skillListCache = null; // 新建 Skill，slash picker 缓存需失效
         } else {
             showToast('创建失败，请重试', 'error');
         }
@@ -3478,8 +3509,159 @@ const skills = {
         if (result !== null) {
             showToast('技能已删除', 'success');
             this.renderModal();
+            state._skillListCache = null; // 删除 Skill，slash picker 缓存需失效
         } else {
             showToast('删除失败，请重试', 'error');
+        }
+    },
+
+    /** 把 Skill 导出为标准 .skill.md（YAML frontmatter + body） */
+    handleDownload(skill) {
+        const name = (skill.name || '').replace(/[\r\n]+/g, ' ').trim();
+        const description = (skill.description || '').replace(/[\r\n]+/g, ' ').trim();
+        const body = (skill.content || '').replace(/\r\n/g, '\n');
+        const md =
+            '---\n' +
+            `name: ${name}\n` +
+            `description: ${description}\n` +
+            '---\n' +
+            '\n' + body + '\n';
+        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name || 'untitled'}.skill.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (skill.source === 'ROLE_GRANTED' || skill.source === 'MARKET_PULLED') {
+            showToast('已下载；如需导入为可编辑 Skill，请使用新的名称', 'success');
+        } else {
+            showToast('已下载 ' + a.download, 'success');
+        }
+    },
+
+    /** 解析 .skill.md 的 YAML frontmatter + body。返回 {name, description, content} 或 {error} */
+    _parseSkillFrontmatter(text) {
+        const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+        if (!m) return { error: '请使用标准 Skill 格式：---\nname: x\ndescription: y\n---\n<内容>' };
+        const yaml = m[1], body = m[2];
+        const nameMatch = yaml.match(/^name:\s*(.+?)\s*$/m);
+        const descMatch = yaml.match(/^description:\s*(.+?)\s*$/m);
+        const name = nameMatch ? nameMatch[1].trim() : '';
+        if (!name) return { error: 'frontmatter 必须有 name: 字段' };
+        if (name.length > 128) return { error: 'name 长度超过 128' };
+        const description = descMatch ? descMatch[1].trim() : '';
+        if (!description) return { error: 'frontmatter 必须有 description: 字段' };
+        return { name, description, content: body.replace(/^\n+/, '') };
+    },
+
+    /** 触发隐藏 file input */
+    handleImport() {
+        const input = document.getElementById('skill-import-file-input');
+        if (input) input.click();
+    },
+
+    async _doImportFile(file) {
+        const text = await file.text();
+        const parsed = this._parseSkillFrontmatter(text);
+        if (parsed.error) {
+            showToast('解析失败：' + parsed.error, 'error');
+            return;
+        }
+        // 探测当前是否已有同名 Skill
+        let existing = null;
+        try { existing = await api.getSkill(parsed.name); } catch (_) { /* 404 */ }
+        if (!existing) {
+            await this._submitImport(parsed);
+            return;
+        }
+        // 已存在：USER_CREATED 走三选项，锁定类型直接提示改名
+        if (existing.source === 'USER_CREATED') {
+            this._showImportConflictDialog(parsed, existing);
+        } else {
+            showToast(`同名 Skill「${parsed.name}」由 ${existing.source === 'ROLE_GRANTED' ? '角色授权' : '市场'}锁定，无法覆盖。请改名后导入。`, 'error');
+        }
+    },
+
+    async _submitImport(parsed) {
+        try {
+            const r = await api.upsertSkill(parsed);
+            const status = r && r.status ? r.status : 'imported';
+            showToast(`已${status === 'updated' ? '覆盖' : '导入'}技能 ${parsed.name}`, 'success');
+            this.renderModal();
+            state._skillListCache = null; // 导入/覆盖 Skill，slash picker 缓存需失效
+        } catch (e) {
+            showToast('导入失败：' + (e.message || e), 'error');
+        }
+    },
+
+    _showImportConflictDialog(parsed, existing) {
+        // index.html (line 320-334) 的 id 已重构为 confirm-modal-* 前缀；保持与 CSS/HTML 一致
+        const m = document.getElementById('confirm-modal-overlay');
+        const titleEl = document.getElementById('confirm-modal-title');
+        const msgEl = document.getElementById('confirm-modal-message');
+        const ok = document.getElementById('confirm-modal-ok');
+        const cancel = document.getElementById('confirm-modal-cancel');
+        const closeBtn = document.getElementById('confirm-modal-close');
+        titleEl.textContent = `技能「${parsed.name}」已存在`;
+        msgEl.innerHTML =
+            `同名技能已存在，请选择处理方式：<br><br><b>覆盖</b>：直接替换现有内容<br>` +
+            `<b>另存为 ${parsed.name}-2</b>：自动寻找下一个可用后缀并保存<br>` +
+            `<b>取消</b>：不导入`;
+        ok.textContent = '覆盖';
+        ok.style.background = 'var(--warning-color, #f59e0b)';
+        ok.style.borderColor = 'var(--warning-color, #f59e0b)';
+        let altBtn = document.getElementById('confirm-save-as-btn');
+        if (!altBtn) {
+            altBtn = document.createElement('button');
+            altBtn.id = 'confirm-save-as-btn';
+            altBtn.className = 'primary-btn';
+            altBtn.style.flex = '1';
+            altBtn.textContent = '另存为';
+            m.querySelector('.modal-footer').insertBefore(altBtn, ok);
+        }
+        altBtn.textContent = `另存为 ${parsed.name}-2`;
+        altBtn.style.display = '';
+        cancel.textContent = '取消';
+        const cleanup = () => {
+            // 标题/正文/按钮文案 全部还原，避免污染后续走 confirm-modal 的流程
+            titleEl.textContent = '确认';
+            msgEl.innerHTML = '';
+            ok.textContent = '确定';
+            ok.style.background = '';
+            ok.style.borderColor = '';
+            cancel.textContent = '取消';
+            altBtn.style.display = 'none';
+            ok.removeEventListener('click', onOk);
+            altBtn.removeEventListener('click', onAlt);
+            cancel.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+        };
+        const onOk = async () => { cleanup(); m.style.display = 'none'; await this._submitImport(parsed); };
+        const onAlt = async () => {
+            cleanup(); m.style.display = 'none';
+            const newName = await this._findFreeName(parsed.name + '-2');
+            await this._submitImport({ ...parsed, name: newName });
+        };
+        const onCancel = () => { cleanup(); m.style.display = 'none'; };
+        ok.addEventListener('click', onOk);
+        altBtn.addEventListener('click', onAlt);
+        cancel.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+        m.style.display = 'flex';
+    },
+
+    async _findFreeName(base) {
+        let n = 2, name = base;
+        while (true) {
+            try {
+                const r = await api.getSkill(name);
+                if (!r) return name;
+            } catch (_) { return name; }
+            n++;
+            name = base.replace(/-(\d+)$/, '') + '-' + n;
         }
     },
 
@@ -3864,6 +4046,167 @@ const init = async () => {
     // chat.send() below provides a defensive fallback for Enter/send calls without a current id.
 };
 
+// ===================== §X Chat Selected Skill Tag =====================
+// 管理输入框上方的 [name ×] 标签条。state.selectedSkill = {name, description} 时显示。
+const selectedSkillTag = {
+    set(skill) {
+        state.selectedSkill = skill;
+        this.update();
+    },
+    clear() {
+        state.selectedSkill = null;
+        this.update();
+    },
+    update() {
+        const el = document.getElementById('chat-selected-skill');
+        if (!el) return;
+        const nameEl = document.getElementById('chat-selected-skill-name');
+        if (state.selectedSkill) {
+            if (nameEl) nameEl.textContent = state.selectedSkill.name;
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    },
+    /** 在 chat.send() 成功回调中调用 */
+    onSendSuccess() { this.clear(); },
+    /** 切换对话时调用，避免跨会话污染 */
+    onConversationSwitch() { this.clear(); },
+};
+
+// ===================== §Y Slash Picker =====================
+// 输入框输入 '/' 触发；浮层显示用户可访问的所有 Skill，键盘上下/Enter/Esc 操作。
+const slashPicker = {
+    state: { open: false, query: '', items: [], activeIndex: 0 },
+
+    async open(query) {
+        if (!this._el) this._el = document.getElementById('slash-picker');
+        if (!this._el) return;
+        // 一次拉取全部 Skill（含 load=false）。admin 特权由后端处理。
+        let all = state._skillListCache;
+        if (!all) {
+            try {
+                all = await api.listSkills();
+                state._skillListCache = all || [];
+            } catch (_) { all = []; }
+        }
+        this.state.query = query || '';
+        this.state.items = this._filter(all, this.state.query);
+        this.state.activeIndex = 0;
+        this.state.open = true;
+        this._render();
+    },
+
+    close() {
+        this.state.open = false;
+        if (this._el) this._el.classList.add('hidden');
+    },
+
+    setQuery(q) {
+        this.state.query = q;
+        const all = state._skillListCache || [];
+        this.state.items = this._filter(all, q);
+        this.state.activeIndex = 0;
+        this._render();
+    },
+
+    move(delta) {
+        if (!this.state.open) return;
+        const n = this.state.items.length;
+        if (n === 0) return;
+        this.state.activeIndex = (this.state.activeIndex + delta + n) % n;
+        this._render();
+    },
+
+    confirm() {
+        if (!this.state.open) return null;
+        const item = this.state.items[this.state.activeIndex];
+        this.close();
+        if (!item) return null;
+        // 从 textarea 中去掉 '/query' 文本
+        const ta = document.getElementById('textarea');
+        if (ta) {
+            const v = ta.value;
+            const idx = v.lastIndexOf('/');
+            if (idx >= 0) ta.value = v.substring(0, idx);
+        }
+        return item;
+    },
+
+    _filter(list, query) {
+        const q = (query || '').toLowerCase();
+        return list
+            .filter(s => !q || s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
+            .slice(0, 50);
+    },
+
+    _render() {
+        if (!this._el) return;
+        if (!this.state.open) { this._el.classList.add('hidden'); return; }
+        const items = this.state.items;
+        if (items.length === 0) {
+            this._el.innerHTML = '<div class="slash-picker-item"><span class="slash-picker-item-name">无匹配 Skill</span></div>';
+            this._el.classList.remove('hidden');
+            return;
+        }
+        this._el.innerHTML = items.map((s, i) => `
+            <div class="slash-picker-item ${i === this.state.activeIndex ? 'active' : ''}" data-idx="${i}">
+                <span class="slash-picker-item-name">${escapeHtml(s.name)}</span>
+                <span class="slash-picker-item-desc">${escapeHtml(s.description || '')}</span>
+            </div>
+        `).join('');
+        this._el.classList.remove('hidden');
+
+        // 事件委托：mousedown 时记录 activeIndex，click 时直接 confirm。
+        // 关键：mouseenter 不再触发 _render()，避免 innerHTML 替换导致
+        // mousedown 后元素被销毁、click 落到新元素上的 bug。
+        if (!this._listenersBound) {
+            this._el.addEventListener('mousemove', (e) => {
+                const item = e.target.closest('.slash-picker-item');
+                if (!item) return;
+                const idx = Number(item.dataset.idx);
+                if (Number.isFinite(idx) && idx !== this.state.activeIndex) {
+                    this.state.activeIndex = idx;
+                    this._updateActiveClass();
+                }
+            });
+            this._el.addEventListener('click', (e) => {
+                const item = e.target.closest('.slash-picker-item');
+                if (!item) return;
+                const idx = Number(item.dataset.idx);
+                if (!Number.isFinite(idx)) return;
+                this.state.activeIndex = idx;
+                const picked = this.confirm();
+                if (picked) selectedSkillTag.set({ name: picked.name, description: picked.description });
+            });
+            this._listenersBound = true;
+        }
+
+        // 键盘上下选中后，把 active 元素滚到可见区域
+        this._scrollActiveIntoView();
+    },
+
+    /** 仅切换 .active class，不重新渲染 HTML（保留 mousedown 目标） */
+    _updateActiveClass() {
+        if (!this._el) return;
+        const children = this._el.querySelectorAll('.slash-picker-item');
+        children.forEach((el, i) => {
+            el.classList.toggle('active', i === this.state.activeIndex);
+        });
+        this._scrollActiveIntoView();
+    },
+
+    /** 把当前 active 元素滚到可视区域，避免键盘导航选到屏外 */
+    _scrollActiveIntoView() {
+        if (!this._el) return;
+        const active = this._el.querySelector('.slash-picker-item.active');
+        if (active && typeof active.scrollIntoView === 'function') {
+            // block: 'nearest' 表示"只在元素真正不可见时才滚动"，不破坏当前位置
+            active.scrollIntoView({ block: 'nearest' });
+        }
+    },
+};
+
 const bindAllEvents = () => {
     const safeBind = (sel, type, handler) => {
         const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
@@ -3875,6 +4218,34 @@ const bindAllEvents = () => {
 
     const ta = document.getElementById('textarea');
     safeBind(ta, 'keydown', (event) => {
+        // Backspace + textarea 为空 + 有 selectedSkill → 清空
+        if (event.key === 'Backspace' && ta.value === '' && state.selectedSkill) {
+            event.preventDefault();
+            selectedSkillTag.clear();
+            return;
+        }
+        // slash picker 打开：键盘控制
+        if (slashPicker.state.open) {
+            if (event.key === 'ArrowDown') { event.preventDefault(); slashPicker.move(1); return; }
+            if (event.key === 'ArrowUp')   { event.preventDefault(); slashPicker.move(-1); return; }
+            if (event.key === 'Enter')     { event.preventDefault(); const item = slashPicker.confirm(); if (item) selectedSkillTag.set({ name: item.name, description: item.description }); return; }
+            if (event.key === 'Tab')       { event.preventDefault(); const item = slashPicker.confirm(); if (item) selectedSkillTag.set({ name: item.name, description: item.description }); return; }
+            if (event.key === 'Escape')    { event.preventDefault(); slashPicker.close(); return; }
+        }
+        // '/' 触发 picker：必须是刚输入 / 且光标前是 /
+        if (event.key === '/' && !slashPicker.state.open) {
+            const v = ta.value;
+            const start = ta.selectionStart;
+            // 允许开头 / 或空白后 /
+            const prev = start > 0 ? v[start - 1] : '';
+            if (start === 0 || /\s/.test(prev)) {
+                event.preventDefault();
+                // 插入 / 让用户看到，然后开 picker
+                ta.value = v.substring(0, start) + '/' + v.substring(start);
+                ta.setSelectionRange(start + 1, start + 1);
+                slashPicker.open('');
+            }
+        }
         if (event.key === 'Enter' && event.ctrlKey) {
             event.preventDefault();
             const start = ta.selectionStart;
@@ -3888,8 +4259,21 @@ const bindAllEvents = () => {
         }
     });
 
+    safeBind(ta, 'input', () => {
+        if (!slashPicker.state.open) return;
+        const v = ta.value;
+        const idx = v.lastIndexOf('/');
+        if (idx < 0) { slashPicker.close(); return; }
+        // / 之后不能有空格（避免被 Enter 触发发送）
+        const after = v.substring(idx + 1);
+        if (/\s/.test(after)) { slashPicker.close(); return; }
+        slashPicker.setQuery(after);
+    });
+
     safeBindById('send-btn', 'click', () => chat.send());
     safeBindById('stop-btn', 'click', () => chat.stopStream());
+
+    safeBindById('chat-selected-skill-clear', 'click', () => selectedSkillTag.clear());
 
     // Modal overlay click-to-close
     safeBindById('mcp-modal-overlay', 'click', (e) => {
@@ -3945,6 +4329,12 @@ const bindAllEvents = () => {
     addIf('#mcp-close-btn', () => mcp.closeModal());
     addIf('#skills-close-btn', () => skills.closeModal());
     addIf('#skill-add-btn', () => skills.showCreateForm());
+    safeBindById('skill-import-btn', 'click', () => skills.handleImport());
+    safeBindById('skill-import-file-input', 'change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) skills._doImportFile(f);
+        e.target.value = '';
+    });
     addIf('.ks-create-btn', () => knowledge.create());
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
 };

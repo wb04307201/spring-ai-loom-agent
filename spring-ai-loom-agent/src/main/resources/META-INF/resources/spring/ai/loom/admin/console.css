@@ -239,17 +239,30 @@ table.user-table {
 }
 
 .delete-btn {
-    padding: 4px 12px;
+    padding: 8px 16px;
     background: transparent;
     color: var(--error-color, #ef4444);
     border: 1px solid var(--error-color, #ef4444);
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: 6px;
+    font-size: 13px;
     cursor: pointer;
     transition: all 0.15s;
 }
 
 .delete-btn:hover { background: var(--error-color, #ef4444); color: white; }
+
+/* 知识库市场等场景用的 .danger-btn 尺寸与 .secondary-btn 保持一致（仅颜色不同） */
+.danger-btn {
+    padding: 8px 16px;
+    background: transparent;
+    color: var(--error-color, #ef4444);
+    border: 1px solid var(--error-color, #ef4444);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.danger-btn:hover { background: var(--error-color, #ef4444); color: white; }
 
 .user-link {
     color: var(--primary-color, #6366f1);

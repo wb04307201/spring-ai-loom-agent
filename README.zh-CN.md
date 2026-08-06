@@ -32,7 +32,7 @@
 - **🧠 技能市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权），带版本号与 admin 审批流；技能用 `@工具名` 调用 MCP
 - **🧩 子任务 & ⏰ 定时任务** — 主对话把任务委派给"子模型"同步执行；LLM 可创建定时任务，触发时以子任务运行，重启自动恢复
 - **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
-- **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / MCP 描述 / 用量统计 五大模块，admin 路径鉴权
+- **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / 知识库市场 / MCP 描述 / 日志（原用量统计）六大模块，admin 路径鉴权
 - **📁 文件管理** — 磁盘存储 + H2 元数据，上传 / 预览 / 下载，聊天附件自动桥接
 - **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 端到端部署（默认启用），Git / Maven（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
 - **⚙️ 开箱即用工程化** — Spring Boot 自动配置，全组件 `@ConditionalOnMissingBean` 可替换，Flyway 迁移，广泛支持各类聊天 / 嵌入 / 向量存储后端
@@ -45,8 +45,8 @@
 |------|------|--------|----------|----------|
 | 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
 | 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
-| 技能 | `ISkillTool` | 2 | ✅ 启用 | `skill.enabled` |
-| 知识库 | `IKnowledgeTool` | 2 | ✅ 启用 | `knowledge.enabled` |
+| 技能 | `ISkillTool` | 3 | ✅ 启用 | `skill.enabled` |
+| 知识库 | `IKnowledgeTool` | 1 | ✅ 启用 | `knowledge.enabled` |
 | 子任务 | `ISubTaskTool` | 4 | ✅ 启用 | `subtask.enabled` |
 | 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |

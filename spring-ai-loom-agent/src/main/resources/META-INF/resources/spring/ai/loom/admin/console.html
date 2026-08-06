@@ -31,7 +31,7 @@
                 <span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span>
             </a>
             <a href="stats.html" class="admin-sidebar-link">
-                <span class="admin-sidebar-icon">📈</span><span>用量统计</span>
+                <span class="admin-sidebar-icon">📈</span><span>日志</span>
             </a>
             <div class="admin-sidebar-divider"></div>
             <a href="/spring/ai/loom/index.html" class="admin-sidebar-link">
@@ -58,7 +58,6 @@
             <div class="admin-toolbar">
                 <button id="create-user-btn" class="primary-btn">+ 新建用户</button>
                 <button id="refresh-btn" class="secondary-btn">刷新</button>
-                <button id="batch-clean-btn" class="secondary-btn">批量清理</button>
                 <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="current-month-label"></span>
             </div>
 
@@ -101,23 +100,6 @@
         <div class="modal-footer">
             <button class="secondary-btn" id="create-cancel-btn">取消</button>
             <button class="primary-btn" id="create-submit-btn">创建</button>
-        </div>
-    </div>
-</div>
-
-<!-- 批量清理模态框（整合后唯一入口） -->
-<div id="batch-clean-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="max-width: 720px; max-height: 80vh;">
-        <div class="modal-header">
-            <h3>批量清理已软删会话</h3>
-            <div class="close-button" id="batch-clean-close">&times;</div>
-        </div>
-        <div class="modal-body" style="padding: 0; max-height: 60vh; overflow-y: auto;" id="batch-clean-list">
-            <div class="loading-indicator">加载中...</div>
-        </div>
-        <div class="modal-footer">
-            <button class="secondary-btn" id="batch-clean-cancel">取消</button>
-            <button class="primary-btn" id="batch-clean-confirm">清理选中</button>
         </div>
     </div>
 </div>

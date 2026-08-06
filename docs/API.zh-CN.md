@@ -15,11 +15,13 @@
 - [5. 知识库管理](#5-知识库管理)
 - [6. 技能管理](#6-技能管理)
 - [7. MCP 工具](#7-mcp-工具)
-- [8. 终端管理](#8-终端管理)
-- [9. Maven 构建工具](#9-maven-构建工具)
-  - [9.7 文件工具（@Tool 注解）](#97-文件工具tool-注解)
-- [10. 数据模型](#10-数据模型)
-- [11. 配置属性](#11-配置属性)
+- [8. 技能工具（@Tool 注解）](#8-技能工具tool-注解)
+- [9. 知识库工具（@Tool 注解）](#9-知识库工具tool-注解)
+- [10. 终端管理](#10-终端管理)
+- [11. Maven 构建工具](#11-maven-构建工具)
+  - [11.7 文件工具（@Tool 注解）](#117-文件工具tool-注解)
+- [12. 数据模型](#12-数据模型)
+- [13. 配置属性](#13-配置属性)
 
 ---
 
@@ -893,11 +895,84 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 8. 终端管理
+## 8. 技能工具（@Tool 注解）
+
+`ISkillTool` 注册给 LLM 调用的 `@Tool` 方法。**与** `## 6. 技能管理` **的服务端 REST API 不同**（后者服务于管理控制台 UI）。
+
+### 10.1 `listSkills` — 列出可用技能
+
+```
+@Tool: listSkills
+```
+
+列出当前用户可访问的技能（渐进式披露风格）。默认返回全部（上限 200），可按 `keyword` 和 `source` 过滤。
+
+| 参数        | 类型    | 必填 | 说明                                                                                          |
+|-------------|---------|------|----------------------------------------------------------------------------------------------|
+| `keyword`   | string  | 否   | 子串过滤（不区分大小写），匹配 `name` 或 `description`                                            |
+| `source`    | string  | 否   | 按 source 过滤：`USER_CREATED` / `MARKET_VIEW` / `ROLE_GRANTED` / `MARKET_PULLED`                  |
+| `maxCount`  | integer | 否   | 最多返回数量，默认 `200`                                                                       |
+
+**返回**：文本表格列出匹配的技能（name + source + description），结果数小于用户全部可访问技能数时附带截断提示。
+
+### 10.2 `getSkill` — 获取单个技能的内容
+
+```
+@Tool: getSkill
+```
+
+| 参数   | 类型   | 必填 | 说明         |
+|--------|--------|------|--------------|
+| `name` | string | 是   | 技能名称     |
+
+**返回**：包含 `技能名`、`技能描述` 和完整 `技能内容` 的文本。用户无访问权限时抛出异常。
+
+### 10.3 `createOrUpdateSkill` — 创建或更新自建技能
+
+```
+@Tool: createOrUpdateSkill
+```
+
+| 参数          | 类型   | 必填 | 说明                                                                |
+|---------------|--------|------|--------------------------------------------------------------------|
+| `name`        | string | 是   | 技能名；去前后空白；最长 128                                            |
+| `description` | string | 否   | 技能描述                                                               |
+| `content`     | string | 是   | 技能 Prompt 内容（非空）                                              |
+
+**行为**：
+- 若用户已拥有同名技能，内容/描述被覆盖。
+- `ROLE_GRANTED` / `MARKET_PULLED` 技能**已锁定**，返回 403。
+- 返回 "已创建技能 X" 或 "已更新技能 X"。
+
+---
+
+## 9. 知识库工具（@Tool 注解）
+
+`IKnowledgeTool` 注册给 LLM 的工具化 RAG 检索方法。已启用的知识库列表在 system prompt `【知识库】` 段自动展示——LLM 不需要列表工具来发现它们。
+
+### 11.1 `searchKnowledge` — 向量检索知识库
+
+```
+@Tool: searchKnowledge
+```
+
+| 参数          | 类型    | 必填 | 说明                                                                  |
+|---------------|---------|------|----------------------------------------------------------------------|
+| `knowledgeId` | string  | 是   | 目标知识库 ID                                                          |
+| `query`       | string  | 是   | 检索查询（语义相似度）                                                  |
+| `topK`        | integer | 否   | 最多返回 chunk 数，默认取 `rag.topK` 配置                                |
+
+**返回**：top-k chunk 列表，含相似度分数和文本内容。空结果返回 "未检索到相关文档片段"。权限检查：仅 own / subscribed / role-granted 知识库可检索；否则返回 "没有权限访问该知识库"。
+
+**相似度阈值**：通过 `rag.similarityThreshold` 配置（默认 0.50）。低于阈值的 chunk 在返回前被过滤。
+
+---
+
+## 10. 终端管理
 
 通过 `@Tool` 注解暴露的进程管理工具，供 LLM 在对话中启动和管理系统进程。
 
-### 8.1 `startProcess` — 启动进程
+### 10.1 `startProcess` — 启动进程
 
 ```
 @Tool: startProcess
@@ -925,7 +1000,7 @@ GET /spring/ai/chat/loom/mcp
 }
 ```
 
-### 8.2 `interactWithProcess` — 与进程交互
+### 10.2 `interactWithProcess` — 与进程交互
 
 ```
 @Tool: interactWithProcess
@@ -941,7 +1016,7 @@ GET /spring/ai/chat/loom/mcp
 | `input` | `String` | ✅ | 要发送的输入（自动追加换行符） |
 | `timeout` | `Long` | | 等待响应超时（毫秒，默认 10000） |
 
-### 8.3 `readProcessOutput` — 读取进程输出
+### 10.3 `readProcessOutput` — 读取进程输出
 
 ```
 @Tool: readProcessOutput
@@ -958,7 +1033,7 @@ GET /spring/ai/chat/loom/mcp
 | `position` | `Integer` | | 绝对字符位置（仅 `mode=absolute` 时） |
 | `lines` | `Integer` | | 行数（仅 `mode=tail` 时，默认 50） |
 
-### 8.4 `forceTerminate` — 强制终止进程
+### 10.4 `forceTerminate` — 强制终止进程
 
 ```
 @Tool: forceTerminate
@@ -972,7 +1047,7 @@ GET /spring/ai/chat/loom/mcp
 |------|------|------|------|
 | `sessionId` | `String` | ✅ | 会话 ID |
 
-### 8.5 `listSessions` — 列出所有会话
+### 10.5 `listSessions` — 列出所有会话
 
 ```
 @Tool: listSessions
@@ -980,7 +1055,7 @@ GET /spring/ai/chat/loom/mcp
 
 列出当前用户所有活跃的终端会话。
 
-### 8.6 `getProcessInfo` — 获取进程信息
+### 10.6 `getProcessInfo` — 获取进程信息
 
 ```
 @Tool: getProcessInfo
@@ -994,7 +1069,7 @@ GET /spring/ai/chat/loom/mcp
 |------|------|------|------|
 | `sessionId` | `String` | ✅ | 会话 ID |
 
-### 8.7 `sendSignal` — 发送信号
+### 10.7 `sendSignal` — 发送信号
 
 ```
 @Tool: sendSignal
@@ -1009,7 +1084,7 @@ GET /spring/ai/chat/loom/mcp
 | `sessionId` | `String` | ✅ | 会话 ID |
 | `signal` | `String` | ✅ | 信号类型：`interrupt` / `eof` / `quit` |
 
-### 8.8 `listProcesses` — 列出系统进程
+### 10.8 `listProcesses` — 列出系统进程
 
 ```
 @Tool: listProcesses
@@ -1024,7 +1099,7 @@ GET /spring/ai/chat/loom/mcp
 | `maxResults` | `Integer` | | 每页最大结果数（默认 50，最大 200） |
 | `page` | `Integer` | | 页码，从 0 开始（默认 0） |
 
-### 8.9 `killProcess` — 杀死指定进程
+### 10.9 `killProcess` — 杀死指定进程
 
 ```
 @Tool: killProcess
@@ -1041,11 +1116,11 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 9. Maven 构建工具
+## 11. Maven 构建工具
 
 所有 Maven 工具的操作范围限定在用户文件目录（`{fileBasePath}/{username}/`）内。超出该范围的绝对路径将被拒绝。
 
-### 9.1 通用执行
+### 11.1 通用执行
 
 ```
 @Tool: mavenExecute
@@ -1063,7 +1138,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 9.2 编译
+### 11.2 编译
 
 ```
 @Tool: mavenBuild
@@ -1080,7 +1155,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 9.3 打包
+### 11.3 打包
 
 ```
 @Tool: mavenPackage
@@ -1097,7 +1172,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 9.4 测试
+### 11.4 测试
 
 ```
 @Tool: mavenTest
@@ -1114,7 +1189,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 9.5 依赖树
+### 11.5 依赖树
 
 ```
 @Tool: mavenDependencyTree
@@ -1130,7 +1205,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-### 9.6 验证
+### 11.6 验证
 
 ```
 @Tool: mavenValidate
@@ -1145,7 +1220,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 9.7 文件工具（@Tool 注解）
+## 11.7 文件工具（@Tool 注解）
 
 所有文件工具均限定在用户文件目录（`{fileBasePath}/{username}/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
 
@@ -1359,7 +1434,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 10. 数据模型
+## 12. 数据模型
 
 ### ChatRequestRecord
 
@@ -1470,7 +1545,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 11. 配置属性
+## 13. 配置属性
 
 所有配置项在 `application.yml` 中以 `spring.ai.loom.agent` 为前缀。
 

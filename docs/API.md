@@ -897,9 +897,82 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 8. Terminal Management
+## 8. Skill Tools (LLM-callable)
 
-### 8.1 Start Process
+The `@Tool` methods registered by `ISkillTool` for the LLM. These are **separate from** the admin REST APIs in `## 6. Skill Management` (which serve the admin console UI).
+
+### 8.1 `listSkills` — list available skills
+
+```
+@Tool: listSkills
+```
+
+List the current user's accessible skills (progressive-disclosure style). Default returns all (cap 200); filterable by `keyword` and `source`.
+
+| Parameter  | Type     | Required | Description                                                                                                  |
+|------------|----------|----------|--------------------------------------------------------------------------------------------------------------|
+| `keyword`  | string   | No       | Substring filter (case-insensitive) matched against `name` and `description`                                     |
+| `source`   | string   | No       | Filter by skill source: `USER_CREATED` / `MARKET_VIEW` / `ROLE_GRANTED` / `MARKET_PULLED`                     |
+| `maxCount` | integer  | No       | Max records returned; default `200`                                                                           |
+
+**Returns**: A text table listing the matching skills (name + source + description), plus a truncation notice when the result is smaller than the user's total accessible skills.
+
+### 8.2 `getSkill` — fetch one skill's content
+
+```
+@Tool: getSkill
+```
+
+| Parameter | Type   | Required | Description       |
+|-----------|--------|----------|-------------------|
+| `name`    | string | Yes      | The skill's name  |
+
+**Returns**: Text with `技能名`, `技能描述`, and full `技能内容`. Throws if the user has no access to the skill.
+
+### 10.3 `createOrUpdateSkill` — create or update a user-owned skill
+
+```
+@Tool: createOrUpdateSkill
+```
+
+| Parameter     | Type   | Required | Description                                                                                       |
+|---------------|--------|----------|---------------------------------------------------------------------------------------------------|
+| `name`        | string | Yes      | Skill name; trimmed; max length 128                                                                 |
+| `description` | string | No       | Skill description                                                                                  |
+| `content`     | string | Yes      | Skill prompt content (non-empty)                                                                  |
+
+**Behavior**:
+- If the user already owns a skill with this name, content/description are overwritten.
+- `ROLE_GRANTED` / `MARKET_PULLED` skills are **locked** and will return 403.
+- Returns "已创建技能 X" or "已更新技能 X".
+
+---
+
+## 9. Knowledge Tools (LLM-callable)
+
+The `@Tool` methods registered by `IKnowledgeTool` for tool-based RAG retrieval. The list of enabled knowledge bases is auto-injected into the system prompt under the `【知识库】` section — the LLM does not need a list tool to discover them.
+
+### 11.1 `searchKnowledge` — vector search a knowledge base
+
+```
+@Tool: searchKnowledge
+```
+
+| Parameter      | Type    | Required | Description                                                                                              |
+|----------------|---------|----------|----------------------------------------------------------------------------------------------------------|
+| `knowledgeId`  | string  | Yes      | Target knowledge base ID                                                                                |
+| `query`        | string  | Yes      | Search query (semantic similarity)                                                                       |
+| `topK`         | integer | No       | Max chunks to return; defaults to `rag.topK` (config)                                                    |
+
+**Returns**: Top-k chunks with similarity score and text content. Empty result returns "未检索到相关文档片段". Access check: only own / subscribed / role-granted KBs are searchable; otherwise returns "没有权限访问该知识库".
+
+**Similarity threshold**: Configured via `rag.similarityThreshold` (default 0.50). Chunks below the threshold are filtered out before being returned.
+
+---
+
+## 10. Terminal Management
+
+### 10.1 Start Process
 
 ```
 @Tool: startProcess
@@ -916,7 +989,7 @@ Start a terminal process or REPL session. Supports two modes: **Shell mode** (on
 
 ---
 
-### 8.2 Interact with Process
+### 10.2 Interact with Process
 
 ```
 @Tool: interactWithProcess
@@ -932,7 +1005,7 @@ Send input to a running REPL session and wait for response.
 
 ---
 
-### 8.3 Read Process Output
+### 10.3 Read Process Output
 
 ```
 @Tool: readProcessOutput
@@ -949,7 +1022,7 @@ Read output from a running process. Supports three modes: `new` (unread content 
 
 ---
 
-### 8.4 Force Terminate
+### 10.4 Force Terminate
 
 ```
 @Tool: forceTerminate
@@ -963,7 +1036,7 @@ Force-terminate a managed terminal session.
 
 ---
 
-### 8.5 List Sessions
+### 10.5 List Sessions
 
 ```
 @Tool: listSessions
@@ -973,7 +1046,7 @@ List all active terminal sessions for the current user.
 
 ---
 
-### 8.6 Get Process Info
+### 10.6 Get Process Info
 
 ```
 @Tool: getProcessInfo
@@ -987,7 +1060,7 @@ Get detailed info for a single session, including full output, process state, wo
 
 ---
 
-### 8.7 Send Signal
+### 10.7 Send Signal
 
 ```
 @Tool: sendSignal
@@ -1002,7 +1075,7 @@ Send a control signal to a terminal session. PTY mode supports: `interrupt` (Ctr
 
 ---
 
-### 8.8 List System Processes
+### 10.8 List System Processes
 
 ```
 @Tool: listProcesses
@@ -1017,7 +1090,7 @@ List all running OS processes (like `ps` or Task Manager). Supports pagination.
 
 ---
 
-### 8.9 Kill Process
+### 10.9 Kill Process
 
 ```
 @Tool: killProcess
@@ -1032,11 +1105,11 @@ Force-terminate a system process by PID.
 
 ---
 
-## 9. Sub-task & Schedule APIs
+## 11. Sub-task & Schedule APIs
 
 Sub-tasks are per-conversation (`loom-subtask-{user}-{conv}-{taskId}`); schedules are per-conversation (`loom-sched-{user}-{conv}-{name}`) and persist to the loom-agent-owned `loom_scheduled_task` table (V2.0 migration). The `flex.schedule.limits` constraints are **10m min-interval / 72h max-lifetime / strict mode** by default in the test app.
 
-### 9.1 List Sub-task Limits
+### 11.1 List Sub-task Limits
 
 ```http
 GET /spring/ai/loom/subtask/limits
@@ -1044,19 +1117,19 @@ GET /spring/ai/loom/subtask/limits
 
 **Response**: `{ "maxConcurrent": int, "maxHistory": int }`
 
-### 9.2 List Active Sub-tasks
+### 11.2 List Active Sub-tasks
 
 ```http
 GET /spring/ai/loom/subtask/list/active?conversationId=...
 ```
 
-### 9.3 List Sub-task History
+### 11.3 List Sub-task History
 
 ```http
 GET /spring/ai/loom/subtask/list/history?conversationId=...&limit=...
 ```
 
-### 9.4 Kill a Sub-task
+### 11.4 Kill a Sub-task
 
 ```http
 POST /spring/ai/loom/subtask/kill/{id}
@@ -1064,13 +1137,13 @@ POST /spring/ai/loom/subtask/kill/{id}
 
 **Permission**: Owner only. Cross-conversation kill returns 403.
 
-### 9.5 Delete a Sub-task History Entry
+### 11.5 Delete a Sub-task History Entry
 
 ```http
 DELETE /spring/ai/loom/subtask/history/{id}
 ```
 
-### 9.6 List Schedule Limits
+### 11.6 List Schedule Limits
 
 ```http
 GET /spring/ai/loom/schedule/limits
@@ -1078,7 +1151,7 @@ GET /spring/ai/loom/schedule/limits
 
 **Response**: `{ "minInterval": "PT10M", "maxLifetime": "PT72H", "mode": "strict" }` (ISO 8601 durations)
 
-### 9.7 List All Schedules
+### 11.7 List All Schedules
 
 ```http
 GET /spring/ai/loom/schedule/list
@@ -1086,7 +1159,7 @@ GET /spring/ai/loom/schedule/list
 
 **Response**: `TaskInfo[]` — all schedules visible to the current user.
 
-### 9.8 Cancel a Schedule
+### 11.8 Cancel a Schedule
 
 ```http
 POST /spring/ai/loom/schedule/cancel
@@ -1097,13 +1170,13 @@ Content-Type: application/json
 
 **Note**: The body field is **`name`**, not `taskName`. The value is the FULL namespaced name (returned by `list`). Returns 403 for non-owner or non-existent task. Also deletes the corresponding `loom_scheduled_task` row so the `ScheduleRestoreListener` doesn't resurrect it on restart.
 
-### 9.9 Cancel All Schedules for a Conversation
+### 11.9 Cancel All Schedules for a Conversation
 
 ```http
 POST /spring/ai/loom/schedule/by-conversation/{conversationId}/cancel-all
 ```
 
-### 9.10 Get Schedule Execution History
+### 11.10 Get Schedule Execution History
 
 ```http
 GET /spring/ai/loom/schedule/history/{name}
@@ -1111,7 +1184,7 @@ GET /spring/ai/loom/schedule/history/{name}
 
 **Permission**: Owner only (returns 403 for non-owner).
 
-### 9.11 Get Schedule History for a Conversation
+### 11.11 Get Schedule History for a Conversation
 
 ```http
 GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
@@ -1119,7 +1192,7 @@ GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
 
 ---
 
-## 10. Admin APIs
+## 12. Admin APIs
 
 All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-admin access returns 403 (`{"message": "无权限"}`). The admin pages under `admin/*.html` are the canonical UI for these endpoints.
 
@@ -1173,7 +1246,7 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 
 ---
 
-## 11. Data Models
+## 13. Data Models
 
 ### ChatRequestRecord
 
@@ -1284,7 +1357,7 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 
 ---
 
-## 12. Configuration Properties
+## 14. Configuration Properties
 
 All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 

@@ -1946,6 +1946,49 @@ public class LoomAgentConfiguration {
                             java.util.Map.of("error", ex.getMessage() == null ? "Skill 不存在或无权限" : ex.getMessage()));
                 }
             });
+
+            // 创建 / 更新（前端「导入 skill」与 chat 工具共用）
+            // 返回 {status: "created"|"updated", name, description} 让前端区分新建 / 覆盖
+            builder.POST("spring/ai/loom/skill/upsert", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                cn.wubo.spring.ai.loom.agent.model.UpsertSkillRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.UpsertSkillRequest.class);
+                if (body == null) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                String name = body.name() == null ? null : body.name().trim();
+                String description = body.description() == null ? "" : body.description();
+                String content = body.content();
+                if (name == null || name.isEmpty()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "name 必填"));
+                }
+                if (name.length() > 128) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "name 长度超过 128"));
+                }
+                if (content == null || content.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "content 必填"));
+                }
+                // 锁检查：ROLE_GRANTED / MARKET_PULLED 不能改 —— skillStorage.save 内部会校验并抛 403
+                boolean existed = false;
+                try {
+                    skillStorage.get(name, username);
+                    existed = true;
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ignore) {
+                    // 不存在时 service 抛 message-only 异常，吞掉
+                }
+                try {
+                    skillStorage.save(new cn.wubo.spring.ai.loom.agent.model.SkillRecord(
+                            name, description, true, content, "USER_CREATED"), username);
+                    return ServerResponse.ok().body(java.util.Map.of(
+                            "status", existed ? "updated" : "created",
+                            "name", name,
+                            "description", description));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
             builder.DELETE("spring/ai/loom/skill/{name}", request -> {
                 String name = request.pathVariable("name");
                 String username = UserContextHolder.getCurrentUser();

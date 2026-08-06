@@ -496,6 +496,7 @@ body {
     padding: 16px 24px;
     background: var(--bg-primary);
     flex-shrink: 0;
+    position: relative; /* slash-picker 等 absolute 子元素的定位锚点 */
 }
 
 .toolbar {
@@ -2917,3 +2918,117 @@ textarea::placeholder {
 .toast.success { border-left: 4px solid #22c55e; }
 .toast.error { border-left: 4px solid var(--error-color, #ef4444); }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+/* ===== Chat Selected Skill Tag ===== */
+.chat-selected-skill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-secondary, #f1f5f9);
+    border: 1px solid var(--primary-color, #6366f1);
+    border-radius: var(--radius-sm, 6px);
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+}
+
+.chat-selected-skill.hidden {
+    display: none;
+}
+
+.chat-selected-skill .skill-tag {
+    font-weight: 500;
+    color: var(--primary-color, #6366f1);
+}
+
+.chat-selected-skill .skill-tag-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+    border-radius: 4px;
+    transition: all var(--transition-fast, 0.15s ease);
+}
+
+.chat-selected-skill .skill-tag-close:hover {
+    background: var(--bg-primary, #fff);
+    color: var(--error-color, #ef4444);
+}
+
+/* ===== Slash Picker ===== */
+.slash-picker {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    box-shadow: var(--shadow-lg, 0 10px 25px rgba(0, 0, 0, 0.1));
+    z-index: 1000;
+    margin-bottom: 4px;
+}
+
+.slash-picker.hidden {
+    display: none;
+}
+
+.slash-picker-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.slash-picker-item:last-child {
+    border-bottom: none;
+}
+
+.slash-picker-item.active {
+    background: var(--primary-color, #6366f1);
+    color: #fff;
+}
+
+.slash-picker-item.active .slash-picker-item-desc {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.slash-picker-item-name {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.slash-picker-item-desc {
+    font-size: 11px;
+    color: var(--text-muted, #64748b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.skill-detail-secondary-btn {
+    padding: 14px 18px;
+    background: var(--bg-primary, #fff);
+    color: var(--text-primary, #1e293b);
+    border: 2px solid var(--border-color, #e2e8f0);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.skill-detail-secondary-btn:hover {
+    border-color: var(--primary-color, #6366f1);
+    color: var(--primary-color, #6366f1);
+    transform: translateY(-1px);
+}

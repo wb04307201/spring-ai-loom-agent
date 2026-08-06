@@ -24,11 +24,10 @@ import static org.mockito.Mockito.*;
  * DefaultKnowledgeTool 单元测试
  * <p>
  * 覆盖：
- * 1. listKnowledgeBases 分页列出知识库，默认每页20条
- * 2. listKnowledgeBases size=-1 返回全部
- * 3. listKnowledgeBases 空列表
- * 4. searchKnowledge 使用 VectorStore 带 filterExpression 检索
- * 5. username 通过 ToolContext 正确传递
+ * 1. searchKnowledge 使用 VectorStore 带 filterExpression 检索
+ * 2. username 通过 ToolContext 正确传递
+ * <p>
+ * 移除：listKnowledgeBases（已删除；KB 列表在 system prompt【知识库】段自动展示）
  */
 @DisplayName("DefaultKnowledgeTool 单元测试")
 class DefaultKnowledgeToolTest {
@@ -52,98 +51,6 @@ class DefaultKnowledgeToolTest {
         Map<String, Object> ctx = new HashMap<>();
         ctx.put("username", username);
         return new ToolContext(ctx);
-    }
-
-    // ──────────── listKnowledgeBases ────────────
-
-    @Test
-    @DisplayName("listKnowledgeBases 列出当前用户的知识库")
-    void listKnowledgeBases_listsUserKnowledgeBases() {
-        when(knowledge.list("alice")).thenReturn(List.of(
-                new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档"),
-                new KnowledgeRecord("kb-2", "alice", "技术文档", "包含技术资料")
-        ));
-
-        String result = tool.listKnowledgeBases(1, 20, ctx("alice"));
-        assertTrue(result.contains("kb-1"));
-        assertTrue(result.contains("产品手册"));
-        assertTrue(result.contains("包含产品文档"));
-        assertTrue(result.contains("kb-2"));
-        assertTrue(result.contains("技术文档"));
-        assertTrue(result.contains("共 2 个"), "应只列出 alice 的 2 个知识库: " + result);
-        verify(knowledge).list("alice");
-    }
-
-    @Test
-    @DisplayName("listKnowledgeBases 无知识库时显示空列表")
-    void listKnowledgeBases_emptyList() {
-        when(knowledge.list("bob")).thenReturn(List.of());
-        String result = tool.listKnowledgeBases(1, 20, ctx("bob"));
-        assertTrue(result.contains("共 0 个"), "应提示 0 个知识库: " + result);
-        assertTrue(result.contains("暂无知识库"), "应提示暂无知识库: " + result);
-    }
-
-    @Test
-    @DisplayName("listKnowledgeBases 默认 null 参数使用默认值")
-    void listKnowledgeBases_defaultParams() {
-        when(knowledge.list("dave")).thenReturn(List.of());
-        String result = tool.listKnowledgeBases(null, null, ctx("dave"));
-        assertTrue(result.contains("共 0 个"));
-        assertTrue(result.contains("第 1/0 页"));
-    }
-
-    @Test
-    @DisplayName("listKnowledgeBases size=-1 返回全部")
-    void listKnowledgeBases_allKnowledgeBases() {
-        List<KnowledgeRecord> kbs = List.of(
-                new KnowledgeRecord("kb-1", "eve", "描述1", "详情1"),
-                new KnowledgeRecord("kb-2", "eve", "描述2", "详情2"),
-                new KnowledgeRecord("kb-3", "eve", "描述3", "详情3")
-        );
-        when(knowledge.list("eve")).thenReturn(kbs);
-
-        String result = tool.listKnowledgeBases(1, -1, ctx("eve"));
-        assertTrue(result.contains("kb-1"));
-        assertTrue(result.contains("kb-2"));
-        assertTrue(result.contains("kb-3"));
-        assertTrue(result.contains("共 3 个"));
-        assertFalse(result.contains("下一页"), "size=-1 不应有下一页提示: " + result);
-    }
-
-    @Test
-    @DisplayName("listKnowledgeBases 翻页提示下一页")
-    void listKnowledgeBases_nextPageHint() {
-        List<KnowledgeRecord> kbs = List.of(
-                new KnowledgeRecord("kb-1", "frank", "d1", "c1"),
-                new KnowledgeRecord("kb-2", "frank", "d2", "c2"),
-                new KnowledgeRecord("kb-3", "frank", "d3", "c3")
-        );
-        when(knowledge.list("frank")).thenReturn(kbs);
-
-        String result = tool.listKnowledgeBases(1, 2, ctx("frank"));
-        assertTrue(result.contains("第 1/2 页"), "应显示第1页: " + result);
-        assertTrue(result.contains("下一页"), "应有下一页提示: " + result);
-    }
-
-    @Test
-    @DisplayName("listKnowledgeBases enabledKnowledgeIds 只列出选中的知识库")
-    void listKnowledgeBases_filtersByEnabledIds() {
-        when(knowledge.list("alice")).thenReturn(List.of(
-                new KnowledgeRecord("kb-1", "alice", "产品手册", "包含产品文档"),
-                new KnowledgeRecord("kb-2", "alice", "技术文档", "包含技术资料"),
-                new KnowledgeRecord("kb-3", "alice", "其他", "其他内容")
-        ));
-
-        Map<String, Object> ctxMap = new HashMap<>();
-        ctxMap.put("username", "alice");
-        ctxMap.put("enabledKnowledgeIds", List.of("kb-1", "kb-3"));
-        ToolContext ctx = new ToolContext(ctxMap);
-
-        String result = tool.listKnowledgeBases(1, 20, ctx);
-        assertTrue(result.contains("kb-1"));
-        assertTrue(result.contains("kb-3"));
-        assertFalse(result.contains("技术文档"), "未选中的 kb-2 不应出现: " + result);
-        assertTrue(result.contains("共 2 个"), "应只列出 2 个启用的知识库: " + result);
     }
 
     // ──────────── searchKnowledge ────────────
