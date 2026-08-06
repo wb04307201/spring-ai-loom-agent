@@ -402,6 +402,24 @@ const api = {
         const r = await apiFetch(API.listSkills);
         return r.ok ? r.json() : [];
     },
+    async getSkill(name) {
+        const r = await apiFetch(API.getSkill(name));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    },
+    async upsertSkill(skill) {
+        const r = await apiFetch('/spring/ai/loom/skill/upsert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(skill),
+        });
+        if (!r.ok) {
+            let msg = 'HTTP ' + r.status;
+            try { const j = await r.json(); if (j.error) msg = j.error; } catch (_) {}
+            throw new Error(msg);
+        }
+        return r.json();
+    },
     async createSkill(skill) {
         const r = await apiFetch(API.createSkill, {
             method: 'PUT',
@@ -3487,6 +3505,148 @@ const skills = {
         }
     },
 
+    /** 把 Skill 导出为标准 .skill.md（YAML frontmatter + body） */
+    handleDownload(skill) {
+        const name = (skill.name || '').replace(/[\r\n]+/g, ' ').trim();
+        const description = (skill.description || '').replace(/[\r\n]+/g, ' ').trim();
+        const body = (skill.content || '').replace(/\r\n/g, '\n');
+        const md =
+            '---\n' +
+            `name: ${name}\n` +
+            `description: ${description}\n` +
+            '---\n' +
+            '\n' + body + '\n';
+        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name || 'untitled'}.skill.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (skill.source === 'ROLE_GRANTED' || skill.source === 'MARKET_PULLED') {
+            showToast('已下载；如需导入为可编辑 Skill，请使用新的名称', 'success');
+        } else {
+            showToast('已下载 ' + a.download, 'success');
+        }
+    },
+
+    /** 解析 .skill.md 的 YAML frontmatter + body。返回 {name, description, content} 或 {error} */
+    _parseSkillFrontmatter(text) {
+        const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+        if (!m) return { error: '请使用标准 Skill 格式：---\nname: x\ndescription: y\n---\n<内容>' };
+        const yaml = m[1], body = m[2];
+        const nameMatch = yaml.match(/^name:\s*(.+?)\s*$/m);
+        const descMatch = yaml.match(/^description:\s*(.+?)\s*$/m);
+        const name = nameMatch ? nameMatch[1].trim() : '';
+        if (!name) return { error: 'frontmatter 必须有 name: 字段' };
+        if (name.length > 128) return { error: 'name 长度超过 128' };
+        const description = descMatch ? descMatch[1].trim() : '';
+        if (!description) return { error: 'frontmatter 必须有 description: 字段' };
+        return { name, description, content: body.replace(/^\n+/, '') };
+    },
+
+    /** 触发隐藏 file input */
+    handleImport() {
+        const input = document.getElementById('skill-import-file-input');
+        if (input) input.click();
+    },
+
+    async _doImportFile(file) {
+        const text = await file.text();
+        const parsed = this._parseSkillFrontmatter(text);
+        if (parsed.error) {
+            showToast('解析失败：' + parsed.error, 'error');
+            return;
+        }
+        // 探测当前是否已有同名 Skill
+        let existing = null;
+        try { existing = await api.getSkill(parsed.name); } catch (_) { /* 404 */ }
+        if (!existing) {
+            await this._submitImport(parsed);
+            return;
+        }
+        // 已存在：USER_CREATED 走三选项，锁定类型直接提示改名
+        if (existing.source === 'USER_CREATED') {
+            this._showImportConflictDialog(parsed, existing);
+        } else {
+            showToast(`同名 Skill「${parsed.name}」由 ${existing.source === 'ROLE_GRANTED' ? '角色授权' : '市场'}锁定，无法覆盖。请改名后导入。`, 'error');
+        }
+    },
+
+    async _submitImport(parsed) {
+        try {
+            const r = await api.upsertSkill(parsed);
+            const status = r && r.status ? r.status : 'imported';
+            showToast(`已${status === 'updated' ? '覆盖' : '导入'}技能 ${parsed.name}`, 'success');
+            this.renderModal();
+        } catch (e) {
+            showToast('导入失败：' + (e.message || e), 'error');
+        }
+    },
+
+    _showImportConflictDialog(parsed, existing) {
+        const m = document.getElementById('confirm-modal');
+        document.getElementById('confirm-title').textContent = `技能「${parsed.name}」已存在`;
+        document.getElementById('confirm-message').innerHTML =
+            `同名技能已存在，请选择处理方式：<br><br><b>覆盖</b>：直接替换现有内容<br>` +
+            `<b>另存为 ${parsed.name}-2</b>：自动寻找下一个可用后缀并保存<br>` +
+            `<b>取消</b>：不导入`;
+        const ok = document.getElementById('confirm-ok');
+        const cancel = document.getElementById('confirm-cancel');
+        const closeBtn = document.getElementById('confirm-close');
+        ok.textContent = '覆盖';
+        ok.style.background = 'var(--warning-color, #f59e0b)';
+        ok.style.borderColor = 'var(--warning-color, #f59e0b)';
+        let altBtn = document.getElementById('confirm-save-as-btn');
+        if (!altBtn) {
+            altBtn = document.createElement('button');
+            altBtn.id = 'confirm-save-as-btn';
+            altBtn.className = 'primary-btn';
+            altBtn.style.flex = '1';
+            altBtn.textContent = '另存为';
+            m.querySelector('.modal-footer').insertBefore(altBtn, ok);
+        }
+        altBtn.textContent = `另存为 ${parsed.name}-2`;
+        altBtn.style.display = '';
+        cancel.textContent = '取消';
+        const cleanup = () => {
+            ok.textContent = '确定';
+            ok.style.background = '';
+            ok.style.borderColor = '';
+            altBtn.style.display = 'none';
+            ok.removeEventListener('click', onOk);
+            altBtn.removeEventListener('click', onAlt);
+            cancel.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+        };
+        const onOk = async () => { cleanup(); m.style.display = 'none'; await this._submitImport(parsed); };
+        const onAlt = async () => {
+            cleanup(); m.style.display = 'none';
+            const newName = await this._findFreeName(parsed.name + '-2');
+            await this._submitImport({ ...parsed, name: newName });
+        };
+        const onCancel = () => { cleanup(); m.style.display = 'none'; };
+        ok.addEventListener('click', onOk);
+        altBtn.addEventListener('click', onAlt);
+        cancel.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+        m.style.display = 'flex';
+    },
+
+    async _findFreeName(base) {
+        let n = 2, name = base;
+        while (true) {
+            try {
+                const r = await api.getSkill(name);
+                if (!r) return name;
+            } catch (_) { return name; }
+            n++;
+            name = base.replace(/-(\d+)$/, '') + '-' + n;
+        }
+    },
+
     send(skill, skillParams) {
         // Build prompt
         let promptContent = skill.content;
@@ -4111,6 +4271,12 @@ const bindAllEvents = () => {
     addIf('#mcp-close-btn', () => mcp.closeModal());
     addIf('#skills-close-btn', () => skills.closeModal());
     addIf('#skill-add-btn', () => skills.showCreateForm());
+    safeBindById('skill-import-btn', 'click', () => skills.handleImport());
+    safeBindById('skill-import-file-input', 'change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) skills._doImportFile(f);
+        e.target.value = '';
+    });
     addIf('.ks-create-btn', () => knowledge.create());
     addIf('#ks-modal-overlay .close-button', () => knowledge.closePanel());
 };
