@@ -1392,6 +1392,7 @@ const chat = {
             mcps: state.selectedMcps,
             enabledKnowledgeIds: state.enabledKnowledgeIds.length > 0 ? state.enabledKnowledgeIds : null,
             fileIds: state.pendingImages.length > 0 ? state.pendingImages.map(img => img.fileId).filter(Boolean) : null,
+            selectedSkillName: state.selectedSkill ? state.selectedSkill.name : null,
         };
 
         // Clear pending image after capturing fileId
@@ -1429,6 +1430,7 @@ const chat = {
                     ui.enableSend();
                     ui.setStopButtonVisible(false);
                     conversation.loadList();
+                    selectedSkillTag.onSendSuccess();
                     // Auto-rename from the first user message if the conversation still
                     // carries its default placeholder title. Fire-and-forget; the title
                     // update will refresh the sidebar once the PATCH lands.
