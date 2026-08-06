@@ -1656,8 +1656,8 @@ const knowledge = {
 
         const description = await dialog.prompt({
             title: '创建知识库',
-            message: '请输入知识库描述：',
-            placeholder: '例如：包含公司产品文档和使用手册',
+            message: '请输入知识库内容摘要（LLM 据此决定是否检索本库）：',
+            placeholder: '例如：本知识库收录产品保修条款、故障排查流程、退换货政策',
             okText: '创建',
             defaultValue: '',
         });

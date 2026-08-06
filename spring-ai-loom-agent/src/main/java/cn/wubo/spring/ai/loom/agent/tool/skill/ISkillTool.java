@@ -7,10 +7,11 @@ import org.springframework.ai.tool.annotation.ToolParam;
 
 public interface ISkillTool extends IEmbedTool {
 
-    @Tool(description = "分页列出所有可用的技能，包含技能名和描述。默认每页20条。")
+    @Tool(description = "列出当前用户可访问的技能（仅 name + 描述，不含完整内容；完整内容请用 @getSkill）。默认返回全部（上限 200）。可选按 keyword 模糊匹配 name/description，或按 source 过滤。")
     String listSkills(
-        @ToolParam(description = "页码，从1开始") Integer page,
-        @ToolParam(description = "每页数量，-1表示全部") Integer size,
+        @ToolParam(description = "模糊匹配关键词，匹配技能名或描述，可选", required = false) String keyword,
+        @ToolParam(description = "按 source 过滤：USER_CREATED / MARKET_VIEW / ROLE_GRANTED / MARKET_PULLED，可选", required = false) String source,
+        @ToolParam(description = "最多返回数量，默认 200，可选", required = false) Integer maxCount,
         ToolContext toolContext
     );
 

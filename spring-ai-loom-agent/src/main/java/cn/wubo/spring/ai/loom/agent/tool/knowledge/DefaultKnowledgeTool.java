@@ -9,11 +9,10 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+
 import java.util.List;
 
 public class DefaultKnowledgeTool implements IKnowledgeTool {
-
-    private static final int DEFAULT_PAGE_SIZE = 20;
 
     private final IKnowledge knowledge;
     private final VectorStore vectorStore;
@@ -25,62 +24,11 @@ public class DefaultKnowledgeTool implements IKnowledgeTool {
         this.ragProperty = ragProperty;
     }
 
-    @Override
-    @Tool(description = "分页列出当前用户启用的知识库，包含知识库名称和描述。默认每页20条。")
-    public String listKnowledgeBases(
-        @ToolParam(description = "页码，从1开始") Integer page,
-        @ToolParam(description = "每页数量，-1表示全部") Integer size,
-        ToolContext toolContext) {
-        String username = (String) toolContext.getContext().get("username");
-        List<KnowledgeRecord> userKnowledgeBases = knowledge.list(username);
-
-        // 过滤：只展示用户本次对话启用的知识库
-        @SuppressWarnings("unchecked")
-        List<String> enabledIds = (List<String>) toolContext.getContext().get("enabledKnowledgeIds");
-        if (enabledIds != null && !enabledIds.isEmpty()) {
-            userKnowledgeBases = userKnowledgeBases.stream()
-                .filter(kb -> enabledIds.contains(kb.id()))
-                .toList();
-        }
-
-        int total = userKnowledgeBases.size();
-        int pageSize = (size == null || size <= 0) ? DEFAULT_PAGE_SIZE : size;
-        int currentPage = (page == null || page < 1) ? 1 : page;
-
-        List<KnowledgeRecord> pageItems;
-        int totalPages;
-
-        if (pageSize == -1) {
-            pageItems = userKnowledgeBases;
-            totalPages = 1;
-            currentPage = 1;
-        } else {
-            totalPages = (int) Math.ceil((double) total / pageSize);
-            int fromIndex = (currentPage - 1) * pageSize;
-            int toIndex = Math.min(fromIndex + pageSize, total);
-            pageItems = (fromIndex < total) ? userKnowledgeBases.subList(fromIndex, toIndex) : List.of();
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("知识库目录（共 %d 个，第 %d/%d 页）:%n%n", total, currentPage, totalPages));
-        sb.append(String.format("%-36s %-20s %-50s%n", "知识库ID", "知识库名称", "知识库描述"));
-        sb.append("-".repeat(110)).append("\n");
-
-        for (KnowledgeRecord kb : pageItems) {
-            sb.append(String.format("%-36s %-20s %-50s%n", kb.id(), kb.name(), kb.description()));
-        }
-
-        if (totalPages > 1 && pageSize != -1) {
-            sb.append(String.format("%n提示：共 %d 页，调用 @listKnowledgeBases {\"page\": %d} 查看下一页，或 @listKnowledgeBases {\"size\": -1} 查看全部",
-                totalPages, currentPage + 1));
-        }
-
-        if (total == 0) {
-            sb.append("当前用户暂无知识库。");
-        }
-
-        return sb.toString();
-    }
+    /**
+     * 已删除 listKnowledgeBases(page, size)。
+     * 原因：知识库列表在 system prompt【知识库】段自动展示（ID+名称+摘要），
+     * 让 LLM 再调工具列一遍是冗余。LLM 应当根据 prompt 中的信息直接决策。
+     */
 
     @Override
     @Tool(description = "在指定知识库中检索相关文档片段。当用户的问题可能涉及知识库中的内容时调用此工具。")

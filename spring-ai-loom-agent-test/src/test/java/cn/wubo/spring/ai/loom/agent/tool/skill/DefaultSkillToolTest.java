@@ -20,11 +20,11 @@ import static org.mockito.Mockito.*;
  * DefaultSkillTool 单元测试
  * <p>
  * 覆盖：
- * 1. listSkills 分页列出 load=true 的技能，默认每页20条
- * 2. listSkills size=-1 返回全部
- * 3. listSkills 空技能列表
- * 4. listSkills 翻页提示下一页
- * 5. getSkill 按名称获取完整信息
+ * 1. listSkills 列出 load=true 的技能
+ * 2. listSkills 空技能列表
+ * 3. listSkills 按 keyword 模糊匹配
+ * 4. listSkills 按 source 过滤
+ * 5. listSkills maxCount 截断 + 提示
  * 6. username 通过 ToolContext 正确传递到 ISkillStorage
  */
 @DisplayName("DefaultSkillTool 单元测试")
@@ -53,10 +53,10 @@ class DefaultSkillToolTest {
                 new SkillRecord("daily-standup", "每日站会", false, "content2", "classpath:skills/standup.st")
         ));
 
-        String result = tool.listSkills(1, 20, ctx("alice"));
+        String result = tool.listSkills(null, null, null, ctx("alice"));
         assertTrue(result.contains("news-watch"));
         assertTrue(result.contains("月度报告生成"));
-        assertTrue(result.contains("共 1 个"), "应只列出已加载的 1 个技能: " + result);
+        assertTrue(result.contains("命中 1 / 共 1 个"), "应只列出已加载的 1 个技能: " + result);
         assertFalse(result.contains("daily-standup"), "未加载技能不应出现: " + result);
     }
 
@@ -64,60 +64,90 @@ class DefaultSkillToolTest {
     @DisplayName("listSkills 无技能时显示空目录")
     void listSkills_emptyList() {
         when(storage.list("bob")).thenReturn(List.of());
-        String result = tool.listSkills(1, 20, ctx("bob"));
-        assertTrue(result.contains("共 0 个"), "应提示 0 个技能: " + result);
+        String result = tool.listSkills(null, null, null, ctx("bob"));
+        assertTrue(result.contains("命中 0 / 共 0 个"), "应提示 0 个技能: " + result);
     }
 
     @Test
     @DisplayName("listSkills 把 username 透传给 storage")
     void listSkills_passesUsername() {
         when(storage.list("charlie")).thenReturn(List.of());
-        tool.listSkills(1, 20, ctx("charlie"));
+        tool.listSkills(null, null, null, ctx("charlie"));
         verify(storage).list("charlie");
     }
 
     @Test
-    @DisplayName("listSkills 默认 null 参数使用默认值")
-    void listSkills_defaultParams() {
-        when(storage.list("dave")).thenReturn(List.of());
-        String result = tool.listSkills(null, null, ctx("dave"));
-        assertTrue(result.contains("共 0 个"));
-        assertTrue(result.contains("第 1/0 页"));
+    @DisplayName("listSkills keyword 模糊匹配（不区分大小写，匹配 name 或 description）")
+    void listSkills_keywordFilter() {
+        when(storage.list("dave")).thenReturn(List.of(
+                new SkillRecord("deploy-app", "部署应用", true, "c1", "USER_CREATED"),
+                new SkillRecord("write-doc", "编写文档", true, "c2", "USER_CREATED"),
+                new SkillRecord("network", "部署网络", true, "c3", "MARKET_VIEW")
+        ));
+
+        String result = tool.listSkills("部署", null, null, ctx("dave"));
+        assertTrue(result.contains("deploy-app"), "name 含 '部署' 的应匹配: " + result);
+        assertTrue(result.contains("network"), "description 含 '部署' 的应匹配: " + result);
+        assertFalse(result.contains("write-doc"), "name/desc 都不含 '部署' 的不应匹配: " + result);
+        assertTrue(result.contains("命中 2 / 共 3 个"));
     }
 
     @Test
-    @DisplayName("listSkills size=-1 返回全部")
-    void listSkills_allSkills() {
-        List<SkillRecord> skills = List.of(
-                new SkillRecord("skill-1", "描述1", true, "c1", "x"),
-                new SkillRecord("skill-2", "描述2", true, "c2", "x"),
-                new SkillRecord("skill-3", "描述3", true, "c3", "x")
-        );
-        when(storage.list("eve")).thenReturn(skills);
+    @DisplayName("listSkills source 精确过滤")
+    void listSkills_sourceFilter() {
+        when(storage.list("eve")).thenReturn(List.of(
+                new SkillRecord("user-skill", "用户自建", true, "c1", "USER_CREATED"),
+                new SkillRecord("mkt-skill", "市场技能", true, "c2", "MARKET_VIEW"),
+                new SkillRecord("role-skill", "角色授权", true, "c3", "ROLE_GRANTED")
+        ));
 
-        String result = tool.listSkills(1, -1, ctx("eve"));
-        assertTrue(result.contains("skill-1"));
-        assertTrue(result.contains("skill-2"));
-        assertTrue(result.contains("skill-3"));
-        assertTrue(result.contains("共 3 个"));
-        assertFalse(result.contains("下一页"), "全部模式不应有下一页提示: " + result);
+        String result = tool.listSkills(null, "USER_CREATED", null, ctx("eve"));
+        assertTrue(result.contains("user-skill"));
+        assertFalse(result.contains("mkt-skill"), "MARKET_VIEW 应被过滤掉: " + result);
+        assertFalse(result.contains("role-skill"), "ROLE_GRANTED 应被过滤掉: " + result);
+        assertTrue(result.contains("命中 1 / 共 3 个"));
     }
 
     @Test
-    @DisplayName("listSkills 翻页有下一页提示")
-    void listSkills_nextPageHint() {
-        // 创建 30 个技能，每页 20 个
+    @DisplayName("listSkills maxCount 截断并提示缩小范围")
+    void listSkills_maxCountTruncates() {
         List<SkillRecord> skills = List.of(
-                new SkillRecord("skill-1", "描述1", true, "c1", "x"),
-                new SkillRecord("skill-2", "描述2", true, "c2", "x"),
-                new SkillRecord("skill-3", "描述3", true, "c3", "x")
+                new SkillRecord("skill-1", "描述1", true, "c1", "USER_CREATED"),
+                new SkillRecord("skill-2", "描述2", true, "c2", "USER_CREATED"),
+                new SkillRecord("skill-3", "描述3", true, "c3", "USER_CREATED")
         );
         when(storage.list("frank")).thenReturn(skills);
 
-        String result = tool.listSkills(1, 2, ctx("frank"));
-        assertTrue(result.contains("下一页"), "应有下一页提示: " + result);
-        assertTrue(result.contains("page\": 2"), "下一页应提示 page 2: " + result);
-        assertFalse(result.contains("skill-3"), "第1页不应包含第3个技能: " + result);
+        String result = tool.listSkills(null, null, 2, ctx("frank"));
+        assertTrue(result.contains("skill-1"));
+        assertTrue(result.contains("skill-2"));
+        assertFalse(result.contains("skill-3"), "maxCount=2 时第 3 个应被截断: " + result);
+        assertTrue(result.contains("上限 2"));
+        assertTrue(result.contains("已截断"), "应有截断提示: " + result);
+        assertTrue(result.contains("建议用 keyword 缩小范围"), "应建议缩小范围: " + result);
+    }
+
+    @Test
+    @DisplayName("listSkills maxCount > total 时不截断也不提示")
+    void listSkills_maxCountAboveTotal() {
+        when(storage.list("grace")).thenReturn(List.of(
+                new SkillRecord("a", "x", true, "c", "USER_CREATED")
+        ));
+
+        String result = tool.listSkills(null, null, 100, ctx("grace"));
+        assertFalse(result.contains("已截断"), "总数 < maxCount 时不应有截断提示: " + result);
+    }
+
+    @Test
+    @DisplayName("listSkills 无参数时全部返回（默认 maxCount=200）")
+    void listSkills_defaultMaxCount() {
+        when(storage.list("henry")).thenReturn(List.of(
+                new SkillRecord("a", "x", true, "c", "USER_CREATED"),
+                new SkillRecord("b", "y", true, "c", "USER_CREATED")
+        ));
+        String result = tool.listSkills(null, null, null, ctx("henry"));
+        assertTrue(result.contains("命中 2 / 共 2 个"));
+        assertTrue(result.contains("上限 200"), "默认上限应为 200: " + result);
     }
 
     @Test
