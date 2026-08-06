@@ -3894,6 +3894,99 @@ const selectedSkillTag = {
     onConversationSwitch() { this.clear(); },
 };
 
+// ===================== §Y Slash Picker =====================
+// 输入框输入 '/' 触发；浮层显示用户可访问的所有 Skill，键盘上下/Enter/Esc 操作。
+const slashPicker = {
+    state: { open: false, query: '', items: [], activeIndex: 0 },
+
+    async open(query) {
+        if (!this._el) this._el = document.getElementById('slash-picker');
+        if (!this._el) return;
+        // 一次拉取全部 Skill（含 load=false）。admin 特权由后端处理。
+        let all = state._skillListCache;
+        if (!all) {
+            try {
+                all = await api.listSkills();
+                state._skillListCache = all || [];
+            } catch (_) { all = []; }
+        }
+        this.state.query = query || '';
+        this.state.items = this._filter(all, this.state.query);
+        this.state.activeIndex = 0;
+        this.state.open = true;
+        this._render();
+    },
+
+    close() {
+        this.state.open = false;
+        if (this._el) this._el.classList.add('hidden');
+    },
+
+    setQuery(q) {
+        this.state.query = q;
+        const all = state._skillListCache || [];
+        this.state.items = this._filter(all, q);
+        this.state.activeIndex = 0;
+        this._render();
+    },
+
+    move(delta) {
+        if (!this.state.open) return;
+        const n = this.state.items.length;
+        if (n === 0) return;
+        this.state.activeIndex = (this.state.activeIndex + delta + n) % n;
+        this._render();
+    },
+
+    confirm() {
+        if (!this.state.open) return null;
+        const item = this.state.items[this.state.activeIndex];
+        this.close();
+        if (!item) return null;
+        // 从 textarea 中去掉 '/query' 文本
+        const ta = document.getElementById('textarea');
+        if (ta) {
+            const v = ta.value;
+            const idx = v.lastIndexOf('/');
+            if (idx >= 0) ta.value = v.substring(0, idx);
+        }
+        return item;
+    },
+
+    _filter(list, query) {
+        const q = (query || '').toLowerCase();
+        return list
+            .filter(s => !q || s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
+            .slice(0, 50);
+    },
+
+    _render() {
+        if (!this._el) return;
+        if (!this.state.open) { this._el.classList.add('hidden'); return; }
+        const items = this.state.items;
+        if (items.length === 0) {
+            this._el.innerHTML = '<div class="slash-picker-item"><span class="slash-picker-item-name">无匹配 Skill</span></div>';
+            this._el.classList.remove('hidden');
+            return;
+        }
+        this._el.innerHTML = items.map((s, i) => `
+            <div class="slash-picker-item ${i === this.state.activeIndex ? 'active' : ''}" data-idx="${i}">
+                <span class="slash-picker-item-name">${escapeHtml(s.name)}</span>
+                <span class="slash-picker-item-desc">${escapeHtml(s.description || '')}</span>
+            </div>
+        `).join('');
+        this._el.classList.remove('hidden');
+        // 鼠标 hover 也可切换 active
+        this._el.querySelectorAll('.slash-picker-item').forEach((el, i) => {
+            el.addEventListener('mouseenter', () => { this.state.activeIndex = i; this._render(); });
+            el.addEventListener('click', () => {
+                const item = this.confirm();
+                if (item) selectedSkillTag.set({ name: item.name, description: item.description });
+            });
+        });
+    },
+};
+
 const bindAllEvents = () => {
     const safeBind = (sel, type, handler) => {
         const e = typeof sel === 'string' ? document.querySelector(sel) : sel;
@@ -3905,9 +3998,33 @@ const bindAllEvents = () => {
 
     const ta = document.getElementById('textarea');
     safeBind(ta, 'keydown', (event) => {
+        // Backspace + textarea 为空 + 有 selectedSkill → 清空
         if (event.key === 'Backspace' && ta.value === '' && state.selectedSkill) {
             event.preventDefault();
             selectedSkillTag.clear();
+            return;
+        }
+        // slash picker 打开：键盘控制
+        if (slashPicker.state.open) {
+            if (event.key === 'ArrowDown') { event.preventDefault(); slashPicker.move(1); return; }
+            if (event.key === 'ArrowUp')   { event.preventDefault(); slashPicker.move(-1); return; }
+            if (event.key === 'Enter')     { event.preventDefault(); const item = slashPicker.confirm(); if (item) selectedSkillTag.set({ name: item.name, description: item.description }); return; }
+            if (event.key === 'Tab')       { event.preventDefault(); const item = slashPicker.confirm(); if (item) selectedSkillTag.set({ name: item.name, description: item.description }); return; }
+            if (event.key === 'Escape')    { event.preventDefault(); slashPicker.close(); return; }
+        }
+        // '/' 触发 picker：必须是刚输入 / 且光标前是 /
+        if (event.key === '/' && !slashPicker.state.open) {
+            const v = ta.value;
+            const start = ta.selectionStart;
+            // 允许开头 / 或空白后 /
+            const prev = start > 0 ? v[start - 1] : '';
+            if (start === 0 || /\s/.test(prev)) {
+                event.preventDefault();
+                // 插入 / 让用户看到，然后开 picker
+                ta.value = v.substring(0, start) + '/' + v.substring(start);
+                ta.setSelectionRange(start + 1, start + 1);
+                slashPicker.open('');
+            }
         }
         if (event.key === 'Enter' && event.ctrlKey) {
             event.preventDefault();
@@ -3920,6 +4037,17 @@ const bindAllEvents = () => {
             event.preventDefault();
             chat.send();
         }
+    });
+
+    safeBind(ta, 'input', () => {
+        if (!slashPicker.state.open) return;
+        const v = ta.value;
+        const idx = v.lastIndexOf('/');
+        if (idx < 0) { slashPicker.close(); return; }
+        // / 之后不能有空格（避免被 Enter 触发发送）
+        const after = v.substring(idx + 1);
+        if (/\s/.test(after)) { slashPicker.close(); return; }
+        slashPicker.setQuery(after);
     });
 
     safeBindById('send-btn', 'click', () => chat.send());
