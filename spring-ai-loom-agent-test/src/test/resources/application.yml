@@ -1,13 +1,24 @@
 spring:
+  datasource:
+    url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
-    anthropic:
-      api-key: ${NEW_API_KEY}
-      base-url: http://123.56.128.32:3000
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
       chat:
         options:
           model: qwen3.7-plus
+          multi_model: true
+          enable_thinking: true
+      embedding:
+        options:
+          model: text-embedding-v4
+loom:
+  agent:
+    datasource-dir: ./target/test-ds
+    file-base-path: ./target/test-file-base
+    knowledge-base-path: ./target/test-knowledge-base
 server:
-  port: 8080
+  port: 0
 logging:
   level:
     org:
