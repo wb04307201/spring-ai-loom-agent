@@ -59,6 +59,11 @@ class DefaultChatTest {
         IFile file = mock(IFile.class);
         ISkillStorage skillStorage = mock(ISkillStorage.class);
         when(skillStorage.list(anyString())).thenReturn(List.of());
+        when(skillStorage.get(anyString(), anyString())).thenAnswer(inv -> {
+            String name = inv.getArgument(0);
+            return new cn.wubo.spring.ai.loom.agent.model.SkillRecord(
+                    name, "test-desc", true, "skill-body-" + name, "USER_CREATED");
+        });
         IKnowledge knowledge = mock(IKnowledge.class);
         when(knowledge.list(anyString())).thenReturn(List.of());
         LoomAgentProperties properties = mock(LoomAgentProperties.class);
@@ -138,6 +143,40 @@ class DefaultChatTest {
         captureToolContext(record);
 
         verify(userConversation, never()).insert(any());
+    }
+
+    // ============= selectedSkillName 注入 =============
+
+    private String captureSystemPrompt(ChatRequestRecord record) {
+        chat.stream(record, "alice", request);
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(requestSpec, atLeastOnce()).system(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    @DisplayName("selectedSkillName=null：不追加 Skill 块（兼容旧调用）")
+    void selectedSkillNameNullKeepsBasePrompt() {
+        ChatRequestRecord record = new ChatRequestRecord("hi", "conv-1", null, null, null, null);
+
+        String prompt = captureSystemPrompt(record);
+
+        assertFalse(prompt.contains("【本轮用户选择的 Skill】"), "null 时不注入 Skill 块");
+    }
+
+    @Test
+    @DisplayName("selectedSkillName 合法：Skill 完整 content 追加到 system prompt 末尾")
+    void selectedSkillNameValidAppendsSkillBlock() {
+        ChatRequestRecord record = new ChatRequestRecord("hi", "conv-1", null, null, null, "note-health");
+
+        String prompt = captureSystemPrompt(record);
+
+        assertTrue(prompt.contains("【本轮用户选择的 Skill】"), "应注入 Skill 块标题");
+        assertTrue(prompt.contains("name: note-health"), "应包含 Skill 名");
+        assertTrue(prompt.contains("skill-body-note-health"), "应包含 Skill 完整 content");
+        int baseIdx = prompt.indexOf("base-system");
+        int skillIdx = prompt.indexOf("【本轮用户选择的 Skill】");
+        assertTrue(baseIdx >= 0 && skillIdx > baseIdx, "Skill 块应追加在基础提示之后");
     }
 
     @Test

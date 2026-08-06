@@ -8,6 +8,7 @@ import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
 import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
+import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
@@ -75,6 +76,28 @@ public class DefaultChat implements IChat {
         }
 
         String dynamicSystemPrompt = buildDynamicSystemPrompt(username, chatRequestRecord.enabledKnowledgeIds());
+
+        // 注入用户通过 / 命令精准选中的 Skill（仅作用于本轮聊天）。
+        // 解析失败仅 log.warn，聊天继续进行。
+        if (chatRequestRecord.selectedSkillName() != null
+                && !chatRequestRecord.selectedSkillName().isBlank()) {
+            try {
+                SkillRecord selected = skillStorage.get(chatRequestRecord.selectedSkillName().trim(), username);
+                if (selected != null && selected.content() != null) {
+                    StringBuilder extra = new StringBuilder();
+                    extra.append("\n\n【本轮用户选择的 Skill】\n");
+                    extra.append("name: ").append(selected.name()).append("\n");
+                    if (selected.description() != null) {
+                        extra.append("description: ").append(selected.description()).append("\n");
+                    }
+                    extra.append("\n").append(selected.content());
+                    dynamicSystemPrompt = dynamicSystemPrompt + extra;
+                }
+            } catch (LoomAgentRuntimeException ex) {
+                log.warn("selectedSkillName 解析失败: name={}, user={}, msg={}",
+                        chatRequestRecord.selectedSkillName(), username, ex.getMessage());
+            }
+        }
 
         // Prepare document content if files are attached (appended to dynamic system prompt)
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
