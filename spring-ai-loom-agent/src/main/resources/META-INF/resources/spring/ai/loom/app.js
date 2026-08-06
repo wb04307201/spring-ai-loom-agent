@@ -4156,14 +4156,54 @@ const slashPicker = {
             </div>
         `).join('');
         this._el.classList.remove('hidden');
-        // 鼠标 hover 也可切换 active
-        this._el.querySelectorAll('.slash-picker-item').forEach((el, i) => {
-            el.addEventListener('mouseenter', () => { this.state.activeIndex = i; this._render(); });
-            el.addEventListener('click', () => {
-                const item = this.confirm();
-                if (item) selectedSkillTag.set({ name: item.name, description: item.description });
+
+        // 事件委托：mousedown 时记录 activeIndex，click 时直接 confirm。
+        // 关键：mouseenter 不再触发 _render()，避免 innerHTML 替换导致
+        // mousedown 后元素被销毁、click 落到新元素上的 bug。
+        if (!this._listenersBound) {
+            this._el.addEventListener('mousemove', (e) => {
+                const item = e.target.closest('.slash-picker-item');
+                if (!item) return;
+                const idx = Number(item.dataset.idx);
+                if (Number.isFinite(idx) && idx !== this.state.activeIndex) {
+                    this.state.activeIndex = idx;
+                    this._updateActiveClass();
+                }
             });
+            this._el.addEventListener('click', (e) => {
+                const item = e.target.closest('.slash-picker-item');
+                if (!item) return;
+                const idx = Number(item.dataset.idx);
+                if (!Number.isFinite(idx)) return;
+                this.state.activeIndex = idx;
+                const picked = this.confirm();
+                if (picked) selectedSkillTag.set({ name: picked.name, description: picked.description });
+            });
+            this._listenersBound = true;
+        }
+
+        // 键盘上下选中后，把 active 元素滚到可见区域
+        this._scrollActiveIntoView();
+    },
+
+    /** 仅切换 .active class，不重新渲染 HTML（保留 mousedown 目标） */
+    _updateActiveClass() {
+        if (!this._el) return;
+        const children = this._el.querySelectorAll('.slash-picker-item');
+        children.forEach((el, i) => {
+            el.classList.toggle('active', i === this.state.activeIndex);
         });
+        this._scrollActiveIntoView();
+    },
+
+    /** 把当前 active 元素滚到可视区域，避免键盘导航选到屏外 */
+    _scrollActiveIntoView() {
+        if (!this._el) return;
+        const active = this._el.querySelector('.slash-picker-item.active');
+        if (active && typeof active.scrollIntoView === 'function') {
+            // block: 'nearest' 表示"只在元素真正不可见时才滚动"，不破坏当前位置
+            active.scrollIntoView({ block: 'nearest' });
+        }
     },
 };
 
