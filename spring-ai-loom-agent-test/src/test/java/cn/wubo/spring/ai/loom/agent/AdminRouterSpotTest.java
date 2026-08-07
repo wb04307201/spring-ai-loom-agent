@@ -127,6 +127,8 @@ class AdminRouterSpotTest {
     @DisplayName("当前用户用量：未登录返回空统计而非 500")
     @SuppressWarnings("unchecked")
     void currentUserTokensWithoutLogin() throws Exception {
+        when(chatUsageService.currentMonthForUser(null)).thenReturn(
+                new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
         ServerResponse response = route("GET", "/spring/ai/loom/user/tokens/current-month", null);
 
         assertEquals(200, response.statusCode().value());
