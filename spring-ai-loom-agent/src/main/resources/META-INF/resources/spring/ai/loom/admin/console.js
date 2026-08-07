@@ -74,34 +74,8 @@
             }
             const users = await list.json();
             renderTable(users);
-            // 拉本月 token 统计
-            loadMonthlyTokens();
         } catch (e) {
             tableContainer.innerHTML = `<div class="empty-state">加载失败：${e.message}</div>`;
-        }
-    }
-
-    async function loadMonthlyTokens() {
-        try {
-            const now = new Date();
-            const r = await fetch(`/spring/ai/loom/admin/stats/tokens/monthly?year=${now.getFullYear()}&month=${now.getMonth() + 1}`, {
-                credentials: 'include',
-            });
-            if (!r.ok) return;
-            const list = await r.json();
-            const byUser = {};
-            for (const row of list) byUser[row.username] = row.totalTokens;
-            // 填到表格
-            tableContainer.querySelectorAll('.usage-cell').forEach(cell => {
-                const u = cell.getAttribute('data-username');
-                const t = byUser[u] || 0;
-                cell.textContent = t.toLocaleString();
-            });
-            // 月份标签
-            const label = document.getElementById('current-month-label');
-            if (label) label.textContent = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')} 月用量`;
-        } catch (e) {
-            // 静默失败
         }
     }
 
@@ -113,10 +87,9 @@
         const rows = users.map(u => {
             const typeLabel = u.type === 'ADMIN' ? '管理员' : '普通用户';
             return `<tr data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">
-                <td><span><strong>${escapeHtml(u.username)}</strong></span></td>
+                <td><strong>${escapeHtml(u.username)}</strong></td>
                 <td>${escapeHtml(u.nickname || '')}</td>
                 <td><span class="type-badge ${u.type}">${typeLabel}</span></td>
-                <td class="usage-cell" data-username="${escapeHtml(u.username)}">-</td>
                 <td>
                     <button class="secondary-btn assign-role-btn" data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">分配角色</button>
                     <button class="delete-btn" data-username="${escapeHtml(u.username)}">删除</button>
@@ -126,7 +99,7 @@
         tableContainer.innerHTML = `
             <table class="user-table">
                 <thead>
-                    <tr><th>用户名</th><th>昵称</th><th>类型</th><th>本月 Token</th><th>操作</th></tr>
+                    <tr><th>用户名</th><th>昵称</th><th>类型</th><th>操作</th></tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>`;
