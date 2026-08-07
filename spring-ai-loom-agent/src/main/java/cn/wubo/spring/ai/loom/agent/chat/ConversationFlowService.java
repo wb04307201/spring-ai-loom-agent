@@ -155,6 +155,10 @@ public class ConversationFlowService {
         }
 
         List<Event> events = new ArrayList<>();
+        // V5.1：V4.0 假设从 chat_memory 反推 metadata.thinking 失效（content 是纯文本），
+        // 改从 loom_chat_reasoning 显式读。reasoning 是一次会话一条，绑到第一条 ASSISTANT。
+        String dbReasoning = types.contains("ASSISTANT") ? chatUsageService.getReasoning(conversationId) : null;
+        boolean reasoningBound = false;
         for (ChatMemoryRow row : rows) {
             String type = row.type();
             if (type == null) continue;
@@ -178,12 +182,18 @@ public class ConversationFlowService {
                             data.put("promptTokens", usage.path("promptTokens").asLong(0));
                             data.put("completionTokens", usage.path("completionTokens").asLong(0));
                         }
+                        // V4.0 原有尝试（保留兼容旧库）
                         JsonNode thinking = contentNode.path("metadata").path("thinking");
                         if (!thinking.isMissingNode() && !thinking.isNull()) {
                             data.put("thinking", thinking.asText());
                         }
                     } else {
                         data.put("content", row.content() == null ? "" : row.content());
+                    }
+                    // V5.1：注入 loom_chat_reasoning 的最终思考文本（绑到第一条 ASSISTANT）
+                    if (!reasoningBound && dbReasoning != null && !dbReasoning.isBlank()) {
+                        data.put("thinking", dbReasoning);
+                        reasoningBound = true;
                     }
                     // AssistantMessage.content.toolCalls[]
                     JsonNode toolCalls = contentNode != null ? contentNode.path("toolCalls") : null;

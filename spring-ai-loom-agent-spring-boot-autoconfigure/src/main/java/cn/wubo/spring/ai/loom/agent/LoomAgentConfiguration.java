@@ -370,11 +370,20 @@ public class LoomAgentConfiguration {
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
+                        // V5.1：累积 DashScope enable_thinking 模式下的 reasoningContent
+                        // Spring AI DashScope 实测是 incremental（每条 chunk 是当前为止的
+                        // 增量片段），所以得 append 不是覆盖。content 文本也是增量同理。
+                        final StringBuilder reasoningAccum = new StringBuilder();
+
                         reactor.core.Disposable subscription = chatResponseFlux
                                 .filter(chatResponse -> chatResponse.getResult() != null)
                                 .subscribe(chatResponse -> {
+                            log.info("V5.1 stream NEXT: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
                             try {
                                 String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
+                                if (reasoningContent != null && !reasoningContent.isBlank()) {
+                                    reasoningAccum.append(reasoningContent);
+                                }
                                 emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
                                 // V5.0：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_token_usage
                                 // (V4.0 假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
@@ -388,7 +397,21 @@ public class LoomAgentConfiguration {
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }
-                        }, emitter::completeWithError, () -> {
+                        }, err -> {
+                            log.warn("V5.1 stream ERROR: conv={} err={}", conversationId, err.getMessage());
+                            emitter.completeWithError(err);
+                        }, () -> {
+                            log.info("V5.1 stream COMPLETE: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
+                            // V5.1：流完整结束时把 AI 思考落库
+                            String r = reasoningAccum.toString();
+                            if (!r.isBlank()) {
+                                try {
+                                    chatUsageService.saveReasoning(conversationId, r);
+                                    log.info("V5.1 saveReasoning OK: conv={} len={}", conversationId, r.length());
+                                } catch (Exception e) {
+                                    log.warn("saveReasoning 失败: {}", e.getMessage());
+                                }
+                            }
                             emitterRegistry.autoCleanup(username, conversationId);
                             emitter.complete();
                         });

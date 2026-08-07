@@ -13,13 +13,24 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+/**
+ * V5.1：单客户端 listTools() 内部走 Reactor 20s 超时；任一客户端慢/挂会卡死整个
+ * /mcps 接口。"listSystem()" 调链：SyncMcp.mcps() → McpServerAdmin.listSystem() →
+ * roleService.getVisibleMcpsForUser() → /mcps。客户端逐个 try/catch + 30s 缓存。
+ */
 @Slf4j
 public class SyncMcp extends AbstractMcp {
 
+    private static final long CACHE_TTL_MS = 30_000L;
+
     private final List<McpSyncClient> mcpSyncClients;
     private final IRoleService roleService;
+
+    private final List<McpRecord> cachedList = new ArrayList<>();
+    private final AtomicLong cachedAt = new AtomicLong(0);
 
     public SyncMcp(JdbcTemplate jdbcTemplate, List<McpSyncClient> mcpSyncClients, IRoleService roleService) {
         super(jdbcTemplate);
@@ -28,13 +39,52 @@ public class SyncMcp extends AbstractMcp {
     }
 
     public List<McpRecord> mcps() {
-        return mcpSyncClients.stream()
-                .filter(McpSyncClient::isInitialized)
-                .map(mcpSyncClient -> convertToMcpRecord(
-                        mcpSyncClient.getClientInfo(),
-                        mcpSyncClient.listTools().tools()
-                ))
-                .toList();
+        long now = System.currentTimeMillis();
+        if (now - cachedAt.get() < CACHE_TTL_MS && !cachedList.isEmpty()) {
+            return snapshot();
+        }
+        List<McpRecord> fresh = new ArrayList<>();
+        for (McpSyncClient c : mcpSyncClients) {
+            try {
+                if (!c.isInitialized()) continue;
+                McpRecord rec = convertToMcpRecord(
+                        c.getClientInfo(),
+                        c.listTools().tools());
+                fresh.add(rec);
+            } catch (Exception e) {
+                // 单客户端失败不阻塞整体；常见原因：Reactor 20s 超时、stdio 进程已退出
+                log.warn("MCP client {} listTools 失败，跳过本次: {}",
+                        safeClientName(c), e.getMessage());
+            }
+        }
+        if (!fresh.isEmpty()) {
+            synchronized (this) {
+                cachedList.clear();
+                cachedList.addAll(fresh);
+                cachedAt.set(now);
+            }
+            return snapshot();
+        }
+        if (cachedAt.get() != 0) {
+            // SDK 全挂但有老缓存 → 继续用，避免 MCP 服务暂时卡顿后不可见
+            log.warn("本次 SDK live 拉取为空，沿用 {}s 前的缓存", (now - cachedAt.get()) / 1000);
+            return snapshot();
+        }
+        return fresh;
+    }
+
+    private List<McpRecord> snapshot() {
+        synchronized (this) {
+            return new ArrayList<>(cachedList);
+        }
+    }
+
+    private static String safeClientName(McpSyncClient c) {
+        try {
+            return c.getClientInfo().name();
+        } catch (Exception e) {
+            return "<unknown>";
+        }
     }
 
     /**

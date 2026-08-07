@@ -1,6 +1,8 @@
 package cn.wubo.spring.ai.loom.agent.token;
 
 import cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +32,8 @@ import java.util.Map;
 @Component
 public class ChatUsageService {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatUsageService.class);
+
     private final JdbcTemplate jdbcTemplate;
 
     public ChatUsageService(JdbcTemplate jdbcTemplate) {
@@ -45,6 +49,39 @@ public class ChatUsageService {
                         "(conversation_id, username, prompt_tokens, completion_tokens, total_tokens, created_at) " +
                         "VALUES (?, ?, ?, ?, ?, ?)",
                 conversationId, username, prompt, completion, total, Timestamp.from(Instant.now()));
+    }
+
+    /**
+     * V5.1：保存一次对话的 AI 思考内容（DashScope enable_thinking 模式下 metadata
+     * reasoningContent 累积）。一条对话一条最终记录，conversation_id 是主键。
+     * 同一会话多次调用会覆盖（upsert）。
+     */
+    public void saveReasoning(String conversationId, String reasoningText) {
+        if (conversationId == null || conversationId.isBlank()) return;
+        if (reasoningText == null || reasoningText.isBlank()) return;
+        Timestamp now = Timestamp.from(Instant.now());
+        int updated = jdbcTemplate.update(
+                "UPDATE loom_chat_reasoning SET reasoning_text = ?, updated_at = ? WHERE conversation_id = ?",
+                reasoningText, now, conversationId);
+        if (updated == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO loom_chat_reasoning (conversation_id, reasoning_text, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    conversationId, reasoningText, now, now);
+        }
+    }
+
+    /**
+     * V5.1：读一次对话的 AI 思考。返回 null 表示没有。
+     */
+    public String getReasoning(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) return null;
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT reasoning_text FROM loom_chat_reasoning WHERE conversation_id = ?",
+                    String.class, conversationId);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            return null;
+        }
     }
 
     /**
