@@ -326,6 +326,7 @@ public class LoomAgentConfiguration {
             private final IChat chat;
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
             private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
+            private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
             public SseEmitter stream(@RequestBody ChatRequestRecord chatRecord, HttpServletRequest request) {
@@ -385,7 +386,7 @@ public class LoomAgentConfiguration {
                                     reasoningAccum.append(reasoningContent);
                                 }
                                 emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
-                                // V5.0：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_token_usage
+                                // V5.0：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_usage
                                 // (V4.0 假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
                                 var chatMeta = chatResponse.getMetadata();
                                 if (chatMeta != null && chatMeta.getUsage() != null) {
@@ -393,6 +394,24 @@ public class LoomAgentConfiguration {
                                     chatUsageService.record(
                                             conversationId, username,
                                             u.getPromptTokens(), u.getCompletionTokens(), u.getTotalTokens());
+                                }
+                                // V5.2：从 ChatResponse.getResult().getOutput().getToolCalls() 抓 tool call 信息
+                                // 写到 loom_tool_call_log（缺失这段导致 tool_call 数据全 0）
+                                var toolCalls = chatResponse.getResult().getOutput().getToolCalls();
+                                if (toolCalls != null) {
+                                    log.info("V5.2 toolCalls size: conv={} size={}", conversationId, toolCalls.size());
+                                    for (var tc : toolCalls) {
+                                        try {
+                                            String id = tc.id();
+                                            String name = tc.name();
+                                            String args = tc.arguments() == null ? "" : tc.arguments();
+                                            toolCallLogRepository.save(new cn.wubo.spring.ai.loom.agent.model.ToolCallLog(
+                                                    null, conversationId, username, id, name, args, null, false, null, java.time.Instant.now()));
+                                            log.info("V5.2 saveToolCall OK: conv={} tool={}", conversationId, name);
+                                        } catch (Exception ex) {
+                                            log.warn("saveToolCall 失败: {}", ex.getMessage());
+                                        }
+                                    }
                                 }
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
