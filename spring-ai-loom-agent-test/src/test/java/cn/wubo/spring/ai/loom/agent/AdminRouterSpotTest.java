@@ -4,7 +4,7 @@ import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin;
 import cn.wubo.spring.ai.loom.agent.rbac.IRoleService;
-import cn.wubo.spring.ai.loom.agent.token.ITokenUsage;
+import cn.wubo.spring.ai.loom.agent.token.ChatUsageService;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
@@ -37,15 +37,16 @@ import static org.mockito.Mockito.*;
 class AdminRouterSpotTest {
 
     private IUser user;
-    private ITokenUsage tokenUsage;
+    private ChatUsageService chatUsageService;
     private RouterFunction<ServerResponse> router;
 
     @BeforeEach
     void setUp() {
         user = mock(IUser.class);
-        tokenUsage = mock(ITokenUsage.class);
+        chatUsageService = mock(ChatUsageService.class);
         router = new LoomAgentConfiguration.WebConfiguration().loomAgentBaseRouter(
-                user, new LoomAgentProperties(), mock(IUserConversation.class), tokenUsage,
+                user, new LoomAgentProperties(), mock(IUserConversation.class), chatUsageService,
+                mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
                 mock(IRoleService.class), mock(IMcpServerAdmin.class), mock(JdbcTemplate.class));
     }
 
@@ -107,19 +108,19 @@ class AdminRouterSpotTest {
         ServerResponse response = route("GET", "/spring/ai/loom/admin/stats/tokens/monthly", null, "year", "abc");
 
         assertEquals(400, response.statusCode().value());
-        verifyNoInteractions(tokenUsage);
+        verifyNoInteractions(chatUsageService);
     }
 
     @Test
     @DisplayName("月度统计：数字参数透传")
     void statsNumericParamsDelegate() throws Exception {
-        when(tokenUsage.monthlyByUser(2026, 7)).thenReturn(List.of());
+        when(chatUsageService.monthlyByUser(2026, 7)).thenReturn(List.of());
 
         ServerResponse response = route("GET", "/spring/ai/loom/admin/stats/tokens/monthly", null,
                 "year", "2026", "month", "7");
 
         assertEquals(200, response.statusCode().value());
-        verify(tokenUsage).monthlyByUser(2026, 7);
+        verify(chatUsageService).monthlyByUser(2026, 7);
     }
 
     @Test

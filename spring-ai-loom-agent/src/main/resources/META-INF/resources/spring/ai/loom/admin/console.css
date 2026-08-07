@@ -586,3 +586,130 @@ table.user-table {
 .toast.error { border-left: 4px solid var(--error-color, #ef4444); }
 
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+
+/* ===== V4.0：会话全量对话流（conversation.html） ===== */
+
+.conv-meta-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.conv-meta-table th,
+.conv-meta-table td {
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+.conv-meta-table th {
+    width: 120px;
+    color: var(--text-muted, #94a3b8);
+    font-weight: 500;
+}
+
+.conv-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.conv-filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+    cursor: pointer;
+}
+.conv-search {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 4px;
+    font-size: 13px;
+    width: 200px;
+    background: var(--bg-primary, #fff);
+}
+
+.flow-container {
+    margin-top: 12px;
+    background: var(--bg-primary, #fff);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    padding: 16px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.flow-event {
+    display: grid;
+    grid-template-columns: 32px 130px 80px 1fr;
+    gap: 12px;
+    padding: 12px 8px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+    align-items: start;
+    font-size: 13px;
+}
+.flow-event:last-child { border-bottom: none; }
+.flow-event:hover { background: #f8fafc; }
+
+.flow-icon { font-size: 16px; line-height: 1.4; text-align: center; }
+.flow-time { color: var(--text-muted, #94a3b8); font-size: 12px; font-family: ui-monospace, monospace; padding-top: 2px; }
+.flow-type {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-muted, #64748b);
+    text-align: center;
+    align-self: start;
+    font-family: ui-monospace, monospace;
+}
+.flow-body { min-width: 0; }
+.flow-content {
+    color: var(--text-primary, #1e293b);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-bottom: 4px;
+}
+.flow-event-name { color: var(--text-primary, #1e293b); font-weight: 500; margin-bottom: 2px; }
+.flow-meta { color: var(--text-muted, #94a3b8); font-size: 11px; font-family: ui-monospace, monospace; margin-top: 2px; }
+.flow-thinking, .flow-args, .flow-result, .flow-prompt, .flow-error {
+    margin-top: 6px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 4px;
+    padding: 6px 10px;
+    background: var(--bg-secondary, #f8fafc);
+    font-size: 12px;
+}
+.flow-thinking summary, .flow-args summary, .flow-result summary, .flow-prompt summary, .flow-error summary {
+    cursor: pointer;
+    color: var(--text-muted, #94a3b8);
+    font-weight: 500;
+}
+.flow-thinking pre, .flow-args pre, .flow-result pre, .flow-prompt pre, .flow-error pre {
+    margin: 6px 0 0 0;
+    padding: 8px;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 3px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: ui-monospace, monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* 类型着色：背景色块 + 左边框 */
+.flow-event-USER { border-left: 3px solid #94a3b8; padding-left: 5px; }
+.flow-event-ASSISTANT { border-left: 3px solid #3b82f6; padding-left: 5px; }
+.flow-event-ASSISTANT .flow-type { background: #dbeafe; color: #1e40af; }
+.flow-event-TOOL_CALL { border-left: 3px solid #8b5cf6; padding-left: 5px; }
+.flow-event-TOOL_CALL .flow-type { background: #ede9fe; color: #5b21b6; }
+.flow-event-TOOL_RESULT { border-left: 3px solid #10b981; padding-left: 5px; }
+.flow-event-TOOL_RESULT .flow-type { background: #d1fae5; color: #065f46; }
+.flow-event-SUBTASK { border-left: 3px solid #f59e0b; padding-left: 5px; }
+.flow-event-SUBTASK .flow-type { background: #fef3c7; color: #92400e; }
+.flow-event-SCHEDULE { border-left: 3px solid #eab308; padding-left: 5px; }
+.flow-event-SCHEDULE .flow-type { background: #fef9c3; color: #854d0e; }

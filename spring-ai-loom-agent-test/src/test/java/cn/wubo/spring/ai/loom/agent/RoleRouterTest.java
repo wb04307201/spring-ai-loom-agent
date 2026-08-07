@@ -5,7 +5,7 @@ import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.RoleInfo;
 import cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin;
 import cn.wubo.spring.ai.loom.agent.rbac.IRoleService;
-import cn.wubo.spring.ai.loom.agent.token.ITokenUsage;
+import cn.wubo.spring.ai.loom.agent.token.ChatUsageService;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import org.junit.jupiter.api.AfterEach;
@@ -50,7 +50,8 @@ class RoleRouterTest {
                 mock(IUser.class),
                 new LoomAgentProperties(),
                 mock(IUserConversation.class),
-                mock(ITokenUsage.class),
+                mock(ChatUsageService.class),
+                mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
                 roleService,
                 mock(IMcpServerAdmin.class),
                 mock(JdbcTemplate.class));

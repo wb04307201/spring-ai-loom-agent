@@ -308,6 +308,14 @@ public class LoomAgentConfiguration {
                     skillStorage, knowledge, properties);
         }
 
+        // ============== V4.0：loom_tool_call_log 仓储 ==============
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository.class)
+        public cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository defaultToolCallLogRepository(
+                org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.tool.JdbcToolCallLogRepository(jdbcTemplate);
+        }
+
         @Slf4j
         @Data
         @RequiredArgsConstructor
@@ -316,7 +324,6 @@ public class LoomAgentConfiguration {
         public static class SseController {
 
             private final IChat chat;
-            private final cn.wubo.spring.ai.loom.agent.token.ITokenUsage tokenUsage;
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -324,19 +331,9 @@ public class LoomAgentConfiguration {
                 SseEmitter emitter = new SseEmitter(0L);
 
                 String username = UserContextHolder.getCurrentUser();
-                final long startMs = System.currentTimeMillis();
                 final String conversationId = chatRecord.conversationId();
-                // DashScope 流式每个 chunk 都带累计 usage（最后 chunk 是最终值）。
-                // 用 holder 记录最后一次，stream 结束时统一入库（避免一条对话记 N 行）。
-                final int[] finalPrompt = {0};
-                final int[] finalCompletion = {0};
-                final int[] finalTotal = {0};
-                final String[] finalModel = {null};
-                final boolean[] hasUsage = {false};
-                final java.util.concurrent.atomic.AtomicBoolean usageRecorded =
-                        new java.util.concurrent.atomic.AtomicBoolean(false);
 
-                // 注册到 registry：disposable 暂存 wrapper；onStop 回调用于在停止时记录累积 usage
+                // 注册到 registry：disposable 暂存 wrapper
                 final java.util.concurrent.atomic.AtomicReference<reactor.core.Disposable> subRef = new java.util.concurrent.atomic.AtomicReference<>();
                 final java.util.concurrent.atomic.AtomicBoolean disposeRequested =
                         new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -352,18 +349,7 @@ public class LoomAgentConfiguration {
                                 return disposeRequested.get() || d == null || d.isDisposed();
                             }
                         },
-                        () -> {
-                            // 用户主动 stop 时触发：把已经累积的 usage 入库（避免丢数据）
-                            if (hasUsage[0] && usageRecorded.compareAndSet(false, true)) {
-                                try {
-                                    tokenUsage.record(
-                                            conversationId, username, "ASSISTANT",
-                                            finalPrompt[0], finalCompletion[0], finalTotal[0],
-                                            finalModel[0],
-                                            (int) (System.currentTimeMillis() - startMs));
-                                } catch (Exception ignore) { /* 重复记录不阻塞 */ }
-                            }
-                        });
+                        () -> { /* 用户主动 stop 时不再落库（V4.0：usage 实时从 chat_memory 聚合） */ });
 
                 // 注册 lifecycle 自动清理
                 emitter.onTimeout(() -> {
@@ -389,41 +375,14 @@ public class LoomAgentConfiguration {
                             try {
                                 String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
                                 emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
-                                // 累计 usage：每个 chunk 都返累计值，只保留最后
-                                try {
-                                    var respMeta = chatResponse.getMetadata();
-                                    if (respMeta != null && respMeta.getUsage() != null) {
-                                        var usage = respMeta.getUsage();
-                                        Integer pt = usage.getPromptTokens();
-                                        Integer ct = usage.getCompletionTokens();
-                                        Integer tt = usage.getTotalTokens();
-                                        if (tt != null && tt > 0) {
-                                            if (pt != null) finalPrompt[0] = pt;
-                                            if (ct != null) finalCompletion[0] = ct;
-                                            finalTotal[0] = tt;
-                                            finalModel[0] = respMeta.getModel();
-                                            hasUsage[0] = true;
-                                        }
-                                    }
-                                } catch (Exception ignore) {
-                                    // 抓 usage 失败不阻塞流
-                                }
+                                // V4.0：不再主动记录 usage 到 token_usage 表；
+                                // Spring AI 把 AssistantMessage 写入 chat_memory，metadata.usage 已含
+                                // prompt/completion/total tokens，ConversationFlowService / ChatUsageService
+                                // 实时从 chat_memory 聚合统计。
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }
                         }, emitter::completeWithError, () -> {
-                            // 流结束：把累计的 usage 一次性入库
-                            if (hasUsage[0] && usageRecorded.compareAndSet(false, true)) {
-                                try {
-                                    tokenUsage.record(
-                                            conversationId, username, "ASSISTANT",
-                                            finalPrompt[0], finalCompletion[0], finalTotal[0],
-                                            finalModel[0],
-                                            (int) (System.currentTimeMillis() - startMs));
-                                } catch (Exception e) {
-                                    log.debug("记录 token usage 失败：{}", e.getMessage());
-                                }
-                            }
                             emitterRegistry.autoCleanup(username, conversationId);
                             emitter.complete();
                         });
@@ -1129,11 +1088,10 @@ public class LoomAgentConfiguration {
             return new DefaultUserConversation(jdbcTemplate, chatMemory, sessionCache);
         }
 
-        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.token.ITokenUsage.class)
-        @Bean
-        public cn.wubo.spring.ai.loom.agent.token.ITokenUsage defaultTokenUsage(JdbcTemplate jdbcTemplate) {
-            return new cn.wubo.spring.ai.loom.agent.token.DefaultTokenUsage(jdbcTemplate);
-        }
+        // V4.0：旧 ITokenUsage / DefaultTokenUsage 删除。token 统计改由 ChatUsageService
+        // 从 chat_memory 实时聚合，不需要额外的依赖 tokenUsage 的 Bean。
+        // @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.token.ITokenUsage.class) — 删除
+        // public cn.wubo.spring.ai.loom.agent.token.ITokenUsage defaultTokenUsage(JdbcTemplate jdbcTemplate) — 删除
 
         @ConditionalOnMissingBean(ISkillStorage.class)
         @Bean
@@ -1394,7 +1352,8 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentBaseRouter")
         public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties,
                                                                  IUserConversation userConversation,
-                                                                 cn.wubo.spring.ai.loom.agent.token.ITokenUsage tokenUsage,
+                                                                 cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
+                                                                 cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService conversationFlowService,
                                                                  cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService,
                                                                  cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin,
                                                                  JdbcTemplate jdbcTemplate) {
@@ -1543,13 +1502,10 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().body(userConversation.adminListByUsername(username));
             });
 
-            // 管理员：列出会话每 turn 的 token + 内容
-            builder.GET("spring/ai/loom/admin/conversations/{conversationId}/turns", request -> {
-                String conversationId = request.pathVariable("conversationId");
-                return ServerResponse.ok().body(tokenUsage.byConversation(conversationId));
-            });
+            // 管理员：列出会话每 turn 的 token + 内容（V4.0 移除，用 /flow 替代）
+            // builder.GET("spring/ai/loom/admin/conversations/{conversationId}/turns", ...) — 删除
 
-            // 管理员：全局月度统计（按用户聚合）
+            // 管理员：全局月度统计（按用户聚合，从 chat_memory 实时聚合，V4.0 替代旧 token_usage）
             builder.GET("spring/ai/loom/admin/stats/tokens/monthly", request -> {
                 int year = java.time.LocalDate.now().getYear();
                 int month = java.time.LocalDate.now().getMonthValue();
@@ -1563,27 +1519,27 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body(java.util.Map.of(
                             "error", "year/month 必须是数字: year=" + y + ", month=" + m));
                 }
-                return ServerResponse.ok().body(tokenUsage.monthlyByUser(year, month));
+                return ServerResponse.ok().body(chatUsageService.monthlyByUser(year, month));
             });
 
-            // 管理员：批量清理已软删的会话消息
-            builder.POST("spring/ai/loom/admin/conversations/clean-batch", request -> {
-                CleanBatchRequest body = request.body(CleanBatchRequest.class);
-                if (body == null || body.items() == null) {
-                    return ServerResponse.badRequest().body(java.util.Map.of("error", "items 不能为空"));
-                }
-                int ok = 0, fail = 0;
-                java.util.List<String> errors = new java.util.ArrayList<>();
-                for (CleanBatchRequest.CleanItem item : body.items()) {
-                    try {
-                        userConversation.cleanContentForUserConv(item.username(), item.conversationId());
-                        ok++;
-                    } catch (Exception e) {
-                        fail++;
-                        errors.add(item.username() + "/" + item.conversationId() + ": " + e.getMessage());
-                    }
-                }
-                return ServerResponse.ok().body(java.util.Map.of("ok", ok, "fail", fail, "errors", errors));
+            // 管理员：批量清理（V4.0 移除 — 控制台不再支持删除；如需直接连 DB 操作）
+            // builder.POST("spring/ai/loom/admin/conversations/clean-batch", ...) — 删除
+
+            // ===== V4.0：全量对话流（单个会话时间线） =====
+            builder.GET("spring/ai/loom/admin/conversations/{conversationId}/flow", request -> {
+                String conversationId = request.pathVariable("conversationId");
+                String username = request.param("username").orElse(null);
+                int page = request.param("page").map(s -> {
+                    try { return Integer.parseInt(s); } catch (NumberFormatException e) { return 0; }
+                }).orElse(0);
+                int size = request.param("size").map(s -> {
+                    try { return Integer.parseInt(s); } catch (NumberFormatException e) { return 50; }
+                }).orElse(50);
+                java.util.Set<String> types = request.param("types")
+                        .map(s -> java.util.Set.of(s.split(",")))
+                        .orElse(java.util.Set.of());
+                return ServerResponse.ok().body(
+                        conversationFlowService.flow(conversationId, username, page, size, types));
             });
 
             // ===== 角色管理 =====
@@ -1699,13 +1655,22 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().body(true);
             });
 
-            // 当前用户：本月 token 用量
+            // 当前用户：本月 token 用量（V4.0：从 chat_memory 实时聚合）
             builder.GET("/spring/ai/loom/user/tokens/current-month", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (username == null) {
                     return ServerResponse.ok().body(new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
                 }
-                return ServerResponse.ok().body(tokenUsage.currentMonthForUser(username));
+                // V4.0：当前月 token 仍按 chat_memory 实时聚合
+                java.util.List<cn.wubo.spring.ai.loom.agent.token.ChatUsageService.MonthlyUsage> m =
+                        chatUsageService.recent6MonthsForUser(username);
+                java.time.LocalDate now = java.time.LocalDate.now();
+                int year = now.getYear(), month = now.getMonthValue();
+                long total = 0, calls = 0;
+                for (var x : m) if (x.year() == year && x.month() == month) { total = x.totalTokens(); calls = x.callCount(); }
+                double avg = calls == 0 ? 0 : (double) total / calls;
+                return ServerResponse.ok().body(
+                        new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat(username, total, 0, 0, (int) calls, avg));
             });
 
             return builder.build();
@@ -1752,6 +1717,8 @@ public class LoomAgentConfiguration {
                 if (!owned) {
                     return ServerResponse.notFound().build();
                 }
+                // V4.0：保留此端点供 /flow fallback 使用（admin 自家查 chat_memory 仍然合法）。
+                // 前端 /flow 端点已统一处理，不直接调本端点。
                 return ServerResponse.ok().body(
                         chatMemoryRepository.findByConversationId(conversationId));
             });

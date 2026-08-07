@@ -21,22 +21,42 @@
     </header>
 
     <main class="admin-main">
+        <div class="stats-card" id="meta-card">
+            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">会话元数据</h3>
+            <div id="meta-content" style="font-size: 13px; line-height: 1.7; color: var(--text-primary, #1e293b);">加载中...</div>
+        </div>
+
         <div class="stats-card">
-            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">会话日志</h3>
-            <div id="conv-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">调用统计</h3>
+            <div id="conv-stats" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px;">
                 <div class="usage-stat"><div class="usage-stat-label">总 Token</div><div class="usage-stat-value" id="stat-total">-</div></div>
                 <div class="usage-stat"><div class="usage-stat-label">调用次数</div><div class="usage-stat-value" id="stat-calls">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">平均输入</div><div class="usage-stat-value" id="stat-avg-prompt">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">平均输出</div><div class="usage-stat-value" id="stat-avg-completion">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">工具调用</div><div class="usage-stat-value" id="stat-tools">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">子任务</div><div class="usage-stat-value" id="stat-subtasks">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">定时任务</div><div class="usage-stat-value" id="stat-schedules">-</div></div>
+                <div class="usage-stat"><div class="usage-stat-label">错误</div><div class="usage-stat-value" id="stat-errors" style="color: var(--error-color, #ef4444);">-</div></div>
             </div>
         </div>
 
         <div class="admin-toolbar">
-            <button id="refresh-btn" class="secondary-btn">刷新</button>
+            <div class="conv-filters">
+                <label class="conv-filter-label"><input type="checkbox" data-type="USER" checked> 用户</label>
+                <label class="conv-filter-label"><input type="checkbox" data-type="ASSISTANT" checked> 助手</label>
+                <label class="conv-filter-label"><input type="checkbox" data-type="TOOL_CALL" checked> 工具调用</label>
+                <label class="conv-filter-label"><input type="checkbox" data-type="TOOL_RESULT" checked> 工具结果</label>
+                <label class="conv-filter-label"><input type="checkbox" data-type="SUBTASK" checked> 子任务</label>
+                <label class="conv-filter-label"><input type="checkbox" data-type="SCHEDULE" checked> 定时</label>
+                <input type="search" id="flow-search" class="conv-search" placeholder="搜索内容...">
+                <button id="refresh-btn" class="secondary-btn">刷新</button>
+            </div>
         </div>
 
-        <div id="turns-container" class="table-container">
+        <div id="flow-container" class="flow-container">
             <div class="loading-indicator">加载中...</div>
+        </div>
+
+        <div id="flow-pager" style="text-align: center; padding: 16px; display: none;">
+            <button id="load-more-btn" class="secondary-btn">加载更多</button>
         </div>
     </main>
 </div>
@@ -46,4 +66,3 @@
 <script src="conversation.js"></script>
 </body>
 </html>
-
