@@ -325,6 +325,7 @@ public class LoomAgentConfiguration {
 
             private final IChat chat;
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
+            private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
             public SseEmitter stream(@RequestBody ChatRequestRecord chatRecord, HttpServletRequest request) {
@@ -375,10 +376,15 @@ public class LoomAgentConfiguration {
                             try {
                                 String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
                                 emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
-                                // V4.0：不再主动记录 usage 到 token_usage 表；
-                                // Spring AI 把 AssistantMessage 写入 chat_memory，metadata.usage 已含
-                                // prompt/completion/total tokens，ConversationFlowService / ChatUsageService
-                                // 实时从 chat_memory 聚合统计。
+                                // V5.0：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_token_usage
+                                // (V4.0 假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
+                                var chatMeta = chatResponse.getMetadata();
+                                if (chatMeta != null && chatMeta.getUsage() != null) {
+                                    var u = chatMeta.getUsage();
+                                    chatUsageService.record(
+                                            conversationId, username,
+                                            u.getPromptTokens(), u.getCompletionTokens(), u.getTotalTokens());
+                                }
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }
@@ -1655,22 +1661,10 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().body(true);
             });
 
-            // 当前用户：本月 token 用量（V4.0：从 chat_memory 实时聚合）
+            // 当前用户：本月 token 用量（V5.0：从 loom_chat_token_usage 聚合 prompt/completion/total 全部真实值）
             builder.GET("/spring/ai/loom/user/tokens/current-month", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (username == null) {
-                    return ServerResponse.ok().body(new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
-                }
-                // V4.0：当前月 token 仍按 chat_memory 实时聚合
-                java.util.List<cn.wubo.spring.ai.loom.agent.token.ChatUsageService.MonthlyUsage> m =
-                        chatUsageService.recent6MonthsForUser(username);
-                java.time.LocalDate now = java.time.LocalDate.now();
-                int year = now.getYear(), month = now.getMonthValue();
-                long total = 0, calls = 0;
-                for (var x : m) if (x.year() == year && x.month() == month) { total = x.totalTokens(); calls = x.callCount(); }
-                double avg = calls == 0 ? 0 : (double) total / calls;
-                return ServerResponse.ok().body(
-                        new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat(username, total, 0, 0, (int) calls, avg));
+                return ServerResponse.ok().body(chatUsageService.currentMonthForUser(username));
             });
 
             return builder.build();
