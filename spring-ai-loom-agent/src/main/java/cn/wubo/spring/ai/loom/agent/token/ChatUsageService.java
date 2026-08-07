@@ -1,56 +1,75 @@
 package cn.wubo.spring.ai.loom.agent.token;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * V4.0 替代原 {@link ITokenUsage}：从 {@code SPRING_AI_CHAT_MEMORY} 的 metadata
- * 实时聚合 token 统计。旧 {@code chat_token_usage} 表已 V4.0 删除。
+ * V5.0 替代 V4.0 方案：直接读 {@code loom_chat_token_usage} 表。
  *
- * <p>实现说明：H2 2.3.232 不支持 {@code JSON_VALUE} / {@code JSONPATH} 函数
- * （H2 2.4+ 才支持 JSONPATH），而 V4.0 之前我们用的是 {@code JSON_VALUE}。
- * 改用 Java 端 ObjectMapper 解析 metadata CLOB → 内存聚合。
+ * <p>V4.0 假设 {@code SPRING_AI_CHAT_MEMORY.content} 序列化为 JSON，可从中反推
+ * AssistantMessage 的 metadata.usage / toolCalls / model 等。但实际 Spring AI
+ * 只持久化 content 字符串，metadata 未落库 → V4.0 的 parseUsage 全部返回 null，
+ * stats / user / conversation / 我的用量 全部显示 0。
  *
- * <p>性能：admin 视图数据量小（chat_memory 总行数 + 单个用户的消息量都不大），
- * 全量扫 + Java 解析在毫秒级。后续若成为热点可换 PostgreSQL + JSON_PATH。
+ * <p>V5.0 起：每次 ChatResponse 在 SseController 处显式记录 usage 到
+ * {@code loom_chat_token_usage}，本服务只读这张表。
  *
- * <p>不做缓存：admin 统计查询频次低 + 全部走索引；不增加缓存层。
+ * <p>不做缓存：统计查询频次低；不引入额外缓存层。
  */
 @Component
 public class ChatUsageService {
 
     private final JdbcTemplate jdbcTemplate;
-    private final ObjectMapper objectMapper;
 
-    public ChatUsageService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public ChatUsageService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        this.objectMapper = objectMapper;
+    }
+
+    /** SseController 流处理调用：每条 ChatResponse 收到有效 usage 时写一行。 */
+    public void record(String conversationId, String username, long prompt, long completion, long total) {
+        if (total <= 0 && prompt <= 0 && completion <= 0) return;
+        if (username == null || username.isBlank()) return;
+        jdbcTemplate.update(
+                "INSERT INTO loom_chat_token_usage " +
+                        "(conversation_id, username, prompt_tokens, completion_tokens, total_tokens, created_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                conversationId, username, prompt, completion, total, Timestamp.from(Instant.now()));
     }
 
     /**
-     * 全局月度统计（按用户聚合）。只算 ASSISTANT 消息的 usage。
+     * 全局月度统计（按用户聚合）。
      */
     public List<UserUsage> monthlyByUser(int year, int month) {
-        Instant fromI = java.time.LocalDateTime.of(year, month, 1, 0, 0)
-                .atZone(java.time.ZoneId.systemDefault()).toInstant();
-        Instant toI = fromI.plusSeconds(java.time.Duration.ofDays(31).toSeconds());
         Map<String, long[]> agg = new HashMap<>();
-        for (UsageRow r : scanAssistantUsageBetween(fromI, toI)) {
-            long[] a = agg.computeIfAbsent(r.username, k -> new long[4]); // [total, prompt, completion, calls]
-            a[0] += r.total;
-            a[1] += r.prompt;
-            a[2] += r.completion;
-            a[3] += 1;
-        }
+        jdbcTemplate.query(
+                "select username, sum(prompt_tokens), sum(completion_tokens), sum(total_tokens), count(*) " +
+                        "from loom_chat_token_usage " +
+                        "where YEAR(created_at) = ? and MONTH(created_at) = ? " +
+                        "group by username",
+                rs -> {
+                    String u = rs.getString(1);
+                    long prompt = rs.getLong(2);
+                    long completion = rs.getLong(3);
+                    long total = rs.getLong(4);
+                    long calls = rs.getLong(5);
+                    long[] a = agg.computeIfAbsent(u, k -> new long[4]);
+                    a[0] += total;
+                    a[1] += prompt;
+                    a[2] += completion;
+                    a[3] += calls;
+                },
+                year, month);
         return agg.entrySet().stream()
                 .map(e -> new UserUsage(e.getKey(), e.getValue()[0], e.getValue()[1], e.getValue()[2], e.getValue()[3]))
                 .sorted((a, b) -> Long.compare(b.totalTokens(), a.totalTokens()))
@@ -59,108 +78,83 @@ public class ChatUsageService {
 
     /**
      * 用户最近 6 个月 token 用量（user.html 顶部柱状图）。
+     * 即使中间月份缺记录也要返回 6 条，totalTokens=0 即可。
      */
     public List<MonthlyUsage> recent6MonthsForUser(String username) {
-        java.time.LocalDateTime now = java.time.LocalDateTime.now()
-                .withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0).withNano(0);
-        Instant fromI = now.minusMonths(5).atZone(java.time.ZoneId.systemDefault()).toInstant();
-        Instant toI = now.plusMonths(1).atZone(java.time.ZoneId.systemDefault()).toInstant();
+        Instant toI = LocalDate.now().plusMonths(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
+        Instant fromI = LocalDate.now().withDayOfMonth(1).minusMonths(5).atStartOfDay(ZoneId.systemDefault()).toInstant();
 
-        Map<String, long[]> agg = new HashMap<>(); // key: "yyyy-M" → [total, calls]
-        for (UsageRow r : scanAssistantUsageBetween(fromI, toI)) {
-            if (!username.equals(r.username)) continue;
-            java.time.LocalDateTime dt = java.time.LocalDateTime.ofInstant(r.timestamp, java.time.ZoneId.systemDefault());
-            String k = dt.getYear() + "-" + dt.getMonthValue();
-            long[] a = agg.computeIfAbsent(k, x -> new long[2]);
-            a[0] += r.total;
-            a[1] += 1;
+        Map<String, long[]> agg = new HashMap<>(); // yyyy-M -> [total, calls]
+        jdbcTemplate.query(
+                "select created_at, total_tokens from loom_chat_token_usage " +
+                        "where username = ? and created_at >= ? and created_at < ?",
+                rs -> {
+                    LocalDateTime dt = LocalDateTime.ofInstant(rs.getTimestamp(1).toInstant(), ZoneId.systemDefault());
+                    String k = dt.getYear() + "-" + dt.getMonthValue();
+                    long[] a = agg.computeIfAbsent(k, x -> new long[2]);
+                    a[0] += rs.getLong(2);
+                    a[1] += 1;
+                },
+                username, Timestamp.from(fromI), Timestamp.from(toI));
+
+        // 把 6 个月都补齐，缺记录的填 0
+        List<MonthlyUsage> out = new ArrayList<>();
+        for (int i = 5; i >= 0; i--) {
+            LocalDate d = LocalDate.now().minusMonths(i);
+            String k = d.getYear() + "-" + d.getMonthValue();
+            long[] a = agg.getOrDefault(k, new long[]{0, 0});
+            out.add(new MonthlyUsage(d.getYear(), d.getMonthValue(), a[0], a[1]));
         }
-        return agg.entrySet().stream()
-                .map(e -> {
-                    String[] parts = e.getKey().split("-");
-                    return new MonthlyUsage(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
-                            e.getValue()[0], e.getValue()[1]);
-                })
-                .sorted((a, b) -> a.year() != b.year() ? Integer.compare(a.year(), b.year()) : Integer.compare(a.month(), b.month()))
-                .toList();
+        return out;
     }
 
     /**
      * 单会话 token 统计（conversation.html 顶部卡片）。
      */
     public ConversationUsage byConversation(String conversationId) {
-        long total = 0, prompt = 0, completion = 0;
-        long calls = 0;
-        Instant fromI = Instant.EPOCH;
-        Instant toI = Instant.now().plusSeconds(60);
-        for (UsageRow r : scanAssistantUsageBetween(fromI, toI)) {
-            if (!conversationId.equals(r.conversationId)) continue;
-            total += r.total;
-            prompt += r.prompt;
-            completion += r.completion;
-            calls++;
-        }
-        return new ConversationUsage(conversationId, calls, total, prompt, completion);
-    }
-
-    /**
-     * 公共扫描：从 chat_memory 读指定时间窗内的 ASSISTANT 消息 + 关联 user_conversation，
-     * Java 端解析 content JSON 抽取 usage。
-     *
-     * <p>H2 schema 实际是：
-     * <pre>
-     *   CREATE TABLE SPRING_AI_CHAT_MEMORY (
-     *       conversation_id VARCHAR(36), content LONGVARCHAR, type VARCHAR(10), timestamp TIMESTAMP
-     *   )
-     * </pre>
-     * 没有 metadata 列——usage 存在 content（JSON 序列化 AssistantMessage）的
-     * {@code usage} 字段里。
-     */
-    private List<UsageRow> scanAssistantUsageBetween(Instant from, Instant to) {
-        Timestamp fromTs = Timestamp.from(from);
-        Timestamp toTs = Timestamp.from(to);
-        List<UsageRow> out = new ArrayList<>();
+        long[] sums = new long[4]; // total, prompt, completion, calls
         jdbcTemplate.query(
-                "select cm.conversation_id, uc.username, cm.content, cm.timestamp " +
-                        "from spring_ai_chat_memory cm " +
-                        "join user_conversation uc on uc.conversation_id = cm.conversation_id " +
-                        "where cm.type = 'ASSISTANT' and cm.timestamp >= ? and cm.timestamp < ?",
+                "select sum(prompt_tokens), sum(completion_tokens), sum(total_tokens), count(*) " +
+                        "from loom_chat_token_usage where conversation_id = ?",
                 rs -> {
-                    String convId = rs.getString("conversation_id");
-                    String user = rs.getString("username");
-                    String content = rs.getString("content");
-                    java.sql.Timestamp ts = rs.getTimestamp("timestamp");
-                    long[] usage = parseUsage(content);
-                    if (usage == null) return;
-                    out.add(new UsageRow(convId, user, ts.toInstant(), usage[0], usage[1], usage[2]));
+                    sums[1] = rs.getLong(1);
+                    sums[2] = rs.getLong(2);
+                    sums[0] = rs.getLong(3);
+                    sums[3] = rs.getLong(4);
                 },
-                fromTs, toTs);
-        return out;
+                conversationId);
+        return new ConversationUsage(conversationId, sums[3], sums[0], sums[1], sums[2]);
     }
 
     /**
-     * 解析 AssistantMessage 序列化后的 JSON content，提取 usage。
-     * content 结构：{ "toolCallId": null, "type": "assistant", "content": "...", "usage": { "totalTokens": ..., ... }, ... }。
+     * 当前用户的本月 token 用量（聊天界面"我的用量"模态框）。
      */
-    private long[] parseUsage(String content) {
-        if (content == null || content.isBlank()) return null;
-        try {
-            JsonNode root = objectMapper.readTree(content);
-            JsonNode usage = root.path("usage");
-            if (usage.isMissingNode() || usage.isNull()) return null;
-            long total = usage.path("totalTokens").asLong(0);
-            long prompt = usage.path("promptTokens").asLong(0);
-            long completion = usage.path("completionTokens").asLong(0);
-            if (total == 0 && prompt == 0 && completion == 0) return null;
-            return new long[]{total, prompt, completion};
-        } catch (Exception e) {
-            return null;
+    public CurrentMonthTokenStat currentMonthForUser(String username) {
+        if (username == null || username.isBlank()) {
+            return new CurrentMonthTokenStat("", 0, 0, 0, 0, 0);
         }
+        LocalDate now = LocalDate.now();
+        long[] sums = new long[4]; // total, prompt, completion, calls
+        jdbcTemplate.query(
+                "select sum(prompt_tokens), sum(completion_tokens), sum(total_tokens), count(*) " +
+                        "from loom_chat_token_usage " +
+                        "where username = ? and YEAR(created_at) = ? and MONTH(created_at) = ?",
+                rs -> {
+                    sums[1] = rs.getLong(1);
+                    sums[2] = rs.getLong(2);
+                    sums[0] = rs.getLong(3);
+                    sums[3] = rs.getLong(4);
+                },
+                username, now.getYear(), now.getMonthValue());
+        long total = sums[0];
+        long prompt = sums[1];
+        long completion = sums[2];
+        long calls = sums[3];
+        double avg = calls == 0 ? 0 : (double) total / calls;
+        return new CurrentMonthTokenStat(username, total, prompt, completion, (int) calls, avg);
     }
 
     public record UserUsage(String username, long totalTokens, long promptTokens, long completionTokens, long callCount) {}
     public record MonthlyUsage(int year, int month, long totalTokens, long callCount) {}
     public record ConversationUsage(String conversationId, long callCount, long totalTokens, long promptTokens, long completionTokens) {}
-
-    private record UsageRow(String conversationId, String username, Instant timestamp, long total, long prompt, long completion) {}
 }
