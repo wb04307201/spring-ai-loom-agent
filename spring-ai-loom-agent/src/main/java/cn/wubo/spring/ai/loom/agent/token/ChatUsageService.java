@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * V5.0 替代 V4.0 方案：直接读 {@code loom_chat_token_usage} 表。
+ * V5.0 替代 V4.0 方案：直接读 {@code loom_chat_usage} 表。
  *
  * <p>V4.0 假设 {@code SPRING_AI_CHAT_MEMORY.content} 序列化为 JSON，可从中反推
  * AssistantMessage 的 metadata.usage / toolCalls / model 等。但实际 Spring AI
@@ -25,7 +25,7 @@ import java.util.Map;
  * stats / user / conversation / 我的用量 全部显示 0。
  *
  * <p>V5.0 起：每次 ChatResponse 在 SseController 处显式记录 usage 到
- * {@code loom_chat_token_usage}，本服务只读这张表。
+ * {@code loom_chat_usage}，本服务只读这张表。
  *
  * <p>不做缓存：统计查询频次低；不引入额外缓存层。
  */
@@ -45,7 +45,7 @@ public class ChatUsageService {
         if (total <= 0 && prompt <= 0 && completion <= 0) return;
         if (username == null || username.isBlank()) return;
         jdbcTemplate.update(
-                "INSERT INTO loom_chat_token_usage " +
+                "INSERT INTO loom_chat_usage " +
                         "(conversation_id, username, prompt_tokens, completion_tokens, total_tokens, created_at) " +
                         "VALUES (?, ?, ?, ?, ?, ?)",
                 conversationId, username, prompt, completion, total, Timestamp.from(Instant.now()));
@@ -91,7 +91,7 @@ public class ChatUsageService {
         Map<String, long[]> agg = new HashMap<>();
         jdbcTemplate.query(
                 "select username, sum(prompt_tokens), sum(completion_tokens), sum(total_tokens), count(*) " +
-                        "from loom_chat_token_usage " +
+                        "from loom_chat_usage " +
                         "where YEAR(created_at) = ? and MONTH(created_at) = ? " +
                         "group by username",
                 rs -> {
@@ -123,7 +123,7 @@ public class ChatUsageService {
 
         Map<String, long[]> agg = new HashMap<>(); // yyyy-M -> [total, calls]
         jdbcTemplate.query(
-                "select created_at, total_tokens from loom_chat_token_usage " +
+                "select created_at, total_tokens from loom_chat_usage " +
                         "where username = ? and created_at >= ? and created_at < ?",
                 rs -> {
                     LocalDateTime dt = LocalDateTime.ofInstant(rs.getTimestamp(1).toInstant(), ZoneId.systemDefault());
@@ -152,7 +152,7 @@ public class ChatUsageService {
         long[] sums = new long[4]; // total, prompt, completion, calls
         jdbcTemplate.query(
                 "select sum(prompt_tokens), sum(completion_tokens), sum(total_tokens), count(*) " +
-                        "from loom_chat_token_usage where conversation_id = ?",
+                        "from loom_chat_usage where conversation_id = ?",
                 rs -> {
                     sums[1] = rs.getLong(1);
                     sums[2] = rs.getLong(2);
@@ -174,7 +174,7 @@ public class ChatUsageService {
         long[] sums = new long[4]; // total, prompt, completion, calls
         jdbcTemplate.query(
                 "select sum(prompt_tokens), sum(completion_tokens), sum(total_tokens), count(*) " +
-                        "from loom_chat_token_usage " +
+                        "from loom_chat_usage " +
                         "where username = ? and YEAR(created_at) = ? and MONTH(created_at) = ?",
                 rs -> {
                     sums[1] = rs.getLong(1);
