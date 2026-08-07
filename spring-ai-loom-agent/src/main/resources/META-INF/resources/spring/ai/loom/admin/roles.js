@@ -76,11 +76,16 @@
         }
         const rows = list.map(r => {
             const sysTag = r.system ? '<span class="type-badge ADMIN" style="margin-left: 8px;">系统</span>' : '';
+            const delBtn = r.system ? '' :
+                `<button class="delete-btn btn-sm delete-role-btn" data-code="${escapeHtml(r.code)}" style="margin-left: 4px;">删除</button>`;
             return `<tr data-code="${escapeHtml(r.code)}">
                 <td><strong>${escapeHtml(r.code)}</strong>${sysTag}</td>
                 <td>${escapeHtml(r.name)}</td>
                 <td>${escapeHtml(r.description || '')}</td>
-                <td><button class="secondary-btn edit-role-btn" data-code="${escapeHtml(r.code)}">编辑 / 授权</button></td>
+                <td>
+                    <button class="secondary-btn btn-sm edit-role-btn" data-code="${escapeHtml(r.code)}">编辑 / 授权</button>
+                    ${delBtn}
+                </td>
             </tr>`;
         }).join('');
         tableContainer.innerHTML = `
@@ -91,6 +96,33 @@
         tableContainer.querySelectorAll('.edit-role-btn').forEach(btn => {
             btn.addEventListener('click', () => openDetail(btn.getAttribute('data-code')));
         });
+        tableContainer.querySelectorAll('.delete-role-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteRole(btn.getAttribute('data-code'), btn));
+        });
+    }
+
+    async function deleteRole(code, btn) {
+        const ok = await confirmDialog({
+            title: '删除角色',
+            message: `确定要删除角色「${code}」吗？此操作不可撤销。`,
+            okText: '删除',
+        });
+        if (!ok) return;
+        try {
+            const r = await fetch(API.del(code), {
+                method: 'DELETE', credentials: 'include',
+            });
+            if (!r.ok) {
+                let msg = `删除失败：HTTP ${r.status}`;
+                try { msg = JSON.parse(await r.text()).message || msg; } catch (_) {}
+                showToast(msg, 'error');
+                return;
+            }
+            showToast('角色已删除', 'success');
+            loadRoles();
+        } catch (e) {
+            showToast('网络错误：' + e.message, 'error');
+        }
     }
 
     // ===== 新建角色 =====
@@ -622,9 +654,6 @@
     document.getElementById('create-role-submit').addEventListener('click', submitCreate);
     document.getElementById('role-detail-close').addEventListener('click', closeDetail);
     document.getElementById('rd-save').addEventListener('click', saveDetail);
-    document.getElementById('rd-delete').addEventListener('click', () => {
-        if (currentDetail) deleteRole(currentDetail.code);
-    });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', loadRoles);

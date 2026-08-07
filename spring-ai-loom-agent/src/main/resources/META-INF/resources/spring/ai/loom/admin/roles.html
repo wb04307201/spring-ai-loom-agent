@@ -37,7 +37,7 @@
         </header>
 
         <main class="admin-main">
-        <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+        <div class="info-banner">
             <strong>业务角色</strong> —— 这里维护的是给「普通用户」授权 MCP 用的业务角色（如：研发、运营、客服）。
             <strong>不是</strong>用户类型（管理员 / 普通用户）；用户类型在 <a href="console.html" style="color: #1e40af; text-decoration: underline;">用户管理</a>里设置。
         </div>
@@ -129,7 +129,6 @@
             <div id="rd-error" class="error-msg" style="display: none;"></div>
         </div>
         <div class="modal-footer">
-            <button class="secondary-btn" id="rd-delete">删除角色</button>
             <button class="primary-btn" id="rd-save">保存</button>
         </div>
     </div>
@@ -147,7 +146,7 @@
         </div>
         <div class="modal-footer">
             <button class="secondary-btn" id="confirm-cancel">取消</button>
-            <button class="primary-btn" id="confirm-ok" style="background: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444);">确定</button>
+            <button class="primary-btn danger-solid" id="confirm-ok">确定</button>
         </div>
     </div>
 </div>
