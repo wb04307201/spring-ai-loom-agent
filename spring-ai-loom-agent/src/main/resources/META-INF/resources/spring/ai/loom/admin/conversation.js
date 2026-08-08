@@ -206,7 +206,6 @@ function logicalSort(events) {
             return;
         }
         flowContainer.innerHTML = filtered.map(renderEvent).join('');
-        flowContainer.classList.toggle('compact', document.body.classList.contains('compact-mode'));
         flowPager.style.display = 'none';
         // V5.4：搜索高亮 — walk 文本节点，匹配处用 <mark> 包裹
         if (searchKeyword) highlightMatches(flowContainer, searchKeyword);
@@ -235,24 +234,13 @@ function logicalSort(events) {
         });
     }
 
-    // V5.4：全展开 / 全折叠 / 紧凑模式 三个按钮
+    // V5.4 P6：仅保留"全展开 / 全折叠"两个按钮。"紧凑"和"全屏"按钮已移除
+    // (元数据/统计已默认折叠进 details，事件流区默认 75vh，无需"全屏"再隐藏 meta)
     document.getElementById('expand-all-btn').addEventListener('click', () => {
         flowContainer.querySelectorAll('details').forEach(d => d.open = true);
     });
     document.getElementById('collapse-all-btn').addEventListener('click', () => {
         flowContainer.querySelectorAll('details').forEach(d => d.open = false);
-    });
-    document.getElementById('compact-toggle-btn').addEventListener('click', () => {
-        document.body.classList.toggle('compact-mode');
-        render();  // re-render with compact class
-    });
-    // V5.4：全屏模式 — 隐藏 meta + stats 卡片，让 conversation 占全部高度
-    document.getElementById('fullscreen-btn').addEventListener('click', () => {
-        const isFull = document.body.classList.toggle('fullscreen-mode');
-        const btn = document.getElementById('fullscreen-btn');
-        btn.textContent = isFull ? '退出全屏' : '全屏';
-        // V5.4 P5：全屏时 max-height 92vh（默认已 75vh，无需全屏也能看大部分事件）
-        flowContainer.style.maxHeight = isFull ? '92vh' : '75vh';
     });
 
     function renderEvent(ev) {
