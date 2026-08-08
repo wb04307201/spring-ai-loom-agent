@@ -105,7 +105,7 @@ class ConversationRouterTest {
         IUserConversation conversations = mock(IUserConversation.class);
         JdbcChatMemoryRepository memory = mock(JdbcChatMemoryRepository.class);
         when(conversations.adminListByUsername("bob")).thenReturn(java.util.List.of(
-                new AdminConversationView("bob-conv", "bob", "Bob", "preview", null, null, null, false)));
+                new AdminConversationView("bob-conv", "bob", "Bob", "preview", null, null, null, false, 0L, 0L, 0L, 0L, 0L, 0L)));
         when(memory.findByConversationId("bob-conv")).thenReturn(java.util.List.of());
         RouterFunction<ServerResponse> router = router(conversations, memory);
 

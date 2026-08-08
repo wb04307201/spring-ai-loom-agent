@@ -13,6 +13,8 @@
     const listContainer = document.getElementById('conv-list-container');
     const barChart = document.getElementById('bar-chart');
     const monthTotalEl = document.getElementById('month-total');
+    const searchEl = document.getElementById('conv-search');
+    const sortEl = document.getElementById('conv-sort');
 
     titleEl.textContent = `用户详情：${username}`;
 
@@ -117,54 +119,121 @@
         loadConvTokens(list);
     }
 
-    async function loadConvTokens(list) {
-        const now = new Date();
-        const fromI = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString();
-        const toI = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-        const tokensByConv = {};
-        try {
-            const r = await fetch(`/spring/ai/loom/admin/stats/tokens/monthly?year=${now.getFullYear()}&month=${now.getMonth() + 1}`, {
-                credentials: 'include',
-            });
-            // 月度接口按用户聚合，不够细。直接从 byUser 拉
-            const r2 = await fetch('/spring/ai/loom/admin/users', {credentials: 'include'});
-            // 简化：只显示最近 6 个月的总量作为参考
-        } catch (e) {}
+    // V5.4 P4：缓存全量会话 + 前端做搜索/排序/筛选（不再每次重新拉接口）
+    let allConversations = [];
 
-        // V5.4：按 updatedAt 降序排（最新活跃会话在表格最上面，符合 activity feed 习惯）
-        const sorted = list.slice().sort((a, b) => {
-            const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-            const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-            return tb - ta;
+    function getStatus(c) {
+        if (c.deletedAt) return 'DELETED';
+        if (c.contentCleaned) return 'CLEANED';
+        return 'NORMAL';
+    }
+
+    function fmtTs(s) {
+        if (!s) return '-';
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN');
+    }
+
+    // 把数字格式化成 k/m 形式
+    function fmtNum(n) {
+        if (!n || n <= 0) return '0';
+        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+        if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
+        return String(n);
+    }
+
+    function buildStatsLine(c) {
+        const tok = fmtNum(c.totalTokens);
+        const parts = [];
+        parts.push(`📊 ${c.messageCount || 0} 条`);
+        parts.push(`${tok} tokens`);
+        if (c.toolCallCount > 0) parts.push(`🔧 ${c.toolCallCount}`);
+        if (c.subtaskCount > 0) parts.push(`🧩 ${c.subtaskCount}`);
+        if (c.scheduleCount > 0) parts.push(`⏰ ${c.scheduleCount}`);
+        if (c.errorCount > 0) parts.push(`<span style="color: var(--error-color, #ef4444);">❌ ${c.errorCount}</span>`);
+        return '<div class="conv-stats-line" style="font-size: 11px; color: var(--text-muted, #64748b); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap;">' +
+            parts.map(p => `<span>${p}</span>`).join('') + '</div>';
+    }
+
+    function applyFilters(list) {
+        const kw = (searchEl?.value || '').trim().toLowerCase();
+        const checkedStatuses = new Set();
+        document.querySelectorAll('.conv-filter-label input[data-status]').forEach(cb => {
+            if (cb.checked) checkedStatuses.add(cb.dataset.status);
         });
-        const rows = sorted.map(c => {
-            const created = c.createdAt ? new Date(c.createdAt).toLocaleString('zh-CN') : '-';
-            const lastActive = c.updatedAt ? new Date(c.updatedAt).toLocaleString('zh-CN') : '-';
-            // V5.4：3 态合并为单一 state badge（已软删 / 已清理 / 正常）
+        const sortKey = sortEl?.value || 'updatedAt-desc';
+        const [field, dir] = sortKey.split('-');
+        return list.filter(c => {
+            if (!checkedStatuses.has(getStatus(c))) return false;
+            if (kw && !(c.preview || '').toLowerCase().includes(kw)
+                && !(c.conversationId || '').toLowerCase().includes(kw)) return false;
+            return true;
+        }).sort((a, b) => {
+            let va = a[field], vb = b[field];
+            if (field === 'messageCount' || field === 'totalTokens' || field === 'errorCount' || field === 'toolCallCount') {
+                va = +va || 0; vb = +vb || 0;
+            } else {
+                va = va ? new Date(va).getTime() : 0;
+                vb = vb ? new Date(vb).getTime() : 0;
+            }
+            return dir === 'desc' ? vb - va : va - vb;
+        });
+    }
+
+    function renderTable(list) {
+        if (!list || list.length === 0) {
+            listContainer.innerHTML = '<div class="empty-state">该用户暂无会话</div>';
+            return;
+        }
+        const filtered = applyFilters(list);
+        // V5.4 P4：底部汇总行
+        const totalTokens = filtered.reduce((s, c) => s + (c.totalTokens || 0), 0);
+        const totalTools = filtered.reduce((s, c) => s + (c.toolCallCount || 0), 0);
+        const totalSubs = filtered.reduce((s, c) => s + (c.subtaskCount || 0), 0);
+        const totalErrs = filtered.reduce((s, c) => s + (c.errorCount || 0), 0);
+
+        const rows = filtered.map(c => {
+            const created = fmtTs(c.createdAt);
+            const lastActive = fmtTs(c.updatedAt);
+            const status = getStatus(c);
             let stateTag;
-            if (c.deletedAt) {
+            if (status === 'DELETED') {
                 stateTag = '<span class="type-badge USER" style="background: #fee2e2; color: #991b1b;">已软删</span>';
-            } else if (c.contentCleaned) {
+            } else if (status === 'CLEANED') {
                 stateTag = '<span class="type-badge USER" style="background: #d1fae5; color: #065f46;">已清理</span>';
             } else {
                 stateTag = '<span class="type-badge ADMIN">正常</span>';
             }
-            return `<tr data-username="${escapeHtml(c.username)}" data-conv="${escapeHtml(c.conversationId)}">
-                <td><a class="user-link" href="conversation.html?id=${encodeURIComponent(c.conversationId)}&username=${encodeURIComponent(username)}">${escapeHtml(c.conversationId.substring(0, 8))}…</a></td>
-                <td>${escapeHtml(c.preview || '')}</td>
+            const previewHtml = `<div>${escapeHtml((c.preview || '').substring(0, 80))}</div>${buildStatsLine(c)}`;
+            const convUrl = `conversation.html?id=${encodeURIComponent(c.conversationId)}&username=${encodeURIComponent(username)}`;
+            const shortId = escapeHtml(c.conversationId.substring(0, 8));
+            const fullId = escapeHtml(c.conversationId);
+            return `<tr data-username="${escapeHtml(c.username)}" data-conv="${fullId}" data-status="${status}">
+                <td><a class="user-link" href="${convUrl}" title="${fullId}">${shortId}…</a></td>
+                <td>${previewHtml}</td>
                 <td>${stateTag}</td>
-                <td>${created}</td>
-                <td>${lastActive}</td>
+                <td style="font-size: 12px; white-space: nowrap;">${created}</td>
+                <td style="font-size: 12px; white-space: nowrap;">${lastActive}</td>
             </tr>`;
         }).join('');
+        const summary = `<tfoot><tr style="background: var(--bg-secondary, #f8fafc); font-weight: 500;">
+            <td colspan="2" style="text-align: right; font-size: 12px;">汇总 · ${filtered.length} 个会话</td>
+            <td>🔧 ${totalTools} · 🧩 ${totalSubs} · ❌ ${totalErrs}</td>
+            <td colspan="2" style="font-size: 12px;">${totalTokens.toLocaleString()} tokens</td>
+        </tr></tfoot>`;
         listContainer.innerHTML = `
             <table class="user-table">
                 <thead>
                     <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>创建</th><th>最后活跃</th></tr>
                 </thead>
-                <tbody>${rows}</tbody>
+                <tbody>${rows || '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">无符合筛选条件的会话</td></tr>'}</tbody>
+                ${summary}
             </table>`;
-        // 清理入口整合到控制台顶部"批量清理"按钮（这里不再单独触发清理弹窗）
+    }
+
+    async function loadConvTokens(list) {
+        allConversations = list;
+        renderTable(list);
     }
 
     // 拉用户元信息
@@ -284,6 +353,13 @@
         loadConversations();
         loadBarChart();
         loadRoles();
+    });
+
+    // V5.4 P4：搜索 + 排序 + 筛选 实时触发
+    searchEl?.addEventListener('input', () => renderTable(allConversations));
+    sortEl?.addEventListener('change', () => renderTable(allConversations));
+    document.querySelectorAll('.conv-filter-label input[data-status]').forEach(cb => {
+        cb.addEventListener('change', () => renderTable(allConversations));
     });
 
     loadUserInfo().then(loadRoles);

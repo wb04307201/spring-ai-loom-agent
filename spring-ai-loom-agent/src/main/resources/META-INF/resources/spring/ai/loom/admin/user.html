@@ -40,8 +40,22 @@
             <div id="role-save-error" class="error-msg" style="display: none; margin-top: 8px;"></div>
         </div>
 
-        <div class="admin-toolbar">
+        <div class="admin-toolbar" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
             <button id="refresh-btn" class="secondary-btn">刷新</button>
+            <input type="search" id="conv-search" class="conv-search" placeholder="搜索预览内容..." style="flex: 1; max-width: 240px;">
+            <select id="conv-sort" class="secondary-btn" title="排序">
+                <option value="updatedAt-desc" selected>最后活跃 ↓</option>
+                <option value="updatedAt-asc">最后活跃 ↑</option>
+                <option value="createdAt-desc">创建 ↓</option>
+                <option value="createdAt-asc">创建 ↑</option>
+                <option value="totalTokens-desc">Token ↓</option>
+                <option value="errorCount-desc">错误 ↓</option>
+                <option value="toolCallCount-desc">工具调用 ↓</option>
+                <option value="messageCount-desc">消息数 ↓</option>
+            </select>
+            <label class="conv-filter-label"><input type="checkbox" data-status="NORMAL" checked> 正常</label>
+            <label class="conv-filter-label"><input type="checkbox" data-status="DELETED" checked> 已软删</label>
+            <label class="conv-filter-label"><input type="checkbox" data-status="CLEANED" checked> 已清理</label>
             <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="month-total"></span>
         </div>
 

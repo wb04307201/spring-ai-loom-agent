@@ -148,9 +148,18 @@ public class DefaultUserConversation implements IUserConversation {
 
     @Override
     public List<AdminConversationView> adminListByUsername(String username) {
+        // V5.4 P4：单次 SQL 拉所有会话 + 6 个标量子查询聚合 stats（按 conversation_id 过滤）
+        // 子查询用 scalar correlated subquery，H2 支持且计划器会按主键索引加速。
+        // 对 N 个会话：6N 次子查询被合并到 1 个 round-trip，整体仍是 1 次 SELECT。
         return jdbcTemplate.query(
                 "select uc.conversation_id, uc.username, uc.deleted_at, uc.content_cleaned, " +
-                        "uc.created_at, uc.updated_at " +
+                        "uc.created_at, uc.updated_at, " +
+                        "(select count(*) from spring_ai_chat_memory m where m.conversation_id = uc.conversation_id) as msg_count, " +
+                        "(select coalesce(sum(total_tokens), 0) from loom_chat_usage u where u.conversation_id = uc.conversation_id) as total_tokens, " +
+                        "(select count(*) from loom_tool_call_log t where t.conversation_id = uc.conversation_id) as tool_count, " +
+                        "(select count(*) from loom_subtask_history s where s.conversation_id = uc.conversation_id) as sub_count, " +
+                        "(select count(*) from loom_scheduled_task sch where sch.conversation_id = uc.conversation_id) as sch_count, " +
+                        "(select count(*) from loom_tool_call_log t where t.conversation_id = uc.conversation_id and t.result_is_error = true) as err_count " +
                         "from user_conversation uc where uc.username = ? " +
                         "order by uc.updated_at desc",
                 (rs, rowNum) -> {
@@ -161,7 +170,13 @@ public class DefaultUserConversation implements IUserConversation {
                     Instant createdAt = toInstant(rs.getTimestamp("created_at"));
                     Instant updatedAt = toInstant(rs.getTimestamp("updated_at"));
                     return new AdminConversationView(convId, rs.getString("username"),
-                            null, preview, createdAt, updatedAt, deletedAt, cleaned);
+                            null, preview, createdAt, updatedAt, deletedAt, cleaned,
+                            rs.getLong("msg_count"),
+                            rs.getLong("total_tokens"),
+                            rs.getLong("tool_count"),
+                            rs.getLong("sub_count"),
+                            rs.getLong("sch_count"),
+                            rs.getLong("err_count"));
                 }, username);
     }
 
@@ -184,7 +199,8 @@ public class DefaultUserConversation implements IUserConversation {
                             toInstant(rs.getTimestamp("created_at")),
                             toInstant(rs.getTimestamp("updated_at")),
                             deletedAt,
-                            rs.getBoolean("content_cleaned"));
+                            rs.getBoolean("content_cleaned"),
+                            0L, 0L, 0L, 0L, 0L, 0L);
                 });
     }
 
