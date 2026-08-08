@@ -20,7 +20,7 @@
     const backLink = document.getElementById('back-link');
     if (username) backLink.href = `user.html?username=${encodeURIComponent(username)}`;
 
-    const FLOW_SIZE = 200;
+    const FLOW_SIZE = 500;  // V5.4 P3：默认拉 500 条覆盖长对话（之前 200 会截断 282+ event 的对话）
     let allEvents = [];
     let currentTypes = new Set();
     let searchKeyword = '';
@@ -238,6 +238,26 @@
         let icon = '·';
         let body = '';
         switch (t) {
+        case 'SYSTEM': {
+                // V5.4 P3：系统提示词事件 — 展示该对话实际下发的 dynamic system prompt
+                icon = '⚙️';
+                const len = d.length || (d.content || '').length;
+                let content = d.content || '';
+                let rendered = '';
+                if (content && window.marked) {
+                    try {
+                        const raw = window.marked.parse(content, { gfm: true, breaks: true });
+                        rendered = window.sanitizeHtml ? window.sanitizeHtml(raw) : raw;
+                    } catch (e) {
+                        rendered = escapeHtml(content);
+                    }
+                }
+                body = '<div class="flow-meta">长度: ' + (len) + ' 字符 · 动态拼装（含工具/技能/知识库）</div>' +
+                    '<details class="flow-system" open><summary>系统提示词</summary>' +
+                    '<div class="flow-content flow-markdown">' + rendered + '</div>' +
+                    '</details>';
+                break;
+            }
             case 'USER':
                 icon = '👤';
                 body = '<div class="flow-content">' + escapeHtml(d.content || '') + '</div>';

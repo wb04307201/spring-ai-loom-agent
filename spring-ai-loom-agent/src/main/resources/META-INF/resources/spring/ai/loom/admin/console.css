@@ -776,3 +776,8 @@ body.fullscreen-mode .stats-card:nth-of-type(1) {  /* 隐藏第一个 stats-card
 .flow-event-SUBTASK .flow-type { background: #fef3c7; color: #92400e; }
 .flow-event-SCHEDULE { border-left: 3px solid #eab308; padding-left: 5px; }
 .flow-event-SCHEDULE .flow-type { background: #fef9c3; color: #854d0e; }
+/* V5.4 P3：SYSTEM 事件 — 系统提示词，紫色调区分 */
+.flow-event-SYSTEM { border-left: 3px solid #6366f1; padding-left: 5px; background: #f5f3ff; border-radius: 4px; }
+.flow-event-SYSTEM .flow-type { background: #e0e7ff; color: #3730a3; }
+.flow-event-SYSTEM .flow-system { margin-top: 4px; }
+.flow-event-SYSTEM .flow-system summary { cursor: pointer; color: var(--primary, #6366f1); font-weight: 500; padding: 4px 0; }

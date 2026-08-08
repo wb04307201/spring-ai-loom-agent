@@ -6,6 +6,7 @@ import cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -42,15 +43,19 @@ public class ConversationFlowService {
     private final IToolCallLogRepository toolCallLogRepository;
     private final ChatUsageService chatUsageService;
     private final ObjectMapper objectMapper;
+    /** @Lazy 避免 DefaultChat → ConversationFlowService → ... 循环依赖 */
+    private final IChat chat;
 
     public ConversationFlowService(JdbcTemplate jdbcTemplate,
                                   IToolCallLogRepository toolCallLogRepository,
                                   ChatUsageService chatUsageService,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  @Lazy IChat chat) {
         this.jdbcTemplate = jdbcTemplate;
         this.toolCallLogRepository = toolCallLogRepository;
         this.chatUsageService = chatUsageService;
         this.objectMapper = objectMapper;
+        this.chat = chat;
     }
 
     public record Meta(String conversationId, String title, Instant createdAt, Instant updatedAt, String username) {}
@@ -59,7 +64,7 @@ public class ConversationFlowService {
     public record FlowResult(Meta meta, Stats stats, List<Event> events, int page, int size, long total, boolean hasMore) {}
 
     private static final Set<String> DEFAULT_TYPES = Set.of(
-            "USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "SUBTASK", "SCHEDULE");
+            "USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "SUBTASK", "SCHEDULE", "SYSTEM");
 
     public FlowResult flow(String conversationId, String username, int page, int size, Set<String> types) {
         if (types == null || types.isEmpty()) types = DEFAULT_TYPES;
@@ -68,6 +73,30 @@ public class ConversationFlowService {
         Stats stats = computeStats(conversationId, username);
 
         List<Event> all = new ArrayList<>();
+        // V5.4 P3：SYSTEM 事件 — 展示该对话实际下发的 system prompt（动态拼装，含技能列表/知识库/工具列表）
+        if (types.contains("SYSTEM")) {
+            try {
+                // V5.4 P3：通过 IChat 接口调用 buildDynamicSystemPrompt — 不依赖 instanceof，
+                // Spring 代理（Proxy / CGLIB）下 DefaultChat 仍能被识别为 IChat 实现。
+                String sysPrompt = chat.buildDynamicSystemPrompt(username, null);
+                if (sysPrompt != null && !sysPrompt.isBlank()) {
+                    Map<String, Object> sysData = new HashMap<>();
+                    sysData.put("content", sysPrompt);
+                    sysData.put("length", sysPrompt.length());
+                    // 锚到该对话 USER 第一条消息前 1ms（保证排序：SYSTEM 在 USER 之前）
+                    Instant firstUserTs = jdbcTemplate.query(
+                            "select min(timestamp) from spring_ai_chat_memory where conversation_id = ? and type = 'USER'",
+                            (org.springframework.jdbc.core.ResultSetExtractor<Instant>) rs -> rs.next()
+                                    ? (rs.getTimestamp(1) == null ? null : rs.getTimestamp(1).toInstant())
+                                    : null,
+                            conversationId);
+                    Instant sysTs = firstUserTs != null ? firstUserTs.minusMillis(1) : Instant.now();
+                    all.add(new Event("SYSTEM", sysTs, sysData));
+                }
+            } catch (Exception e) {
+                log.warn("SYSTEM prompt build failed for {}: {}", conversationId, e.getMessage());
+            }
+        }
         if (types.contains("USER") || types.contains("ASSISTANT") || types.contains("TOOL_CALL") || types.contains("TOOL_RESULT")) {
             List<Event> evs = extractFromChatMemory(conversationId, username, types);
             log.info("V5.4 P2 extractFromChatMemory: {} events", evs.size());

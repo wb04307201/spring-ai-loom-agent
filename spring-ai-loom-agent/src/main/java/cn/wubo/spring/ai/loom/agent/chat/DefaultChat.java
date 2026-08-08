@@ -227,7 +227,8 @@ public class DefaultChat implements IChat {
         return oneLine.length() > 120 ? oneLine.substring(0, 120) + "…" : oneLine;
     }
 
-    private String buildDynamicSystemPrompt(String username, List<String> enabledKnowledgeIds) {
+    @Override
+    public String buildDynamicSystemPrompt(String username, List<String> enabledKnowledgeIds) {
         StringBuilder sb = new StringBuilder();
 
         // Base system prompt from properties
