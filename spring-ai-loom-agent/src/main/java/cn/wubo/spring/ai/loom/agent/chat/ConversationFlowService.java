@@ -303,28 +303,11 @@ public class ConversationFlowService {
                     }
                 }
                 case "TOOL" -> {
-                    if (!types.contains("TOOL_RESULT")) break;
-                    // ToolResponseMessage: { "id": "call_abc", "name": "toolName", "content": "result" }
-                    String callId = contentNode != null ? contentNode.path("id").asText(null) : null;
-                    String name = contentNode != null ? contentNode.path("name").asText(null) : null;
-                    String result = contentNode != null ? contentNode.path("content").asText(null)
-                            : (row.content() == null ? "" : row.content());
-                    ToolCallLog l = callId != null ? logByCallId.get(callId) : null;
-                    Map<String, Object> data = new HashMap<>();
-                    data.put("id", callId);
-                    data.put("name", name);
-                    if (l != null) {
-                        data.put("result", l.resultText());
-                        data.put("isError", l.resultIsError());
-                        data.put("durationMs", l.durationMs());
-                        data.put("source", "tool_call_log");
-                        events.add(new Event("TOOL_RESULT", l.createdAt(), data));
-                    } else {
-                        data.put("result", result);
-                        data.put("isError", false);
-                        data.put("source", "chat_memory");
-                        events.add(new Event("TOOL_RESULT", row.timestamp(), data));
-                    }
+                    // V5.4 P7+：跳过 SPRING_AI_CHAT_MEMORY 的 TOOL 行（Spring AI 流式 chunk
+                    // 重复 emit 同一 tool_call_id，导致 chat_memory 有 20+ 行 TOOL 消息但
+                    // 实际只执行 2-4 次）。TOOL_RESULT 唯一来源改为 loom_tool_call_log
+                    // （loadToolResults 方法），id 用 wrap-* 与 tool_call_log 匹配。
+                    if (log.isDebugEnabled()) log.debug("V5.4 P7+ skipping chat_memory TOOL row id={}", contentNode != null ? contentNode.path("id").asText(null) : null);
                 }
                 default -> { /* 跳过 SYSTEM / 其他 */ }
             }
