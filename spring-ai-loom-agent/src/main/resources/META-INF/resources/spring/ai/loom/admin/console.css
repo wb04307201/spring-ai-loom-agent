@@ -635,16 +635,34 @@ table.user-table {
     background: var(--bg-primary, #fff);
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-    padding: 16px;
-    max-height: 70vh;
+    padding: 12px 8px;
+    max-height: 80vh;  /* V5.4 70 → 80vh 多 10% 可视 */
     overflow-y: auto;
+}
+
+/* V5.4 紧凑模式：只显示内容主体，隐藏 thinking/args/result/details */
+body.compact-mode .flow-event { padding: 6px 4px; font-size: 12px; }
+body.compact-mode .flow-event-name,
+body.compact-mode .flow-content { display: inline; margin: 0; }
+body.compact-mode .flow-thinking,
+body.compact-mode .flow-args,
+body.compact-mode .flow-result,
+body.compact-mode .flow-prompt,
+body.compact-mode .flow-error,
+body.compact-mode .flow-meta { display: none !important; }
+body.compact-mode .flow-type { display: none; }  /* 紧凑模式去掉 type 标签 */
+
+/* V5.4 全屏模式：隐藏 meta + stats 卡，让 conversation 占满屏 */
+body.fullscreen-mode #meta-card,
+body.fullscreen-mode .stats-card:nth-of-type(1) {  /* 隐藏第一个 stats-card（调用统计）*/
+    display: none;
 }
 
 .flow-event {
     display: grid;
-    grid-template-columns: 32px 130px 80px 1fr;
-    gap: 12px;
-    padding: 12px 8px;
+    grid-template-columns: 28px 120px 70px 1fr;
+    gap: 8px;
+    padding: 8px 6px;  /* V5.4 紧凑 12 → 8 */
     border-bottom: 1px solid var(--border-color, #e2e8f0);
     align-items: start;
     font-size: 13px;

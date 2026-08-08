@@ -151,8 +151,29 @@
             return;
         }
         flowContainer.innerHTML = filtered.map(renderEvent).join('');
+        flowContainer.classList.toggle('compact', document.body.classList.contains('compact-mode'));
         flowPager.style.display = 'none';
     }
+
+    // V5.4：全展开 / 全折叠 / 紧凑模式 三个按钮
+    document.getElementById('expand-all-btn').addEventListener('click', () => {
+        flowContainer.querySelectorAll('details').forEach(d => d.open = true);
+    });
+    document.getElementById('collapse-all-btn').addEventListener('click', () => {
+        flowContainer.querySelectorAll('details').forEach(d => d.open = false);
+    });
+    document.getElementById('compact-toggle-btn').addEventListener('click', () => {
+        document.body.classList.toggle('compact-mode');
+        render();  // re-render with compact class
+    });
+    // V5.4：全屏模式 — 隐藏 meta + stats 卡片，让 conversation 占全部高度
+    document.getElementById('fullscreen-btn').addEventListener('click', () => {
+        const isFull = document.body.classList.toggle('fullscreen-mode');
+        const btn = document.getElementById('fullscreen-btn');
+        btn.textContent = isFull ? '退出全屏' : '全屏';
+        // 全屏时增大 max-height 到 92vh
+        flowContainer.style.maxHeight = isFull ? '92vh' : '80vh';
+    });
 
     function renderEvent(ev) {
         const ts = fmtTs(ev.ts);
