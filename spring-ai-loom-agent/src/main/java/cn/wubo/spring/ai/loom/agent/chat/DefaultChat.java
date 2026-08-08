@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
@@ -46,7 +47,8 @@ public class DefaultChat implements IChat {
     public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
                        IUserConversation userConversation, IFile file,
                        ISkillStorage skillStorage, IKnowledge knowledge,
-                       LoomAgentProperties properties) {
+                       LoomAgentProperties properties,
+                       cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository) {
         this.chatClient = chatClient;
         this.mcp = mcp;
         this.embedTools = embedTools;
@@ -55,7 +57,10 @@ public class DefaultChat implements IChat {
         this.skillStorage = skillStorage;
         this.knowledge = knowledge;
         this.properties = properties;
+        this.toolCallLogRepository = toolCallLogRepository;
     }
+
+    private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
 
     @Override
     public Flux<ChatResponse> stream(ChatRequestRecord chatRequestRecord, String username, HttpServletRequest request) {
@@ -166,7 +171,15 @@ public class DefaultChat implements IChat {
         ToolCallbackProvider toolCallbackProvider = mcp.getVisibleToolCallbackProvider(username, chatRequestRecord.mcps());
 
         if (toolCallbackProvider != null) {
-            requestSpec.toolCallbacks(toolCallbackProvider);
+            // V5.4：包每个 ToolCallback 写 loom_tool_call_log（Plan D ObservationHandler
+            // 在 Spring AI 1.1.7 onStop 不触发，Plan A 直接包 callback 稳定）
+            ToolCallback[] original = toolCallbackProvider.getToolCallbacks();
+            ToolCallback[] wrapped = new ToolCallback[original.length];
+            for (int i = 0; i < original.length; i++) {
+                wrapped[i] = new cn.wubo.spring.ai.loom.agent.tool.LoggingToolCallback(
+                        original[i], conversationId, username, toolCallLogRepository);
+            }
+            requestSpec.toolCallbacks(wrapped);
         }
 
         return requestSpec.stream().chatResponse()

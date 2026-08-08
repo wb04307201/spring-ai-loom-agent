@@ -5,6 +5,7 @@ import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
 import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
@@ -36,6 +37,7 @@ class DefaultChatTest {
     private ChatClient.ChatClientRequestSpec requestSpec;
     private DefaultChat chat;
     private IUserConversation userConversation;
+    private IToolCallLogRepository toolCallLogRepository;
     private HttpServletRequest request;
 
     @BeforeEach
@@ -58,6 +60,7 @@ class DefaultChatTest {
         userConversation = mock(IUserConversation.class);
         IFile file = mock(IFile.class);
         ISkillStorage skillStorage = mock(ISkillStorage.class);
+        toolCallLogRepository = mock(IToolCallLogRepository.class);
         when(skillStorage.list(anyString())).thenReturn(List.of());
         when(skillStorage.get(anyString(), anyString())).thenAnswer(inv -> {
             String name = inv.getArgument(0);
@@ -74,7 +77,7 @@ class DefaultChatTest {
         when(request.getServerName()).thenReturn("localhost");
         when(request.getServerPort()).thenReturn(8080);
 
-        chat = new DefaultChat(chatClient, mcp, List.of(), userConversation, file, skillStorage, knowledge, properties);
+        chat = new DefaultChat(chatClient, mcp, List.of(), userConversation, file, skillStorage, knowledge, properties, toolCallLogRepository);
     }
 
     @SuppressWarnings("unchecked")

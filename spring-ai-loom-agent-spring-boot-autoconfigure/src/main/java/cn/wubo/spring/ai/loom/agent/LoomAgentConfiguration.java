@@ -303,9 +303,10 @@ public class LoomAgentConfiguration {
                           @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
                           IUserConversation userConversation, IFile file,
                           ISkillStorage skillStorage, IKnowledge knowledge,
-                          LoomAgentProperties properties) {
+                          LoomAgentProperties properties,
+                          cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
-                    skillStorage, knowledge, properties);
+                    skillStorage, knowledge, properties, toolCallLogRepository);
         }
 
         // ============== V4.0：loom_tool_call_log 仓储 ==============
@@ -368,6 +369,9 @@ public class LoomAgentConfiguration {
                     emitterRegistry.autoCleanup(username, conversationId);
                 });
                 CompletableFuture.runAsync(() -> {
+                    // V5.3：让 ToolCallLogObservationHandler 能从 ThreadLocal 拿到
+                    // conversationId / username（ObservationContext 没暴露这些字段）
+                    cn.wubo.spring.ai.loom.agent.tool.ToolCallContextHolder.set(conversationId, username);
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
@@ -438,6 +442,9 @@ public class LoomAgentConfiguration {
                         if (disposeRequested.get()) subscription.dispose();
                     } catch (Exception e) {
                         emitter.completeWithError(e);
+                    } finally {
+                        // V5.3：清理 ThreadLocal 防止内存泄漏
+                        cn.wubo.spring.ai.loom.agent.tool.ToolCallContextHolder.clear();
                     }
                 });
 

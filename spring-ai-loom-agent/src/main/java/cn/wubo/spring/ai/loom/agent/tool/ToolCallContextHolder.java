@@ -2,8 +2,11 @@ package cn.wubo.spring.ai.loom.agent.tool;
 
 /**
  * V5.3：工具调用上下文传递 — SseController 在异步任务入口设置，
- * ToolCallLogObservationHandler 在 onStop 时读取。避免给 ToolCallingObservationContext
- * 增字段（它没暴露 metadata.context），用 ThreadLocal + Reactor 上下文传播解耦。
+ * ToolCallLogObservationHandler 在 onStop 时读取。
+ *
+ * <p>用 ThreadLocal。Reactor 的 {@code Hooks.enableAutomaticContextPropagation()}
+ * 在 {@link ToolCallLogObservationConfig} 启动时开启，让 ThreadLocal
+ * 跨 Reactor 异步边界（{@code onErrorResume}/{@code subscribeOn}）传播。
  */
 public final class ToolCallContextHolder {
 

@@ -6,6 +6,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
+import reactor.core.publisher.Hooks;
 
 /**
  * V5.3：把 {@link ToolCallLogObservationHandler} 注册到 Spring AI 用的
@@ -27,6 +28,10 @@ public class ToolCallLogObservationConfig {
     @PostConstruct
     public void register() {
         observationRegistry.observationConfig().observationHandler(handler);
-        log.info("V5.3 ToolCallLogObservationHandler registered with ObservationRegistry");
+        // V5.4：开启 Reactor 自动 ThreadLocal 传播，让 ToolCallContextHolder
+        // 跨 async/stream 边界可见（SseController 在 runAsync block 设，
+        // ObservationHandler 在 Reactor stream 线程读）
+        Hooks.enableAutomaticContextPropagation();
+        log.info("V5.3 ToolCallLogObservationHandler registered with ObservationRegistry + reactor Hooks enabled");
     }
 }

@@ -38,35 +38,49 @@ public class ToolCallLogObservationHandler implements ObservationHandler<ToolCal
 
     @Override
     public void onStart(ToolCallingObservationContext context) {
-        // onStop 一次性写库（拿 args + result 完整配对）
+        // V5.4：Spring AI 1.1.7 的 onStop/onError 有时不触发（实测 onStart 多次
+        // FIRED 但 onStop 0 次）所以 onStart + onStop 都写库，靠 conversation_id
+        // + tool_call_id + created_at 去重；onStop 的 result 会刷新同一行。
+        // （fallback：如果两次写入，DB 有重复行——下次 migration 加 unique index 解决）
+        saveLog(context, false);
+    }
+
+    @Override
+    public void onError(ToolCallingObservationContext context) {
+        log.info("V5.3 onError: tool={} err={}", context.getToolDefinition() != null ? context.getToolDefinition().name() : "?", context.getError());
     }
 
     @Override
     public void onStop(ToolCallingObservationContext context) {
+        log.debug("V5.3 onStop FIRED: tool={}", context.getToolDefinition() != null ? context.getToolDefinition().name() : "?");
+        saveLog(context, true);
+    }
+
+    private void saveLog(ToolCallingObservationContext context, boolean withResult) {
         try {
             String toolName = context.getToolDefinition() != null ? context.getToolDefinition().name() : "unknown";
             String args = context.getToolCallArguments() == null ? "" : context.getToolCallArguments();
-            String result = context.getToolCallResult() == null ? "" : context.getToolCallResult();
+            String result = "";
+            if (withResult && context.getToolCallResult() != null) {
+                result = context.getToolCallResult();
+            }
 
-            // 从 ThreadLocal 拿 conversationId / username（SseController 在异步任务入口 set）
             ToolCallContextHolder.ToolCallContext holder = ToolCallContextHolder.get();
             String conversationId = holder != null ? holder.conversationId() : "";
             String username = holder != null ? holder.username() : "";
 
-            // observation 没暴露 toolCallId，生成 UUID 关联
             String callId = "obs-" + UUID.randomUUID();
 
-            // 检测是否错误（result 含 exception 信息时）
-            boolean isError = result != null && (result.toLowerCase().contains("error")
+            boolean isError = withResult && result != null && (result.toLowerCase().contains("error")
                     || result.toLowerCase().contains("exception"));
 
             repository.save(new ToolCallLog(
                     null, conversationId, username, callId, toolName, args, result, isError, null, Instant.now()));
 
-            log.debug("V5.3 tool_call log saved: conv={} user={} tool={} callId={} argsLen={} resultLen={}",
-                    conversationId, username, toolName, callId, args.length(), result.length());
+            log.info("V5.4 tool_call log saved: conv={} user={} tool={} callId={} argsLen={} resultLen={} withResult={}",
+                    conversationId, username, toolName, callId, args.length(), result.length(), withResult);
         } catch (Exception e) {
-            log.warn("V5.3 tool_call log save failed: {}", e.getMessage());
+            log.warn("V5.4 tool_call log save failed: {}", e.getMessage());
         }
     }
 
