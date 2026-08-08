@@ -238,20 +238,29 @@ body {
     background: var(--bg-primary, #fff);
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-    overflow: hidden;
+    overflow-x: auto;  /* V5.4：内容超出时横向滚动而不是撑爆父容器 */
 }
 
 table.user-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
+    table-layout: auto;  /* 表格列宽根据内容自适应 */
+    min-width: 600px;  /* 防止小屏被压太扁触发横向滚动 */
 }
 
 .user-table th, .user-table td {
     padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border-color, #e2e8f0);
+    max-width: 300px;  /* V5.4：单列最大宽度防止 preview/状态/时间撑爆 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
+
+.user-table td:nth-child(2) { max-width: 400px; }  /* preview 列放宽点 */
+.user-table td:nth-child(1) a { font-family: ui-monospace, monospace; }  /* 会话 ID 等宽字体 */
 
 .user-table th {
     background: #f8fafc;
@@ -640,10 +649,9 @@ table.user-table {
     overflow-y: auto;
 }
 
-/* V5.4 紧凑模式：只显示内容主体，隐藏 thinking/args/result/details */
-body.compact-mode .flow-event { padding: 6px 4px; font-size: 12px; }
-body.compact-mode .flow-event-name,
-body.compact-mode .flow-content { display: inline; margin: 0; }
+/* V5.4 紧凑模式：只显示内容主体，隐藏 thinking/args/result/details。
+   **保留 grid 布局**（不改成 inline），只压缩 padding + 隐藏 verbose 元数据。 */
+body.compact-mode .flow-event { padding: 6px 8px; font-size: 12px; }
 body.compact-mode .flow-thinking,
 body.compact-mode .flow-args,
 body.compact-mode .flow-result,
