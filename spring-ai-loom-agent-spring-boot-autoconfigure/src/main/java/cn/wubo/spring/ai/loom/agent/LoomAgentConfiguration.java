@@ -369,8 +369,9 @@ public class LoomAgentConfiguration {
                     emitterRegistry.autoCleanup(username, conversationId);
                 });
                 CompletableFuture.runAsync(() -> {
-                    // V5.3：让 ToolCallLogObservationHandler 能从 ThreadLocal 拿到
-                    // conversationId / username（ObservationContext 没暴露这些字段）
+                    // V5.4：让 ToolCallLogObservationHandler 拿到 conversationId / username
+                    // 写入 Map（**不** clear() — sub-task 在主 chat 完成后跑，可能在
+                    // clear 之后才调 tool。下一个 chat 会覆盖 LATEST，不会内存泄漏）
                     cn.wubo.spring.ai.loom.agent.tool.ToolCallContextHolder.set(conversationId, username);
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
@@ -443,8 +444,7 @@ public class LoomAgentConfiguration {
                     } catch (Exception e) {
                         emitter.completeWithError(e);
                     } finally {
-                        // V5.3：清理 ThreadLocal 防止内存泄漏
-                        cn.wubo.spring.ai.loom.agent.tool.ToolCallContextHolder.clear();
+                        // V5.4：不 clear — 让 sub-task 的 tool call（runAsync 异步）也能读到
                     }
                 });
 

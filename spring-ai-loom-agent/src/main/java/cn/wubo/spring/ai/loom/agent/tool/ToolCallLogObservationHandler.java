@@ -77,7 +77,7 @@ public class ToolCallLogObservationHandler implements ObservationHandler<ToolCal
             repository.save(new ToolCallLog(
                     null, conversationId, username, callId, toolName, args, result, isError, null, Instant.now()));
 
-            log.info("V5.4 tool_call log saved: conv={} user={} tool={} callId={} argsLen={} resultLen={} withResult={}",
+            log.debug("V5.4 tool_call log saved: conv={} user={} tool={} callId={} argsLen={} resultLen={} withResult={}",
                     conversationId, username, toolName, callId, args.length(), result.length(), withResult);
         } catch (Exception e) {
             log.warn("V5.4 tool_call log save failed: {}", e.getMessage());
