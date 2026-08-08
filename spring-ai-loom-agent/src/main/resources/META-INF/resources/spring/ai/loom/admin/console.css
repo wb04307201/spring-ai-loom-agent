@@ -737,6 +737,23 @@ body.fullscreen-mode .stats-card:nth-of-type(1) {  /* 隐藏第一个 stats-card
 .flow-event-ASSISTANT .flow-type { background: #dbeafe; color: #1e40af; }
 .flow-event-TOOL_CALL { border-left: 3px solid #8b5cf6; padding-left: 5px; }
 .flow-event-TOOL_CALL .flow-type { background: #ede9fe; color: #5b21b6; }
+
+/* V5.4：搜索关键词高亮 + Markdown 渲染样式 */
+.flow-search-hit { background: #fef08a; color: #92400e; padding: 0 2px; border-radius: 2px; }
+.flow-markdown { line-height: 1.6; }
+.flow-markdown h1, .flow-markdown h2, .flow-markdown h3 { margin: 0.5em 0 0.3em; font-weight: 600; }
+.flow-markdown h1 { font-size: 1.3em; }
+.flow-markdown h2 { font-size: 1.15em; }
+.flow-markdown h3 { font-size: 1em; }
+.flow-markdown p { margin: 0.4em 0; }
+.flow-markdown ul, .flow-markdown ol { margin: 0.4em 0; padding-left: 1.5em; }
+.flow-markdown li { margin: 0.15em 0; }
+.flow-markdown code { background: #f1f5f9; color: #db2777; padding: 1px 4px; border-radius: 3px; font-size: 0.92em; }
+.flow-markdown pre { background: #1e293b; color: #e2e8f0; padding: 8px 12px; border-radius: 4px; overflow-x: auto; margin: 0.5em 0; }
+.flow-markdown pre code { background: transparent; color: inherit; padding: 0; }
+.flow-markdown blockquote { border-left: 3px solid #cbd5e1; padding-left: 12px; color: #64748b; margin: 0.5em 0; }
+.flow-markdown table { border-collapse: collapse; margin: 0.5em 0; }
+.flow-markdown th, .flow-markdown td { border: 1px solid var(--border-color, #e2e8f0); padding: 4px 8px; }
 .flow-event-TOOL_RESULT { border-left: 3px solid #10b981; padding-left: 5px; }
 .flow-event-TOOL_RESULT .flow-type { background: #d1fae5; color: #065f46; }
 .flow-event-SUBTASK { border-left: 3px solid #f59e0b; padding-left: 5px; }

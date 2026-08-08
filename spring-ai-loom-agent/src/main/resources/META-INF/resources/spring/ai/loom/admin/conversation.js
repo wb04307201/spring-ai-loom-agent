@@ -65,9 +65,40 @@
             renderStats(data.stats);
             allEvents = data.events || [];
             render();
+            loadNav();
         } catch (e) {
             flowContainer.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
         }
+    }
+
+    /* V5.4：上下个会话导航 — 拉该用户所有会话，按 updatedAt 排序，
+       找当前 conversationId 的上/下一个 conversationId。 */
+    async function loadNav() {
+        if (!username) return;
+        try {
+            const r = await fetch(`/spring/ai/loom/admin/users/${encodeURIComponent(username)}/conversations`, { credentials: 'include' });
+            if (!r.ok) return;
+            const list = await r.json();
+            const sorted = list.slice().sort((a, b) => {
+                const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                return tb - ta;
+            });
+            const idx = sorted.findIndex(c => c.conversationId === conversationId);
+            if (idx < 0) return;
+            const prev = idx < sorted.length - 1 ? sorted[idx + 1] : null;  // 新→旧：上一个是更新的
+            const next = idx > 0 ? sorted[idx - 1] : null;                  // 旧→新：下一个是更早的
+            const prevLink = document.getElementById('prev-conv-link');
+            const nextLink = document.getElementById('next-conv-link');
+            if (prev) {
+                prevLink.href = `conversation.html?id=${encodeURIComponent(prev.conversationId)}&username=${encodeURIComponent(username)}`;
+                prevLink.style.display = '';
+            }
+            if (next) {
+                nextLink.href = `conversation.html?id=${encodeURIComponent(next.conversationId)}&username=${encodeURIComponent(username)}`;
+                nextLink.style.display = '';
+            }
+        } catch (e) { /* ignore nav load failure */ }
     }
 
     function renderMeta(meta) {
@@ -153,6 +184,31 @@
         flowContainer.innerHTML = filtered.map(renderEvent).join('');
         flowContainer.classList.toggle('compact', document.body.classList.contains('compact-mode'));
         flowPager.style.display = 'none';
+        // V5.4：搜索高亮 — walk 文本节点，匹配处用 <mark> 包裹
+        if (searchKeyword) highlightMatches(flowContainer, searchKeyword);
+    }
+
+    function highlightMatches(root, keyword) {
+        if (!keyword) return;
+        const re = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+        const targets = [];
+        let n;
+        while ((n = walker.nextNode())) {
+            // 跳过 <summary>/<style>/<script> 内的文本
+            const p = n.parentNode;
+            if (p && p.closest && p.closest('style, script, summary')) continue;
+            if (!n.nodeValue || !re.test(n.nodeValue)) continue;
+            targets.push(n);
+        }
+        targets.forEach(text => {
+            const html = text.nodeValue.replace(re, m => `<mark class="flow-search-hit">${m}</mark>`);
+            const span = document.createElement('span');
+            span.innerHTML = html;
+            const parent = text.parentNode;
+            while (span.firstChild) parent.insertBefore(span.firstChild, text);
+            parent.removeChild(text);
+        });
     }
 
     // V5.4：全展开 / 全折叠 / 紧凑模式 三个按钮
@@ -197,7 +253,18 @@
                 if (d.promptTokens != null || d.completionTokens != null) {
                     metaLine += '<div class="flow-meta">tokens: ' + (d.promptTokens || 0) + ' + ' + (d.completionTokens || 0) + '</div>';
                 }
-                body = '<div class="flow-content">' + escapeHtml(d.content || '') + '</div>' + thinking + metaLine;
+                // V5.4：用 marked 把 content 渲染成 Markdown（标题/列表/代码块都好看）
+                // marked.parse 出来的 HTML 通过 sanitizeHtml 加白名单过滤（防止 XSS）
+                let rendered = '';
+                if (d.content && window.marked) {
+                    try {
+                        const raw = window.marked.parse(d.content, { gfm: true, breaks: true });
+                        rendered = window.sanitizeHtml ? window.sanitizeHtml(raw) : raw;
+                    } catch (e) {
+                        rendered = escapeHtml(d.content);  // fallback 到 plain text
+                    }
+                }
+                body = '<div class="flow-content flow-markdown">' + rendered + '</div>' + thinking + metaLine;
                 break;
             }
             case 'TOOL_CALL': {

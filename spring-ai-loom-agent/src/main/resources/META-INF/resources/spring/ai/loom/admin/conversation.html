@@ -16,6 +16,8 @@
         </div>
         <div class="admin-header-right">
             <span id="admin-username" class="admin-username"></span>
+            <a id="prev-conv-link" class="header-link" title="上一个会话" style="display: none;">◀</a>
+            <a id="next-conv-link" class="header-link" title="下一个会话" style="display: none;">▶</a>
             <a id="back-link" href="console.html" class="header-link">← 返回控制台</a>
         </div>
     </header>
@@ -67,6 +69,8 @@
 
 <div id="toast-notification" class="toast"></div>
 
+<script src="/marked@17.0.1/lib/marked.umd.js"></script>
+<script type="module" src="../markdown-renderer.js"></script>
 <script src="conversation.js"></script>
 </body>
 </html>

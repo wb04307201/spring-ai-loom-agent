@@ -50,3 +50,6 @@ export function sanitizeHtml(html) {
     }
     return template.innerHTML;
 }
+
+// V5.4：同时暴露到 window，让非 module 脚本（如 admin/conversation.js）能用
+if (typeof window !== 'undefined') window.sanitizeHtml = sanitizeHtml;
