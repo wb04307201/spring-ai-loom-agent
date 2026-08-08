@@ -131,6 +131,19 @@ public class DefaultChat implements IChat {
 
         ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt().system(dynamicSystemPrompt);
 
+        // V5.4 P9：IEmbedTool 用 ToolCallbacks.from() 预生成 MethodToolCallback 数组
+        // 再包 LoggingToolCallback，toolCallbacks(wrapped) 替代 tools(embedTools.toArray())。
+        // 原因：之前 tools() 注册的 MethodToolCallback 走 Spring AI 默认 ObservationHandler 路径
+        // （写 obs-* 前缀），Spring AI 1.1.7 DashScope 流式 chunk 让 onStart+onStop 各写一次 → 12 次真实
+        // 工具调用 → 84 行 DB。统一用 LoggingToolCallback（write wrap-* + unique 约束）后
+        // DB 行数 = 真实调用次数。
+        ToolCallback[] embedToolCallbacks = cn.wubo.spring.ai.loom.agent.tool.ToolCallbacks.from(embedTools.toArray());
+        ToolCallback[] wrappedEmbedTools = new ToolCallback[embedToolCallbacks.length];
+        for (int i = 0; i < embedToolCallbacks.length; i++) {
+            wrappedEmbedTools[i] = new cn.wubo.spring.ai.loom.agent.tool.LoggingToolCallback(
+                    embedToolCallbacks[i], conversationId, username, toolCallLogRepository);
+        }
+
         if (chatRequestRecord.fileIds() != null && !chatRequestRecord.fileIds().isEmpty()) {
             requestSpec.user(u -> {
                 u.text(chatRequestRecord.message());
@@ -145,9 +158,9 @@ public class DefaultChat implements IChat {
                         log.error("Failed to add media", e);
                     }
                 }
-            }).tools(embedTools.toArray());
+            }).toolCallbacks(wrappedEmbedTools);
         }else{
-            requestSpec.user(chatRequestRecord.message()).tools(embedTools.toArray());
+            requestSpec.user(chatRequestRecord.message()).toolCallbacks(wrappedEmbedTools);
         }
         Map<String, Object> props = new HashMap<>();
         props.put("username", username);
