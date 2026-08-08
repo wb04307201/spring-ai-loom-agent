@@ -131,8 +131,15 @@
             // 简化：只显示最近 6 个月的总量作为参考
         } catch (e) {}
 
-        const rows = list.map(c => {
+        // V5.4：按 updatedAt 降序排（最新活跃会话在表格最上面，符合 activity feed 习惯）
+        const sorted = list.slice().sort((a, b) => {
+            const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+            const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+            return tb - ta;
+        });
+        const rows = sorted.map(c => {
             const deleted = c.deletedAt ? new Date(c.deletedAt).toLocaleString('zh-CN') : '-';
+            const lastActive = c.updatedAt ? new Date(c.updatedAt).toLocaleString('zh-CN') : '-';
             const cleaned = c.contentCleaned ? '<span class="type-badge USER" style="background: #d1fae5; color: #065f46;">已清理</span>' : '';
             const stateTag = c.deletedAt ? '<span class="type-badge USER" style="background: #fee2e2; color: #991b1b;">已软删</span>' : '<span class="type-badge ADMIN">正常</span>';
             return `<tr data-username="${escapeHtml(c.username)}" data-conv="${escapeHtml(c.conversationId)}">
@@ -140,14 +147,14 @@
                 <td>${escapeHtml(c.preview || '')}</td>
                 <td>${stateTag}</td>
                 <td>${cleaned}</td>
+                <td>${lastActive}</td>
                 <td>${deleted}</td>
-                <td>${c.contentCleaned ? '已清理' : '-'}</td>
             </tr>`;
         }).join('');
         listContainer.innerHTML = `
             <table class="user-table">
                 <thead>
-                    <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>内容</th><th>删除时间</th></tr>
+                    <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>内容</th><th>最后活跃</th><th>删除时间</th></tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>`;

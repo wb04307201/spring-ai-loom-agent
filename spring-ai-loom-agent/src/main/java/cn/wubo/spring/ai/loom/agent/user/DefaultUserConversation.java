@@ -149,22 +149,27 @@ public class DefaultUserConversation implements IUserConversation {
     @Override
     public List<AdminConversationView> adminListByUsername(String username) {
         return jdbcTemplate.query(
-                "select uc.conversation_id, uc.username, uc.deleted_at, uc.content_cleaned " +
-                        "from user_conversation uc where uc.username = ? order by uc.deleted_at desc nulls first",
+                "select uc.conversation_id, uc.username, uc.deleted_at, uc.content_cleaned, " +
+                        "uc.created_at, uc.updated_at " +
+                        "from user_conversation uc where uc.username = ? " +
+                        "order by uc.updated_at desc",
                 (rs, rowNum) -> {
                     String convId = rs.getString("conversation_id");
                     Instant deletedAt = toInstant(rs.getTimestamp("deleted_at"));
                     Boolean cleaned = rs.getBoolean("content_cleaned");
                     String preview = cleaned ? "(内容已清理)" : buildPreview(convId);
+                    Instant createdAt = toInstant(rs.getTimestamp("created_at"));
+                    Instant updatedAt = toInstant(rs.getTimestamp("updated_at"));
                     return new AdminConversationView(convId, rs.getString("username"),
-                            null, preview, null, deletedAt, cleaned);
+                            null, preview, createdAt, updatedAt, deletedAt, cleaned);
                 }, username);
     }
 
     @Override
     public List<AdminConversationView> listAllCleanable() {
         return jdbcTemplate.query(
-                "select conversation_id, username, deleted_at, content_cleaned " +
+                "select conversation_id, username, deleted_at, content_cleaned, " +
+                        "created_at, updated_at " +
                         "from user_conversation where content_cleaned = false " +
                         "order by username, conversation_id",
                 (rs, rowNum) -> {
@@ -176,7 +181,8 @@ public class DefaultUserConversation implements IUserConversation {
                             rs.getString("username"),
                             null,
                             preview,
-                            null,
+                            toInstant(rs.getTimestamp("created_at")),
+                            toInstant(rs.getTimestamp("updated_at")),
                             deletedAt,
                             rs.getBoolean("content_cleaned"));
                 });

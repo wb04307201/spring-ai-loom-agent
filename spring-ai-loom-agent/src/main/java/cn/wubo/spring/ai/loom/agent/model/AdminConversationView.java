@@ -11,6 +11,7 @@ public record AdminConversationView(
         String nickname,
         String preview,
         Instant createdAt,
+        Instant updatedAt,  /* V5.4：最后活跃时间 */
         Instant deletedAt,
         Boolean contentCleaned
 ) {
