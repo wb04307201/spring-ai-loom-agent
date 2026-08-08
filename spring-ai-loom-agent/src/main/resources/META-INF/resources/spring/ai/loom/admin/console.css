@@ -238,7 +238,8 @@ body {
     background: var(--bg-primary, #fff);
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-    overflow-x: auto;  /* V5.4：内容超出时横向滚动而不是撑爆父容器 */
+    overflow: auto;  /* V5.4：横/纵都滚动而不是撑爆 */
+    max-height: 70vh;  /* V5.4：限制高度 + 内部滚动，长列表不撑页面 */
 }
 
 table.user-table {
@@ -250,13 +251,14 @@ table.user-table {
 }
 
 .user-table th, .user-table td {
-    padding: 12px 16px;
+    padding: 6px 12px;  /* V5.4 12 → 6 紧凑：长列表一屏多看几行 */
     text-align: left;
     border-bottom: 1px solid var(--border-color, #e2e8f0);
-    max-width: 300px;  /* V5.4：单列最大宽度防止 preview/状态/时间撑爆 */
+    max-width: 300px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 13px;  /* 14 → 13 略小 */
 }
 
 .user-table td:nth-child(2) { max-width: 400px; }  /* preview 列放宽点 */
