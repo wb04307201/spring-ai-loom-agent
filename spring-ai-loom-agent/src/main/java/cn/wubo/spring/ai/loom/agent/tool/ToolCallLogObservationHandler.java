@@ -27,7 +27,8 @@ import java.util.UUID;
  * </ul>
  */
 @Slf4j
-@Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "spring.ai.loom.agent.tool-observation.enabled", havingValue = "true")
+@org.springframework.stereotype.Component
 public class ToolCallLogObservationHandler implements ObservationHandler<ToolCallingObservationContext> {
 
     private final IToolCallLogRepository repository;

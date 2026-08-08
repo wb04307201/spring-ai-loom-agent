@@ -8,7 +8,7 @@ import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.tool.ToolCallbackProvider;
 
@@ -57,7 +57,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private static final Logger log = LoggerFactory.getLogger(DefaultSubTaskExecutor.class);
 
     private final ChatClient chatClient;
-    private final MessageChatMemoryAdvisor memoryAdvisor;
+    private final org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor;
     private final ExecutorService executor;
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
@@ -67,7 +67,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private final ConcurrentHashMap<String, Future<?>> activeFutures = new ConcurrentHashMap<>();
 
     public DefaultSubTaskExecutor(ChatClient chatClient,
-                                  MessageChatMemoryAdvisor memoryAdvisor,
+                                  BaseChatMemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
                                   IMcp mcp,
                                   List<IEmbedTool> embedTools,

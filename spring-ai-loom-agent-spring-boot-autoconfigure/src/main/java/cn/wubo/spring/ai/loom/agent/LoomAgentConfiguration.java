@@ -265,11 +265,11 @@ public class LoomAgentConfiguration {
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
         public ChatClient chatClient(ChatModel chatModel,
-                                     @Qualifier("messageChatMemoryAdvisor") MessageChatMemoryAdvisor messageChatMemoryAdvisor,
+                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor,
                                      LoomAgentProperties properties) {
             ChatClient.Builder builder = ChatClient.builder(chatModel);
             if (properties.getDefaultSystem() != null) builder.defaultSystem(properties.getDefaultSystem());
-            builder.defaultAdvisors(messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
+            builder.defaultAdvisors((org.springframework.ai.chat.client.advisor.api.Advisor) messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
                     new SimpleLoggerAdvisor() // logger advisor
             );
             return builder.build();
@@ -286,8 +286,11 @@ public class LoomAgentConfiguration {
          * 子任务每次都被 fail,history 永远为空。
          */
         @Bean
-        public MessageChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
-            return MessageChatMemoryAdvisor.builder(chatMemory).build();
+        // V5.4 P9：返回自定义 LastChunkMessageChatMemoryAdvisor（只在流式最后一个 chunk
+        // 触发 chatMemory.add），替代 Spring AI 默认 MessageChatMemoryAdvisor（每个 chunk 都写
+        // → chat_memory TOOL 消息多次重复）。
+        public org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
+            return new cn.wubo.spring.ai.loom.agent.memory.LastChunkMessageChatMemoryAdvisor(chatMemory, 0);
         }
 
         @ConditionalOnMissingBean(IChat.class)
@@ -715,7 +718,7 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
                 @Qualifier("chatClient") ChatClient chatClient,
-                @Qualifier("messageChatMemoryAdvisor") MessageChatMemoryAdvisor memoryAdvisor,
+                @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
                 cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
                 // Lazy lookup: the executor ALSO passes a cancel hook back to
