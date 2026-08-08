@@ -409,6 +409,8 @@ table.user-table {
     align-items: center;
     gap: 12px;
     font-size: 12px;
+    text-decoration: none;  /* V5.4：bar-row 包了 <a>，去掉下划线 */
+    color: inherit;
 }
 
 .bar-label {

@@ -57,11 +57,12 @@
         const max = Math.max(1, ...list.map(r => r.totalTokens));
         barChart.innerHTML = list.map(r => {
             const pct = (r.totalTokens / max * 100).toFixed(1);
-            return `<div class="bar-row">
+            // V5.4：整行包 <a>，可点击跳 user.html
+            return `<a class="bar-row" href="user.html?username=${encodeURIComponent(r.username)}">
                 <div class="bar-label">${escapeHtml(r.username)}</div>
                 <div class="bar-track"><div class="bar-fill" style="width: ${pct}%"></div></div>
                 <div class="bar-value">${r.totalTokens.toLocaleString()}</div>
-            </div>`;
+            </a>`;
         }).join('');
     }
 
