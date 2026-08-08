@@ -138,23 +138,29 @@
             return tb - ta;
         });
         const rows = sorted.map(c => {
-            const deleted = c.deletedAt ? new Date(c.deletedAt).toLocaleString('zh-CN') : '-';
+            const created = c.createdAt ? new Date(c.createdAt).toLocaleString('zh-CN') : '-';
             const lastActive = c.updatedAt ? new Date(c.updatedAt).toLocaleString('zh-CN') : '-';
-            const cleaned = c.contentCleaned ? '<span class="type-badge USER" style="background: #d1fae5; color: #065f46;">已清理</span>' : '';
-            const stateTag = c.deletedAt ? '<span class="type-badge USER" style="background: #fee2e2; color: #991b1b;">已软删</span>' : '<span class="type-badge ADMIN">正常</span>';
+            // V5.4：3 态合并为单一 state badge（已软删 / 已清理 / 正常）
+            let stateTag;
+            if (c.deletedAt) {
+                stateTag = '<span class="type-badge USER" style="background: #fee2e2; color: #991b1b;">已软删</span>';
+            } else if (c.contentCleaned) {
+                stateTag = '<span class="type-badge USER" style="background: #d1fae5; color: #065f46;">已清理</span>';
+            } else {
+                stateTag = '<span class="type-badge ADMIN">正常</span>';
+            }
             return `<tr data-username="${escapeHtml(c.username)}" data-conv="${escapeHtml(c.conversationId)}">
                 <td><a class="user-link" href="conversation.html?id=${encodeURIComponent(c.conversationId)}&username=${encodeURIComponent(username)}">${escapeHtml(c.conversationId.substring(0, 8))}…</a></td>
                 <td>${escapeHtml(c.preview || '')}</td>
                 <td>${stateTag}</td>
-                <td>${cleaned}</td>
+                <td>${created}</td>
                 <td>${lastActive}</td>
-                <td>${deleted}</td>
             </tr>`;
         }).join('');
         listContainer.innerHTML = `
             <table class="user-table">
                 <thead>
-                    <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>内容</th><th>最后活跃</th><th>删除时间</th></tr>
+                    <tr><th>会话 ID</th><th>预览</th><th>状态</th><th>创建</th><th>最后活跃</th></tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>`;
