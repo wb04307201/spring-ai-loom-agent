@@ -82,9 +82,37 @@
             ['创建时间', fmtTs(meta.createdAt)],
             ['最后活跃', fmtTs(meta.updatedAt)],
         ];
+        // 增强：底部加 消息数 / 总耗时 / 平均间隔 摘要行
+        const summaryHtml = '<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color, #e2e8f0); display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-size: 12px;">' +
+            '<div><span style="color: var(--text-muted);">消息数：</span><strong id="meta-msg-count">-</strong></div>' +
+            '<div><span style="color: var(--text-muted);">总耗时：</span><strong id="meta-duration">-</strong></div>' +
+            '<div><span style="color: var(--text-muted);">平均间隔：</span><strong id="meta-avg">-</strong></div>' +
+            '</div>';
         metaContent.innerHTML = '<table class="conv-meta-table"><tbody>' +
             rows.map(([k, v]) => '<tr><th>' + escapeHtml(k) + '</th><td>' + escapeHtml(v) + '</td></tr>').join('') +
-            '</tbody></table>';
+            '</tbody></table>' + summaryHtml;
+    }
+
+    function updateMetaSummary() {
+        const userMsgs = allEvents.filter(e => e.type === 'USER').length;
+        const asstMsgs = allEvents.filter(e => e.type === 'ASSISTANT').length;
+        const total = userMsgs + asstMsgs;
+        const countEl = document.getElementById('meta-msg-count');
+        if (countEl) countEl.textContent = `${total} 条 (用户 ${userMsgs} / 助手 ${asstMsgs})`;
+        // 总耗时 = 最后一条事件 - 第一条事件
+        const durationEl = document.getElementById('meta-duration');
+        const avgEl = document.getElementById('meta-avg');
+        if (allEvents.length >= 2) {
+            const first = new Date(allEvents[0].ts).getTime();
+            const last = new Date(allEvents[allEvents.length - 1].ts).getTime();
+            const durMs = last - first;
+            const durStr = durMs < 60000 ? `${Math.round(durMs / 1000)}s` : `${Math.round(durMs / 60000)}m${Math.round((durMs % 60000) / 1000)}s`;
+            if (durationEl) durationEl.textContent = durStr;
+            if (avgEl) avgEl.textContent = total > 1 ? `${Math.round(durMs / (total - 1) / 1000)}s` : '-';
+        } else {
+            if (durationEl) durationEl.textContent = '-';
+            if (avgEl) avgEl.textContent = '-';
+        }
     }
 
     function renderStats(stats) {
@@ -109,9 +137,16 @@
     }
 
     function render() {
+        updateMetaSummary();
         const filtered = allEvents.filter(matchesFilter);
         if (filtered.length === 0) {
-            flowContainer.innerHTML = '<div class="empty-state">无匹配事件</div>';
+            // V5.4：友好空状态 — 区分两种情况
+            const hint = allEvents.length === 0
+                ? '这条对话还没有任何事件 — 试发条消息看看？'
+                : '当前筛选条件下没有事件 — 调整复选框或搜索关键词';
+            flowContainer.innerHTML = '<div class="empty-state" style="padding: 40px 16px; color: var(--text-muted); font-size: 14px;">' +
+                '<div style="font-size: 32px; margin-bottom: 12px;">📭</div>' +
+                '<div>' + escapeHtml(hint) + '</div></div>';
             flowPager.style.display = 'none';
             return;
         }
@@ -148,7 +183,13 @@
                 icon = '🔧';
                 let argsHtml = '';
                 if (d.args) {
-                    argsHtml = '<details class="flow-args"><summary>参数</summary><pre>' + escapeHtml(d.args) + '</pre></details>';
+                    // V5.4：尝试 JSON 美化 args，失败回退到原始字符串
+                    let prettyArgs = d.args;
+                    try {
+                        const obj = JSON.parse(d.args);
+                        prettyArgs = JSON.stringify(obj, null, 2);
+                    } catch (e) { /* 不是 JSON，原样展示 */ }
+                    argsHtml = '<details class="flow-args"><summary>参数</summary><pre>' + escapeHtml(prettyArgs) + '</pre></details>';
                 }
                 body = '<div class="flow-event-name">' + escapeHtml(d.name || '') + '</div>' +
                     '<div class="flow-meta">id: ' + escapeHtml(d.id || '') + '</div>' +
