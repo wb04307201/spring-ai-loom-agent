@@ -5,6 +5,7 @@ import cn.wubo.spring.ai.loom.agent.token.ChatUsageService;
 import cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +35,7 @@ import java.util.Set;
  * <p>事件按 ts 升序合并后分页。{@code types} 参数可过滤事件类型。
  */
 @Service
+@Slf4j
 public class ConversationFlowService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -67,13 +69,24 @@ public class ConversationFlowService {
 
         List<Event> all = new ArrayList<>();
         if (types.contains("USER") || types.contains("ASSISTANT") || types.contains("TOOL_CALL") || types.contains("TOOL_RESULT")) {
-            all.addAll(extractFromChatMemory(conversationId, username, types));
+            List<Event> evs = extractFromChatMemory(conversationId, username, types);
+            log.info("V5.4 P2 extractFromChatMemory: {} events", evs.size());
+            all.addAll(evs);
         }
+        // V5.4 P2 修复：tool_call_log 里的工具调用（V5.3 observation 写入）没在事件流里 — 从这里读
+        if (types.contains("TOOL_CALL")) {
+            List<Event> tc = loadToolCalls(conversationId);
+            log.info("V5.4 P2 loadToolCalls: {} events, all.size() before addAll={}", tc.size(), all.size());
+            all.addAll(tc);
+            log.info("V5.4 P2 after addAll loadToolCalls: all.size()={}", all.size());
+        }
+        if (types.contains("TOOL_RESULT")) all.addAll(loadToolResults(conversationId));
         if (types.contains("SUBTASK")) all.addAll(loadSubtasks(username, conversationId));
         if (types.contains("SCHEDULE")) all.addAll(loadSchedules(username, conversationId));
 
         all.sort(Comparator.comparing(Event::ts));
         int total = all.size();
+        log.info("V5.4 P2 flow({}) all.size()={} types={}", conversationId, total, types);
         int fromIdx = Math.min(page * size, total);
         int toIdx = Math.min(fromIdx + size, total);
         List<Event> pageEvents = all.subList(fromIdx, toIdx);
@@ -291,6 +304,60 @@ public class ConversationFlowService {
             out.add(new Event("SUBTASK", java.time.Instant.ofEpochMilli(r.startedAt()), data));
         }
         return out;
+    }
+
+    /* V5.4 P2 修复：从 loom_tool_call_log 读 tool_call 事件（V5.3 observation 写入的）。
+       之前 conversation.html 的 tool_call 事件都从 chat_memory 来（type=TOOL），
+       但 V5.3 写的是 loom_tool_call_log，chat_memory 里没有这些行，所以事件流空。
+
+       ⚠️ V5.4 P2 第二轮修复：第一次实现里调 jdbcTemplate.query(sql, rowMapper, args) 但忽略返回值，
+       返回的永远是空 List——RowMapper 被调用 N 次但每行对象被 GC。修法：直接接住返回值。
+       （debug log 里能看到 "15 events" 是 RowMapper 调用次数，但 API 返回 0 个事件。） */
+    private List<Event> loadToolCalls(String conversationId) {
+        log.info("V5.4 P2 loadToolCalls query for convId='{}' length={}", conversationId, conversationId == null ? 0 : conversationId.length());
+        try {
+            List<Event> events = jdbcTemplate.query(
+                    "select tool_call_id, tool_name, arguments_json, created_at " +
+                            "from loom_tool_call_log where conversation_id = ? order by created_at",
+                    (rs, n) -> {
+                        Map<String, Object> data = new HashMap<>();
+                        data.put("id", rs.getString("tool_call_id"));
+                        data.put("name", rs.getString("tool_name"));
+                        data.put("args", rs.getString("arguments_json"));
+                        data.put("source", "tool_call_log");
+                        return new Event("TOOL_CALL", rs.getTimestamp("created_at").toInstant(), data);
+                    },
+                    conversationId);
+            log.info("loadToolCalls({}): {} events", conversationId, events.size());
+            return events;
+        } catch (Exception e) {
+            log.warn("loadToolCalls failed for {}: {}", conversationId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<Event> loadToolResults(String conversationId) {
+        // 同 loadToolCalls 的修复 — 接住 jdbcTemplate.query 的返回值
+        try {
+            return jdbcTemplate.query(
+                    "select tool_call_id, tool_name, result_text, result_is_error, created_at, duration_ms " +
+                            "from loom_tool_call_log where conversation_id = ? order by created_at",
+                    (rs, n) -> {
+                        Map<String, Object> data = new HashMap<>();
+                        data.put("id", rs.getString("tool_call_id"));
+                        data.put("name", rs.getString("tool_name"));
+                        data.put("result", rs.getString("result_text"));
+                        data.put("isError", rs.getBoolean("result_is_error"));
+                        long dur = rs.getLong("duration_ms");
+                        if (!rs.wasNull()) data.put("durationMs", dur);
+                        data.put("source", "tool_call_log");
+                        return new Event("TOOL_RESULT", rs.getTimestamp("created_at").toInstant(), data);
+                    },
+                    conversationId);
+        } catch (Exception e) {
+            log.warn("loadToolResults failed for {}: {}", conversationId, e.getMessage());
+            return List.of();
+        }
     }
 
     private List<Event> loadSchedules(String username, String conversationId) {
