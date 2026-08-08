@@ -50,26 +50,27 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
         return id == null ? "" : id.toString();
     }
 
+    // V5.4 P10：用 ThreadLocal 传递 UserMessage（ChatClientRequest.context 实际是不可变 Map，
+    // put 后 adviseStream 取到 null —— 上一版的 bug）。ThreadLocal 跨 before/after 边界稳定。
+    private static final ThreadLocal<org.springframework.ai.chat.messages.Message> USER_MESSAGE_HOLDER = new ThreadLocal<>();
+
     @Override
     public ChatClientRequest before(ChatClientRequest request, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
-        // 把 UserMessage 存到 context，让 adviseStream 流式路径最后一次写 memory 时能取到。
-        // Spring AI MessageChatMemoryAdvisor 把 UserMessage 通过 prompt.mutate 注入到请求中。
-        // 这里我们不修改 prompt（避免与原逻辑冲突），仅把 UserMessage 引用存 context。
+        // 把 UserMessage 存到 ThreadLocal，让 adviseStream 流式路径最后一次写 memory 时能取到。
         try {
             java.util.List<org.springframework.ai.chat.messages.Message> instructions = request.prompt().getInstructions();
             if (instructions != null && !instructions.isEmpty()) {
-                org.springframework.ai.chat.messages.Message userMessage = instructions.get(instructions.size() - 1);
-                // 存到 context（可变的 HashMap）
-                if (request.context() instanceof java.util.Map) {
-                    @SuppressWarnings("unchecked")
-                    java.util.Map<String, Object> mutableContext = (java.util.Map<String, Object>) request.context();
-                    mutableContext.put("V5.4_P9_user_message", userMessage);
-                }
+                USER_MESSAGE_HOLDER.set(instructions.get(instructions.size() - 1));
             }
         } catch (Exception e) {
-            log.debug("V5.4 P9 LastChunkAdvisor.before put user_message failed: {}", e.getMessage());
+            log.debug("V5.4 P10 LastChunkAdvisor.before set user_message failed: {}", e.getMessage());
         }
         return request;
+    }
+
+    /** 测试/Cleanup 入口：清空 ThreadLocal（正常调用路径不依赖，保留兜底） */
+    public static void clearUserMessageHolder() {
+        USER_MESSAGE_HOLDER.remove();
     }
 
     @Override
@@ -101,6 +102,9 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
                         log.debug("V5.4 P9 LastChunkAdvisor wrote memory once for conv={}, total chunks={}", conversationId, list.size());
                     } catch (Exception e) {
                         log.warn("V5.4 P9 LastChunkAdvisor add to memory failed for conv={}: {}", conversationId, e.getMessage());
+                    } finally {
+                        // V5.4 P10：清理 ThreadLocal 避免内存泄漏 + 跨请求污染
+                        USER_MESSAGE_HOLDER.remove();
                     }
                     return Flux.fromIterable(list);
                 });
@@ -118,14 +122,16 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
     }
 
     private org.springframework.ai.chat.messages.Message extractUserMessage(Map<String, Object> context) {
-        // V5.4 P9：context 中存了 "V5.4_P9_user_message" (本类 before() 注入)
-        Object u = context.get("V5.4_P9_user_message");
-        if (u instanceof org.springframework.ai.chat.messages.Message m) return m;
-        // 兼容 Spring AI 1.1.7 的实际 key 名
+        // V5.4 P10：优先从 ThreadLocal 取（跨 before/after 边界稳定）
+        org.springframework.ai.chat.messages.Message u = USER_MESSAGE_HOLDER.get();
+        if (u != null) return u;
+        // 兼容 Spring AI 1.1.7 的实际 key 名（context 可能是可变的）
         Object u2 = context.get("user_message");
         if (u2 instanceof org.springframework.ai.chat.messages.Message m2) return m2;
         Object u3 = context.get("USER_MESSAGE");
         if (u3 instanceof org.springframework.ai.chat.messages.Message m3) return m3;
+        Object u4 = context.get("V5.4_P9_user_message");
+        if (u4 instanceof org.springframework.ai.chat.messages.Message m4) return m4;
         return null;
     }
 }
