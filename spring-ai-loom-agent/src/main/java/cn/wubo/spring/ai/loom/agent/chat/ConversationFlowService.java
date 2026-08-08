@@ -106,11 +106,10 @@ public class ConversationFlowService {
         long subtaskCount = jdbcTemplate.queryForObject(
                 "select count(*) from loom_subtask_history where username = ? and conversation_id = ?",
                 Long.class, username, conversationId);
-        // 定时任务执行数
+        // V5.4 P1 修复：定时任务声明数（之前查 execution 触发次数，新创建的 schedule 还没执行 → 0）
         long scheduleCount = jdbcTemplate.queryForObject(
-                "select count(*) from loom_schedule_execution e " +
-                        "join loom_scheduled_task t on t.task_name = e.task_name " +
-                        "where t.username = ? and t.conversation_id = ?",
+                "select count(*) from loom_scheduled_task " +
+                        "where username = ? and conversation_id = ?",
                 Long.class, username, conversationId);
         // 错误数（tool 返回值含 error / subtask 失败）
         long errorCount = jdbcTemplate.queryForObject(
