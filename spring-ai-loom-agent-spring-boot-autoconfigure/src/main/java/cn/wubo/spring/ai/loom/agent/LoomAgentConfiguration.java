@@ -327,7 +327,7 @@ public class LoomAgentConfiguration {
             private final IChat chat;
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
             private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
-            private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
+            // V5.4 P7：tool_call_log 唯一写入入口是 LoggingToolCallback — SseController 不再写
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
             public SseEmitter stream(@RequestBody ChatRequestRecord chatRecord, HttpServletRequest request) {
@@ -400,24 +400,10 @@ public class LoomAgentConfiguration {
                                             conversationId, username,
                                             u.getPromptTokens(), u.getCompletionTokens(), u.getTotalTokens());
                                 }
-                                // V5.2：从 ChatResponse.getResult().getOutput().getToolCalls() 抓 tool call 信息
-                                // 写到 loom_tool_call_log（缺失这段导致 tool_call 数据全 0）
-                                var toolCalls = chatResponse.getResult().getOutput().getToolCalls();
-                                if (toolCalls != null) {
-                                    log.info("V5.2 toolCalls size: conv={} size={}", conversationId, toolCalls.size());
-                                    for (var tc : toolCalls) {
-                                        try {
-                                            String id = tc.id();
-                                            String name = tc.name();
-                                            String args = tc.arguments() == null ? "" : tc.arguments();
-                                            toolCallLogRepository.save(new cn.wubo.spring.ai.loom.agent.model.ToolCallLog(
-                                                    null, conversationId, username, id, name, args, null, false, null, java.time.Instant.now()));
-                                            log.info("V5.2 saveToolCall OK: conv={} tool={}", conversationId, name);
-                                        } catch (Exception ex) {
-                                            log.warn("saveToolCall 失败: {}", ex.getMessage());
-                                        }
-                                    }
-                                }
+                                // V5.4 P7：tool_call_log 唯一入口是 LoggingToolCallback.call()。
+                                // 之前 SseController 在 stream chunk 里提前抓 chatResponse.getResult().getOutput().getToolCalls()
+                                // 也写一行（result=null），加上 DashScope 流式 chunk 重复 emit 同一 tool_call_id，
+                                // 导致 1 次真实工具调用 → 4-8 行重复 log。删除这段，只保留 callback 入口。
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }

@@ -658,6 +658,22 @@ table.user-table {
    - V5.4 P6 移除"紧凑"和"全屏"按钮（元数据/统计已默认折叠进 details，
    - 事件流区默认 75vh，无需"全屏"再隐藏 meta） */
 
+/* V5.4 P7：轮次分隔标记（"─── 第 N 轮 ───"） */
+.flow-round-divider {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted, #64748b);
+    padding: 12px 0 6px 0;
+    margin: 6px 0 2px 0;
+    border-top: 1px dashed var(--border-color, #e2e8f0);
+    letter-spacing: 0.05em;
+    user-select: none;
+}
+
+/* V5.4 P7：SCHEDULE_FIRE 紫色（区别于 SUBTASK 的橙色） */
+.flow-event-SCHEDULE_FIRE { border-left: 3px solid #a855f7; padding-left: 5px; }
+.flow-event-SCHEDULE_FIRE .flow-type { background: #f3e8ff; color: #6b21a8; }
+
 .flow-event {
     display: grid;
     grid-template-columns: 28px 120px 70px 1fr;

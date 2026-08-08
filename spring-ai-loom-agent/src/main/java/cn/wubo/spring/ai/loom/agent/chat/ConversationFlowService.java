@@ -64,7 +64,7 @@ public class ConversationFlowService {
     public record FlowResult(Meta meta, Stats stats, List<Event> events, int page, int size, long total, boolean hasMore) {}
 
     private static final Set<String> DEFAULT_TYPES = Set.of(
-            "USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "SUBTASK", "SCHEDULE", "SYSTEM");
+            "USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "SUBTASK", "SCHEDULE", "SCHEDULE_FIRE", "SYSTEM");
 
     public FlowResult flow(String conversationId, String username, int page, int size, Set<String> types) {
         if (types == null || types.isEmpty()) types = DEFAULT_TYPES;
@@ -110,8 +110,12 @@ public class ConversationFlowService {
             log.info("V5.4 P2 after addAll loadToolCalls: all.size()={}", all.size());
         }
         if (types.contains("TOOL_RESULT")) all.addAll(loadToolResults(conversationId));
-        if (types.contains("SUBTASK")) all.addAll(loadSubtasks(username, conversationId));
-        if (types.contains("SCHEDULE")) all.addAll(loadSchedules(username, conversationId));
+        // V5.4 P7：合并 SUBTASK + SCHEDULE 为 1 个 SCHEDULE_FIRE 事件
+        // 每次 schedule 触发 = 1 sub-task 启动 + 1 execution 记录，1:1 配对 (ts 几乎一致)。
+        // 前端只看到 1 个事件，含 prompt/result/status/taskName 等完整信息。
+        if (types.contains("SUBTASK") || types.contains("SCHEDULE") || types.contains("SCHEDULE_FIRE")) {
+            all.addAll(loadScheduleFires(username, conversationId));
+        }
 
         // V5.4 P5 B2：USER/ASSISTANT 的 ts 改用 user_conversation.createdAt / updatedAt。
         // 原 DB 时间戳 (SPRING_AI_CHAT_MEMORY.timestamp DEFAULT CURRENT_TIMESTAMP) 是 Spring AI 流式
@@ -338,7 +342,7 @@ public class ConversationFlowService {
     }
 
     private List<Event> loadSubtasks(String username, String conversationId) {
-        List<Event> out = new ArrayList<>();
+        // V5.4 P7：保留为底层方法（被 loadScheduleFires 调用），不直接生成 SUBTASK 事件。
         List<SubtaskRow> rows = jdbcTemplate.query(
                 "select subtask_id, prompt, status, started_at, finished_at, error_message, result_text " +
                         "from loom_subtask_history where username = ? and conversation_id = ? order by started_at",
@@ -351,6 +355,7 @@ public class ConversationFlowService {
                         rs.getString("error_message"),
                         rs.getString("result_text")),
                 username, conversationId);
+        List<Event> out = new ArrayList<>();
         for (SubtaskRow r : rows) {
             Map<String, Object> data = new HashMap<>();
             data.put("id", r.subtaskId());
@@ -421,7 +426,7 @@ public class ConversationFlowService {
     }
 
     private List<Event> loadSchedules(String username, String conversationId) {
-        // 每次 schedule 触发 = 一个 SCHEDULE 事件（task_name + fire time + result）
+        // V5.4 P7：保留为底层方法（被 loadScheduleFires 调用），不直接生成 SCHEDULE 事件。
         List<ScheduleRow> rows = jdbcTemplate.query(
                 "select t.task_name, t.prompt, e.fire_time, e.duration_ms, e.success, e.error_message " +
                         "from loom_scheduled_task t " +
@@ -445,6 +450,80 @@ public class ConversationFlowService {
             data.put("success", r.success());
             data.put("error", r.errorMessage());
             out.add(new Event("SCHEDULE", r.fireTime(), data));
+        }
+        return out;
+    }
+
+    /**
+     * V5.4 P7：合并 SUBTASK + SCHEDULE 为 1 个 SCHEDULE_FIRE 事件。
+     *
+     * <p>每次 schedule 触发都产生 1 条 {@code loom_subtask_history}（sub-task 启动）
+     * 和 1 条 {@code loom_schedule_execution}（执行记录），两者 timestamp 几乎一致（实测相差几毫秒）。
+     * 之前作为两个独立事件展示，用户看着像"两个独立事件"，分不清因果关系。
+     * 合并后：1 个 SCHEDULE_FIRE 事件 = 1 次 schedule 触发，含 taskName / sub-task prompt / result /
+     * status / 耗时 / 错误等完整信息。
+     */
+    private List<Event> loadScheduleFires(String username, String conversationId) {
+        // 1. 拉 schedule 触发记录
+        List<ScheduleRow> executions = jdbcTemplate.query(
+                "select t.task_name, t.prompt, e.fire_time, e.duration_ms, e.success, e.error_message " +
+                        "from loom_scheduled_task t " +
+                        "join loom_schedule_execution e on t.task_name = e.task_name " +
+                        "where t.username = ? and t.conversation_id = ? order by e.fire_time",
+                (rs, n) -> new ScheduleRow(
+                        rs.getString("task_name"),
+                        rs.getString("prompt"),
+                        rs.getTimestamp("fire_time") == null ? null : rs.getTimestamp("fire_time").toInstant(),
+                        rs.getLong("duration_ms"),
+                        rs.getBoolean("success"),
+                        rs.getString("error_message")),
+                username, conversationId);
+        // 2. 拉 sub-task 记录（按 started_at 排序）
+        List<SubtaskRow> subtasks = jdbcTemplate.query(
+                "select subtask_id, prompt, status, started_at, finished_at, error_message, result_text " +
+                        "from loom_subtask_history where username = ? and conversation_id = ? order by started_at",
+                (rs, n) -> new SubtaskRow(
+                        rs.getString("subtask_id"),
+                        rs.getString("prompt"),
+                        rs.getString("status"),
+                        rs.getLong("started_at"),
+                        rs.getLong("finished_at"),
+                        rs.getString("error_message"),
+                        rs.getString("result_text")),
+                username, conversationId);
+        // 3. 按 fire_time 接近度（±5 秒）配对
+        List<Event> out = new ArrayList<>();
+        for (ScheduleRow exec : executions) {
+            SubtaskRow matched = null;
+            if (exec.fireTime() != null) {
+                long fireMs = exec.fireTime().toEpochMilli();
+                for (SubtaskRow sub : subtasks) {
+                    if (matched != null) break;
+                    long subMs = sub.startedAt();
+                    if (Math.abs(subMs - fireMs) <= 5000) {
+                        matched = sub;
+                    }
+                }
+            }
+            Map<String, Object> data = new HashMap<>();
+            data.put("taskName", exec.taskName());
+            // shortName = 去掉 loom-sched-{user}-{convId}- 前缀
+            String tn = exec.taskName();
+            int lastDash = tn.lastIndexOf('-');
+            if (lastDash > 0) data.put("shortName", tn.substring(lastDash + 1));
+            else data.put("shortName", tn);
+            data.put("prompt", exec.prompt());
+            data.put("fireTime", exec.fireTime());
+            data.put("durationMs", exec.durationMs());
+            data.put("success", exec.success());
+            data.put("error", exec.errorMessage());
+            if (matched != null) {
+                data.put("subtaskId", matched.subtaskId());
+                data.put("subtaskStatus", matched.status());
+                data.put("subtaskResult", matched.resultText());
+                data.put("subtaskDurationMs", matched.finishedAt() - matched.startedAt());
+            }
+            out.add(new Event("SCHEDULE_FIRE", exec.fireTime(), data));
         }
         return out;
     }

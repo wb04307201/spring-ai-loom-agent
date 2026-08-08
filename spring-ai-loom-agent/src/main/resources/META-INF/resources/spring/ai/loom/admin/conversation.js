@@ -25,7 +25,7 @@
 // V5.4 P5 B4：按"逻辑时间"分组排序 — SYSTEM → USER → tool → ASSISTANT → 后续
 // 解决 DB 时间戳错位（chat_memory.timestamp 是流结束时刻，晚于真实 tool_call 时间），
 // 同时支持多轮对话（USER1 → tool → AS1 → USER2 → tool → AS2）按"轮"分组。
-const TYPE_PRIORITY = { SYSTEM: 0, USER: 1, TOOL_CALL: 2, TOOL_RESULT: 3, ASSISTANT: 4, SUBTASK: 5, SCHEDULE: 6 };
+const TYPE_PRIORITY = { SYSTEM: 0, USER: 1, TOOL_CALL: 2, TOOL_RESULT: 3, ASSISTANT: 4, SUBTASK: 5, SCHEDULE: 7, SCHEDULE_FIRE: 6 };
 
 function logicalSort(events) {
     // 第一步：按 (typePriority, ts) 全局排序，把 USER 排到 TOOL 之前
@@ -206,6 +206,16 @@ function logicalSort(events) {
             return;
         }
         flowContainer.innerHTML = filtered.map(renderEvent).join('');
+        // V5.4 P7：在每轮 USER 之前插一个分隔标记（"─── 第 N 轮 ───"）。
+        // 多轮对话清晰，LLM 思考阶段（USER → TOOL → ASSISTANT）以"轮"为单位呈现。
+        let userCount = 0;
+        flowContainer.querySelectorAll('.flow-event-USER').forEach(userEl => {
+            userCount++;
+            const divider = document.createElement('div');
+            divider.className = 'flow-round-divider';
+            divider.textContent = '─── 第 ' + userCount + ' 轮 ───';
+            userEl.parentNode.insertBefore(divider, userEl);
+        });
         flowPager.style.display = 'none';
         // V5.4：搜索高亮 — walk 文本节点，匹配处用 <mark> 包裹
         if (searchKeyword) highlightMatches(flowContainer, searchKeyword);
@@ -344,7 +354,28 @@ function logicalSort(events) {
                 body = '<div class="flow-event-name">' + escapeHtml(d.id || '') + '</div>' + subMeta + promptHtml + resultHtml + errorHtml;
                 break;
             }
+            case 'SCHEDULE_FIRE': {
+                // V5.4 P7：1 个事件 = 1 次 schedule 触发。含 sub-task + execution 全部信息。
+                icon = '⏰';
+                let sName = d.shortName || d.taskName || '';
+                let sHeader = '<div class="flow-event-name">⏰ ' + escapeHtml(sName) + ' 触发</div>';
+                let sMeta = '';
+                if (d.fireTime) sMeta += '<div class="flow-meta">触发: ' + fmtTs(d.fireTime) + '</div>';
+                if (d.durationMs != null) sMeta += '<div class="flow-meta">耗时: ' + d.durationMs + ' ms</div>';
+                if (d.success === false) sMeta += '<div class="flow-meta" style="color:var(--error-color);">⚠ 执行失败</div>';
+                if (d.subtaskStatus) sMeta += '<div class="flow-meta">子任务: ' + escapeHtml(d.subtaskStatus) + '</div>';
+                if (d.subtaskDurationMs != null && d.subtaskDurationMs > 0) sMeta += '<div class="flow-meta">子任务耗时: ' + d.subtaskDurationMs + ' ms</div>';
+                let sPrompt = '';
+                if (d.prompt) sPrompt = '<details class="flow-prompt"><summary>prompt</summary><pre>' + escapeHtml(d.prompt) + '</pre></details>';
+                let sResult = '';
+                if (d.subtaskResult) sResult = '<details class="flow-result"><summary>子任务返回值</summary><pre>' + escapeHtml(d.subtaskResult) + '</pre></details>';
+                let sError = '';
+                if (d.error) sError = '<details class="flow-error"><summary>error</summary><pre>' + escapeHtml(d.error) + '</pre></details>';
+                body = sHeader + sMeta + sPrompt + sResult + sError;
+                break;
+            }
             case 'SCHEDULE': {
+                // V5.4 P7：纯 SCHEDULE 事件（不带 SUBTASK）— 只在 filter 显示 SUBTASK 不显示 SCHEDULE_FIRE 时出现
                 icon = '⏰';
                 let sMeta = '';
                 if (d.taskName) sMeta += '<div class="flow-meta">任务: ' + escapeHtml(d.taskName) + '</div>';
