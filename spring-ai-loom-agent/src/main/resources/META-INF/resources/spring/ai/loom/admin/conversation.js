@@ -35,13 +35,17 @@ function logicalSort(events) {
         if (pa !== pb) return pa - pb;
         return new Date(a.ts).getTime() - new Date(b.ts).getTime();
     });
-    // 第二步：多轮对话分组 — 每个 USER 之后到下一个 USER 之前的 events 属该轮
+    // 第二步：多轮对话分组 — 每个 USER 之后到下一个 USER 之前的 events 属该轮。
+    // V5.4 P8 修复：第一轮 start = 0（不是 userIdx[0]）—— 第一个 USER 之前的事件（SYSTEM）
+    // 不属于任何"轮"，但应该保留在末尾前。
     const userIdx = [];
     byPriority.forEach((e, i) => { if (e.type === 'USER') userIdx.push(i); });
     if (userIdx.length <= 1) return byPriority;
     const rounds = userIdx.map((start, k) => {
+        // 第一轮从 0 开始（SYSTEM 等前置事件），后续轮从对应 USER 开始
+        const realStart = k === 0 ? 0 : start;
         const end = k + 1 < userIdx.length ? userIdx[k + 1] : byPriority.length;
-        return byPriority.slice(start, end);
+        return byPriority.slice(realStart, end);
     });
     return rounds.flat();
 }
