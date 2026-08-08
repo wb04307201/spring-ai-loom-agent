@@ -653,16 +653,32 @@ table.user-table {
     overflow-y: auto;
 }
 
-/* V5.4 紧凑模式：只显示内容主体，隐藏 thinking/args/result/details。
-   **保留 grid 布局**（不改成 inline），只压缩 padding + 隐藏 verbose 元数据。 */
-body.compact-mode .flow-event { padding: 6px 8px; font-size: 12px; }
+/* V5.4 紧凑模式：彻底改块布局，去掉 icon/time/type 列，content 占满宽
+   - grid → block，content 单列铺开
+   - USER/ASSISTANT 改用背景色 + 小左边框区分（不再用 3px 大色块）
+   - 默认隐藏所有 details 折叠区，用户可手动展开 */
+body.compact-mode .flow-event {
+    display: block;
+    padding: 6px 10px;
+    margin-bottom: 2px;
+    font-size: 13px;
+    border-bottom: 1px solid #f1f5f9;
+    border-radius: 4px;
+}
+body.compact-mode .flow-icon,
+body.compact-mode .flow-time,
+body.compact-mode .flow-type { display: none !important; }
 body.compact-mode .flow-thinking,
 body.compact-mode .flow-args,
 body.compact-mode .flow-result,
 body.compact-mode .flow-prompt,
 body.compact-mode .flow-error,
 body.compact-mode .flow-meta { display: none !important; }
-body.compact-mode .flow-type { display: none; }  /* 紧凑模式去掉 type 标签 */
+body.compact-mode .flow-body { display: block; }
+/* 紧凑模式 USER/ASSISTANT 用背景色区分（替代原来的 3px 左边大色块） */
+body.compact-mode .flow-event-USER { background: #f8fafc; border-left: 2px solid #cbd5e1; }
+body.compact-mode .flow-event-ASSISTANT { background: #eff6ff; border-left: 2px solid #3b82f6; }
+body.compact-mode .flow-content { display: block; }
 
 /* V5.4 全屏模式：隐藏 meta + stats 卡，让 conversation 占满屏 */
 body.fullscreen-mode #meta-card,
