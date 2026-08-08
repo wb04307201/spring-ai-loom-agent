@@ -21,6 +21,30 @@
     if (username) backLink.href = `user.html?username=${encodeURIComponent(username)}`;
 
     const FLOW_SIZE = 500;  // V5.4 P3：默认拉 500 条覆盖长对话（之前 200 会截断 282+ event 的对话）
+
+// V5.4 P5 B4：按"逻辑时间"分组排序 — SYSTEM → USER → tool → ASSISTANT → 后续
+// 解决 DB 时间戳错位（chat_memory.timestamp 是流结束时刻，晚于真实 tool_call 时间），
+// 同时支持多轮对话（USER1 → tool → AS1 → USER2 → tool → AS2）按"轮"分组。
+const TYPE_PRIORITY = { SYSTEM: 0, USER: 1, TOOL_CALL: 2, TOOL_RESULT: 3, ASSISTANT: 4, SUBTASK: 5, SCHEDULE: 6 };
+
+function logicalSort(events) {
+    // 第一步：按 (typePriority, ts) 全局排序，把 USER 排到 TOOL 之前
+    const byPriority = events.slice().sort((a, b) => {
+        const pa = TYPE_PRIORITY[a.type] ?? 99;
+        const pb = TYPE_PRIORITY[b.type] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return new Date(a.ts).getTime() - new Date(b.ts).getTime();
+    });
+    // 第二步：多轮对话分组 — 每个 USER 之后到下一个 USER 之前的 events 属该轮
+    const userIdx = [];
+    byPriority.forEach((e, i) => { if (e.type === 'USER') userIdx.push(i); });
+    if (userIdx.length <= 1) return byPriority;
+    const rounds = userIdx.map((start, k) => {
+        const end = k + 1 < userIdx.length ? userIdx[k + 1] : byPriority.length;
+        return byPriority.slice(start, end);
+    });
+    return rounds.flat();
+}
     let allEvents = [];
     let currentTypes = new Set();
     let searchKeyword = '';
@@ -63,7 +87,7 @@
             metaEl.textContent = username ? `用户：${username} · ${shortId}…` : `${shortId}…`;
             renderMeta(meta);
             renderStats(data.stats);
-            allEvents = data.events || [];
+            allEvents = logicalSort(data.events || []);
             render();
             loadNav();
         } catch (e) {
@@ -227,8 +251,8 @@
         const isFull = document.body.classList.toggle('fullscreen-mode');
         const btn = document.getElementById('fullscreen-btn');
         btn.textContent = isFull ? '退出全屏' : '全屏';
-        // 全屏时增大 max-height 到 92vh
-        flowContainer.style.maxHeight = isFull ? '92vh' : '80vh';
+        // V5.4 P5：全屏时 max-height 92vh（默认已 75vh，无需全屏也能看大部分事件）
+        flowContainer.style.maxHeight = isFull ? '92vh' : '75vh';
     });
 
     function renderEvent(ev) {

@@ -23,21 +23,30 @@
     </header>
 
     <main class="admin-main">
-        <div class="stats-card" id="meta-card">
-            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">会话元数据</h3>
-            <div id="meta-content" style="font-size: 13px; line-height: 1.7; color: var(--text-primary, #1e293b);">加载中...</div>
-        </div>
-
-        <div class="stats-card">
-            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">调用统计</h3>
-            <div id="conv-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-                <div class="usage-stat"><div class="usage-stat-label">总 Token</div><div class="usage-stat-value" id="stat-total">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">调用次数</div><div class="usage-stat-value" id="stat-calls">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">工具调用</div><div class="usage-stat-value" id="stat-tools">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">子任务</div><div class="usage-stat-value" id="stat-subtasks">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">定时任务</div><div class="usage-stat-value" id="stat-schedules">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">错误</div><div class="usage-stat-value" id="stat-errors" style="color: var(--error-color, #ef4444);">-</div></div>
-            </div>
+        <!-- V5.4 P5 布局：元数据 + 调用统计合并到一个紧凑 row，默认折叠节省空间 -->
+        <div id="meta-card" class="stats-card" style="padding: 12px 16px;">
+            <details id="meta-details">
+                <summary style="cursor: pointer; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); user-select: none;">
+                    <span id="conv-title" style="font-size: 14px; color: var(--text-primary); font-weight: 500;">会话详情</span>
+                    <span style="font-size: 12px;">·</span>
+                    <span id="conv-meta" style="font-size: 12px;">-</span>
+                    <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);">▾ 展开元数据</span>
+                </summary>
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color, #e2e8f0); display: grid; grid-template-columns: 2fr 3fr; gap: 24px;">
+                    <div id="meta-content" style="font-size: 13px; line-height: 1.7;">加载中...</div>
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">调用统计</div>
+                        <div id="conv-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                            <div class="usage-stat"><div class="usage-stat-label">总 Token</div><div class="usage-stat-value" id="stat-total">-</div></div>
+                            <div class="usage-stat"><div class="usage-stat-label">调用次数</div><div class="usage-stat-value" id="stat-calls">-</div></div>
+                            <div class="usage-stat"><div class="usage-stat-label">工具调用</div><div class="usage-stat-value" id="stat-tools">-</div></div>
+                            <div class="usage-stat"><div class="usage-stat-label">子任务</div><div class="usage-stat-value" id="stat-subtasks">-</div></div>
+                            <div class="usage-stat"><div class="usage-stat-label">定时任务</div><div class="usage-stat-value" id="stat-schedules">-</div></div>
+                            <div class="usage-stat"><div class="usage-stat-label">错误</div><div class="usage-stat-value" id="stat-errors" style="color: var(--error-color, #ef4444);">-</div></div>
+                        </div>
+                    </div>
+                </div>
+            </details>
         </div>
 
         <div class="admin-toolbar" style="position: sticky; top: 60px; z-index: 10; background: var(--bg, #f8fafc); padding: 12px 0; border-bottom: 1px solid var(--border-color, #e2e8f0);">
@@ -58,7 +67,8 @@
             </div>
         </div>
 
-        <div id="flow-container" class="flow-container">
+        <!-- V5.4 P5：事件流区放大 — 默认 75vh，让用户无需全屏就能看完大部分事件 -->
+        <div id="flow-container" class="flow-container" style="max-height: 75vh;">
             <div class="loading-indicator">加载中...</div>
         </div>
 

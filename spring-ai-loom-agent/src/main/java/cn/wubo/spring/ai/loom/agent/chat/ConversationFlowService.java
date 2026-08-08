@@ -113,6 +113,37 @@ public class ConversationFlowService {
         if (types.contains("SUBTASK")) all.addAll(loadSubtasks(username, conversationId));
         if (types.contains("SCHEDULE")) all.addAll(loadSchedules(username, conversationId));
 
+        // V5.4 P5 B2：USER/ASSISTANT 的 ts 改用 user_conversation.createdAt / updatedAt。
+        // 原 DB 时间戳 (SPRING_AI_CHAT_MEMORY.timestamp DEFAULT CURRENT_TIMESTAMP) 是 Spring AI 流式
+        // 处理"结束"时刻 — 不是用户发消息时刻。结果是 tool_call（10:50:20）反而早于 USER（10:50:23），
+        // 时间线视觉顺序颠倒。改为用 conversation.createdAt 作为 USER 时刻，
+        // conversation.updatedAt 作为最后一个 ASSISTANT 时刻。
+        if (meta.createdAt() != null) {
+            Instant firstUserTs = meta.createdAt();
+            for (int i = 0; i < all.size(); i++) {
+                if ("USER".equals(all.get(i).type())) {
+                    Event e = all.get(i);
+                    if (e.ts() != null && e.ts().isAfter(firstUserTs)) {
+                        all.set(i, new Event(e.type(), firstUserTs, e.data()));
+                    }
+                    firstUserTs = firstUserTs.plusMillis(1);  // 多轮对话时每条 USER +1ms 拉开
+                }
+            }
+        }
+        if (meta.updatedAt() != null) {
+            Instant lastAssistantTs = meta.updatedAt();
+            for (int i = all.size() - 1; i >= 0; i--) {
+                if ("ASSISTANT".equals(all.get(i).type())) {
+                    Event e = all.get(i);
+                    if (e.ts() != null && e.ts().isBefore(lastAssistantTs)) {
+                        all.set(i, new Event(e.type(), lastAssistantTs, e.data()));
+                    }
+                    lastAssistantTs = lastAssistantTs.minusMillis(1);  // 多轮 ASSISTANT 倒数
+                    break;  // 只改最后一个（用户感知的是对话的最终助手时刻）
+                }
+            }
+        }
+
         all.sort(Comparator.comparing(Event::ts));
         int total = all.size();
         log.info("V5.4 P2 flow({}) all.size()={} types={}", conversationId, total, types);
