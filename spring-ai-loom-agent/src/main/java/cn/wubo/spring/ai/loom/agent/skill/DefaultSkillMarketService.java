@@ -19,239 +19,236 @@ import java.util.List;
 @Component
 public class DefaultSkillMarketService implements ISkillMarketService {
 
-    private final JdbcTemplate jdbcTemplate;
+ private final JdbcTemplate jdbcTemplate;
 
-    public DefaultSkillMarketService(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-    }
+ public DefaultSkillMarketService(JdbcTemplate jdbcTemplate) {
+ this.jdbcTemplate = jdbcTemplate;
+ }
 
-    private MarketSkill mapMarketSkill(ResultSet rs, int rowNum) throws SQLException {
-        Timestamp reviewedAt = rs.getTimestamp("reviewed_at");
-        return new MarketSkill(
-                rs.getLong("id"),
-                rs.getString("name"),
-                rs.getString("description"),
-                rs.getString("content"),
-                rs.getString("version"),
-                rs.getString("author"),
-                rs.getString("status"),
-                rs.getTimestamp("submitted_at").toLocalDateTime(),
-                reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
-                rs.getString("reviewed_by"),
-                rs.getString("review_comment")
-        );
-    }
+ private MarketSkill mapMarketSkill(ResultSet rs, int rowNum) throws SQLException {
+ Timestamp reviewedAt = rs.getTimestamp("reviewed_at");
+ return new MarketSkill(
+ rs.getLong("id"),
+ rs.getString("name"),
+ rs.getString("description"),
+ rs.getString("content"),
+ rs.getString("author"),
+ rs.getString("status"),
+ rs.getTimestamp("submitted_at").toLocalDateTime(),
+ reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
+ rs.getString("reviewed_by"),
+ rs.getString("review_comment")
+ );
+ }
 
-    /* ===== 市场浏览 ===== */
+ /* ===== 市场浏览 ===== */
 
-    @Override
-    public List<MarketSkill> listApproved() {
-        return jdbcTemplate.query(
-                "SELECT * FROM market_skill WHERE status = 'APPROVED' ORDER BY author, name, version DESC",
-                this::mapMarketSkill);
-    }
+ @Override
+ public List<MarketSkill> listApproved() {
+ return jdbcTemplate.query(
+ "SELECT * FROM market_skill WHERE status = 'APPROVED' ORDER BY author, name",
+ this::mapMarketSkill);
+ }
 
-    @Override
-    public MarketSkill get(Long id) {
-        try {
-            return jdbcTemplate.queryForObject(
-                    "SELECT * FROM market_skill WHERE id = ?",
-                    this::mapMarketSkill, id);
-        } catch (EmptyResultDataAccessException e) {
-            throw new LoomAgentRuntimeException("Skill 不存在: id=" + id);
-        }
-    }
+ @Override
+ public MarketSkill get(Long id) {
+ try {
+ return jdbcTemplate.queryForObject(
+ "SELECT * FROM market_skill WHERE id = ?",
+ this::mapMarketSkill, id);
+ } catch (EmptyResultDataAccessException e) {
+ throw new LoomAgentRuntimeException("Skill 不存在: id=" + id);
+ }
+ }
 
-    @Override
-    public List<MarketSkill> listAllForAdmin() {
-        return jdbcTemplate.query(
-                "SELECT * FROM market_skill ORDER BY status, author, name, version DESC",
-                this::mapMarketSkill);
-    }
+ @Override
+ public List<MarketSkill> listAllForAdmin() {
+ // 移除 version 字段，排序按 author, name
+ return jdbcTemplate.query(
+ "SELECT * FROM market_skill ORDER BY author, name",
+ this::mapMarketSkill);
+ }
 
-    @Override
-    public List<MarketSkill> listPending() {
-        return jdbcTemplate.query(
-                "SELECT * FROM market_skill WHERE status = 'PENDING' ORDER BY submitted_at",
-                this::mapMarketSkill);
-    }
+ /* ===== 用户提交（移除 version） ===== */
 
-    /* ===== 用户提交 ===== */
+ @Override
+ @Transactional
+ public MarketSkill submit(String username, MarketSkillSubmitRequest req) {
+ if (req.name() == null || req.name().isBlank()) {
+ throw new LoomAgentRuntimeException("name 不能为空");
+ }
+ if (req.content() == null || req.content().isBlank()) {
+ throw new LoomAgentRuntimeException("content 不能为空");
+ }
+ // UPSERT（同一作者+name 只保留一行）+ 直接 APPROVED
+ Long existingId = null;
+ try {
+ existingId = jdbcTemplate.queryForObject(
+ "SELECT id FROM market_skill WHERE author = ? AND name = ? LIMIT 1",
+ Long.class, username, req.name());
+ } catch (org.springframework.dao.EmptyResultDataAccessException ignored) {}
+ Long marketId;
+ if (existingId != null) {
+ // UPDATE 内容 + 标记 APPROVED
+ jdbcTemplate.update(
+ "UPDATE market_skill SET description = ?, content = ?, status = 'APPROVED', " +
+ "reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?, review_comment = NULL WHERE id = ?",
+ req.description(), req.content(), username, existingId);
+ marketId = existingId;
+ } else {
+ jdbcTemplate.update(
+ "INSERT INTO market_skill (name, description, content, author, status, reviewed_at, reviewed_by) " +
+ "VALUES (?, ?, ?, ?, 'APPROVED', CURRENT_TIMESTAMP, ?)",
+ req.name(), req.description(), req.content(), username, username);
+ marketId = jdbcTemplate.queryForObject(
+ "SELECT MAX(id) FROM market_skill WHERE author = ? AND name = ?",
+ Long.class, username, req.name());
+ }
+ // 反写 author 自己的 user_skill.market_skill_id（用于 save() 反向同步 + 推送）
+ jdbcTemplate.update(
+ "UPDATE user_skill SET market_skill_id = ? WHERE username = ? AND name = ?",
+ marketId, username, req.name());
+ return get(marketId);
+ }
 
-    @Override
-    @Transactional
-    public MarketSkill submit(String username, MarketSkillSubmitRequest req) {
-        validateNameVersion(req.name(), req.version());
-        if (req.content() == null || req.content().isBlank()) {
-            throw new LoomAgentRuntimeException("content 不能为空");
-        }
-        Integer dup = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM market_skill WHERE author = ? AND name = ? AND version = ?",
-                Integer.class, username, req.name(), req.version());
-        if (dup != null && dup > 0) {
-            throw new LoomAgentRuntimeException("已存在同名同版本的提交：author=" + username
-                    + " name=" + req.name() + " version=" + req.version());
-        }
-        jdbcTemplate.update(
-                "INSERT INTO market_skill (name, description, content, version, author, status) " +
-                        "VALUES (?, ?, ?, ?, ?, 'PENDING')",
-                req.name(), req.description(), req.content(), req.version(), username);
-        Long id = jdbcTemplate.queryForObject(
-                "SELECT MAX(id) FROM market_skill WHERE author = ? AND name = ? AND version = ?",
-                Long.class, username, req.name(), req.version());
-        return get(id);
-    }
+ /* ===== admin 直接 CRUD（移除 version） ===== */
 
-    /* ===== admin 审批 ===== */
+ @Override
+ @Transactional
+ public MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req) {
+ if (req.name() == null || req.name().isBlank()) {
+ throw new LoomAgentRuntimeException("name 不能为空");
+ }
+ if (req.content() == null || req.content().isBlank()) {
+ throw new LoomAgentRuntimeException("content 不能为空");
+ }
+ String status = req.status() == null ? MarketSkill.STATUS_APPROVED : req.status();
+ Integer dup = jdbcTemplate.queryForObject(
+ "SELECT COUNT(*) FROM market_skill WHERE author = ? AND name = ?",
+ Integer.class, adminUsername, req.name());
+ if (dup != null && dup > 0) {
+ throw new LoomAgentRuntimeException("已存在同名 Skill：author=" + adminUsername + " name=" + req.name());
+ }
+ jdbcTemplate.update(
+ "INSERT INTO market_skill (name, description, content, author, status, " +
+ "reviewed_at, reviewed_by) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+ req.name(), req.description(), req.content(),
+ adminUsername, status, adminUsername);
+ Long id = jdbcTemplate.queryForObject(
+ "SELECT MAX(id) FROM market_skill WHERE author = ? AND name = ?",
+ Long.class, adminUsername, req.name());
+ return get(id);
+ }
 
-    @Override
-    public MarketSkill approve(String adminUsername, Long id, String comment) {
-        jdbcTemplate.update(
-                "UPDATE market_skill SET status = 'APPROVED', reviewed_at = CURRENT_TIMESTAMP, " +
-                        "reviewed_by = ?, review_comment = ? WHERE id = ? AND status = 'PENDING'",
-                adminUsername, comment, id);
-        return get(id);
-    }
+ @Override
+ @Transactional
+ public MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req) {
+ MarketSkill existing = get(id);
+ jdbcTemplate.update(
+ "UPDATE market_skill SET name = ?, description = ?, content = ?, " +
+ "status = COALESCE(?, status) WHERE id = ?",
+ req.name() == null ? existing.name() : req.name(),
+ req.description() == null ? existing.description() : req.description(),
+ req.content() == null ? existing.content() : req.content(),
+ req.status(),
+ id);
+ return get(id);
+ }
 
-    @Override
-    public MarketSkill reject(String adminUsername, Long id, String comment) {
-        jdbcTemplate.update(
-                "UPDATE market_skill SET status = 'REJECTED', reviewed_at = CURRENT_TIMESTAMP, " +
-                        "reviewed_by = ?, review_comment = ? WHERE id = ? AND status = 'PENDING'",
-                adminUsername, comment, id);
-        return get(id);
-    }
+ @Override
+ @Transactional
+ public void adminDelete(String adminUsername, Long id) {
+ // 先把 user_skill / role_skill 里所有引用清掉
+ jdbcTemplate.update("DELETE FROM user_skill WHERE market_skill_id = ?", id);
+ jdbcTemplate.update("DELETE FROM role_skill WHERE market_skill_id = ?", id);
+ int n = jdbcTemplate.update("DELETE FROM market_skill WHERE id = ?", id);
+ if (n == 0) throw new LoomAgentRuntimeException("Skill 不存在: id=" + id);
+ }
 
-    /* ===== admin 直接 CRUD ===== */
+ /* ===== 用户拉取 ===== */
 
-    @Override
-    @Transactional
-    public MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req) {
-        validateNameVersion(req.name(), req.version());
-        if (req.content() == null || req.content().isBlank()) {
-            throw new LoomAgentRuntimeException("content 不能为空");
-        }
-        String status = req.status() == null ? MarketSkill.STATUS_APPROVED : req.status();
-        Integer dup = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM market_skill WHERE author = ? AND name = ? AND version = ?",
-                Integer.class, adminUsername, req.name(), req.version());
-        if (dup != null && dup > 0) {
-            throw new LoomAgentRuntimeException("已存在同名同版本的 Skill：author=" + adminUsername
-                    + " name=" + req.name() + " version=" + req.version());
-        }
-        jdbcTemplate.update(
-                "INSERT INTO market_skill (name, description, content, version, author, status, " +
-                        "reviewed_at, reviewed_by) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
-                req.name(), req.description(), req.content(), req.version(),
-                adminUsername, status, adminUsername);
-        Long id = jdbcTemplate.queryForObject(
-                "SELECT MAX(id) FROM market_skill WHERE author = ? AND name = ? AND version = ?",
-                Long.class, adminUsername, req.name(), req.version());
-        return get(id);
-    }
+ @Override
+ @Transactional
+ public UserSkill pull(String username, Long marketSkillId) {
+ MarketSkill m = get(marketSkillId);
+ // 去掉 status='APPROVED' 校验（提交即上架）
+ // 检查 user_skill 是否已存在同 name
+ List<UserSkill> existing = jdbcTemplate.query(
+ "SELECT * FROM user_skill WHERE username = ? AND name = ?",
+ (rs, n) -> new UserSkill(
+ rs.getLong("id"), rs.getString("username"), rs.getString("name"),
+ rs.getString("description"), rs.getString("content"), rs.getString("source"),
+ (Long) rs.getObject("market_skill_id"),
+ rs.getBoolean("default_loaded"), rs.getBoolean("locked"),
+ rs.getTimestamp("created_at").toLocalDateTime(),
+ rs.getTimestamp("updated_at").toLocalDateTime()),
+ username, m.name());
+ if (!existing.isEmpty()) {
+ UserSkill e = existing.get(0);
+ // 按 source 区分（USER_CREATED 不能被 pull 覆盖，否则会"吃掉"用户自建的内容）
+ if ("USER_CREATED".equals(e.source())) {
+ throw new LoomAgentRuntimeException(403,
+ "你已有同名自建 skill「" + m.name() + "」，不能从市场覆盖。如需使用市场版本，请先删除自建版本。");
+ }
+ // MARKET_PULLED：刷新 content（拉取最新市场快照）
+ jdbcTemplate.update(
+ "UPDATE user_skill SET description = ?, content = ?, source = 'MARKET_PULLED', " +
+ "market_skill_id = ?, updated_at = CURRENT_TIMESTAMP " +
+ "WHERE id = ?",
+ m.description(), m.content(), m.id(), e.id());
+ return getUserSkill(e.id());
+ }
+ jdbcTemplate.update(
+ "INSERT INTO user_skill (username, name, description, content, source, market_skill_id, " +
+ "default_loaded, locked) VALUES (?, ?, ?, ?, 'MARKET_PULLED', ?, TRUE, FALSE)",
+ username, m.name(), m.description(), m.content(), m.id());
+ Long id = jdbcTemplate.queryForObject(
+ "SELECT MAX(id) FROM user_skill WHERE username = ? AND name = ?",
+ Long.class, username, m.name());
+ return getUserSkill(id);
+ }
 
-    @Override
-    @Transactional
-    public MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req) {
-        MarketSkill existing = get(id);
-        jdbcTemplate.update(
-                "UPDATE market_skill SET name = ?, description = ?, content = ?, version = ?, " +
-                        "status = COALESCE(?, status) WHERE id = ?",
-                req.name() == null ? existing.name() : req.name(),
-                req.description() == null ? existing.description() : req.description(),
-                req.content() == null ? existing.content() : req.content(),
-                req.version() == null ? existing.version() : req.version(),
-                req.status(),
-                id);
-        return get(id);
-    }
+ /* ===== 用户查看/撤回 ===== */
 
-    @Override
-    @Transactional
-    public void adminDelete(String adminUsername, Long id) {
-        // 先把 user_skill / role_skill 里所有引用清掉
-        jdbcTemplate.update("DELETE FROM user_skill WHERE market_skill_id = ?", id);
-        jdbcTemplate.update("DELETE FROM role_skill WHERE market_skill_id = ?", id);
-        int n = jdbcTemplate.update("DELETE FROM market_skill WHERE id = ?", id);
-        if (n == 0) throw new LoomAgentRuntimeException("Skill 不存在: id=" + id);
-    }
+ @Override
+ public List<MarketSkill> listMySubmitted(String username) {
+ return jdbcTemplate.query(
+ "SELECT * FROM market_skill WHERE author = ? ORDER BY submitted_at DESC",
+ this::mapMarketSkill, username);
+ }
 
-    /* ===== 用户拉取 ===== */
+ @Override
+ @Transactional
+ public boolean withdraw(String username, Long marketSkillId) {
+ // 去掉 status='PENDING' 限制（任意状态可撤回）
+ int rows = jdbcTemplate.update(
+ "DELETE FROM market_skill WHERE id = ? AND author = ?",
+ marketSkillId, username);
+ if (rows > 0) {
+ // 反清空 author 自己的 user_skill.market_skill_id（断绝反向同步链路）
+ jdbcTemplate.update(
+ "UPDATE user_skill SET market_skill_id = NULL WHERE username = ? AND market_skill_id = ?",
+ username, marketSkillId);
+ }
+ return rows > 0;
+ }
 
-    @Override
-    @Transactional
-    public UserSkill pull(String username, Long marketSkillId) {
-        MarketSkill m = get(marketSkillId);
-        if (!MarketSkill.STATUS_APPROVED.equals(m.status())) {
-            throw new LoomAgentRuntimeException("只能拉取已审批的 Skill（当前 status=" + m.status() + "）");
-        }
-        // 检查 user_skill 是否已存在同 name
-        List<UserSkill> existing = jdbcTemplate.query(
-                "SELECT * FROM user_skill WHERE username = ? AND name = ?",
-                (rs, n) -> new UserSkill(
-                        rs.getLong("id"), rs.getString("username"), rs.getString("name"),
-                        rs.getString("description"), rs.getString("content"), rs.getString("source"),
-                        (Long) rs.getObject("market_skill_id"), rs.getString("market_version"),
-                        rs.getBoolean("default_loaded"), rs.getBoolean("locked"),
-                        rs.getTimestamp("created_at").toLocalDateTime(),
-                        rs.getTimestamp("updated_at").toLocalDateTime()),
-                username, m.name());
-        if (!existing.isEmpty()) {
-            UserSkill e = existing.get(0);
-            if (e.locked()) {
-                throw new LoomAgentRuntimeException("该 Skill 已被角色授权锁定，不能从市场覆盖");
-            }
-            // 刷新 content / source / market_skill_id / market_version
-            jdbcTemplate.update(
-                    "UPDATE user_skill SET description = ?, content = ?, source = 'MARKET_PULLED', " +
-                            "market_skill_id = ?, market_version = ?, updated_at = CURRENT_TIMESTAMP " +
-                            "WHERE id = ?",
-                    m.description(), m.content(), m.id(), m.version(), e.id());
-            return getUserSkill(e.id());
-        }
-        jdbcTemplate.update(
-                "INSERT INTO user_skill (username, name, description, content, source, market_skill_id, " +
-                        "market_version, default_loaded, locked) VALUES (?, ?, ?, ?, 'MARKET_PULLED', ?, ?, TRUE, FALSE)",
-                username, m.name(), m.description(), m.content(), m.id(), m.version());
-        Long id = jdbcTemplate.queryForObject(
-                "SELECT MAX(id) FROM user_skill WHERE username = ? AND name = ?",
-                Long.class, username, m.name());
-        return getUserSkill(id);
-    }
+ private UserSkill getUserSkill(Long id) {
+ return jdbcTemplate.queryForObject(
+ "SELECT * FROM user_skill WHERE id = ?",
+ (rs, n) -> new UserSkill(
+ rs.getLong("id"), rs.getString("username"), rs.getString("name"),
+ rs.getString("description"), rs.getString("content"), rs.getString("source"),
+ (Long) rs.getObject("market_skill_id"),
+ rs.getBoolean("default_loaded"), rs.getBoolean("locked"),
+ rs.getTimestamp("created_at").toLocalDateTime(),
+ rs.getTimestamp("updated_at").toLocalDateTime()),
+ id);
+ }
 
-    /* ===== 用户查看/撤回 ===== */
-
-    @Override
-    public List<MarketSkill> listMySubmitted(String username) {
-        return jdbcTemplate.query(
-                "SELECT * FROM market_skill WHERE author = ? ORDER BY submitted_at DESC",
-                this::mapMarketSkill, username);
-    }
-
-    @Override
-    @Transactional
-    public boolean withdraw(String username, Long marketSkillId) {
-        int rows = jdbcTemplate.update(
-                "DELETE FROM market_skill WHERE id = ? AND author = ? AND status = 'PENDING'",
-                marketSkillId, username);
-        return rows > 0;
-    }
-
-    private UserSkill getUserSkill(Long id) {
-        return jdbcTemplate.queryForObject(
-                "SELECT * FROM user_skill WHERE id = ?",
-                (rs, n) -> new UserSkill(
-                        rs.getLong("id"), rs.getString("username"), rs.getString("name"),
-                        rs.getString("description"), rs.getString("content"), rs.getString("source"),
-                        (Long) rs.getObject("market_skill_id"), rs.getString("market_version"),
-                        rs.getBoolean("default_loaded"), rs.getBoolean("locked"),
-                        rs.getTimestamp("created_at").toLocalDateTime(),
-                        rs.getTimestamp("updated_at").toLocalDateTime()),
-                id);
-    }
-
-    private void validateNameVersion(String name, String version) {
-        if (name == null || name.isBlank()) throw new LoomAgentRuntimeException("name 不能为空");
-        if (version == null || version.isBlank()) throw new LoomAgentRuntimeException("version 不能为空");
-    }
+ private void validateName(String name) {
+ if (name == null || name.isBlank()) {
+ throw new LoomAgentRuntimeException("name 不能为空");
+ }
+ }
 }

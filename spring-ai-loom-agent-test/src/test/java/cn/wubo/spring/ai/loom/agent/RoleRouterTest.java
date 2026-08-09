@@ -39,115 +39,115 @@ import static org.mockito.Mockito.*;
  */
 class RoleRouterTest {
 
-    private IRoleService roleService;
-    private RouterFunction<ServerResponse> router;
+ private IRoleService roleService;
+ private RouterFunction<ServerResponse> router;
 
-    @BeforeEach
-    void setUp() {
-        roleService = mock(IRoleService.class);
-        LoomAgentConfiguration.WebConfiguration web = new LoomAgentConfiguration.WebConfiguration();
-        router = web.loomAgentBaseRouter(
-                mock(IUser.class),
-                new LoomAgentProperties(),
-                mock(IUserConversation.class),
-                mock(ChatUsageService.class),
-                mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
-                roleService,
-                mock(IMcpServerAdmin.class),
-                mock(JdbcTemplate.class));
-    }
+ @BeforeEach
+ void setUp() {
+ roleService = mock(IRoleService.class);
+ LoomAgentConfiguration.WebConfiguration web = new LoomAgentConfiguration.WebConfiguration();
+ router = web.loomAgentBaseRouter(
+ mock(IUser.class),
+ new LoomAgentProperties(),
+ mock(IUserConversation.class),
+ mock(ChatUsageService.class),
+ mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
+ roleService,
+ mock(IMcpServerAdmin.class),
+ mock(JdbcTemplate.class));
+ }
 
-    @AfterEach
-    void tearDown() {
-        reset(roleService);
-    }
+ @AfterEach
+ void tearDown() {
+ reset(roleService);
+ }
 
-    @Test
-    void createBlankCode_returns400() throws Exception {
-        when(roleService.create(eq(""), anyString(), any(), any()))
-                .thenThrow(new LoomAgentRuntimeException(400, "角色 code 和 name 必填"));
+ @Test
+ void createBlankCode_returns400() throws Exception {
+ when(roleService.create(eq(""), anyString(), any(), any()))
+ .thenThrow(new LoomAgentRuntimeException(400, "角色 code 和 name 必填"));
 
-        ServerResponse response = route("POST", "/spring/ai/loom/admin/roles",
-                "{\"code\":\"\",\"name\":\"x\"}");
+ ServerResponse response = route("POST", "/spring/ai/loom/admin/roles",
+ "{\"code\":\"\",\"name\":\"x\"}");
 
-        assertThat(response.statusCode().value()).isEqualTo(400);
-    }
+ assertThat(response.statusCode().value()).isEqualTo(400);
+ }
 
-    @Test
-    void createBlankName_returns400() throws Exception {
-        when(roleService.create(anyString(), eq(""), any(), any()))
-                .thenThrow(new LoomAgentRuntimeException(400, "角色 code 和 name 必填"));
+ @Test
+ void createBlankName_returns400() throws Exception {
+ when(roleService.create(anyString(), eq(""), any(), any()))
+ .thenThrow(new LoomAgentRuntimeException(400, "角色 code 和 name 必填"));
 
-        ServerResponse response = route("POST", "/spring/ai/loom/admin/roles",
-                "{\"code\":\"tmp-x\",\"name\":\"\"}");
+ ServerResponse response = route("POST", "/spring/ai/loom/admin/roles",
+ "{\"code\":\"tmp-x\",\"name\":\"\"}");
 
-        assertThat(response.statusCode().value()).isEqualTo(400);
-    }
+ assertThat(response.statusCode().value()).isEqualTo(400);
+ }
 
-    @Test
-    void createDuplicateCode_returns409() throws Exception {
-        when(roleService.create(eq("dup"), anyString(), any(), any()))
-                .thenThrow(new LoomAgentRuntimeException(409, "角色 code 已存在: dup"));
+ @Test
+ void createDuplicateCode_returns409() throws Exception {
+ when(roleService.create(eq("dup"), anyString(), any(), any()))
+ .thenThrow(new LoomAgentRuntimeException(409, "角色 code 已存在: dup"));
 
-        ServerResponse response = route("POST", "/spring/ai/loom/admin/roles",
-                "{\"code\":\"dup\",\"name\":\"dup\"}");
+ ServerResponse response = route("POST", "/spring/ai/loom/admin/roles",
+ "{\"code\":\"dup\",\"name\":\"dup\"}");
 
-        assertThat(response.statusCode().value()).isEqualTo(409);
-    }
+ assertThat(response.statusCode().value()).isEqualTo(409);
+ }
 
-    @Test
-    void deleteMissingRole_returns404() throws Exception {
-        doThrow(new LoomAgentRuntimeException(404, "角色不存在: ghost"))
-                .when(roleService).deleteOrThrow("ghost");
+ @Test
+ void deleteMissingRole_returns404() throws Exception {
+ doThrow(new LoomAgentRuntimeException(404, "角色不存在: ghost"))
+ .when(roleService).deleteOrThrow("ghost");
 
-        ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/ghost", null);
+ ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/ghost", null);
 
-        assertThat(response.statusCode().value()).isEqualTo(404);
-    }
+ assertThat(response.statusCode().value()).isEqualTo(404);
+ }
 
-    @Test
-    void deleteSystemRole_returns400() throws Exception {
-        doThrow(new LoomAgentRuntimeException(400, "系统角色不可删除: ADMIN"))
-                .when(roleService).deleteOrThrow("ADMIN");
+ @Test
+ void deleteSystemRole_returns400() throws Exception {
+ doThrow(new LoomAgentRuntimeException(400, "系统角色不可删除: ADMIN"))
+ .when(roleService).deleteOrThrow("ADMIN");
 
-        ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/ADMIN", null);
+ ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/ADMIN", null);
 
-        assertThat(response.statusCode().value()).isEqualTo(400);
-    }
+ assertThat(response.statusCode().value()).isEqualTo(400);
+ }
 
-    @Test
-    void listRoles_returns200WithBody() throws Exception {
-        when(roleService.list()).thenReturn(List.of(
-                new RoleInfo("ADMIN", "管理员", true, "system"),
-                new RoleInfo("USER", "用户", true, "system")));
+ @Test
+ void listRoles_returns200WithBody() throws Exception {
+ when(roleService.list()).thenReturn(List.of(
+ new RoleInfo("ADMIN", "管理员", true, "system"),
+ new RoleInfo("USER", "用户", true, "system")));
 
-        ServerResponse response = route("GET", "/spring/ai/loom/admin/roles", null);
+ ServerResponse response = route("GET", "/spring/ai/loom/admin/roles", null);
 
-        assertThat(response.statusCode().value()).isEqualTo(200);
-        Object entity = ((EntityResponse<?>) response).entity();
-        assertThat(entity).isInstanceOf(List.class);
-        @SuppressWarnings("unchecked")
-        List<RoleInfo> roles = (List<RoleInfo>) entity;
-        assertThat(roles).hasSize(2);
-        assertThat(roles.get(0).code()).isEqualTo("ADMIN");
-    }
+ assertThat(response.statusCode().value()).isEqualTo(200);
+ Object entity = ((EntityResponse<?>) response).entity();
+ assertThat(entity).isInstanceOf(List.class);
+ @SuppressWarnings("unchecked")
+ List<RoleInfo> roles = (List<RoleInfo>) entity;
+ assertThat(roles).hasSize(2);
+ assertThat(roles.get(0).code()).isEqualTo("ADMIN");
+ }
 
-    @Test
-    void deleteExistingRole_returns200() throws Exception {
-        ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/tmp-role", null);
+ @Test
+ void deleteExistingRole_returns200() throws Exception {
+ ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/tmp-role", null);
 
-        assertThat(response.statusCode().value()).isEqualTo(200);
-        verify(roleService).deleteOrThrow("tmp-role");
-    }
+ assertThat(response.statusCode().value()).isEqualTo(200);
+ verify(roleService).deleteOrThrow("tmp-role");
+ }
 
-    private ServerResponse route(String method, String path, String body) throws Exception {
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
-        servletRequest.setContentType("application/json");
-        if (body != null) {
-            servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
-        }
-        ServerRequest request = ServerRequest.create(
-                servletRequest, List.of(new MappingJackson2HttpMessageConverter()));
-        return router.route(request).orElseThrow().handle(request);
-    }
+ private ServerResponse route(String method, String path, String body) throws Exception {
+ MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
+ servletRequest.setContentType("application/json");
+ if (body != null) {
+ servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
+ }
+ ServerRequest request = ServerRequest.create(
+ servletRequest, List.of(new MappingJackson2HttpMessageConverter()));
+ return router.route(request).orElseThrow().handle(request);
+ }
 }

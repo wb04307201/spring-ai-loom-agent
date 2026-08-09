@@ -18,8 +18,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 @EnableConfigurationProperties(LoomFileMcpProperties.class)
 public class LoomFileMcpApplication {
 
-    public static void main(String[] args) {
-        SpringApplication.run(LoomFileMcpApplication.class, args);
-    }
+ public static void main(String[] args) {
+ SpringApplication.run(LoomFileMcpApplication.class, args);
+ }
 
 }

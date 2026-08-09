@@ -14,17 +14,17 @@ import java.nio.charset.StandardCharsets;
  */
 public final class SkillContentResolver {
 
-    private SkillContentResolver() {}
+ private SkillContentResolver() {}
 
-    public static String resolve(String raw, ResourceLoader resourceLoader) {
-        if (raw == null) return "";
-        if (raw.startsWith("classpath:")) {
-            try {
-                return resourceLoader.getResource(raw).getContentAsString(StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                throw new LoomAgentRuntimeException("Failed to load skill content from " + raw + ": " + e.getMessage());
-            }
-        }
-        return raw;
-    }
+ public static String resolve(String raw, ResourceLoader resourceLoader) {
+ if (raw == null) return "";
+ if (raw.startsWith("classpath:")) {
+ try {
+ return resourceLoader.getResource(raw).getContentAsString(StandardCharsets.UTF_8);
+ } catch (IOException e) {
+ throw new LoomAgentRuntimeException("Failed to load skill content from " + raw + ": " + e.getMessage());
+ }
+ }
+ return raw;
+ }
 }

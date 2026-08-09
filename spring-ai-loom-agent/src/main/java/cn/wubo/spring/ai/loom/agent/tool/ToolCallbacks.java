@@ -1,7 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.tool;
 
 /**
- * V5.4 P9：薄封装 Spring AI 1.1.7 的 {@code org.springframework.ai.support.ToolCallbacks.from}，
+ * 薄封装 Spring AI 1.1.7 的 {@code org.springframework.ai.support.ToolCallbacks.from}，
  * 方便在业务代码中调用而不需要直接引用上游包（上游类可能被 spring-ai-commons
  * 多次搬家 —— 不同版本路径不同）。
  *
@@ -16,9 +16,9 @@ package cn.wubo.spring.ai.loom.agent.tool;
  */
 public final class ToolCallbacks {
 
-    private ToolCallbacks() {}
+ private ToolCallbacks() {}
 
-    public static org.springframework.ai.tool.ToolCallback[] from(Object... toolObjects) {
-        return org.springframework.ai.support.ToolCallbacks.from(toolObjects);
-    }
+ public static org.springframework.ai.tool.ToolCallback[] from(Object... toolObjects) {
+ return org.springframework.ai.support.ToolCallbacks.from(toolObjects);
+ }
 }

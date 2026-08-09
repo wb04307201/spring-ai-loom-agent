@@ -4,13 +4,13 @@ import java.io.InputStream;
 
 public interface IUpload {
 
-    String upload(InputStream is, String fileName, String mimeType);
+ String upload(InputStream is, String fileName, String mimeType);
 
-    String uploadWithKnowledge(InputStream is, String fileName, String mimeType, String knowledgeId);
+ String uploadWithKnowledge(InputStream is, String fileName, String mimeType, String knowledgeId);
 
-    int delete(String fileId);
+ int delete(String fileId);
 
-    int deleteAllKnowledge(String knowledgeId);
+ int deleteAllKnowledge(String knowledgeId);
 
-    byte[] getContentByLocation(String location);
+ byte[] getContentByLocation(String location);
 }

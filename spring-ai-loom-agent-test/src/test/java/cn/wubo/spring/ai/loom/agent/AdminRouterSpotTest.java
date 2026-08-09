@@ -36,103 +36,103 @@ import static org.mockito.Mockito.*;
 @DisplayName("admin router 抽测")
 class AdminRouterSpotTest {
 
-    private IUser user;
-    private ChatUsageService chatUsageService;
-    private RouterFunction<ServerResponse> router;
+ private IUser user;
+ private ChatUsageService chatUsageService;
+ private RouterFunction<ServerResponse> router;
 
-    @BeforeEach
-    void setUp() {
-        user = mock(IUser.class);
-        chatUsageService = mock(ChatUsageService.class);
-        router = new LoomAgentConfiguration.WebConfiguration().loomAgentBaseRouter(
-                user, new LoomAgentProperties(), mock(IUserConversation.class), chatUsageService,
-                mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
-                mock(IRoleService.class), mock(IMcpServerAdmin.class), mock(JdbcTemplate.class));
-    }
+ @BeforeEach
+ void setUp() {
+ user = mock(IUser.class);
+ chatUsageService = mock(ChatUsageService.class);
+ router = new LoomAgentConfiguration.WebConfiguration().loomAgentBaseRouter(
+ user, new LoomAgentProperties(), mock(IUserConversation.class), chatUsageService,
+ mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
+ mock(IRoleService.class), mock(IMcpServerAdmin.class), mock(JdbcTemplate.class));
+ }
 
-    @AfterEach
-    void tearDown() {
-        UserContextHolder.clear();
-    }
+ @AfterEach
+ void tearDown() {
+ UserContextHolder.clear();
+ }
 
-    private ServerResponse route(String method, String path, String body, String... paramKv) throws Exception {
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
-        servletRequest.setRequestURI(path);
-        servletRequest.setServletPath(path);
-        if (body != null) {
-            servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
-            servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        }
-        for (int i = 0; i < paramKv.length; i += 2) {
-            servletRequest.addParameter(paramKv[i], paramKv[i + 1]);
-        }
-        ServerRequest request = ServerRequest.create(servletRequest, List.of(new MappingJackson2HttpMessageConverter()));
-        return router.route(request).orElseThrow().handle(request);
-    }
+ private ServerResponse route(String method, String path, String body, String... paramKv) throws Exception {
+ MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
+ servletRequest.setRequestURI(path);
+ servletRequest.setServletPath(path);
+ if (body != null) {
+ servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
+ servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);
+ }
+ for (int i = 0; i < paramKv.length; i += 2) {
+ servletRequest.addParameter(paramKv[i], paramKv[i + 1]);
+ }
+ ServerRequest request = ServerRequest.create(servletRequest, List.of(new MappingJackson2HttpMessageConverter()));
+ return router.route(request).orElseThrow().handle(request);
+ }
 
-    @Test
-    @DisplayName("创建用户：委派 IUser.createUser")
-    void createUserDelegates() throws Exception {
-        ServerResponse response = route("POST", "/spring/ai/loom/admin/users",
-                "{\"username\":\"u1\",\"nickname\":\"n1\",\"password\":\"p1\",\"type\":\"USER\"}");
+ @Test
+ @DisplayName("创建用户：委派 IUser.createUser")
+ void createUserDelegates() throws Exception {
+ ServerResponse response = route("POST", "/spring/ai/loom/admin/users",
+ "{\"username\":\"u1\",\"nickname\":\"n1\",\"password\":\"p1\",\"type\":\"USER\"}");
 
-        assertEquals(200, response.statusCode().value());
-        verify(user).createUser("u1", "n1", "p1", "USER");
-    }
+ assertEquals(200, response.statusCode().value());
+ verify(user).createUser("u1", "n1", "p1", "USER");
+ }
 
-    @Test
-    @DisplayName("创建用户失败：LoomAgentRuntimeException → 400 而非 500")
-    void createUserErrorMapsTo400() throws Exception {
-        doThrow(new LoomAgentRuntimeException("用户名已存在")).when(user)
-                .createUser(anyString(), anyString(), anyString(), any());
+ @Test
+ @DisplayName("创建用户失败：LoomAgentRuntimeException → 400 而非 500")
+ void createUserErrorMapsTo400() throws Exception {
+ doThrow(new LoomAgentRuntimeException("用户名已存在")).when(user)
+ .createUser(anyString(), anyString(), anyString(), any());
 
-        ServerResponse response = route("POST", "/spring/ai/loom/admin/users",
-                "{\"username\":\"u1\",\"nickname\":\"n1\",\"password\":\"p1\",\"type\":\"USER\"}");
+ ServerResponse response = route("POST", "/spring/ai/loom/admin/users",
+ "{\"username\":\"u1\",\"nickname\":\"n1\",\"password\":\"p1\",\"type\":\"USER\"}");
 
-        assertEquals(400, response.statusCode().value());
-    }
+ assertEquals(400, response.statusCode().value());
+ }
 
-    @Test
-    @DisplayName("删除用户失败：400")
-    void deleteUserErrorMapsTo400() throws Exception {
-        doThrow(new LoomAgentRuntimeException("不能删除自己")).when(user).deleteUser("root");
+ @Test
+ @DisplayName("删除用户失败：400")
+ void deleteUserErrorMapsTo400() throws Exception {
+ doThrow(new LoomAgentRuntimeException("不能删除自己")).when(user).deleteUser("root");
 
-        ServerResponse response = route("DELETE", "/spring/ai/loom/admin/users/root", null);
+ ServerResponse response = route("DELETE", "/spring/ai/loom/admin/users/root", null);
 
-        assertEquals(400, response.statusCode().value());
-    }
+ assertEquals(400, response.statusCode().value());
+ }
 
-    @Test
-    @DisplayName("月度统计：year 非数字 → 400")
-    void statsNonNumericYearIs400() throws Exception {
-        ServerResponse response = route("GET", "/spring/ai/loom/admin/stats/tokens/monthly", null, "year", "abc");
+ @Test
+ @DisplayName("月度统计：year 非数字 → 400")
+ void statsNonNumericYearIs400() throws Exception {
+ ServerResponse response = route("GET", "/spring/ai/loom/admin/stats/tokens/monthly", null, "year", "abc");
 
-        assertEquals(400, response.statusCode().value());
-        verifyNoInteractions(chatUsageService);
-    }
+ assertEquals(400, response.statusCode().value());
+ verifyNoInteractions(chatUsageService);
+ }
 
-    @Test
-    @DisplayName("月度统计：数字参数透传")
-    void statsNumericParamsDelegate() throws Exception {
-        when(chatUsageService.monthlyByUser(2026, 7)).thenReturn(List.of());
+ @Test
+ @DisplayName("月度统计：数字参数透传")
+ void statsNumericParamsDelegate() throws Exception {
+ when(chatUsageService.monthlyByUser(2026, 7)).thenReturn(List.of());
 
-        ServerResponse response = route("GET", "/spring/ai/loom/admin/stats/tokens/monthly", null,
-                "year", "2026", "month", "7");
+ ServerResponse response = route("GET", "/spring/ai/loom/admin/stats/tokens/monthly", null,
+ "year", "2026", "month", "7");
 
-        assertEquals(200, response.statusCode().value());
-        verify(chatUsageService).monthlyByUser(2026, 7);
-    }
+ assertEquals(200, response.statusCode().value());
+ verify(chatUsageService).monthlyByUser(2026, 7);
+ }
 
-    @Test
-    @DisplayName("当前用户用量：未登录返回空统计而非 500")
-    @SuppressWarnings("unchecked")
-    void currentUserTokensWithoutLogin() throws Exception {
-        when(chatUsageService.currentMonthForUser(null)).thenReturn(
-                new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
-        ServerResponse response = route("GET", "/spring/ai/loom/user/tokens/current-month", null);
+ @Test
+ @DisplayName("当前用户用量：未登录返回空统计而非 500")
+ @SuppressWarnings("unchecked")
+ void currentUserTokensWithoutLogin() throws Exception {
+ when(chatUsageService.currentMonthForUser(null)).thenReturn(
+ new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
+ ServerResponse response = route("GET", "/spring/ai/loom/user/tokens/current-month", null);
 
-        assertEquals(200, response.statusCode().value());
-        Object entity = ((EntityResponse<?>) response).entity();
-        assertTrue(entity.toString().contains("0") || entity instanceof Map || entity != null);
-    }
+ assertEquals(200, response.statusCode().value());
+ Object entity = ((EntityResponse<?>) response).entity();
+ assertTrue(entity.toString().contains("0") || entity instanceof Map || entity != null);
+ }
 }

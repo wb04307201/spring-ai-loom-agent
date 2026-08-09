@@ -6,13 +6,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
 //@SpringBootApplication(exclude = {
-//    com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeChatAutoConfiguration.class
+// com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeChatAutoConfiguration.class
 //})
 @EnableScheduling
 public class LoomAgentTestApplication {
 
-    public static void main(String[] args) {
-        SpringApplication.run(LoomAgentTestApplication.class, args);
-    }
+ public static void main(String[] args) {
+ SpringApplication.run(LoomAgentTestApplication.class, args);
+ }
 
 }

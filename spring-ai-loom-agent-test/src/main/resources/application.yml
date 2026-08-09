@@ -36,7 +36,7 @@ spring:
       chat:
 #        enabled: false  # 禁用 DashScope ChatModel，只用 Anthropic
         options:
-          model: qwen3.7-plus
+          model: qwen3.8-max
           multi_model: true
           enable_thinking: true
       embedding:

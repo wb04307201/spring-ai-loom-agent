@@ -37,7 +37,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 - **最短触发间隔**：`min-interval`（测试应用默认 10 分钟）
 - **最长存活**：`max-lifetime`（测试应用默认 3 天 / 72h）
 - **模式**：`mode=strict` 时超限抛异常（创建失败并返回友好文案）
-- **持久化**：loom-agent 自管 H2 表 `loom_scheduled_task`（V2.0 新增，前身 `V13`）；见下方「持久化 (Path B — loom-owned)」章节。重启后仍在，且 `createdAt` 保留以便 `max-lifetime` 跨重启累计计时。
+- **持久化**：loom-agent 自管 H2 表 `loom_scheduled_task`（新增，前身 `V13`）；见下方「持久化 (Path B — loom-owned)」章节。重启后仍在，且 `createdAt` 保留以便 `max-lifetime` 跨重启累计计时。
 
 任务名命名空间：`loom-sched-{username}-{conversationId}-{name}`，因此不同用户 / 会话下同名任务互不冲突，列表也按此前缀过滤。
 
@@ -65,7 +65,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 
 定时任务的 H2 持久化由 loom-agent 自管（替代早期借住在 flex-schedule 的方案）：
 
-- **表名**：`loom_scheduled_task`（V2.0 新增，取代了旧的 `flex_scheduled_task`，后者已不再创建）
+- **表名**：`loom_scheduled_task`（新增，取代了旧的 `flex_scheduled_task`，后者已不再创建）
 - **列**：`task_name` PK + `schedule_type` (`cron` / `fixed_delay` / `fixed_rate` / `one_shot`) + 三种 expression 列（按类型取一）+ `prompt` CLOB + `username` + `conversation_id` + `paused` + `created_at` / `updated_at`
 - **Repository**：`ILoomScheduleTriggerRepository`（`cn.wubo.spring.ai.loom.agent.schedule`）；默认实现 `JdbcLoomScheduleTriggerRepository` 由 `LoomAgentConfiguration.ScheduleConfiguration` 用 `@Bean` + `@ConditionalOnMissingBean` 注册
 - **写入**：每次 `createSchedule` 成功后 `repo.save(...)`；每次 `cancelSchedule` 成功后 `repo.delete(...)`；删除会话时 `repo.deleteAllForConversation(user, conv)`

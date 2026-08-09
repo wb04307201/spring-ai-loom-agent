@@ -14,31 +14,31 @@ import java.util.List;
  */
 public interface ILoomScheduleExecutionRepository {
 
-    /** Insert a new execution row. The {@code executionId} is assigned by the DB. */
-    void save(LoomScheduleExecutionRecord record);
+ /** Insert a new execution row. The {@code executionId} is assigned by the DB. */
+ void save(LoomScheduleExecutionRecord record);
 
-    /** Newest-first executions for the given task, capped at {@code limit}. */
-    List<LoomScheduleExecutionRecord> findByTaskName(String taskName, int limit);
+ /** Newest-first executions for the given task, capped at {@code limit}. */
+ List<LoomScheduleExecutionRecord> findByTaskName(String taskName, int limit);
 
-    /** Total execution count for a task — used to drive the per-task max-history trim. */
-    int countByTaskName(String taskName);
+ /** Total execution count for a task — used to drive the per-task max-history trim. */
+ int countByTaskName(String taskName);
 
-    /**
-     * Per-task trim: keep at most {@code keepLast} newest rows for {@code taskName},
-     * delete the rest. Idempotent. Returns the number of rows deleted.
-     */
-    int trimTaskHistory(String taskName, int keepLast);
+ /**
+ * Per-task trim: keep at most {@code keepLast} newest rows for {@code taskName},
+ * delete the rest. Idempotent. Returns the number of rows deleted.
+ */
+ int trimTaskHistory(String taskName, int keepLast);
 
-    /** Delete every row with {@code fire_time < cutoff}. Returns affected row count. */
-    int deleteOlderThan(Instant cutoff);
+ /** Delete every row with {@code fire_time < cutoff}. Returns affected row count. */
+ int deleteOlderThan(Instant cutoff);
 
-    /**
-     * Cascade-delete every execution row whose task_name starts with
-     * {@code loom-sched-{username}-{conversationId}-}. Used when a conversation
-     * is deleted so its schedule audit trail goes with it. Returns affected row count.
-     */
-    int deleteByUserAndConversation(String username, String conversationId);
+ /**
+ * Cascade-delete every execution row whose task_name starts with
+ * {@code loom-sched-{username}-{conversationId}-}. Used when a conversation
+ * is deleted so its schedule audit trail goes with it. Returns affected row count.
+ */
+ int deleteByUserAndConversation(String username, String conversationId);
 
-    /** Defensive schema bootstrap (mirrors V16). */
-    void ensureSchema();
+ /** Defensive schema bootstrap (mirrors V16). */
+ void ensureSchema();
 }

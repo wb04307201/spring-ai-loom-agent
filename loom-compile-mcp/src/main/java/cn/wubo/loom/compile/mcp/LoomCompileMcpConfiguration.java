@@ -5,8 +5,8 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class LoomCompileMcpConfiguration {
-    @Bean
-    public LoomCompileMcpService loomCompileMcpService(LoomCompileMcpProperties properties) {
-        return new LoomCompileMcpService(properties);
-    }
+ @Bean
+ public LoomCompileMcpService loomCompileMcpService(LoomCompileMcpProperties properties) {
+ return new LoomCompileMcpService(properties);
+ }
 }

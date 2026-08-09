@@ -11,36 +11,36 @@ import cn.wubo.spring.ai.loom.agent.model.FileRecord;
  */
 public class DefaultFileDownload implements IFileDownload {
 
-    private final IFile fileService;
-    private final IFileStorage fileStorage;
+ private final IFile fileService;
+ private final IFileStorage fileStorage;
 
-    public DefaultFileDownload(IFile fileService, IFileStorage fileStorage) {
-        this.fileService = fileService;
-        this.fileStorage = fileStorage;
-    }
+ public DefaultFileDownload(IFile fileService, IFileStorage fileStorage) {
+ this.fileService = fileService;
+ this.fileStorage = fileStorage;
+ }
 
-    @Override
-    public String getDownloadUrl(String fileId) {
-        return "/spring/ai/loom/api/file/" + fileId + "/download";
-    }
+ @Override
+ public String getDownloadUrl(String fileId) {
+ return "/spring/ai/loom/api/file/" + fileId + "/download";
+ }
 
-    @Override
-    public String getPreviewUrl(String fileId) {
-        return "/spring/ai/loom/api/file/" + fileId + "/preview";
-    }
+ @Override
+ public String getPreviewUrl(String fileId) {
+ return "/spring/ai/loom/api/file/" + fileId + "/preview";
+ }
 
-    @Override
-    public byte[] readFileContent(String fileId, String username) {
-        FileRecord record = getFileRecord(fileId, username);
-        return fileStorage.read(record.path());
-    }
+ @Override
+ public byte[] readFileContent(String fileId, String username) {
+ FileRecord record = getFileRecord(fileId, username);
+ return fileStorage.read(record.path());
+ }
 
-    @Override
-    public FileRecord getFileRecord(String fileId, String username) {
-        FileRecord record = fileService.getById(fileId, username);
-        if (record == null) {
-            throw new IllegalArgumentException("File not found: " + fileId);
-        }
-        return record;
-    }
+ @Override
+ public FileRecord getFileRecord(String fileId, String username) {
+ FileRecord record = fileService.getById(fileId, username);
+ if (record == null) {
+ throw new IllegalArgumentException("File not found: " + fileId);
+ }
+ return record;
+ }
 }
