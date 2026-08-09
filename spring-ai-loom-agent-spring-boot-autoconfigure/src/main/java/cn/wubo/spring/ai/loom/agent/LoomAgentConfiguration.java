@@ -289,8 +289,8 @@ public class LoomAgentConfiguration {
         // V5.4 P9：返回自定义 LastChunkMessageChatMemoryAdvisor（只在流式最后一个 chunk
         // 触发 chatMemory.add），替代 Spring AI 默认 MessageChatMemoryAdvisor（每个 chunk 都写
         // → chat_memory TOOL 消息多次重复）。
-        public org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
-            return new cn.wubo.spring.ai.loom.agent.memory.LastChunkMessageChatMemoryAdvisor(chatMemory, 0);
+        public org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor(JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.memory.LastChunkMessageChatMemoryAdvisor(jdbcTemplate, 0);
         }
 
         @ConditionalOnMissingBean(IChat.class)

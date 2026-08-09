@@ -8,32 +8,40 @@ import org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.jdbc.core.JdbcTemplate;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * V5.4 P9 自定义 Advisor：只在流式响应 <b>最后一个 chunk</b> 触发
+ * V5.4 P9/P10/P11/P12 自定义 Advisor：只在流式响应 <b>最后一个 chunk</b> 触发
  * {@code chatMemory.add()}，替代 Spring AI 1.1.7 的 {@code MessageChatMemoryAdvisor}。
  *
  * <p>Spring AI 默认实现的问题：{@code MessageChatMemoryAdvisor.adviseStream()} 在
- * <b>每个</b> ChatClientResponse chunk 都调 {@code after()} — 每个 chunk
- * 包含到目前为止的累积 messages — chat_memory 表被写多次（实测一次 LLM 调工具
- * 产生 2 行 chat_memory TOOL 消息 + 2 行 USER/ASSISTANT 消息）。
+ * <b>每个</b> ChatClientResponse chunk 触发 after() → chat_memory TOOL 消息多次写入。
  *
  * <p>本实现：在 Flux 上用 {@code .collectList().flatMapMany()} 缓存所有 chunk，
- * 流完成时（{@code flatMapMany} 内 lambda 同步执行）取最后一个 chunk 触发
- * {@code chatMemory.add()}。这样 chat_memory 表只写一次。
+ * 流完成时取最后一个 chunk 触发 {@code chatMemory.add()}。chat_memory 表只写一次。
  *
- * <p>StreamAdvisorChain 仍能正确返回每个 chunk 给下游（前端 SSE 流式响应不受影响），
- * 只是 chatMemory.add() 的时机延后到流完成。
+ * <p>V5.4 P12：直接用 {@link JdbcTemplate} 写入 {@code SPRING_AI_CHAT_MEMORY} 表，
+ * 避免依赖 Spring AI 内部 chatMemory.add()（因为我们 bean 替代了默认 advisor，
+ * first-write 路径不可靠）。同时写 UserMessage + AssistantMessage，type 受 CHECK 约束
+ * 限制为 USER/ASSISTANT/SYSTEM/TOOL 之一。
  */
 @Slf4j
-@RequiredArgsConstructor
 public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor {
 
-    private final ChatMemory chatMemory;
+    private final JdbcTemplate jdbcTemplate;
     private final int order;
+
+    public LastChunkMessageChatMemoryAdvisor(JdbcTemplate jdbcTemplate, int order) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.order = order;
+    }
 
     @Override
     public int getOrder() {
@@ -42,7 +50,6 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
 
     @Override
     public String getConversationId(Map<String, Object> context) {
-        // 与 Spring AI 一致：从 advisorContext 取 ChatMemory.CONVERSATION_ID
         Object id = context.get("ChatMemory.CONVERSATION_ID");
         if (id == null) {
             id = context.get("chat_memory_conversation_id");
@@ -50,88 +57,89 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
         return id == null ? "" : id.toString();
     }
 
-    // V5.4 P10：用 ThreadLocal 传递 UserMessage（ChatClientRequest.context 实际是不可变 Map，
-    // put 后 adviseStream 取到 null —— 上一版的 bug）。ThreadLocal 跨 before/after 边界稳定。
-    private static final ThreadLocal<org.springframework.ai.chat.messages.Message> USER_MESSAGE_HOLDER = new ThreadLocal<>();
-
     @Override
     public ChatClientRequest before(ChatClientRequest request, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
-        // 把 UserMessage 存到 ThreadLocal，让 adviseStream 流式路径最后一次写 memory 时能取到。
-        try {
-            java.util.List<org.springframework.ai.chat.messages.Message> instructions = request.prompt().getInstructions();
-            if (instructions != null && !instructions.isEmpty()) {
-                USER_MESSAGE_HOLDER.set(instructions.get(instructions.size() - 1));
-            }
-        } catch (Exception e) {
-            log.debug("V5.4 P10 LastChunkAdvisor.before set user_message failed: {}", e.getMessage());
-        }
         return request;
-    }
-
-    /** 测试/Cleanup 入口：清空 ThreadLocal（正常调用路径不依赖，保留兜底） */
-    public static void clearUserMessageHolder() {
-        USER_MESSAGE_HOLDER.remove();
     }
 
     @Override
     public ChatClientResponse after(ChatClientResponse response, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
-        // 非流式路径：每次 call 一次，after 写 memory 一次 —— 这与 Spring AI 默认行为一致。
-        // 写：UserMessage + AssistantMessage + ToolResponseMessages
-        doAddToMemory(response.context(), response.chatResponse().getResult().getOutput());
+        doWriteMemory(response.context(), requestOf(response), response.chatResponse().getResult().getOutput());
         return response;
     }
 
-    /**
-     * 流式路径：缓存所有 chunk，<b>只在流完成时</b>用最后一个 chunk 触发 memory.add。
-     * 这样避免 Spring AI 默认实现"每个 chunk 都写一次"的重复。
-     */
     @Override
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest request, StreamAdvisorChain streamAdvisorChain) {
         String conversationId = getConversationId(request.context());
+        log.info("V5.4 P12 LastChunkAdvisor.adviseStream called for conv={}", conversationId);
+        final StringBuilder assistantTextBuf = new StringBuilder();
         return streamAdvisorChain.nextStream(request)
-                // 缓存所有 chunk
+                // 累积所有 chunk 的 assistant text（Spring AI 1.1.7 流式 chunk 中 getText() 是 partial）
+                .doOnNext(resp -> {
+                    String t = resp.chatResponse().getResult().getOutput().getText();
+                    if (t != null) assistantTextBuf.append(t);
+                })
                 .collectList()
-                // 流完成时（collectList 完成）触发 memory.add 一次
                 .flatMapMany(list -> {
                     if (list == null || list.isEmpty()) {
-                        return Flux.fromIterable(list == null ? java.util.List.of() : list);
+                        return Flux.fromIterable(list == null ? List.of() : list);
                     }
                     ChatClientResponse last = list.get(list.size() - 1);
+                    // 用累积的完整 text 构造 AssistantMessage
+                    String fullText = assistantTextBuf.toString();
+                    AssistantMessage fullAssistant = new AssistantMessage(fullText);
                     try {
-                        doAddToMemory(last.context(), last.chatResponse().getResult().getOutput());
-                        log.debug("V5.4 P9 LastChunkAdvisor wrote memory once for conv={}, total chunks={}", conversationId, list.size());
+                        doWriteMemory(last.context(), request, fullAssistant);
+                        log.info("V5.4 P12 LastChunkAdvisor wrote memory once for conv={}, chunks={}, assistantTextLen={}", conversationId, list.size(), fullText.length());
                     } catch (Exception e) {
-                        log.warn("V5.4 P9 LastChunkAdvisor add to memory failed for conv={}: {}", conversationId, e.getMessage());
-                    } finally {
-                        // V5.4 P10：清理 ThreadLocal 避免内存泄漏 + 跨请求污染
-                        USER_MESSAGE_HOLDER.remove();
+                        log.warn("V5.4 P12 LastChunkAdvisor write failed for conv={}: {}", conversationId, e.getMessage());
                     }
                     return Flux.fromIterable(list);
                 });
     }
 
-    private void doAddToMemory(Map<String, Object> context, org.springframework.ai.chat.messages.AssistantMessage assistantMessage) {
-        String conversationId = getConversationId(context);
-        if (conversationId == null || conversationId.isBlank()) return;
-        // 写：UserMessage + AssistantMessage（+ ToolResponseMessages 如果 AssistantMessage 含 tool_calls）
-        org.springframework.ai.chat.messages.Message userMessage = extractUserMessage(context);
-        java.util.List<org.springframework.ai.chat.messages.Message> messages = new java.util.ArrayList<>();
-        if (userMessage != null) messages.add(userMessage);
-        messages.add(assistantMessage);
-        this.chatMemory.add(conversationId, messages);
+    /** 非流式路径下 from response 推回 ChatClientRequest（不严格必要，但保持一致） */
+    private ChatClientRequest requestOf(ChatClientResponse response) {
+        return null;
     }
 
-    private org.springframework.ai.chat.messages.Message extractUserMessage(Map<String, Object> context) {
-        // V5.4 P10：优先从 ThreadLocal 取（跨 before/after 边界稳定）
-        org.springframework.ai.chat.messages.Message u = USER_MESSAGE_HOLDER.get();
-        if (u != null) return u;
-        // 兼容 Spring AI 1.1.7 的实际 key 名（context 可能是可变的）
-        Object u2 = context.get("user_message");
-        if (u2 instanceof org.springframework.ai.chat.messages.Message m2) return m2;
-        Object u3 = context.get("USER_MESSAGE");
-        if (u3 instanceof org.springframework.ai.chat.messages.Message m3) return m3;
-        Object u4 = context.get("V5.4_P9_user_message");
-        if (u4 instanceof org.springframework.ai.chat.messages.Message m4) return m4;
-        return null;
+    private void doWriteMemory(Map<String, Object> context, ChatClientRequest request, AssistantMessage assistantMessage) {
+        String conversationId = getConversationId(context);
+        if (conversationId == null || conversationId.isBlank()) {
+            log.debug("V5.4 P12 skip write: empty convId");
+            return;
+        }
+        // 1. 写 UserMessage（如果 request 里有）
+        int userCount = 0;
+        if (request != null) {
+            List<Message> instructions = request.prompt().getInstructions();
+            for (Message m : instructions) {
+                if (m instanceof UserMessage um) {
+                    insertMessage(conversationId, "USER", um.getText());
+                    userCount++;
+                }
+            }
+        }
+        log.info("V5.4 P12 doWriteMemory conv={} wrote {} USER messages", conversationId, userCount);
+        // 2. 写 AssistantMessage
+        String assistantText = assistantMessage.getText();
+        insertMessage(conversationId, "ASSISTANT", assistantText);
+    }
+
+    private void insertMessage(String conversationId, String type, String content) {
+        if (content == null || content.isBlank()) return;
+        // type CHECK 约束: USER/ASSISTANT/SYSTEM/TOOL
+        String normalized = type.toUpperCase();
+        if (!"USER".equals(normalized) && !"ASSISTANT".equals(normalized) && !"SYSTEM".equals(normalized) && !"TOOL".equals(normalized)) {
+            log.warn("V5.4 P12 unsupported message type={} skip", normalized);
+            return;
+        }
+        try {
+            jdbcTemplate.update(
+                    "insert into spring_ai_chat_memory (conversation_id, content, type) values (?, ?, ?)",
+                    conversationId, content, normalized);
+        } catch (Exception e) {
+            log.warn("V5.4 P12 insertMessage failed: conv={} type={} err={}", conversationId, normalized, e.getMessage());
+        }
     }
 }
