@@ -3138,7 +3138,7 @@ const skills = {
  // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
  container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
  try {
- const list = await api.listMarketKnowledge(1, 50);
+ const list = await api.listMarketSkills(1, 50);
  const items = (list && list.content) || list || [];
  if (!items || items.length === 0) {
  container.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
