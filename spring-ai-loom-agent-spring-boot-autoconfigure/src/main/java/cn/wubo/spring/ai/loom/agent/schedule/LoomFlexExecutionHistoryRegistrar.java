@@ -15,21 +15,21 @@ import org.springframework.beans.factory.InitializingBean;
 @Slf4j
 public class LoomFlexExecutionHistoryRegistrar implements InitializingBean {
 
-    private final FlexScheduledTaskRegistrar registrar;
-    private final ExecutionHistory executionHistory;
+ private final FlexScheduledTaskRegistrar registrar;
+ private final ExecutionHistory executionHistory;
 
-    public LoomFlexExecutionHistoryRegistrar(FlexScheduledTaskRegistrar registrar,
-                                             ExecutionHistory executionHistory) {
-        this.registrar = registrar;
-        this.executionHistory = executionHistory;
-    }
+ public LoomFlexExecutionHistoryRegistrar(FlexScheduledTaskRegistrar registrar,
+ ExecutionHistory executionHistory) {
+ this.registrar = registrar;
+ this.executionHistory = executionHistory;
+ }
 
-    @Override
-    public void afterPropertiesSet() {
-        if (executionHistory != null) {
-            registrar.setExecutionHistory(executionHistory);
-            log.info("Wired ExecutionHistory ({}) into FlexScheduledTaskRegistrar",
-                    executionHistory.getClass().getSimpleName());
-        }
-    }
+ @Override
+ public void afterPropertiesSet() {
+ if (executionHistory != null) {
+ registrar.setExecutionHistory(executionHistory);
+ log.info("Wired ExecutionHistory ({}) into FlexScheduledTaskRegistrar",
+ executionHistory.getClass().getSimpleName());
+ }
+ }
 }

@@ -8,35 +8,35 @@ import java.util.Map;
 
 public interface IFileTool extends IEmbedTool {
 
-    String readTextFile(String path, Integer head, Integer tail, ToolContext toolContext);
+ String readTextFile(String path, Integer head, Integer tail, ToolContext toolContext);
 
-    String readMediaFile(String path, ToolContext toolContext);
+ String readMediaFile(String path, ToolContext toolContext);
 
-    String readMultipleFiles(List<String> paths, ToolContext toolContext);
+ String readMultipleFiles(List<String> paths, ToolContext toolContext);
 
-    String writeFile(String path, String content, ToolContext toolContext);
+ String writeFile(String path, String content, ToolContext toolContext);
 
-    String editFile(String path, List<Map<String, String>> edits, ToolContext toolContext);
+ String editFile(String path, List<Map<String, String>> edits, ToolContext toolContext);
 
-    String createDirectory(String path, ToolContext toolContext);
+ String createDirectory(String path, ToolContext toolContext);
 
-    String moveFile(String source, String destination, ToolContext toolContext);
+ String moveFile(String source, String destination, ToolContext toolContext);
 
-    String searchFiles(String pattern, ToolContext toolContext);
+ String searchFiles(String pattern, ToolContext toolContext);
 
-    String listAllowedDirectories(ToolContext toolContext);
+ String listAllowedDirectories(ToolContext toolContext);
 
-    String listDirectory(String path, Integer depth, ToolContext toolContext);
+ String listDirectory(String path, Integer depth, ToolContext toolContext);
 
-    String listDirectoryWithSizes(String path, ToolContext toolContext);
+ String listDirectoryWithSizes(String path, ToolContext toolContext);
 
-    String directoryTree(String path, ToolContext toolContext);
+ String directoryTree(String path, ToolContext toolContext);
 
-    String getFileInfo(String path, ToolContext toolContext);
+ String getFileInfo(String path, ToolContext toolContext);
 
-    String downloadFileUrl(String path, ToolContext toolContext);
+ String downloadFileUrl(String path, ToolContext toolContext);
 
-    String viewFileUrl(String path, ToolContext toolContext);
+ String viewFileUrl(String path, ToolContext toolContext);
 
-    String deleteFileOrDirectory(String path, String confirm, ToolContext toolContext);
+ String deleteFileOrDirectory(String path, String confirm, ToolContext toolContext);
 }

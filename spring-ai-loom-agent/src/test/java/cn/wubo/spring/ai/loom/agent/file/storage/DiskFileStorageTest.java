@@ -26,122 +26,122 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("DiskFileStorage 单元测试")
 class DiskFileStorageTest {
 
-    @TempDir
-    Path tempDir;
+ @TempDir
+ Path tempDir;
 
-    private DiskFileStorage storage;
-    private String knowledgeBasePath;
+ private DiskFileStorage storage;
+ private String knowledgeBasePath;
 
-    @BeforeEach
-    void setUp() {
-        knowledgeBasePath = tempDir.resolve("knowledge").toString();
-        storage = new DiskFileStorage(knowledgeBasePath);
+ @BeforeEach
+ void setUp() {
+ knowledgeBasePath = tempDir.resolve("knowledge").toString();
+ storage = new DiskFileStorage(knowledgeBasePath);
 
-        // Set a test user context
-        UserContextHolder.setCurrentUser("testuser");
-    }
+ // Set a test user context
+ UserContextHolder.setCurrentUser("testuser");
+ }
 
-    @AfterEach
-    void tearDown() {
-        UserContextHolder.clear();
-    }
+ @AfterEach
+ void tearDown() {
+ UserContextHolder.clear();
+ }
 
-    @Test
-    @DisplayName("save 保存文件到磁盘并返回路径")
-    void testSave_savesFileToDisk() throws IOException {
-        byte[] content = "disk test content".getBytes();
+ @Test
+ @DisplayName("save 保存文件到磁盘并返回路径")
+ void testSave_savesFileToDisk() throws IOException {
+ byte[] content = "disk test content".getBytes();
 
-        String returnedPath = storage.save("kb-1", "test.txt",
-                new ByteArrayInputStream(content), "text/plain");
+ String returnedPath = storage.save("kb-1", "test.txt",
+ new ByteArrayInputStream(content), "text/plain");
 
-        assertNotNull(returnedPath);
-        assertFalse(returnedPath.isBlank());
+ assertNotNull(returnedPath);
+ assertFalse(returnedPath.isBlank());
 
-        // Verify file was written to disk
-        Path knowledgeDir = Path.of(knowledgeBasePath, "testuser", "kb-1");
-        assertTrue(Files.exists(knowledgeDir), "knowledge dir should exist");
-        assertTrue(Files.list(knowledgeDir).count() > 0, "should have a file in the dir");
-    }
+ // Verify file was written to disk
+ Path knowledgeDir = Path.of(knowledgeBasePath, "testuser", "kb-1");
+ assertTrue(Files.exists(knowledgeDir), "knowledge dir should exist");
+ assertTrue(Files.list(knowledgeDir).count() > 0, "should have a file in the dir");
+ }
 
-    @Test
-    @DisplayName("save 重名文件自动追加序号")
-    void testSave_duplicateFileNameAppendsSuffix() throws IOException {
-        byte[] content = "content 1".getBytes();
+ @Test
+ @DisplayName("save 重名文件自动追加序号")
+ void testSave_duplicateFileNameAppendsSuffix() throws IOException {
+ byte[] content = "content 1".getBytes();
 
-        // Save first file
-        String path1 = storage.save("kb-1", "report.pdf",
-                new ByteArrayInputStream(content), "application/pdf");
+ // Save first file
+ String path1 = storage.save("kb-1", "report.pdf",
+ new ByteArrayInputStream(content), "application/pdf");
 
-        // Save second file with same name
-        String path2 = storage.save("kb-1", "report.pdf",
-                new ByteArrayInputStream(content), "application/pdf");
+ // Save second file with same name
+ String path2 = storage.save("kb-1", "report.pdf",
+ new ByteArrayInputStream(content), "application/pdf");
 
-        assertNotEquals(path1, path2);
+ assertNotEquals(path1, path2);
 
-        // Should have 2 files in the directory
-        Path knowledgeDir = Path.of(knowledgeBasePath, "testuser", "kb-1");
-        assertEquals(2, Files.list(knowledgeDir).count(), "should have 2 files");
-    }
+ // Should have 2 files in the directory
+ Path knowledgeDir = Path.of(knowledgeBasePath, "testuser", "kb-1");
+ assertEquals(2, Files.list(knowledgeDir).count(), "should have 2 files");
+ }
 
-    @Test
-    @DisplayName("read 从磁盘路径读取文件")
-    void testRead_readsFileContent() throws IOException {
-        byte[] content = "readable content".getBytes();
+ @Test
+ @DisplayName("read 从磁盘路径读取文件")
+ void testRead_readsFileContent() throws IOException {
+ byte[] content = "readable content".getBytes();
 
-        String savedPath = storage.save("kb-1", "read.txt",
-                new ByteArrayInputStream(content), "text/plain");
+ String savedPath = storage.save("kb-1", "read.txt",
+ new ByteArrayInputStream(content), "text/plain");
 
-        // Read and verify content
-        byte[] readResult = storage.read(savedPath);
-        assertArrayEquals(content, readResult);
-    }
+ // Read and verify content
+ byte[] readResult = storage.read(savedPath);
+ assertArrayEquals(content, readResult);
+ }
 
-    @Test
-    @DisplayName("delete 删除磁盘文件")
-    void testDelete_deletesFileFromDisk() throws IOException {
-        // Save a file
-        String savedPath = storage.save("kb-1", "delete.txt",
-                new ByteArrayInputStream(new byte[]{1, 2, 3}), "application/octet-stream");
+ @Test
+ @DisplayName("delete 删除磁盘文件")
+ void testDelete_deletesFileFromDisk() throws IOException {
+ // Save a file
+ String savedPath = storage.save("kb-1", "delete.txt",
+ new ByteArrayInputStream(new byte[]{1, 2, 3}), "application/octet-stream");
 
-        // Verify file exists
-        Path path = Path.of(savedPath);
-        assertTrue(Files.exists(path), "file should exist before delete");
+ // Verify file exists
+ Path path = Path.of(savedPath);
+ assertTrue(Files.exists(path), "file should exist before delete");
 
-        // Delete it
-        storage.delete(savedPath);
-        assertFalse(Files.exists(path), "file should not exist after delete");
-    }
+ // Delete it
+ storage.delete(savedPath);
+ assertFalse(Files.exists(path), "file should not exist after delete");
+ }
 
-    @Test
-    @DisplayName("deleteByKnowledgeId 删除整个知识库目录")
-    void testDeleteByKnowledgeId_deletesKnowledgeDir() throws IOException {
-        // Create some files
-        storage.save("kb-1", "file1.txt", new ByteArrayInputStream(new byte[1]), "text/plain");
-        storage.save("kb-1", "file2.txt", new ByteArrayInputStream(new byte[2]), "text/plain");
-        storage.save("kb-2", "file3.txt", new ByteArrayInputStream(new byte[3]), "text/plain");
+ @Test
+ @DisplayName("deleteByKnowledgeId 删除整个知识库目录")
+ void testDeleteByKnowledgeId_deletesKnowledgeDir() throws IOException {
+ // Create some files
+ storage.save("kb-1", "file1.txt", new ByteArrayInputStream(new byte[1]), "text/plain");
+ storage.save("kb-1", "file2.txt", new ByteArrayInputStream(new byte[2]), "text/plain");
+ storage.save("kb-2", "file3.txt", new ByteArrayInputStream(new byte[3]), "text/plain");
 
-        Path kb1Dir = Path.of(knowledgeBasePath, "testuser", "kb-1");
-        assertTrue(Files.exists(kb1Dir), "kb-1 dir should exist");
+ Path kb1Dir = Path.of(knowledgeBasePath, "testuser", "kb-1");
+ assertTrue(Files.exists(kb1Dir), "kb-1 dir should exist");
 
-        // Delete kb-1
-        storage.deleteByKnowledgeId("kb-1");
+ // Delete kb-1
+ storage.deleteByKnowledgeId("kb-1");
 
-        assertFalse(Files.exists(kb1Dir), "kb-1 dir should be deleted");
+ assertFalse(Files.exists(kb1Dir), "kb-1 dir should be deleted");
 
-        // kb-2 should still exist
-        Path kb2Dir = Path.of(knowledgeBasePath, "testuser", "kb-2");
-        assertTrue(Files.exists(kb2Dir), "kb-2 dir should still exist");
-    }
+ // kb-2 should still exist
+ Path kb2Dir = Path.of(knowledgeBasePath, "testuser", "kb-2");
+ assertTrue(Files.exists(kb2Dir), "kb-2 dir should still exist");
+ }
 
-    @Test
-    @DisplayName("deleteByKnowledgeId 空知识库不报错")
-    void testDeleteByKnowledgeId_emptyKnowledgeBaseNoError() {
-        assertDoesNotThrow(() -> storage.deleteByKnowledgeId("kb-nonexistent"));
-    }
+ @Test
+ @DisplayName("deleteByKnowledgeId 空知识库不报错")
+ void testDeleteByKnowledgeId_emptyKnowledgeBaseNoError() {
+ assertDoesNotThrow(() -> storage.deleteByKnowledgeId("kb-nonexistent"));
+ }
 
-    @Test
-    @DisplayName("read 文件不存在时抛出异常")
-    void testRead_nonExistentFileThrowsException() {
-        assertThrows(RuntimeException.class, () -> storage.read("/non/existent/path/file.txt"));
-    }
+ @Test
+ @DisplayName("read 文件不存在时抛出异常")
+ void testRead_nonExistentFileThrowsException() {
+ assertThrows(RuntimeException.class, () -> storage.read("/non/existent/path/file.txt"));
+ }
 }

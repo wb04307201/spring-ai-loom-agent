@@ -1,5 +1,5 @@
 <a href="https://marked.js.org">
-  <img width="60px" height="60px" src="https://marked.js.org/img/logo-black.svg" align="right" />
+ <img width="60px" height="60px" src="https://marked.js.org/img/logo-black.svg" align="right" />
 </a>
 
 # Marked
@@ -78,16 +78,16 @@ $ marked --help
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"/>
-  <title>Marked in the browser</title>
+ <meta charset="utf-8"/>
+ <title>Marked in the browser</title>
 </head>
 <body>
-  <div id="content"></div>
-  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
-  <script>
-    document.getElementById('content').innerHTML =
-      marked.parse('# Marked in the browser\n\nRendered by **marked**.');
-  </script>
+ <div id="content"></div>
+ <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+ <script>
+ document.getElementById('content').innerHTML =
+ marked.parse('# Marked in the browser\n\nRendered by **marked**.');
+ </script>
 </body>
 </html>
 ```
@@ -95,9 +95,9 @@ or import esm module
 
 ```html
 <script type="module">
-  import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
-  document.getElementById('content').innerHTML =
-    marked.parse('# Marked in the browser\n\nRendered by **marked**.');
+ import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
+ document.getElementById('content').innerHTML =
+ marked.parse('# Marked in the browser\n\nRendered by **marked**.');
 </script>
 ```
 

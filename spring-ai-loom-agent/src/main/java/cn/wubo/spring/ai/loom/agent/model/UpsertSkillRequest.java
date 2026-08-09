@@ -5,8 +5,8 @@ package cn.wubo.spring.ai.loom.agent.model;
  * 端点 {@code POST /spring/ai/loom/skill/upsert} 与 chat 工具 {@code createOrUpdateSkill} 共用。
  */
 public record UpsertSkillRequest(
-        String name,
-        String description,
-        String content
+ String name,
+ String description,
+ String content
 ) {
 }

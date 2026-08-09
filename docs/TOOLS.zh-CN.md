@@ -14,11 +14,11 @@
 - [6. `IGitTool` — Git 工具（JGit）](#6-igittool--git-工具jgit)
 - [7. `IMavenTool` — Maven 构建工具（maven-invoker）](#7-imaventool--maven-构建工具maven-invoker)
 - [8. `ICompileAndDeployTool` — 端到端部署](#8-icompileanddeploytool--端到端部署)
-  - [8.1 工具入参](#81-工具入参)
-  - [8.2 配置属性](#82-配置属性)
-  - [8.3 预置基础镜像模板](#83-预置基础镜像模板)
-  - [8.4 工具入参示例](#84-工具入参示例)
-  - [8.5 端到端对话示例](#85-端到端对话示例)
+ - [8.1 工具入参](#81-工具入参)
+ - [8.2 配置属性](#82-配置属性)
+ - [8.3 预置基础镜像模板](#83-预置基础镜像模板)
+ - [8.4 工具入参示例](#84-工具入参示例)
+ - [8.5 端到端对话示例](#85-端到端对话示例)
 - [9. `ISubTaskTool` — 子任务委派](#9-isubtasktool--子任务委派)
 - [10. `IScheduleTool` — 定时任务](#10-ischeduletool--定时任务)
 - [11. 替换子工具](#11-替换子工具)
@@ -29,16 +29,16 @@
 
 每个内置工具组都通过 `spring.ai.loom.agent.*` 下的 `*.enabled` 属性控制开关。`time` / `file` / `skill` / `subtask` / `schedule` / `compile` 默认启用；`git` 和 `maven` 是 **opt-in**（默认关闭），因为端到端部署已经覆盖了编译/打包场景。
 
-| 属性                 | 类型     | 默认值   | 说明                                                       |
+| 属性 | 类型 | 默认值 | 说明 |
 |--------------------|--------|-------|----------------------------------------------------------|
-| `time.enabled`     | boolean | `true`  | 时间工具（`ITimeTool` — 当前时间、时区转换）                            |
-| `file.enabled`     | boolean | `true`  | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除）                     |
-| `skill.enabled`    | boolean | `true`  | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                          |
-| `subtask.enabled`  | boolean | `true`  | 子任务委派（`ISubTaskTool` — `start_sub_task` 把一段任务交给子模型同步执行）        |
-| `schedule.enabled` | boolean | `true`  | 定时任务（`IScheduleTool` — 创建/取消/列出/查历史；触发时以子任务方式运行，持久化到 H2 + 重启恢复） |
-| `git.enabled`      | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
-| `maven.enabled`    | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** — 编译/打包走 `ICompileAndDeployTool`。 |
-| `compile.enabled`  | boolean | `true`  | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
+| `time.enabled` | boolean | `true` | 时间工具（`ITimeTool` — 当前时间、时区转换） |
+| `file.enabled` | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除） |
+| `skill.enabled` | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情） |
+| `subtask.enabled` | boolean | `true` | 子任务委派（`ISubTaskTool` — `start_sub_task` 把一段任务交给子模型同步执行） |
+| `schedule.enabled` | boolean | `true` | 定时任务（`IScheduleTool` — 创建/取消/列出/查历史；触发时以子任务方式运行，持久化到 H2 + 重启恢复） |
+| `git.enabled` | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
+| `maven.enabled` | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** — 编译/打包走 `ICompileAndDeployTool`。 |
+| `compile.enabled` | boolean | `true` | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
 
 > 即便工具组被禁用，你仍可注册自己的 `@Bean IGitTool` / `@Bean IMavenTool` 来重新启用 — `@ConditionalOnMissingBean` 优先使用用户提供的 Bean。
 
@@ -46,13 +46,13 @@
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        git:
-          enabled: false
-        maven:
-          enabled: false
+ ai:
+ loom:
+ agent:
+ git:
+ enabled: false
+ maven:
+ enabled: false
 ```
 
 ---
@@ -61,85 +61,85 @@ spring:
 
 `IEmbedTool` 是聚合标记接口。子接口（`ITimeTool`、`ISkillTool`、`IFileTool`、`ISubTaskTool`、`IScheduleTool`、`IGitTool`、`IMavenTool`）各自向 LLM 提供独立的 `@Tool` 方法。`ICompileAndDeployTool` 同样继承 `IEmbedTool`，是部署场景的推荐入口。
 
-| 子接口                       | 默认实现                              | 方法数  | 默认状态      | 备注                                          |
+| 子接口 | 默认实现 | 方法数 | 默认状态 | 备注 |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
-| `ITimeTool`              | `DefaultTimeTool`                 | 2    | 启用        | 未设 `time.enabled` 时始终开启                     |
-| `ISkillTool`             | `DefaultSkillTool`                | 3    | 启用        | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
-| `IFileTool`              | `DefaultFileTool`                 | 16   | 启用        | 基于路径；根目录 = `{fileBasePath}/{username}/` |
-| `ISubTaskTool`           | `DefaultSubTaskTool`              | 4    | 启用        | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
-| `IScheduleTool`          | `DefaultScheduleTool`             | 4    | 启用        | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
-| `IGitTool`               | `DefaultGitTool`（JGit 7.6）         | 28   | **禁用**    | 通过 `git.enabled=true` 开启                     |
-| `IMavenTool`             | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用**    | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
-| `ICompileAndDeployTool`  | `DefaultCompileAndDeployTool`     | 1    | 启用        | 端到端 `git clone → build → docker run → health check` |
+| `ITimeTool` | `DefaultTimeTool` | 2 | 启用 | 未设 `time.enabled` 时始终开启 |
+| `ISkillTool` | `DefaultSkillTool` | 3 | 启用 | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
+| `IFileTool` | `DefaultFileTool` | 16 | 启用 | 基于路径；根目录 = `{fileBasePath}/{username}/` |
+| `ISubTaskTool` | `DefaultSubTaskTool` | 4 | 启用 | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
+| `IScheduleTool` | `DefaultScheduleTool` | 4 | 启用 | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
+| `IGitTool` | `DefaultGitTool`（JGit 7.6） | 28 | **禁用** | 通过 `git.enabled=true` 开启 |
+| `IMavenTool` | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用** | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
+| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | 启用 | 端到端 `git clone → build → docker run → health check` |
 
 ---
 
 ## 3. `ITimeTool` — 时间工具
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool`                     |
-| **默认实现** | `DefaultTimeTool`                                                      |
-| **覆盖方式** | 自定义 `@Bean ITimeTool`                                                  |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.time.enabled` 切换                       |
-| **方法**   | `getCurrentTime`（获取指定时区的当前时间）、`convertTime`（在不同时区之间转换时间） |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool` |
+| **默认实现** | `DefaultTimeTool` |
+| **覆盖方式** | 自定义 `@Bean ITimeTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.time.enabled` 切换 |
+| **方法** | `getCurrentTime`（获取指定时区的当前时间）、`convertTime`（在不同时区之间转换时间） |
 
 ---
 
 ## 4. `ISkillTool` — 技能工具
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool`                   |
-| **默认实现** | `DefaultSkillTool`                                                     |
-| **覆盖方式** | 自定义 `@Bean ISkillTool`                                                 |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.skill.enabled` 切换                      |
-| **方法**   | `listSkills(keyword, source, maxCount)`（渐进式披露：默认全返回，上限 200；按 `keyword` 模糊匹配 `name`/`description`，按 `source` 过滤）、`getSkill`（根据名称获取技能详情）、`createOrUpdateSkill(name, description, content)`（创建或覆盖自建技能；`ROLE_GRANTED` / `MARKET_PULLED` 锁定返回 403） |
-| **数据源** | `user_skill`（数据库）。每次调用前 `DefaultSkillStorage` 自动 sync `role_skill` → `user_skill`（locked 的 ROLE_GRANTED 条目）。对 admin 还会附带** union view**：所有 APPROVED + 自己的 PENDING（source=`MARKET_VIEW`）。 |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool` |
+| **默认实现** | `DefaultSkillTool` |
+| **覆盖方式** | 自定义 `@Bean ISkillTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.skill.enabled` 切换 |
+| **方法** | `listSkills(keyword, source, maxCount)`（渐进式披露：默认全返回，上限 200；按 `keyword` 模糊匹配 `name`/`description`，按 `source` 过滤）、`getSkill`（根据名称获取技能详情）、`createOrUpdateSkill(name, description, content)`（创建或覆盖自建技能；`ROLE_GRANTED` / `MARKET_PULLED` 锁定返回 403，要改 MARKET_PULLED 请用 duplicateSkill 复制后改） |
+| **数据源** | `user_skill`（数据库）。每次调用前 `DefaultSkillStorage` 自动 sync `role_skill` → `user_skill`（locked 的 ROLE_GRANTED 条目）。MARKET_PULLED 行始终是市场最新快照（作者 save() 时自动推送到所有拉取者；拉取者无需手动 re-pull）。 |
 
 ---
 
 ## 5. `IFileTool` — 文件工具
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool`                     |
-| **默认实现** | `DefaultFileTool`                                                      |
-| **覆盖方式** | 自定义 `@Bean IFileTool`                                                  |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.file.enabled` 切换                       |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool` |
+| **默认实现** | `DefaultFileTool` |
+| **覆盖方式** | 自定义 `@Bean IFileTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.file.enabled` 切换 |
 | **根路径** | 所有基于路径的操作以 `{fileBasePath}/{username}/`（默认 `.local/file/{username}/`）为根目录 |
 
 **方法（16 个）**：
 
-| 方法                       | 用途                                                                 |
+| 方法 | 用途 |
 |--------------------------|--------------------------------------------------------------------|
-| `readTextFile`           | 读取单个文本文件                                                          |
-| `readMediaFile`          | 读取媒体文件（图片/音频）                                                    |
-| `readMultipleFiles`      | 一次读取多个文件                                                          |
-| `writeFile`              | 创建或覆盖写入文件                                                        |
-| `editFile`               | 在已存在的文件中进行定点文本编辑                                                  |
-| `createDirectory`        | 创建目录（递归）                                                          |
-| `moveFile`               | 移动或重命名文件/目录                                                       |
-| `searchFiles`            | 在文件树上做 glob/regex 搜索                                              |
-| `listAllowedDirectories` | 列出 LLM 允许访问的目录                                                    |
-| `listDirectory`          | 列出目录条目                                                            |
-| `listDirectoryWithSizes` | 列出目录条目（含大小信息）                                                     |
-| `directoryTree`          | 递归的目录树                                                            |
-| `getFileInfo`            | 获取文件/目录的元信息（大小、修改时间、类型）                                            |
-| `downloadFileUrl`        | 获取下载链接（自动创建临时 `file_info` 记录，`usage="temp"`）                        |
-| `viewFileUrl`            | 获取预览链接（自动创建临时 `file_info` 记录）                                       |
-| `deleteFileOrDirectory`  | 删除（需显式 `I_CONFIRM_DELETE` 确认，token 可在 `spring.ai.loom.agent.file.deleteConfirmToken` 改）；支持递归删除目录；清理已删除文件对应的 `file_info` 记录         |
+| `readTextFile` | 读取单个文本文件 |
+| `readMediaFile` | 读取媒体文件（图片/音频） |
+| `readMultipleFiles` | 一次读取多个文件 |
+| `writeFile` | 创建或覆盖写入文件 |
+| `editFile` | 在已存在的文件中进行定点文本编辑 |
+| `createDirectory` | 创建目录（递归） |
+| `moveFile` | 移动或重命名文件/目录 |
+| `searchFiles` | 在文件树上做 glob/regex 搜索 |
+| `listAllowedDirectories` | 列出 LLM 允许访问的目录 |
+| `listDirectory` | 列出目录条目 |
+| `listDirectoryWithSizes` | 列出目录条目（含大小信息） |
+| `directoryTree` | 递归的目录树 |
+| `getFileInfo` | 获取文件/目录的元信息（大小、修改时间、类型） |
+| `downloadFileUrl` | 获取下载链接（自动创建临时 `file_info` 记录，`usage="temp"`） |
+| `viewFileUrl` | 获取预览链接（自动创建临时 `file_info` 记录） |
+| `deleteFileOrDirectory` | 删除（需显式 `I_CONFIRM_DELETE` 确认，token 可在 `spring.ai.loom.agent.file.deleteConfirmToken` 改）；支持递归删除目录；清理已删除文件对应的 `file_info` 记录 |
 
 ---
 
 ## 6. `IGitTool` — Git 工具（JGit）
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool`                       |
-| **默认实现** | `DefaultGitTool`（基于 Eclipse JGit 7.6.0）                               |
-| **覆盖方式** | 自定义 `@Bean IGitTool`                                                   |
-| **状态**   | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **默认禁用** |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool` |
+| **默认实现** | `DefaultGitTool`（基于 Eclipse JGit 7.6.0） |
+| **覆盖方式** | 自定义 `@Bean IGitTool` |
+| **状态** | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **默认禁用** |
 | **工作目录** | 通过 `gitSetWorkingDir` 设置（绝对路径或相对于 `{fileBasePath}/{username}/` 的相对路径）；`gitInit` / `gitClone` 也接受绝对路径或用户文件目录下的相对路径 |
 
 **方法（28 个）**：
@@ -160,23 +160,23 @@ spring:
 
 ## 7. `IMavenTool` — Maven 构建工具（maven-invoker）
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool`                   |
-| **默认实现** | `DefaultMavenTool`（基于 maven-invoker 3.3.0，不依赖 shell）              |
-| **覆盖方式** | 自定义 `@Bean IMavenTool`                                              |
-| **状态**   | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` 且 `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")` — **默认禁用，需 opt-in** |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool` |
+| **默认实现** | `DefaultMavenTool`（基于 maven-invoker 3.3.0，不依赖 shell） |
+| **覆盖方式** | 自定义 `@Bean IMavenTool` |
+| **状态** | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` 且 `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")` — **默认禁用，需 opt-in** |
 | **方法（6 个）** | `mavenExecute`（通用 Maven 命令执行）、`mavenBuild`（编译）、`mavenPackage`（打包 JAR/WAR）、`mavenTest`（运行测试，支持测试模式匹配）、`mavenDependencyTree`（依赖树，支持范围过滤）、`mavenValidate`（验证项目结构） |
 
 **配置属性**：
 
-| 属性                                              | 类型     | 默认值       | 说明                                              |
+| 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled`              | boolean  | `false`     | 是否启用 Maven 工具（**opt-in**）—— 编译/打包走 `ICompileAndDeployTool` |
-| `spring.ai.loom.agent.maven.mavenHome`            | String   | —           | Maven 安装目录（可选，空则使用 PATH）                  |
-| `spring.ai.loom.agent.maven.localRepository`      | String   | —           | 本地仓库路径（可选）                                  |
-| `spring.ai.loom.agent.maven.maxOutputLines`       | int      | `200`       | 输出最大行数（超出截断）                               |
-| `spring.ai.loom.agent.maven.defaultTimeoutMs`     | long     | `300000`    | 默认执行超时（5 分钟）                                 |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | 是否启用 Maven 工具（**opt-in**）—— 编译/打包走 `ICompileAndDeployTool` |
+| `spring.ai.loom.agent.maven.mavenHome` | String | — | Maven 安装目录（可选，空则使用 PATH） |
+| `spring.ai.loom.agent.maven.localRepository` | String | — | 本地仓库路径（可选） |
+| `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | 输出最大行数（超出截断） |
+| `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | 默认执行超时（5 分钟） |
 
 > 部署流水线中的编译/打包请优先使用 `ICompileAndDeployTool`；仅当 LLM 需要执行单点 `mvn` 命令时再开启 `IMavenTool`。
 
@@ -186,15 +186,15 @@ spring:
 
 `IKnowledgeTool` 提供工具化 RAG：LLM 调 `searchKnowledge` 按需从指定知识库拉取相关 chunk。替代了旧的 `RetrievalAugmentationAdvisor` 模式（旧的模式是把所有 chunk 预注入到 system prompt 里）。
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool`           |
-| **默认实现** | `DefaultKnowledgeTool`                                                   |
-| **覆盖方式** | 自定义 `@Bean IKnowledgeTool`                                              |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.knowledge.enabled` 切换                  |
-| **方法**   | `searchKnowledge(knowledgeId, query, topK?)`（向量检索指定知识库，返回 top-k chunk 含相似度分数） |
-| **权限检查** | 每次调用校验用户对目标知识库的访问权限（own / subscribed / role-granted）；否则返回 "没有权限访问该知识库"  |
-| **过滤**   | 内置 SpEL 过滤 `type == 'knowledge' && knowledgeId == ?` 限定只在请求的知识库内检索 |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool` |
+| **默认实现** | `DefaultKnowledgeTool` |
+| **覆盖方式** | 自定义 `@Bean IKnowledgeTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.knowledge.enabled` 切换 |
+| **方法** | `searchKnowledge(knowledgeId, query, topK?)`（向量检索指定知识库，返回 top-k chunk 含相似度分数） |
+| **权限检查** | 每次调用校验用户对目标知识库的访问权限（own / subscribed / role-granted）；否则返回 "没有权限访问该知识库" |
+| **过滤** | 内置 SpEL 过滤 `type == 'knowledge' && knowledgeId == ?` 限定只在请求的知识库内检索 |
 | **KB 发现** | 已启用的知识库列表在 system prompt `【知识库】` 段自动展示（ID + 名称 + 摘要）—— LLM 不需要 `listKnowledgeBases` 工具来发现它们；该工具已于 2025-09 移除 |
 
 > KB `description` 字段作为 LLM 用的**内容摘要**（不是主题标签）。好例子：「本知识库收录产品保修条款、售后流程：保修期限（主机 36 个月/电池 12 个月/配件 6 个月）...」。未来 LLM 自动生成摘要。
@@ -205,16 +205,16 @@ spring:
 
 `ISubTaskTool` 让主对话把一段任务委派给同步运行的"子模型"，跑在独立线程池上。子任务不能再触发子任务或定时任务（递归防御）。
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.subtask.ISubTaskTool`                |
-| **默认实现** | `DefaultSubTaskTool`                                                     |
-| **覆盖方式** | 自定义 `@Bean ISubTaskTool`                                                 |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换                  |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.subtask.ISubTaskTool` |
+| **默认实现** | `DefaultSubTaskTool` |
+| **覆盖方式** | 自定义 `@Bean ISubTaskTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换 |
 | **方法(4)** | `start_sub_task(prompt, systemContext?)`（在 `loomSubTaskExecutor` 上启动子任务）；`list_sub_tasks()`（列出当前会话的活跃子任务）；`cancel_sub_task(subTaskId)`（取消运行中的子任务）；`get_sub_task_history(limit?)`（最近已完成/已取消的子任务） |
-| **隔离**   | 严格按 `(username, conversationId)` 隔离；子任务 memory 用 `{conversationId}--sub--{subTaskId}` 命名空间，避免污染父会话历史 |
+| **隔离** | 严格按 `(username, conversationId)` 隔离；子任务 memory 用 `{conversationId}--sub--{subTaskId}` 命名空间，避免污染父会话历史 |
 | **工具过滤** | 子任务运行时 self-tools（`ISubTaskTool` / `IScheduleTool`）被过滤掉，防止递归 |
-| **并发**   | 通过 `spring.ai.loom.agent.subtask.max-concurrent`（默认 4）控制；历史通过 `max-history`（默认 200）控制 |
+| **并发** | 通过 `spring.ai.loom.agent.subtask.max-concurrent`（默认 4）控制；历史通过 `max-history`（默认 200）控制 |
 
 ---
 
@@ -222,79 +222,79 @@ spring:
 
 `ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`。是 `git clone → build → docker run` 工作流的**推荐入口** —— LLM 只需传参，工具返回 `accessUrl`。
 
-| 项目       | 内容                                                                                |
+| 项目 | 内容 |
 |----------|-----------------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.tool.compile.ICompileAndDeployTool`                  |
-| **默认实现** | `DefaultCompileAndDeployTool`                                                     |
-| **覆盖方式** | 自定义 `@Bean ICompileAndDeployTool`                                               |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.compile.enabled` 切换                            |
-| **方法**   | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
-| **工作区** | 每次调用在 `{fileBasePath}/{username}/compile-deploy-<uuid>/` 下创建独立工作区               |
+| **接口** | `cn.wubo.spring.ai.loom.agent.tool.compile.ICompileAndDeployTool` |
+| **默认实现** | `DefaultCompileAndDeployTool` |
+| **覆盖方式** | 自定义 `@Bean ICompileAndDeployTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.compile.enabled` 切换 |
+| **方法** | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
+| **工作区** | 每次调用在 `{fileBasePath}/{username}/compile-deploy-<uuid>/` 下创建独立工作区 |
 
 ### 10.1 工具入参
 
 `params` 是大小写不敏感的 Map。必填：`gitUrl`、`port`、`containerPort`。其他按需提供。
 
-| 键                  | 必填   | 说明                                                                                                              |
+| 键 | 必填 | 说明 |
 |--------------------|------|-----------------------------------------------------------------------------------------------------------------|
-| `gitUrl`           | 是    | Git 仓库 URL                                                                                                       |
-| `gitUsername`      | 否    | Git 用户名（公开仓库可省略）                                                                                                  |
-| `gitPassword`      | 否    | Git 密码或 token（公开仓库可省略）                                                                                            |
-| `branch`           | 否    | 克隆分支（默认远程 HEAD）                                                                                                  |
-| `port`             | 是    | 宿主机对外端口（也是访问 URL 的端口，如 `http://localhost:{port}/{healthPath}`）                                                       |
-| `containerPort`    | 是    | 容器内应用监听端口（无 yml 兜底，参考 application.yml 的 `server.port`）                                                            |
-| `subDir`           | 否    | 多模块仓库的子目录；根目录无 `pom.xml` 时**必须**显式指定，否则工具会返回 fail                                                                          |
-| `imageName`        | 否    | Docker 镜像名（默认按时间戳自动生成）                                                                                            |
-| `containerName`    | 否    | Docker 容器名（默认按时间戳自动生成）                                                                                            |
-| `healthPath`       | 否    | 健康检查路径，同时作为访问 URL 路径（如 `healthPath=sql-forge-demo` → `http://localhost:{port}/sql-forge-demo`；无 context-path 时传 `/`） |
-| `buildTool`        | 否    | 构建栈：`maven` / `npm` / `npm-frontend` / `pip`。缺省时按 marker 文件自动探测（`pom.xml→maven`、`package.json→npm`、`requirements.txt` / `pyproject.toml→pip`）。多模块仓同时存在多个 marker 时必须显式指定。 |
-| `baseImage`        | 否    | 基础镜像；支持模板别名（`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`）或完整镜像名（如 `openjdk:17-slim`）。缺省按 `buildTool` 自动选（`maven→java17`、`npm→node20`、`npm-frontend→node20-serve`、`pip→python3`）。 |
-| `runCommand`       | 否    | 字符串数组，覆盖模板的默认 ENTRYPOINT（极少用）                                                                                       |
+| `gitUrl` | 是 | Git 仓库 URL |
+| `gitUsername` | 否 | Git 用户名（公开仓库可省略） |
+| `gitPassword` | 否 | Git 密码或 token（公开仓库可省略） |
+| `branch` | 否 | 克隆分支（默认远程 HEAD） |
+| `port` | 是 | 宿主机对外端口（也是访问 URL 的端口，如 `http://localhost:{port}/{healthPath}`） |
+| `containerPort` | 是 | 容器内应用监听端口（无 yml 兜底，参考 application.yml 的 `server.port`） |
+| `subDir` | 否 | 多模块仓库的子目录；根目录无 `pom.xml` 时**必须**显式指定，否则工具会返回 fail |
+| `imageName` | 否 | Docker 镜像名（默认按时间戳自动生成） |
+| `containerName` | 否 | Docker 容器名（默认按时间戳自动生成） |
+| `healthPath` | 否 | 健康检查路径，同时作为访问 URL 路径（如 `healthPath=sql-forge-demo` → `http://localhost:{port}/sql-forge-demo`；无 context-path 时传 `/`） |
+| `buildTool` | 否 | 构建栈：`maven` / `npm` / `npm-frontend` / `pip`。缺省时按 marker 文件自动探测（`pom.xml→maven`、`package.json→npm`、`requirements.txt` / `pyproject.toml→pip`）。多模块仓同时存在多个 marker 时必须显式指定。 |
+| `baseImage` | 否 | 基础镜像；支持模板别名（`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`）或完整镜像名（如 `openjdk:17-slim`）。缺省按 `buildTool` 自动选（`maven→java17`、`npm→node20`、`npm-frontend→node20-serve`、`pip→python3`）。 |
+| `runCommand` | 否 | 字符串数组，覆盖模板的默认 ENTRYPOINT（极少用） |
 
 ### 10.2 配置属性
 
 所有配置位于 `spring.ai.loom.agent.compile.*` 下。
 
-| 属性                                                       | 类型      | 默认值                       | 说明                                                                                                  |
+| 属性 | 类型 | 默认值 | 说明 |
 |----------------------------------------------------------|---------|---------------------------|---------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled`                    | boolean | `true`                    | 是否注册端到端部署工具（默认启用）                                                                                   |
-| `spring.ai.loom.agent.compile.mavenHome`                  | string  | 自动探测                      | 可选 Maven 安装目录；回退到 `maven.mavenHome` 与 PATH                                                             |
-| `spring.ai.loom.agent.compile.dockerCmd`                  | string  | `docker`                  | 可选 docker CLI 二进制覆盖                                                                                  |
-| `spring.ai.loom.agent.compile.mavenTimeoutMs`             | long    | `600000`                  | Maven 编译超时（10 分钟）                                                                                    |
-| `spring.ai.loom.agent.compile.dockerBuildTimeoutMs`       | long    | `600000`                  | `docker build` 超时（10 分钟）                                                                                |
-| `spring.ai.loom.agent.compile.dockerRunTimeoutMs`         | long    | `60000`                   | `docker run` 启动超时（1 分钟）                                                                               |
-| `spring.ai.loom.agent.compile.healthCheckMaxWaitMs`       | long    | `60000`                   | 容器启动后健康检查总等待（1 分钟）                                                                                   |
-| `spring.ai.loom.agent.compile.healthCheckIntervalMs`      | long    | `2000`                    | 健康检查轮询间隔（2 秒）                                                                                        |
-| `spring.ai.loom.agent.compile.keepWorkspace`              | boolean | `false`                   | 部署完成后是否保留工作区（默认删；调试时设 `true`）                                                                          |
-| `spring.ai.loom.agent.compile.imageTemplates`             | map     | （6 个预置模板）                  | 按别名预置的基础镜像模板，见下                                                                                     |
-| `spring.ai.loom.agent.compile.extraRunArgs`               | string[]| `[]`                      | 注入到 `--name` 与镜像名之间的额外 `docker run` 参数                                                                   |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | 是否注册端到端部署工具（默认启用） |
+| `spring.ai.loom.agent.compile.mavenHome` | string | 自动探测 | 可选 Maven 安装目录；回退到 `maven.mavenHome` 与 PATH |
+| `spring.ai.loom.agent.compile.dockerCmd` | string | `docker` | 可选 docker CLI 二进制覆盖 |
+| `spring.ai.loom.agent.compile.mavenTimeoutMs` | long | `600000` | Maven 编译超时（10 分钟） |
+| `spring.ai.loom.agent.compile.dockerBuildTimeoutMs` | long | `600000` | `docker build` 超时（10 分钟） |
+| `spring.ai.loom.agent.compile.dockerRunTimeoutMs` | long | `60000` | `docker run` 启动超时（1 分钟） |
+| `spring.ai.loom.agent.compile.healthCheckMaxWaitMs` | long | `60000` | 容器启动后健康检查总等待（1 分钟） |
+| `spring.ai.loom.agent.compile.healthCheckIntervalMs` | long | `2000` | 健康检查轮询间隔（2 秒） |
+| `spring.ai.loom.agent.compile.keepWorkspace` | boolean | `false` | 部署完成后是否保留工作区（默认删；调试时设 `true`） |
+| `spring.ai.loom.agent.compile.imageTemplates` | map | （6 个预置模板） | 按别名预置的基础镜像模板，见下 |
+| `spring.ai.loom.agent.compile.extraRunArgs` | string[]| `[]` | 注入到 `--name` 与镜像名之间的额外 `docker run` 参数 |
 
 ### 10.3 预置基础镜像模板
 
-| 别名               | 镜像                                | 默认 ENTRYPOINT                          |
+| 别名 | 镜像 | 默认 ENTRYPOINT |
 |------------------|-----------------------------------|---------------------------------------------|
-| `java17`         | `eclipse-temurin:17-jre-alpine`   | `["java","-jar","app.jar"]`                 |
-| `java21`         | `eclipse-temurin:21-jre-alpine`   | `["java","-jar","app.jar"]`                 |
-| `nginx`          | `nginx:1.27-alpine`               | `["nginx","-g","daemon off;"]`              |
-| `python3`        | `python:3.12-slim`                | `["python","app.py"]`                       |
-| `node20`         | `node:20-alpine`                  | `["node","dist/index.js"]`                  |
-| `node20-serve`   | `nginx:1.27-alpine`               | `["nginx","-g","daemon off;"]`              |
+| `java17` | `eclipse-temurin:17-jre-alpine` | `["java","-jar","app.jar"]` |
+| `java21` | `eclipse-temurin:21-jre-alpine` | `["java","-jar","app.jar"]` |
+| `nginx` | `nginx:1.27-alpine` | `["nginx","-g","daemon off;"]` |
+| `python3` | `python:3.12-slim` | `["python","app.py"]` |
+| `node20` | `node:20-alpine` | `["node","dist/index.js"]` |
+| `node20-serve` | `nginx:1.27-alpine` | `["nginx","-g","daemon off;"]` |
 
 可通过 yml 覆盖或新增模板：
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        compile:
-          image-templates:
-            java17:
-              image: eclipse-temurin:17-jre-alpine
-              command: [java, -jar, app.jar]
-            nginx:
-              image: nginx:1.27-alpine
-              command: [nginx, -g, "daemon off;"]
+ ai:
+ loom:
+ agent:
+ compile:
+ image-templates:
+ java17:
+ image: eclipse-temurin:17-jre-alpine
+ command: [java, -jar, app.jar]
+ nginx:
+ image: nginx:1.27-alpine
+ command: [nginx, -g, "daemon off;"]
 ```
 
 工具入参 `baseImage` 传别名即选中对应模板；传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 `java17` 兜底。
@@ -303,13 +303,13 @@ spring:
 
 ```json
 {
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "port": 8081,
-  "containerPort": 8080,
-  "subDir": "sql-forge-web",
-  "buildTool": "maven",
-  "baseImage": "java17",
-  "healthPath": "sql-forge-demo"
+ "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+ "port": 8081,
+ "containerPort": 8080,
+ "subDir": "sql-forge-web",
+ "buildTool": "maven",
+ "baseImage": "java17",
+ "healthPath": "sql-forge-demo"
 }
 ```
 
@@ -337,14 +337,14 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ```json
 {
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "gitUsername": "wb04307201",
-  "gitPassword": "<your-password>",
-  "subDir": "sql-forge-demo",
-  "buildTool": "maven",
-  "port": 8081,
-  "containerPort": 8081,
-  "healthPath": "/sql/forge/web"
+ "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+ "gitUsername": "wb04307201",
+ "gitPassword": "<your-password>",
+ "subDir": "sql-forge-demo",
+ "buildTool": "maven",
+ "port": 8081,
+ "containerPort": 8081,
+ "healthPath": "/sql/forge/web"
 }
 ```
 
@@ -379,12 +379,12 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ```json
 {
-  "gitUrl": "https://gitee.com/example/spa-admin.git",
-  "buildTool": "npm-frontend",
-  "baseImage": "node20-serve",
-  "port": 8088,
-  "containerPort": 80,
-  "healthPath": "/admin/"
+ "gitUrl": "https://gitee.com/example/spa-admin.git",
+ "buildTool": "npm-frontend",
+ "baseImage": "node20-serve",
+ "port": 8088,
+ "containerPort": 80,
+ "healthPath": "/admin/"
 }
 ```
 
@@ -406,11 +406,11 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ```json
 {
-  "gitUrl": "https://gitee.com/example/py-service.git",
-  "buildTool": "pip",
-  "port": 9000,
-  "containerPort": 9000,
-  "healthPath": "/"
+ "gitUrl": "https://gitee.com/example/py-service.git",
+ "buildTool": "pip",
+ "port": 9000,
+ "containerPort": 9000,
+ "healthPath": "/"
 }
 ```
 
@@ -440,33 +440,33 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 >
 > 1. **公开仓库**：直接省略 `gitUsername` / `gitPassword`。
 > 2. **私有仓库**（按优先级）：
->    - 在 `application.yml` 里配 `spring.ai.loom.agent.git.username` / `git.token`，由工具隐式注入 `gitUsername` / `gitPassword`；LLM 完全看不到凭据。
->    - 用部署平台的 **Secret / Credential 变量**（GitHub Actions、GitLab CI、Jenkins Credentials 等），运行时注入到环境变量。
->    - 用 **SSH Key**（在容器或宿主机 `~/.ssh/` 里挂好 `id_rsa` + `config`），git 协议直接走 `git@…`，LLM 不需要密码。
+> - 在 `application.yml` 里配 `spring.ai.loom.agent.git.username` / `git.token`，由工具隐式注入 `gitUsername` / `gitPassword`；LLM 完全看不到凭据。
+> - 用部署平台的 **Secret / Credential 变量**（GitHub Actions、GitLab CI、Jenkins Credentials 等），运行时注入到环境变量。
+> - 用 **SSH Key**（在容器或宿主机 `~/.ssh/` 里挂好 `id_rsa` + `config`），git 协议直接走 `git@…`，LLM 不需要密码。
 > 3. **临时调试**时，让用户在 LLM 之外的渠道（环境变量、临时文件）保管密码，对话里只说"密码已就位"。
 
 ---
 
 ## 13. `IScheduleTool` — 定时任务
 
-| 项目       | 内容                                                                     |
+| 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口**   | `cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool`                  |
-| **默认实现** | `DefaultScheduleTool`                                                  |
-| **覆盖方式** | 自定义 `@Bean IScheduleTool`                                             |
-| **状态**   | 默认启用；通过 `spring.ai.loom.agent.schedule.enabled` 切换                   |
+| **接口** | `cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool` |
+| **默认实现** | `DefaultScheduleTool` |
+| **覆盖方式** | 自定义 `@Bean IScheduleTool` |
+| **状态** | 默认启用；通过 `spring.ai.loom.agent.schedule.enabled` 切换 |
 | **方法（4）** | `createSchedule`（cron / fixed_delay / fixed_rate / one_shot）、`cancelSchedule`、`listSchedules`、`getScheduleHistory` |
 
-定时任务命名空间为 `loom-sched-{username}-{conversationId}-{name}`，触发时**以子任务方式运行**。loom-agent 自管 H2 持久化（`loom_scheduled_task`，V2.0 新增）；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，使 `max-lifetime` 上限跨重启累计（超上限的行自动清理）。取消时会校验行所有权（跨用户取消会被拒绝）并删除持久化行，使恢复监听器不会"复活"幽灵任务。
+定时任务命名空间为 `loom-sched-{username}-{conversationId}-{name}`，触发时**以子任务方式运行**。loom-agent 自管 H2 持久化（`loom_scheduled_task`，新增）；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，使 `max-lifetime` 上限跨重启累计（超上限的行自动清理）。取消时会校验行所有权（跨用户取消会被拒绝）并删除持久化行，使恢复监听器不会"复活"幽灵任务。
 
 **触发约束**来自 `flex.schedule.limits`：
 
-| 属性                       | 示例    | 说明                              |
+| 属性 | 示例 | 说明 |
 |--------------------------|-------|---------------------------------|
-| `schedule.enabled`       | `true` | 启用定时任务工具                       |
-| `flex.schedule.limits.min-interval` | `10m` | 最小触发间隔                    |
-| `flex.schedule.limits.max-lifetime` | `72h` | 任务最大存活（跨重启累计）          |
-| `flex.schedule.limits.mode` | `strict` | `strict` = 超限抛异常            |
+| `schedule.enabled` | `true` | 启用定时任务工具 |
+| `flex.schedule.limits.min-interval` | `10m` | 最小触发间隔 |
+| `flex.schedule.limits.max-lifetime` | `72h` | 任务最大存活（跨重启累计） |
+| `flex.schedule.limits.mode` | `strict` | `strict` = 超限抛异常 |
 
 ---
 
@@ -477,7 +477,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 ```java
 @Bean
 public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
-    return new MyCustomFileTool(file, properties.getFileBasePath());
+ return new MyCustomFileTool(file, properties.getFileBasePath());
 }
 // DefaultTimeTool 和 DefaultSkillTool 仍然生效
 ```
@@ -487,7 +487,7 @@ public IFileTool customFileTool(IFile file, LoomAgentProperties properties) {
 ```java
 @Bean
 public IGitTool customGitTool() {
-    return new MyCliGitTool();   // 即便 git.enabled=false 也会生效
+ return new MyCliGitTool(); // 即便 git.enabled=false 也会生效
 }
 ```
 

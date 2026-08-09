@@ -10,17 +10,17 @@ Run the MCP server without local installation via [jbang](https://www.jbang.dev/
 
 ```json
 {
-  "mcpServers": {
-    "loom-git-mcp": {
-      "command": "jbang",
-      "args": [
-        "io.github.wb04307201:loom-git-mcp:1.0-SNAPSHOT",
-        "--loom.git.mcp.basePath=/workspace",
-        "--loom.git.mcp.gitUsername=your-username",
-        "--loom.git.mcp.gitToken=ghp_your_token_here"
-      ]
-    }
-  }
+ "mcpServers": {
+ "loom-git-mcp": {
+ "command": "jbang",
+ "args": [
+ "io.github.wb04307201:loom-git-mcp:1.0-SNAPSHOT",
+ "--loom.git.mcp.basePath=/workspace",
+ "--loom.git.mcp.gitUsername=your-username",
+ "--loom.git.mcp.gitToken=ghp_your_token_here"
+ ]
+ }
+ }
 }
 ```
 

@@ -8,5 +8,5 @@ import java.util.List;
 
 public interface IDocumentRead {
 
-    List<Document> read(Resource fileResource, String knowledgeId);
+ List<Document> read(Resource fileResource, String knowledgeId);
 }

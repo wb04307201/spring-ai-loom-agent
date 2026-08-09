@@ -27,83 +27,83 @@ import static org.mockito.Mockito.mock;
 @DisplayName("LoomAgentConfiguration Tool 默认加载验证")
 class LoomAgentToolAutoConfigTest {
 
-    @Configuration
-    static class TestConfig {
-        @Bean
-        LoomAgentProperties loomAgentProperties() {
-            return new LoomAgentProperties();
-        }
+ @Configuration
+ static class TestConfig {
+ @Bean
+ LoomAgentProperties loomAgentProperties() {
+ return new LoomAgentProperties();
+ }
 
-        @Bean
-        IFile iFile() {
-            return mock(IFile.class);
-        }
+ @Bean
+ IFile iFile() {
+ return mock(IFile.class);
+ }
 
-        @Bean
-        ISkillStorage iSkillStorage() {
-            return mock(ISkillStorage.class);
-        }
-    }
+ @Bean
+ ISkillStorage iSkillStorage() {
+ return mock(ISkillStorage.class);
+ }
+ }
 
-    private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.ToolConfiguration.class);
+ private final ApplicationContextRunner runner = new ApplicationContextRunner()
+ .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.ToolConfiguration.class);
 
-    @Test
-    @DisplayName("默认配置下常用 tool bean 加载（git/maven 是 opt-in，默认不加载）")
-    void allToolsLoadedByDefault() {
-        runner.run(ctx -> {
-            assertThat(ctx).hasSingleBean(ITimeTool.class);
-            assertThat(ctx).hasSingleBean(ISkillTool.class);
-            assertThat(ctx).hasSingleBean(IFileTool.class);
-            // IGitTool / IMavenTool 是 opt-in（默认 false），应由显式 enabled=true 启用
-            assertThat(ctx).doesNotHaveBean(IGitTool.class);
-            assertThat(ctx).doesNotHaveBean(IMavenTool.class);
-        });
-    }
+ @Test
+ @DisplayName("默认配置下常用 tool bean 加载（git/maven 是 opt-in，默认不加载）")
+ void allToolsLoadedByDefault() {
+ runner.run(ctx -> {
+ assertThat(ctx).hasSingleBean(ITimeTool.class);
+ assertThat(ctx).hasSingleBean(ISkillTool.class);
+ assertThat(ctx).hasSingleBean(IFileTool.class);
+ // IGitTool / IMavenTool 是 opt-in（默认 false），应由显式 enabled=true 启用
+ assertThat(ctx).doesNotHaveBean(IGitTool.class);
+ assertThat(ctx).doesNotHaveBean(IMavenTool.class);
+ });
+ }
 
-    @Test
-    @DisplayName("yml spring.ai.loom.agent.git.enabled=false 时 IGitTool 不加载")
-    void gitDisabledByConfig() {
-        runner.withPropertyValues("spring.ai.loom.agent.git.enabled=false")
-                .run(ctx -> {
-                    assertThat(ctx).doesNotHaveBean(IGitTool.class);
-                    // 其他 tool 仍加载
-                    assertThat(ctx).hasSingleBean(ITimeTool.class);
-                    assertThat(ctx).hasSingleBean(IFileTool.class);
-                });
-    }
+ @Test
+ @DisplayName("yml spring.ai.loom.agent.git.enabled=false 时 IGitTool 不加载")
+ void gitDisabledByConfig() {
+ runner.withPropertyValues("spring.ai.loom.agent.git.enabled=false")
+ .run(ctx -> {
+ assertThat(ctx).doesNotHaveBean(IGitTool.class);
+ // 其他 tool 仍加载
+ assertThat(ctx).hasSingleBean(ITimeTool.class);
+ assertThat(ctx).hasSingleBean(IFileTool.class);
+ });
+ }
 
-    @Test
-    @DisplayName("yml spring.ai.loom.agent.maven.enabled=false 时 IMavenTool 不加载")
-    void mavenDisabledByConfig() {
-        // 默认 git/maven 都是 opt-in（默认 false），这里显式开 git 以验证 maven 关闭仍能加载 git
-        runner.withPropertyValues(
-                        "spring.ai.loom.agent.maven.enabled=false",
-                        "spring.ai.loom.agent.git.enabled=true")
-                .run(ctx -> {
-                    assertThat(ctx).doesNotHaveBean(IMavenTool.class);
-                    assertThat(ctx).hasSingleBean(IGitTool.class);
-                });
-    }
+ @Test
+ @DisplayName("yml spring.ai.loom.agent.maven.enabled=false 时 IMavenTool 不加载")
+ void mavenDisabledByConfig() {
+ // 默认 git/maven 都是 opt-in（默认 false），这里显式开 git 以验证 maven 关闭仍能加载 git
+ runner.withPropertyValues(
+ "spring.ai.loom.agent.maven.enabled=false",
+ "spring.ai.loom.agent.git.enabled=true")
+ .run(ctx -> {
+ assertThat(ctx).doesNotHaveBean(IMavenTool.class);
+ assertThat(ctx).hasSingleBean(IGitTool.class);
+ });
+ }
 
-    @Test
-    @DisplayName("yml spring.ai.loom.agent.time.enabled=false 时 ITimeTool 不加载")
-    void timeDisabledByConfig() {
-        runner.withPropertyValues("spring.ai.loom.agent.time.enabled=false")
-                .run(ctx -> assertThat(ctx).doesNotHaveBean(ITimeTool.class));
-    }
+ @Test
+ @DisplayName("yml spring.ai.loom.agent.time.enabled=false 时 ITimeTool 不加载")
+ void timeDisabledByConfig() {
+ runner.withPropertyValues("spring.ai.loom.agent.time.enabled=false")
+ .run(ctx -> assertThat(ctx).doesNotHaveBean(ITimeTool.class));
+ }
 
-    @Test
-    @DisplayName("yml spring.ai.loom.agent.file.enabled=false 时 IFileTool 不加载")
-    void fileDisabledByConfig() {
-        runner.withPropertyValues("spring.ai.loom.agent.file.enabled=false")
-                .run(ctx -> assertThat(ctx).doesNotHaveBean(IFileTool.class));
-    }
+ @Test
+ @DisplayName("yml spring.ai.loom.agent.file.enabled=false 时 IFileTool 不加载")
+ void fileDisabledByConfig() {
+ runner.withPropertyValues("spring.ai.loom.agent.file.enabled=false")
+ .run(ctx -> assertThat(ctx).doesNotHaveBean(IFileTool.class));
+ }
 
-    @Test
-    @DisplayName("yml spring.ai.loom.agent.skill.enabled=false 时 ISkillTool 不加载")
-    void skillDisabledByConfig() {
-        runner.withPropertyValues("spring.ai.loom.agent.skill.enabled=false")
-                .run(ctx -> assertThat(ctx).doesNotHaveBean(ISkillTool.class));
-    }
+ @Test
+ @DisplayName("yml spring.ai.loom.agent.skill.enabled=false 时 ISkillTool 不加载")
+ void skillDisabledByConfig() {
+ runner.withPropertyValues("spring.ai.loom.agent.skill.enabled=false")
+ .run(ctx -> assertThat(ctx).doesNotHaveBean(ISkillTool.class));
+ }
 }

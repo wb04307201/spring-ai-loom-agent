@@ -12,19 +12,19 @@ import java.util.List;
  * find project -> compile -> find artifact -> write Dockerfile.
  */
 public sealed interface BuildStrategy
-        permits MavenBuildStrategy, NpmBackendBuildStrategy, NpmFrontendBuildStrategy, PythonBuildStrategy {
+ permits MavenBuildStrategy, NpmBackendBuildStrategy, NpmFrontendBuildStrategy, PythonBuildStrategy {
 
-    List<String> markerFiles();
+ List<String> markerFiles();
 
-    List<List<String>> buildCommands();
+ List<List<String>> buildCommands();
 
-    List<String> artifactCandidates();
+ List<String> artifactCandidates();
 
-    boolean isLongRunning();
+ boolean isLongRunning();
 
-    File writeDockerfile(Path projectDir, ResolvedImage image, int containerPort, String artifact) throws IOException;
+ File writeDockerfile(Path projectDir, ResolvedImage image, int containerPort, String artifact) throws IOException;
 
-    default Path findArtifact(Path candidateDir) {
-        return candidateDir;
-    }
+ default Path findArtifact(Path candidateDir) {
+ return candidateDir;
+ }
 }

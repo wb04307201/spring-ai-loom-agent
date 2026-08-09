@@ -10,17 +10,17 @@
 
 ```json
 {
-  "mcpServers": {
-    "loom-maven-mcp": {
-      "command": "jbang",
-      "args": [
-        "io.github.wb04307201:loom-maven-mcp:1.0-SNAPSHOT",
-        "--loom.maven.mcp.basePath=/workspace",
-        "--loom.maven.mcp.mavenHome=/opt/maven",
-        "--loom.maven.mcp.defaultTimeoutMs=300000"
-      ]
-    }
-  }
+ "mcpServers": {
+ "loom-maven-mcp": {
+ "command": "jbang",
+ "args": [
+ "io.github.wb04307201:loom-maven-mcp:1.0-SNAPSHOT",
+ "--loom.maven.mcp.basePath=/workspace",
+ "--loom.maven.mcp.mavenHome=/opt/maven",
+ "--loom.maven.mcp.defaultTimeoutMs=300000"
+ ]
+ }
+ }
 }
 ```
 

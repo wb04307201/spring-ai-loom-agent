@@ -15,38 +15,38 @@ import java.util.Map;
  */
 public interface IMavenTool extends IEmbedTool {
 
-    /**
-     * 执行任意 Maven 命令（通用入口）
-     */
-    String mavenExecute(List<String> goals, String pomPath, String workingDir,
-                        Map<String, String> properties, Long timeoutMs, ToolContext toolContext);
+ /**
+ * 执行任意 Maven 命令（通用入口）
+ */
+ String mavenExecute(List<String> goals, String pomPath, String workingDir,
+ Map<String, String> properties, Long timeoutMs, ToolContext toolContext);
 
-    /**
-     * 编译项目（mvn compile）
-     */
-    String mavenBuild(String pomPath, String workingDir,
-                      Map<String, String> properties, Boolean skipTests, ToolContext toolContext);
+ /**
+ * 编译项目（mvn compile）
+ */
+ String mavenBuild(String pomPath, String workingDir,
+ Map<String, String> properties, Boolean skipTests, ToolContext toolContext);
 
-    /**
-     * 打包项目（mvn package）
-     */
-    String mavenPackage(String pomPath, String workingDir,
-                        Map<String, String> properties, Boolean skipTests, ToolContext toolContext);
+ /**
+ * 打包项目（mvn package）
+ */
+ String mavenPackage(String pomPath, String workingDir,
+ Map<String, String> properties, Boolean skipTests, ToolContext toolContext);
 
-    /**
-     * 运行测试（mvn test）
-     */
-    String mavenTest(String pomPath, String workingDir, String testPattern,
-                     Map<String, String> properties, ToolContext toolContext);
+ /**
+ * 运行测试（mvn test）
+ */
+ String mavenTest(String pomPath, String workingDir, String testPattern,
+ Map<String, String> properties, ToolContext toolContext);
 
-    /**
-     * 查看依赖树（mvn dependency:tree）
-     */
-    String mavenDependencyTree(String pomPath, String workingDir,
-                               String includeScope, ToolContext toolContext);
+ /**
+ * 查看依赖树（mvn dependency:tree）
+ */
+ String mavenDependencyTree(String pomPath, String workingDir,
+ String includeScope, ToolContext toolContext);
 
-    /**
-     * 验证项目（mvn validate）
-     */
-    String mavenValidate(String pomPath, String workingDir, ToolContext toolContext);
+ /**
+ * 验证项目（mvn validate）
+ */
+ String mavenValidate(String pomPath, String workingDir, ToolContext toolContext);
 }

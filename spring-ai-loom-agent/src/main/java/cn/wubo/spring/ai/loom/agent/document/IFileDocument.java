@@ -6,10 +6,10 @@ import java.util.List;
 
 public interface IFileDocument {
 
-    List<FileDocumentRecord> getListByFileId(String id);
+ List<FileDocumentRecord> getListByFileId(String id);
 
-    int[][] insert(List<FileDocumentRecord> fileDocuments);
+ int[][] insert(List<FileDocumentRecord> fileDocuments);
 
-    int deleteByFileId(String id);
+ int deleteByFileId(String id);
 
 }

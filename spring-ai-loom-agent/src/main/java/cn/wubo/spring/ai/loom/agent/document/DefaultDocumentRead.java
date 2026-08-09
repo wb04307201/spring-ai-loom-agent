@@ -10,27 +10,27 @@ import java.util.List;
 
 public class DefaultDocumentRead implements IDocumentRead {
 
-    private final TokenTextSplitter tokenTextSplitter;
-    private final ExtractedTextFormatter extractedTextFormatter;
+ private final TokenTextSplitter tokenTextSplitter;
+ private final ExtractedTextFormatter extractedTextFormatter;
 
-    public DefaultDocumentRead() {
-        // 创建一个分词器，用于将文本拆分为多个块
-        this.tokenTextSplitter = TokenTextSplitter.builder().build();
-        // 配置提取文本格式化器，设置各种文本处理选项
-        this.extractedTextFormatter = ExtractedTextFormatter.builder().build();
-    }
+ public DefaultDocumentRead() {
+ // 创建一个分词器，用于将文本拆分为多个块
+ this.tokenTextSplitter = TokenTextSplitter.builder().build();
+ // 配置提取文本格式化器，设置各种文本处理选项
+ this.extractedTextFormatter = ExtractedTextFormatter.builder().build();
+ }
 
-    @Override
-    public List<Document> read(Resource fileResource, String knowledgeId) {
-        TikaDocumentReader tikaDocumentReader = new TikaDocumentReader(fileResource, extractedTextFormatter);
-        List<Document> documentList = tikaDocumentReader.read();
-        List<Document> documents = tokenTextSplitter.apply(documentList);
-        documents
-                .forEach(document -> {
-                    document.getMetadata().put("type", "knowledge");
-                    document.getMetadata().put("knowledgeId", knowledgeId);
-                });
+ @Override
+ public List<Document> read(Resource fileResource, String knowledgeId) {
+ TikaDocumentReader tikaDocumentReader = new TikaDocumentReader(fileResource, extractedTextFormatter);
+ List<Document> documentList = tikaDocumentReader.read();
+ List<Document> documents = tokenTextSplitter.apply(documentList);
+ documents
+ .forEach(document -> {
+ document.getMetadata().put("type", "knowledge");
+ document.getMetadata().put("knowledgeId", knowledgeId);
+ });
 
-        return documents;
-    }
+ return documents;
+ }
 }
