@@ -1498,9 +1498,15 @@ public class LoomAgentConfiguration {
  });
 
  // 当前用户角色允许的 mcp 的工具列表
- builder.GET("/spring/ai/loom/mcps/{name}/tools", request -> {
+ // 用 query string 接收 name：path variable 在 mcp name 含 "/" 时
+ // （如 "spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch"）
+ // Tomcat 会把 URL 编码后的 %2F 还原成 "/" 当路径分隔符，导致 404。
+ builder.GET("/spring/ai/loom/mcps/tools", request -> {
  String username = UserContextHolder.getCurrentUser();
- String mcpName = request.pathVariable("name");
+ String mcpName = request.param("name").orElse(null);
+ if (mcpName == null || mcpName.isEmpty()) {
+ return ServerResponse.badRequest().body(java.util.Map.of("error", "name 参数必填"));
+ }
  boolean allowed = roleService.getVisibleMcpsForUser(username).stream()
  .anyMatch(m -> m.name().equals(mcpName));
  if (!allowed) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));

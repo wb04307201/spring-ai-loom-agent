@@ -27,7 +27,10 @@ const API = {
  deleteConversation: (id) => `/spring/ai/loom/conversation/${id}`,
  stream: '/spring/ai/loom/stream',
  listMcps: '/spring/ai/loom/mcps',
- mcpTools: (name) => `/spring/ai/loom/mcps/${encodeURIComponent(name)}/tools`,
+ // mcpTools 用 query string 而不是 path variable，避免 name 含 "/" 时
+ // Tomcat 把 "%2F" 当 "/" 拆路径，导致 404（实测：
+ // "spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch" 调不通）
+ mcpTools: (name) => `/spring/ai/loom/mcps/tools?name=${encodeURIComponent(name)}`,
  listSkills: '/spring/ai/loom/skill',
  getSkill: (name) => `/spring/ai/loom/skill/${name}`,
  createSkill: '/spring/ai/loom/skill',
