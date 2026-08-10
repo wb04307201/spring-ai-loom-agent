@@ -1,13 +1,10 @@
 package cn.wubo.spring.ai.loom.agent.memory;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor;
-import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -35,111 +32,118 @@ import java.util.Map;
 @Slf4j
 public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor {
 
- private final JdbcTemplate jdbcTemplate;
- private final int order;
+    private final JdbcTemplate jdbcTemplate;
+    private final int order;
 
- public LastChunkMessageChatMemoryAdvisor(JdbcTemplate jdbcTemplate, int order) {
- this.jdbcTemplate = jdbcTemplate;
- this.order = order;
- }
+    public LastChunkMessageChatMemoryAdvisor(JdbcTemplate jdbcTemplate, int order) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.order = order;
+    }
 
- @Override
- public int getOrder() {
- return this.order;
- }
+    @Override
+    public int getOrder() {
+        return this.order;
+    }
 
- @Override
- public String getConversationId(Map<String, Object> context) {
- Object id = context.get("ChatMemory.CONVERSATION_ID");
- if (id == null) {
- id = context.get("chat_memory_conversation_id");
- }
- return id == null ? "" : id.toString();
- }
+    @Override
+    public String getConversationId(Map<String, Object> context) {
+        Object id = context.get("ChatMemory.CONVERSATION_ID");
+        if (id == null) {
+            id = context.get("chat_memory_conversation_id");
+        }
+        return id == null ? "" : id.toString();
+    }
 
- @Override
- public ChatClientRequest before(ChatClientRequest request, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
- return request;
- }
+    @Override
+    public ChatClientRequest before(ChatClientRequest request, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
+        return request;
+    }
 
- @Override
- public ChatClientResponse after(ChatClientResponse response, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
- doWriteMemory(response.context(), requestOf(response), response.chatResponse().getResult().getOutput());
- return response;
- }
+    @Override
+    public ChatClientResponse after(ChatClientResponse response, org.springframework.ai.chat.client.advisor.api.AdvisorChain advisorChain) {
+        doWriteMemory(response.context(), requestOf(response), response.chatResponse().getResult().getOutput());
+        return response;
+    }
 
- @Override
- public Flux<ChatClientResponse> adviseStream(ChatClientRequest request, StreamAdvisorChain streamAdvisorChain) {
- String conversationId = getConversationId(request.context());
- log.info("LastChunkAdvisor.adviseStream called for conv={}", conversationId);
- final StringBuilder assistantTextBuf = new StringBuilder();
- return streamAdvisorChain.nextStream(request)
- // 累积所有 chunk 的 assistant text（Spring AI 1.1.7 流式 chunk 中 getText() 是 partial）
- .doOnNext(resp -> {
- String t = resp.chatResponse().getResult().getOutput().getText();
- if (t != null) assistantTextBuf.append(t);
- })
- .collectList()
- .flatMapMany(list -> {
- if (list == null || list.isEmpty()) {
- return Flux.fromIterable(list == null ? List.of() : list);
- }
- ChatClientResponse last = list.get(list.size() - 1);
- // 用累积的完整 text 构造 AssistantMessage
- String fullText = assistantTextBuf.toString();
- AssistantMessage fullAssistant = new AssistantMessage(fullText);
- try {
- doWriteMemory(last.context(), request, fullAssistant);
- log.info("LastChunkAdvisor wrote memory once for conv={}, chunks={}, assistantTextLen={}", conversationId, list.size(), fullText.length());
- } catch (Exception e) {
- log.warn("LastChunkAdvisor write failed for conv={}: {}", conversationId, e.getMessage());
- }
- return Flux.fromIterable(list);
- });
- }
+    @Override
+    public Flux<ChatClientResponse> adviseStream(ChatClientRequest request, StreamAdvisorChain streamAdvisorChain) {
+        String conversationId = getConversationId(request.context());
+        log.info("LastChunkAdvisor.adviseStream called for conv={}", conversationId);
+        final StringBuilder assistantTextBuf = new StringBuilder();
+        // 闭包持有最后一个 chunk，用于在 doOnComplete 时拿到 context() 写库
+        // （单元素数组是 Java 里避免 final 限制的惯用法；线程安全见注释）
+        final ChatClientResponse[] lastResponse = new ChatClientResponse[1];
+        return streamAdvisorChain.nextStream(request)
+                // 累积所有 chunk 的 assistant text（Spring AI 1.1.7 流式 chunk 中 getText() 是 partial）
+                // doOnNext 是 no-buffering side-effect operator，每个 chunk 立即透传下游，
+                // 不再像之前的 .collectList() 那样把整条流卡到内存里再批量 emit
+                .doOnNext(resp -> {
+                    String t = resp.chatResponse().getResult().getOutput().getText();
+                    if (t != null) assistantTextBuf.append(t);
+                    lastResponse[0] = resp;
+                })
+                // 仅在流正常完成时触发写库 — 保留 P9 修复目标（每个会话恰好 1 行 USER + 1 行 ASSISTANT）
+                // 上游异常时 doOnComplete 不触发，避免写 partial text
+                .doOnComplete(() -> {
+                    if (lastResponse[0] == null) {
+                        log.debug("LastChunkAdvisor: empty stream, skip write for conv={}", conversationId);
+                        return;
+                    }
+                    String fullText = assistantTextBuf.toString();
+                    AssistantMessage fullAssistant = new AssistantMessage(fullText);
+                    try {
+                        doWriteMemory(lastResponse[0].context(), request, fullAssistant);
+                        log.info("LastChunkAdvisor wrote memory once for conv={}, assistantTextLen={}", conversationId, fullText.length());
+                    } catch (Exception e) {
+                        log.warn("LastChunkAdvisor write failed for conv={}: {}", conversationId, e.getMessage());
+                    }
+                });
+    }
 
- /** 非流式路径下 from response 推回 ChatClientRequest（不严格必要，但保持一致） */
- private ChatClientRequest requestOf(ChatClientResponse response) {
- return null;
- }
+    /**
+     * 非流式路径下 from response 推回 ChatClientRequest（不严格必要，但保持一致）
+     */
+    private ChatClientRequest requestOf(ChatClientResponse response) {
+        return null;
+    }
 
- private void doWriteMemory(Map<String, Object> context, ChatClientRequest request, AssistantMessage assistantMessage) {
- String conversationId = getConversationId(context);
- if (conversationId == null || conversationId.isBlank()) {
- log.debug("skip write: empty convId");
- return;
- }
- // 1. 写 UserMessage（如果 request 里有）
- int userCount = 0;
- if (request != null) {
- List<Message> instructions = request.prompt().getInstructions();
- for (Message m : instructions) {
- if (m instanceof UserMessage um) {
- insertMessage(conversationId, "USER", um.getText());
- userCount++;
- }
- }
- }
- log.info("doWriteMemory conv={} wrote {} USER messages", conversationId, userCount);
- // 2. 写 AssistantMessage
- String assistantText = assistantMessage.getText();
- insertMessage(conversationId, "ASSISTANT", assistantText);
- }
+    private void doWriteMemory(Map<String, Object> context, ChatClientRequest request, AssistantMessage assistantMessage) {
+        String conversationId = getConversationId(context);
+        if (conversationId == null || conversationId.isBlank()) {
+            log.debug("skip write: empty convId");
+            return;
+        }
+        // 1. 写 UserMessage（如果 request 里有）
+        int userCount = 0;
+        if (request != null) {
+            List<Message> instructions = request.prompt().getInstructions();
+            for (Message m : instructions) {
+                if (m instanceof UserMessage um) {
+                    insertMessage(conversationId, "USER", um.getText());
+                    userCount++;
+                }
+            }
+        }
+        log.info("doWriteMemory conv={} wrote {} USER messages", conversationId, userCount);
+        // 2. 写 AssistantMessage
+        String assistantText = assistantMessage.getText();
+        insertMessage(conversationId, "ASSISTANT", assistantText);
+    }
 
- private void insertMessage(String conversationId, String type, String content) {
- if (content == null || content.isBlank()) return;
- // type CHECK 约束: USER/ASSISTANT/SYSTEM/TOOL
- String normalized = type.toUpperCase();
- if (!"USER".equals(normalized) && !"ASSISTANT".equals(normalized) && !"SYSTEM".equals(normalized) && !"TOOL".equals(normalized)) {
- log.warn("unsupported message type={} skip", normalized);
- return;
- }
- try {
- jdbcTemplate.update(
- "insert into spring_ai_chat_memory (conversation_id, content, type) values (?, ?, ?)",
- conversationId, content, normalized);
- } catch (Exception e) {
- log.warn("insertMessage failed: conv={} type={} err={}", conversationId, normalized, e.getMessage());
- }
- }
+    private void insertMessage(String conversationId, String type, String content) {
+        if (content == null || content.isBlank()) return;
+        // type CHECK 约束: USER/ASSISTANT/SYSTEM/TOOL
+        String normalized = type.toUpperCase();
+        if (!"USER".equals(normalized) && !"ASSISTANT".equals(normalized) && !"SYSTEM".equals(normalized) && !"TOOL".equals(normalized)) {
+            log.warn("unsupported message type={} skip", normalized);
+            return;
+        }
+        try {
+            jdbcTemplate.update(
+                    "insert into spring_ai_chat_memory (conversation_id, content, type) values (?, ?, ?)",
+                    conversationId, content, normalized);
+        } catch (Exception e) {
+            log.warn("insertMessage failed: conv={} type={} err={}", conversationId, normalized, e.getMessage());
+        }
+    }
 }

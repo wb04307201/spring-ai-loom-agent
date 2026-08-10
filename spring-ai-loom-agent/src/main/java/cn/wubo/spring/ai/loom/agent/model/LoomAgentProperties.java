@@ -161,8 +161,7 @@ public class LoomAgentProperties {
  * 还会校验当前用户 type=ADMIN，否则 302 重定向到 /spring/ai/loom/index.html。
  */
  private List<String> adminPathPatterns = List.of(
- "/spring/ai/loom/admin/**",
- "/spring/ai/loom/user/currentIsAdmin"
+         "/spring/ai/loom/admin/**"
  );
  private CookieProperty cookie = new CookieProperty();
 
