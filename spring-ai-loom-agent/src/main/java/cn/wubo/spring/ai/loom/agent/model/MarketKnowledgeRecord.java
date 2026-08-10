@@ -8,17 +8,17 @@ import java.time.LocalDateTime;
  * status: PENDING / APPROVED / REJECTED
  */
 public record MarketKnowledgeRecord(
- String id,
- String username,
- String name,
- String description,
- String status,
- LocalDateTime submittedAt,
- LocalDateTime reviewedAt,
- String reviewedBy,
- String reviewComment
+        String id,
+        String username,
+        String name,
+        String description,
+        String status,
+        LocalDateTime submittedAt,
+        LocalDateTime reviewedAt,
+        String reviewedBy,
+        String reviewComment
 ) {
- public static final String STATUS_PENDING = "PENDING";
- public static final String STATUS_APPROVED = "APPROVED";
- public static final String STATUS_REJECTED = "REJECTED";
+    public static final String STATUS_PENDING = "PENDING";
+    public static final String STATUS_APPROVED = "APPROVED";
+    public static final String STATUS_REJECTED = "REJECTED";
 }

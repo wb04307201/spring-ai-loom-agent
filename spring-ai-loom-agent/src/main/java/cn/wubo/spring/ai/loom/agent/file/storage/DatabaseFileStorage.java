@@ -17,43 +17,43 @@ import java.util.UUID;
  */
 public class DatabaseFileStorage implements IFileStorage {
 
- private final JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate jdbcTemplate;
 
- public DatabaseFileStorage(JdbcTemplate jdbcTemplate) {
- this.jdbcTemplate = jdbcTemplate;
- }
+    public DatabaseFileStorage(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
 
- @Override
- public String save(String knowledgeId, String fileName, InputStream inputStream, String mimeType) {
- String fileId = UUID.randomUUID().toString();
- byte[] content;
- try {
- content = inputStream.readAllBytes();
- } catch (java.io.IOException e) {
- throw new RuntimeException("Failed to read input stream", e);
- }
+    @Override
+    public String save(String knowledgeId, String fileName, InputStream inputStream, String mimeType) {
+        String fileId = UUID.randomUUID().toString();
+        byte[] content;
+        try {
+            content = inputStream.readAllBytes();
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Failed to read input stream", e);
+        }
 
- jdbcTemplate.update(
- "INSERT INTO loom_file_content (file_id, content, mime_type, knowledge_id) VALUES (?, ?, ?, ?)",
- fileId, content, mimeType, knowledgeId);
- return fileId;
- }
+        jdbcTemplate.update(
+                "INSERT INTO loom_file_content (file_id, content, mime_type, knowledge_id) VALUES (?, ?, ?, ?)",
+                fileId, content, mimeType, knowledgeId);
+        return fileId;
+    }
 
- @Override
- public byte[] read(String location) {
- return jdbcTemplate.queryForObject(
- "SELECT content FROM loom_file_content WHERE file_id = ?",
- new Object[]{location},
- byte[].class);
- }
+    @Override
+    public byte[] read(String location) {
+        return jdbcTemplate.queryForObject(
+                "SELECT content FROM loom_file_content WHERE file_id = ?",
+                new Object[]{location},
+                byte[].class);
+    }
 
- @Override
- public void delete(String location) {
- jdbcTemplate.update("DELETE FROM loom_file_content WHERE file_id = ?", location);
- }
+    @Override
+    public void delete(String location) {
+        jdbcTemplate.update("DELETE FROM loom_file_content WHERE file_id = ?", location);
+    }
 
- @Override
- public void deleteByKnowledgeId(String knowledgeId) {
- jdbcTemplate.update("DELETE FROM loom_file_content WHERE knowledge_id = ?", knowledgeId);
- }
+    @Override
+    public void deleteByKnowledgeId(String knowledgeId) {
+        jdbcTemplate.update("DELETE FROM loom_file_content WHERE knowledge_id = ?", knowledgeId);
+    }
 }

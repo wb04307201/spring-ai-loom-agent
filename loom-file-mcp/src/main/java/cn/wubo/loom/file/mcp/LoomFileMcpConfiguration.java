@@ -9,9 +9,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class LoomFileMcpConfiguration {
 
- @Bean
- public LoomFileMcpService loomFileMcpService(LoomFileMcpProperties properties) {
- return new LoomFileMcpService(properties);
- }
+    @Bean
+    public LoomFileMcpService loomFileMcpService(LoomFileMcpProperties properties) {
+        return new LoomFileMcpService(properties);
+    }
 
 }

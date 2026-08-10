@@ -1,7 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.tool;
 
 import io.micrometer.observation.ObservationRegistry;
-import io.micrometer.observation.aop.ObservedAspect;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,16 +29,16 @@ import reactor.core.publisher.Hooks;
 @RequiredArgsConstructor
 public class ToolCallLogObservationConfig {
 
- private final ObservationRegistry observationRegistry;
- private final ToolCallLogObservationHandler handler;
+    private final ObservationRegistry observationRegistry;
+    private final ToolCallLogObservationHandler handler;
 
- @PostConstruct
- public void register() {
- observationRegistry.observationConfig().observationHandler(handler);
- // ：开启 Reactor 自动 ThreadLocal 传播，让 ToolCallContextHolder
- // 跨 async/stream 边界可见（SseController 在 runAsync block 设，
- // ObservationHandler 在 Reactor stream 线程读）
- Hooks.enableAutomaticContextPropagation();
- log.info(" ToolCallLogObservationHandler registered with ObservationRegistry + reactor Hooks enabled");
- }
+    @PostConstruct
+    public void register() {
+        observationRegistry.observationConfig().observationHandler(handler);
+        // ：开启 Reactor 自动 ThreadLocal 传播，让 ToolCallContextHolder
+        // 跨 async/stream 边界可见（SseController 在 runAsync block 设，
+        // ObservationHandler 在 Reactor stream 线程读）
+        Hooks.enableAutomaticContextPropagation();
+        log.info(" ToolCallLogObservationHandler registered with ObservationRegistry + reactor Hooks enabled");
+    }
 }

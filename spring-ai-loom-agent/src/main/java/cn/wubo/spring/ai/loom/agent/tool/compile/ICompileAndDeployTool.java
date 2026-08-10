@@ -42,56 +42,56 @@ import java.util.Map;
  */
 public interface ICompileAndDeployTool extends IEmbedTool {
 
- /**
- * 克隆代码仓库、按 buildTool 打包（Maven / npm / pip）、构建 Docker 镜像并启动容器，最后返回访问 URL。
- * <p>
- * 业务参数（port / containerPort / subDir / baseImage / runCommand / healthPath）
- * 一律从对话给到 AI，不在 yml 中配置。
- *
- * @param params 工具入参 Map，支持以下键（大小写不敏感）：
- * <ul>
- * <li>{@code gitUrl} — Git 仓库 URL（<b>必填</b>）</li>
- * <li>{@code gitUsername} — Git 用户名（公开仓库可省略）</li>
- * <li>{@code gitPassword} — Git 密码或 token（公开仓库可省略）</li>
- * <li>{@code branch} — 克隆分支（可选，默认为远程 HEAD）</li>
- * <li>{@code port} — 宿主机对外端口（<b>必填，无 yml 兜底</b>）</li>
- * <li>{@code containerPort} — 容器内应用监听端口（<b>必填，无 yml 兜底</b>）</li>
- * <li>{@code subDir} — 多模块仓库子目录（可选）；缺省时多模块可能选错</li>
- * <li>{@code imageName} — Docker 镜像名（可选，工具自动生成）</li>
- * <li>{@code containerName} — Docker 容器名（可选，工具自动生成）</li>
- * <li>{@code healthPath} — 健康检查路径（可选，默认 {@code /}）</li>
- * <li>{@code buildTool} — 构建栈（可选）：{@code maven} / {@code npm} / {@code npm-frontend} / {@code pip}。
- * 缺省时按 marker 文件自动探测（{@code pom.xml→maven}、{@code package.json→npm}、
- * {@code requirements.txt / pyproject.toml→pip}）。多模块仓同时有多个
- * marker 时必须显式指定</li>
- * <li>{@code baseImage} — 基础镜像（可选）；支持模板别名
- * {@code java17/java21/nginx/python3/node20/node20-serve}，
- * 或完整镜像名如 {@code openjdk:17-slim}。缺省按 buildTool 自动选
- * （maven→java17、npm→node20、npm-frontend→node20-serve、pip→python3）</li>
- * <li>{@code runCommand} — 容器启动命令（可选）；缺省按 baseImage 模板自动生成</li>
- * </ul>
- * @param toolContext Spring AI 工具上下文（注入 username）
- * @return 编译部署结果
- */
- @Tool(description = "克隆 Git 仓库、按 buildTool 打包（maven/npm/pip）、构建 Docker 镜像并启动容器，返回访问 URL。"
- + "适用于 Spring Boot / 标准 Maven / Node（前后端） / Python 项目的端到端编译部署。"
- + "入参是 Map：gitUrl、port、containerPort 都是必填（无 yml 兜底，缺失会返回 fail）。"
- + "其余按需提供（gitUsername、gitPassword、branch、subDir、buildTool、imageName、containerName、"
- + "healthPath、baseImage、runCommand）。"
- + "baseImage 支持模板别名（java17 / java21 / nginx / python3 / node20 / node20-serve，缺省按 buildTool 自动选）或完整镜像名（如 openjdk:17-slim）；"
- + "runCommand 极少用，缺省即可（会按模板自动生成 ENTRYPOINT）。"
- + "port 是宿主机对外端口，containerPort 是容器内应用监听端口（参考 application.yml 的 server.port），"
- + "docker run 会用 -p <port>:<containerPort> 映射。"
- + "多模块仓库（根无 pom.xml）必须传 subDir 显式选择子模块；缺省时若多个子模块无法自动选择，工具会返回 fail。"
- + "healthPath 既作探活路径也作访问 URL 路径（如 healthPath=sql-forge-demo 则访问 http://localhost:<port>/sql-forge-demo）；无 context-path 时传 \"/\"。")
- CompileAndDeployResult compileAndDeploy(
- @ToolParam(description = "工具入参 Map，包含 gitUrl 等键。支持的键（大小写不敏感）："
- + "gitUrl（必填）、gitUsername、gitPassword、branch、"
- + "port（必填，宿主机对外端口）、containerPort（必填，容器内应用端口）、"
- + "subDir（可选，多模块仓显式选子模块）、"
- + "imageName、containerName、healthPath、"
- + "buildTool（maven/npm/npm-frontend/pip，可选；缺省按 marker 自动探测）、"
- + "baseImage（java17/java21/nginx/python3/node20/node20-serve 或完整镜像名）、"
- + "runCommand（字符串数组，覆盖模板 ENTRYPOINT）") Map<String, Object> params,
- ToolContext toolContext);
+    /**
+     * 克隆代码仓库、按 buildTool 打包（Maven / npm / pip）、构建 Docker 镜像并启动容器，最后返回访问 URL。
+     * <p>
+     * 业务参数（port / containerPort / subDir / baseImage / runCommand / healthPath）
+     * 一律从对话给到 AI，不在 yml 中配置。
+     *
+     * @param params      工具入参 Map，支持以下键（大小写不敏感）：
+     *                    <ul>
+     *                    <li>{@code gitUrl} — Git 仓库 URL（<b>必填</b>）</li>
+     *                    <li>{@code gitUsername} — Git 用户名（公开仓库可省略）</li>
+     *                    <li>{@code gitPassword} — Git 密码或 token（公开仓库可省略）</li>
+     *                    <li>{@code branch} — 克隆分支（可选，默认为远程 HEAD）</li>
+     *                    <li>{@code port} — 宿主机对外端口（<b>必填，无 yml 兜底</b>）</li>
+     *                    <li>{@code containerPort} — 容器内应用监听端口（<b>必填，无 yml 兜底</b>）</li>
+     *                    <li>{@code subDir} — 多模块仓库子目录（可选）；缺省时多模块可能选错</li>
+     *                    <li>{@code imageName} — Docker 镜像名（可选，工具自动生成）</li>
+     *                    <li>{@code containerName} — Docker 容器名（可选，工具自动生成）</li>
+     *                    <li>{@code healthPath} — 健康检查路径（可选，默认 {@code /}）</li>
+     *                    <li>{@code buildTool} — 构建栈（可选）：{@code maven} / {@code npm} / {@code npm-frontend} / {@code pip}。
+     *                    缺省时按 marker 文件自动探测（{@code pom.xml→maven}、{@code package.json→npm}、
+     *                    {@code requirements.txt / pyproject.toml→pip}）。多模块仓同时有多个
+     *                    marker 时必须显式指定</li>
+     *                    <li>{@code baseImage} — 基础镜像（可选）；支持模板别名
+     *                    {@code java17/java21/nginx/python3/node20/node20-serve}，
+     *                    或完整镜像名如 {@code openjdk:17-slim}。缺省按 buildTool 自动选
+     *                    （maven→java17、npm→node20、npm-frontend→node20-serve、pip→python3）</li>
+     *                    <li>{@code runCommand} — 容器启动命令（可选）；缺省按 baseImage 模板自动生成</li>
+     *                    </ul>
+     * @param toolContext Spring AI 工具上下文（注入 username）
+     * @return 编译部署结果
+     */
+    @Tool(description = "克隆 Git 仓库、按 buildTool 打包（maven/npm/pip）、构建 Docker 镜像并启动容器，返回访问 URL。"
+            + "适用于 Spring Boot / 标准 Maven / Node（前后端） / Python 项目的端到端编译部署。"
+            + "入参是 Map：gitUrl、port、containerPort 都是必填（无 yml 兜底，缺失会返回 fail）。"
+            + "其余按需提供（gitUsername、gitPassword、branch、subDir、buildTool、imageName、containerName、"
+            + "healthPath、baseImage、runCommand）。"
+            + "baseImage 支持模板别名（java17 / java21 / nginx / python3 / node20 / node20-serve，缺省按 buildTool 自动选）或完整镜像名（如 openjdk:17-slim）；"
+            + "runCommand 极少用，缺省即可（会按模板自动生成 ENTRYPOINT）。"
+            + "port 是宿主机对外端口，containerPort 是容器内应用监听端口（参考 application.yml 的 server.port），"
+            + "docker run 会用 -p <port>:<containerPort> 映射。"
+            + "多模块仓库（根无 pom.xml）必须传 subDir 显式选择子模块；缺省时若多个子模块无法自动选择，工具会返回 fail。"
+            + "healthPath 既作探活路径也作访问 URL 路径（如 healthPath=sql-forge-demo 则访问 http://localhost:<port>/sql-forge-demo）；无 context-path 时传 \"/\"。")
+    CompileAndDeployResult compileAndDeploy(
+            @ToolParam(description = "工具入参 Map，包含 gitUrl 等键。支持的键（大小写不敏感）："
+                    + "gitUrl（必填）、gitUsername、gitPassword、branch、"
+                    + "port（必填，宿主机对外端口）、containerPort（必填，容器内应用端口）、"
+                    + "subDir（可选，多模块仓显式选子模块）、"
+                    + "imageName、containerName、healthPath、"
+                    + "buildTool（maven/npm/npm-frontend/pip，可选；缺省按 marker 自动探测）、"
+                    + "baseImage（java17/java21/nginx/python3/node20/node20-serve 或完整镜像名）、"
+                    + "runCommand（字符串数组，覆盖模板 ENTRYPOINT）") Map<String, Object> params,
+            ToolContext toolContext);
 }

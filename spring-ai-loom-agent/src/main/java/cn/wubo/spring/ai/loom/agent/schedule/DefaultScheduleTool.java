@@ -33,362 +33,371 @@ import java.util.UUID;
  */
 public class DefaultScheduleTool implements IScheduleTool {
 
- private static final Logger log = LoggerFactory.getLogger(DefaultScheduleTool.class);
+    private static final Logger log = LoggerFactory.getLogger(DefaultScheduleTool.class);
 
- private final FlexScheduledTaskService flexService;
- private final ISubTaskExecutor subTaskExecutor;
- private final ILoomScheduleTriggerRepository loomScheduleTriggerRepository;
- private final ILoomScheduleExecutionRepository loomScheduleExecutionRepository;
- /** Per-task execution history cap. Mirrors ScheduleExecutionProperties default. */
- private final int maxExecutionsPerTask;
+    private final FlexScheduledTaskService flexService;
+    private final ISubTaskExecutor subTaskExecutor;
+    private final ILoomScheduleTriggerRepository loomScheduleTriggerRepository;
+    private final ILoomScheduleExecutionRepository loomScheduleExecutionRepository;
+    /**
+     * Per-task execution history cap. Mirrors ScheduleExecutionProperties default.
+     */
+    private final int maxExecutionsPerTask;
 
- public DefaultScheduleTool(FlexScheduledTaskService flexService,
- ISubTaskExecutor subTaskExecutor,
- ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
- ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
- int maxExecutionsPerTask) {
- this.flexService = flexService;
- this.subTaskExecutor = subTaskExecutor;
- this.loomScheduleTriggerRepository = loomScheduleTriggerRepository;
- this.loomScheduleExecutionRepository = loomScheduleExecutionRepository;
- this.maxExecutionsPerTask = Math.max(10, maxExecutionsPerTask);
- }
+    public DefaultScheduleTool(FlexScheduledTaskService flexService,
+                               ISubTaskExecutor subTaskExecutor,
+                               ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                               ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+                               int maxExecutionsPerTask) {
+        this.flexService = flexService;
+        this.subTaskExecutor = subTaskExecutor;
+        this.loomScheduleTriggerRepository = loomScheduleTriggerRepository;
+        this.loomScheduleExecutionRepository = loomScheduleExecutionRepository;
+        this.maxExecutionsPerTask = Math.max(10, maxExecutionsPerTask);
+    }
 
- /** Backward-compatible constructor for callers that haven't wired the execution repo yet. */
- public DefaultScheduleTool(FlexScheduledTaskService flexService,
- ISubTaskExecutor subTaskExecutor,
- ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
- this(flexService, subTaskExecutor, loomScheduleTriggerRepository, null, 1000);
- }
+    /**
+     * Backward-compatible constructor for callers that haven't wired the execution repo yet.
+     */
+    public DefaultScheduleTool(FlexScheduledTaskService flexService,
+                               ISubTaskExecutor subTaskExecutor,
+                               ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
+        this(flexService, subTaskExecutor, loomScheduleTriggerRepository, null, 1000);
+    }
 
- static String fullName(String username, String conversationId, String name) {
- return "loom-sched-" + username + "-" + conversationId + "-" + name;
- }
+    static String fullName(String username, String conversationId, String name) {
+        return "loom-sched-" + username + "-" + conversationId + "-" + name;
+    }
 
- @Override
- @Tool(description = "创建一个定时任务。one_shot 类型的初始延迟可以从几秒起;"
- + "fixed_delay/fixed_rate/cron 类型的重复间隔最短由 flex-schedule.limits 配置决定(默认 10 分钟),"
- + "最长存活 3 天(强校验)。类型 cron / fixed_delay / fixed_rate / one_shot。")
- public String createSchedule(String name, String scheduleType, String expression, String prompt, ToolContext toolContext) {
- // Mirror the prompt validation in DefaultSubTaskTool.startSubTask: an empty
- // prompt here would otherwise persist to H2 and explode at fire time when
- // DefaultSubTaskExecutor's `spec.user(req.prompt())` throws "text cannot be
- // null or empty" — every scheduled run would fail. Reject up-front.
- if (prompt == null || prompt.isBlank()) {
- String uname = toolContext != null && toolContext.getContext() != null
- ? String.valueOf(toolContext.getContext().get("username")) : "";
- log.warn("定时任务 prompt 为空,拒绝创建: user={}, name={}", uname, name);
- return "[定时失败] prompt 不能为空,请提供具体的任务指令再调用 create_scheduled_task。";
- }
- String username = (String) toolContext.getContext().get("username");
- String convId = (String) toolContext.getContext().get("parentConversationId");
- String full = fullName(username, convId, name);
+    /**
+     * Null-safe ToolContext string reader. Returns "" when the context is missing
+     * or the value isn't a String, so callers can treat absent keys uniformly.
+     */
+    private static String readContextString(ToolContext toolContext, String key) {
+        if (toolContext == null || toolContext.getContext() == null) return "";
+        Object v = toolContext.getContext().get(key);
+        return (v instanceof String s) ? s : "";
+    }
 
- try {
- switch (scheduleType.toLowerCase()) {
- case "cron" -> flexService.task(full)
- .cron(expression)
- .register(() -> runAsSubTask(full, username, convId, prompt));
- case "fixed_delay" -> flexService.task(full)
- .fixedDelay(Duration.ofSeconds(parseSeconds(expression)))
- .register(() -> runAsSubTask(full, username, convId, prompt));
- case "fixed_rate" -> flexService.task(full)
- .fixedRate(Duration.ofSeconds(parseSeconds(expression)))
- .register(() -> runAsSubTask(full, username, convId, prompt));
- case "one_shot" -> flexService.task(full)
- .oneShot(Duration.ofSeconds(parseSeconds(expression)))
- .register(() -> runAsSubTask(full, username, convId, prompt));
- default -> { return "[定时失败] 不支持的类型: " + scheduleType; }
- }
- persistAfterRegister(full, name, scheduleType, expression, prompt, username, convId);
- return "[定时已创建] " + name + " (" + scheduleType + ": " + expression + ")";
- } catch (Exception e) {
- log.error("定时器创建失败: full={}", full, e);
- return "[定时失败] " + e.getMessage();
- }
- }
+    private static long parseLongOrZero(String expression) {
+        try {
+            return Long.parseLong(expression);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
 
- /**
- * Write the row to {@code loom_scheduled_task} immediately after a successful
- * register. We use the same instant for createdAt/updatedAt (per spec the
- * createdAt is the original registration time so max-lifetime can fire across
- * restarts; see {@link ScheduleRestoreListener}). If persistence fails we
- * compensate by cancelling the just-registered task so the two layers stay
- * aligned.
- */
- private void persistAfterRegister(String full, String name, String scheduleType, String expression,
- String prompt, String username, String convId) {
- // BUG-14: fixed_rate / fixed_delay expressions come from the LLM in
- // units like "15m" / "12 分钟" / "PT11M". Use the lenient parseSeconds
- // (same one that drives flex-schedule) so the H2 row's
- // interval_seconds reflects the real interval. The previous
- // parseLongOrZero swallowed "15m" as NFE and wrote 0, which made
- // ScheduleRestoreListener treat restored rows as "PT0S" and drop them
- // at the next boot. Clamp negatives to 0 defensively.
- long nowSec = Math.max(0L, parseSeconds(expression));
- Instant now = Instant.now();
- LoomScheduleTriggerRecord record = new LoomScheduleTriggerRecord(
- full,
- scheduleType,
- "cron".equals(scheduleType) ? expression : null,
- ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? nowSec : null,
- null, // initialDelaySeconds (preserved for future extension)
- "one_shot".equals(scheduleType) ? nowSec : null,
- prompt,
- username,
- convId,
- false,
- now,
- now);
- try {
- loomScheduleTriggerRepository.save(record);
- } catch (Exception e) {
- log.error("持久化定时任务失败,回滚 register: full={}", full, e);
- try {
- flexService.cancel(full);
- } catch (Exception cancelErr) {
- log.warn("注册回滚 cancel 也失败: full={}", full, cancelErr);
- }
- throw e;
- }
- }
+    /**
+     * Lenient seconds parser for the LLM-driven {@code expression} argument.
+     * Accepts plain integers ("10"), seconds suffix ("10s", "10S", "10secs"),
+     * Chinese seconds ("10秒", "10 秒"), and minutes ("1m", "5min", "5 分钟")
+     * converted to seconds. Anything else returns {@code -1} so the caller can
+     * surface a friendly `[定时失败] expression 格式不对` instead of NFE.
+     */
+    private static long parseSeconds(String expression) {
+        if (expression == null) return -1L;
+        String s = expression.trim().toLowerCase()
+                .replace(" ", "")
+                .replace("秒钟", "s") // Chinese compound "秒钟" handled first
+                .replace("秒", "s")
+                .replace("secs", "s")
+                .replace("sec", "s")
+                // Chinese time units → shorthand. Order matters: longest first
+                // so "分钟" matches before "分" and "分钟" before "秒" already
+                // happened above.
+                .replace("分钟", "m")
+                .replace("分", "m")
+                .replace("minutes", "m")
+                .replace("minute", "m")
+                .replace("mins", "m")
+                .replace("min", "m");
+        // "10m" / "5min" → minutes
+        if (s.endsWith("m")) {
+            String num = s.substring(0, s.length() - 1);
+            try {
+                return Long.parseLong(num) * 60;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        // "10s" or "10" → seconds
+        if (s.endsWith("s")) s = s.substring(0, s.length() - 1);
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
 
- /**
- * Null-safe ToolContext string reader. Returns "" when the context is missing
- * or the value isn't a String, so callers can treat absent keys uniformly.
- */
- private static String readContextString(ToolContext toolContext, String key) {
- if (toolContext == null || toolContext.getContext() == null) return "";
- Object v = toolContext.getContext().get(key);
- return (v instanceof String s) ? s : "";
- }
+    @Override
+    @Tool(description = "创建一个定时任务。one_shot 类型的初始延迟可以从几秒起;"
+            + "fixed_delay/fixed_rate/cron 类型的重复间隔最短由 flex-schedule.limits 配置决定(默认 10 分钟),"
+            + "最长存活 3 天(强校验)。类型 cron / fixed_delay / fixed_rate / one_shot。")
+    public String createSchedule(String name, String scheduleType, String expression, String prompt, ToolContext toolContext) {
+        // Mirror the prompt validation in DefaultSubTaskTool.startSubTask: an empty
+        // prompt here would otherwise persist to H2 and explode at fire time when
+        // DefaultSubTaskExecutor's `spec.user(req.prompt())` throws "text cannot be
+        // null or empty" — every scheduled run would fail. Reject up-front.
+        if (prompt == null || prompt.isBlank()) {
+            String uname = toolContext != null && toolContext.getContext() != null
+                    ? String.valueOf(toolContext.getContext().get("username")) : "";
+            log.warn("定时任务 prompt 为空,拒绝创建: user={}, name={}", uname, name);
+            return "[定时失败] prompt 不能为空,请提供具体的任务指令再调用 create_scheduled_task。";
+        }
+        String username = (String) toolContext.getContext().get("username");
+        String convId = (String) toolContext.getContext().get("parentConversationId");
+        String full = fullName(username, convId, name);
 
- private static long parseLongOrZero(String expression) {
- try {
- return Long.parseLong(expression);
- } catch (NumberFormatException e) {
- return 0L;
- }
- }
+        try {
+            switch (scheduleType.toLowerCase()) {
+                case "cron" -> flexService.task(full)
+                        .cron(expression)
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
+                case "fixed_delay" -> flexService.task(full)
+                        .fixedDelay(Duration.ofSeconds(parseSeconds(expression)))
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
+                case "fixed_rate" -> flexService.task(full)
+                        .fixedRate(Duration.ofSeconds(parseSeconds(expression)))
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
+                case "one_shot" -> flexService.task(full)
+                        .oneShot(Duration.ofSeconds(parseSeconds(expression)))
+                        .register(() -> runAsSubTask(full, username, convId, prompt));
+                default -> {
+                    return "[定时失败] 不支持的类型: " + scheduleType;
+                }
+            }
+            persistAfterRegister(full, name, scheduleType, expression, prompt, username, convId);
+            return "[定时已创建] " + name + " (" + scheduleType + ": " + expression + ")";
+        } catch (Exception e) {
+            log.error("定时器创建失败: full={}", full, e);
+            return "[定时失败] " + e.getMessage();
+        }
+    }
 
- /**
- * Lenient seconds parser for the LLM-driven {@code expression} argument.
- * Accepts plain integers ("10"), seconds suffix ("10s", "10S", "10secs"),
- * Chinese seconds ("10秒", "10 秒"), and minutes ("1m", "5min", "5 分钟")
- * converted to seconds. Anything else returns {@code -1} so the caller can
- * surface a friendly `[定时失败] expression 格式不对` instead of NFE.
- */
- private static long parseSeconds(String expression) {
- if (expression == null) return -1L;
- String s = expression.trim().toLowerCase()
- .replace(" ", "")
- .replace("秒钟", "s") // Chinese compound "秒钟" handled first
- .replace("秒", "s")
- .replace("secs", "s")
- .replace("sec", "s")
- // Chinese time units → shorthand. Order matters: longest first
- // so "分钟" matches before "分" and "分钟" before "秒" already
- // happened above.
- .replace("分钟", "m")
- .replace("分", "m")
- .replace("minutes", "m")
- .replace("minute", "m")
- .replace("mins", "m")
- .replace("min", "m");
- // "10m" / "5min" → minutes
- if (s.endsWith("m")) {
- String num = s.substring(0, s.length() - 1);
- try { return Long.parseLong(num) * 60; } catch (NumberFormatException ignored) {}
- }
- // "10s" or "10" → seconds
- if (s.endsWith("s")) s = s.substring(0, s.length() - 1);
- try {
- return Long.parseLong(s);
- } catch (NumberFormatException e) {
- return -1L;
- }
- }
+    /**
+     * Write the row to {@code loom_scheduled_task} immediately after a successful
+     * register. We use the same instant for createdAt/updatedAt (per spec the
+     * createdAt is the original registration time so max-lifetime can fire across
+     * restarts; see {@link ScheduleRestoreListener}). If persistence fails we
+     * compensate by cancelling the just-registered task so the two layers stay
+     * aligned.
+     */
+    private void persistAfterRegister(String full, String name, String scheduleType, String expression,
+                                      String prompt, String username, String convId) {
+        // BUG-14: fixed_rate / fixed_delay expressions come from the LLM in
+        // units like "15m" / "12 分钟" / "PT11M". Use the lenient parseSeconds
+        // (same one that drives flex-schedule) so the H2 row's
+        // interval_seconds reflects the real interval. The previous
+        // parseLongOrZero swallowed "15m" as NFE and wrote 0, which made
+        // ScheduleRestoreListener treat restored rows as "PT0S" and drop them
+        // at the next boot. Clamp negatives to 0 defensively.
+        long nowSec = Math.max(0L, parseSeconds(expression));
+        Instant now = Instant.now();
+        LoomScheduleTriggerRecord record = new LoomScheduleTriggerRecord(
+                full,
+                scheduleType,
+                "cron".equals(scheduleType) ? expression : null,
+                ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? nowSec : null,
+                null, // initialDelaySeconds (preserved for future extension)
+                "one_shot".equals(scheduleType) ? nowSec : null,
+                prompt,
+                username,
+                convId,
+                false,
+                now,
+                now);
+        try {
+            loomScheduleTriggerRepository.save(record);
+        } catch (Exception e) {
+            log.error("持久化定时任务失败,回滚 register: full={}", full, e);
+            try {
+                flexService.cancel(full);
+            } catch (Exception cancelErr) {
+                log.warn("注册回滚 cancel 也失败: full={}", full, cancelErr);
+            }
+            throw e;
+        }
+    }
 
- private void runAsSubTask(String taskName, String username, String convId, String prompt) {
- String id = UUID.randomUUID().toString();
- SubTaskRequest req = new SubTaskRequest(id, convId, null, username, prompt, null, true);
- long startMs = System.currentTimeMillis();
- Instant fireTime = Instant.now();
- boolean success = false;
- String errorMessage = null;
- try {
- // execute() returns a SubTaskResult instead of throwing on failure
- // (it internally catches ExecutionException and reports FAILED via
- // the result). That contract was originally intended for the
- // LLM-tool path; here we use the schedule's instrument() outcome
- // to mark the execution as success/failure, so we re-throw on
- // FAILED so the schedule's ExecutionRecord.success reflects the
- // actual sub-task outcome.
- SubTaskResult result = subTaskExecutor.execute(req);
- if (result.status() == SubTaskStatus.FAILED) {
- errorMessage = result.errorMessage();
- throw new RuntimeException("调度子任务执行失败: " + result.errorMessage());
- }
- success = true;
- } catch (Exception e) {
- log.error("调度子任务执行失败: id={}, task={}", id, taskName, e);
- if (errorMessage == null) {
- errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
- }
- // Re-throw so FlexScheduledTaskRegistrar.instrument()'s catch block
- // records an ExecutionRecord with success=false instead of true.
- // Without this the schedule's "history" UI would show every fire
- // as successful even when the sub-task itself failed.
- throw new RuntimeException(e);
- } finally {
- long durationMs = System.currentTimeMillis() - startMs;
- recordExecution(taskName, fireTime, durationMs, success, errorMessage);
- }
- }
+    private void runAsSubTask(String taskName, String username, String convId, String prompt) {
+        String id = UUID.randomUUID().toString();
+        SubTaskRequest req = new SubTaskRequest(id, convId, null, username, prompt, null, true);
+        long startMs = System.currentTimeMillis();
+        Instant fireTime = Instant.now();
+        boolean success = false;
+        String errorMessage = null;
+        try {
+            // execute() returns a SubTaskResult instead of throwing on failure
+            // (it internally catches ExecutionException and reports FAILED via
+            // the result). That contract was originally intended for the
+            // LLM-tool path; here we use the schedule's instrument() outcome
+            // to mark the execution as success/failure, so we re-throw on
+            // FAILED so the schedule's ExecutionRecord.success reflects the
+            // actual sub-task outcome.
+            SubTaskResult result = subTaskExecutor.execute(req);
+            if (result.status() == SubTaskStatus.FAILED) {
+                errorMessage = result.errorMessage();
+                throw new RuntimeException("调度子任务执行失败: " + result.errorMessage());
+            }
+            success = true;
+        } catch (Exception e) {
+            log.error("调度子任务执行失败: id={}, task={}", id, taskName, e);
+            if (errorMessage == null) {
+                errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            }
+            // Re-throw so FlexScheduledTaskRegistrar.instrument()'s catch block
+            // records an ExecutionRecord with success=false instead of true.
+            // Without this the schedule's "history" UI would show every fire
+            // as successful even when the sub-task itself failed.
+            throw new RuntimeException(e);
+        } finally {
+            long durationMs = System.currentTimeMillis() - startMs;
+            recordExecution(taskName, fireTime, durationMs, success, errorMessage);
+        }
+    }
 
- /**
- * Persist a fire event to {@code loom_schedule_execution} (mirrors
- * {@link ScheduleRestoreListener#recordExecution}). Called from the
- * LLM-tool / createSchedule path — every fire, success or failure.
- */
- private void recordExecution(String taskName, Instant fireTime, long durationMs,
- boolean success, String errorMessage) {
- if (loomScheduleExecutionRepository == null) return;
- try {
- loomScheduleExecutionRepository.save(new LoomScheduleExecutionRecord(
- null,
- taskName,
- fireTime,
- durationMs,
- success,
- errorMessage,
- LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER));
- int n = loomScheduleExecutionRepository.trimTaskHistory(taskName, maxExecutionsPerTask);
- if (n > 0) {
- log.debug("Trimmed {} old execution row(s) for task [{}]", n, taskName);
- }
- } catch (Exception e) {
- log.warn("Failed to record schedule execution [{}]: {}", taskName, e.getMessage());
- }
- }
+    /**
+     * Persist a fire event to {@code loom_schedule_execution} (mirrors
+     * {@link ScheduleRestoreListener#recordExecution}). Called from the
+     * LLM-tool / createSchedule path — every fire, success or failure.
+     */
+    private void recordExecution(String taskName, Instant fireTime, long durationMs,
+                                 boolean success, String errorMessage) {
+        if (loomScheduleExecutionRepository == null) return;
+        try {
+            loomScheduleExecutionRepository.save(new LoomScheduleExecutionRecord(
+                    null,
+                    taskName,
+                    fireTime,
+                    durationMs,
+                    success,
+                    errorMessage,
+                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER));
+            int n = loomScheduleExecutionRepository.trimTaskHistory(taskName, maxExecutionsPerTask);
+            if (n > 0) {
+                log.debug("Trimmed {} old execution row(s) for task [{}]", n, taskName);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to record schedule execution [{}]: {}", taskName, e.getMessage());
+        }
+    }
 
- @Override
- @Tool(description = "取消一个定时任务。")
- public String cancelSchedule(String name, ToolContext toolContext) {
- String username = (String) toolContext.getContext().get("username");
- String convId = (String) toolContext.getContext().get("parentConversationId");
- String full = fullName(username, convId, name);
- // BUG-13: cross-user schedule cancel. Verify the schedule row is
- // owned by the current user before letting flex-schedule fire the
- // cancellation. Without this check a USER could guess the namespaced
- // name (loom-sched-<admin>-<conv>-<name>) and cancel someone else's
- // task. We return the same "[取消失败] 未找到任务: <name>" message
- // the tool path normally surfaces when the row is missing, so the
- // attacker doesn't learn that the task exists for someone else.
- try {
- var rec = loomScheduleTriggerRepository.findByName(full);
- if (rec.isEmpty() || !rec.get().username().equals(username)) {
- log.warn("拒绝跨用户取消: caller={}, target={} (row owner={})",
- username, full,
- rec.map(LoomScheduleTriggerRecord::username).orElse("<none>"));
- return "[取消失败] 未找到任务: " + name;
- }
- flexService.cancel(full);
- try {
- loomScheduleTriggerRepository.delete(full);
- } catch (Exception e) {
- log.warn("取消时删除持久化行失败: full={}", full, e);
- }
- return "[定时已取消] " + name;
- } catch (Exception e) {
- return "[取消失败] " + e.getMessage();
- }
- }
+    @Override
+    @Tool(description = "取消一个定时任务。")
+    public String cancelSchedule(String name, ToolContext toolContext) {
+        String username = (String) toolContext.getContext().get("username");
+        String convId = (String) toolContext.getContext().get("parentConversationId");
+        String full = fullName(username, convId, name);
+        // BUG-13: cross-user schedule cancel. Verify the schedule row is
+        // owned by the current user before letting flex-schedule fire the
+        // cancellation. Without this check a USER could guess the namespaced
+        // name (loom-sched-<admin>-<conv>-<name>) and cancel someone else's
+        // task. We return the same "[取消失败] 未找到任务: <name>" message
+        // the tool path normally surfaces when the row is missing, so the
+        // attacker doesn't learn that the task exists for someone else.
+        try {
+            var rec = loomScheduleTriggerRepository.findByName(full);
+            if (rec.isEmpty() || !rec.get().username().equals(username)) {
+                log.warn("拒绝跨用户取消: caller={}, target={} (row owner={})",
+                        username, full,
+                        rec.map(LoomScheduleTriggerRecord::username).orElse("<none>"));
+                return "[取消失败] 未找到任务: " + name;
+            }
+            flexService.cancel(full);
+            try {
+                loomScheduleTriggerRepository.delete(full);
+            } catch (Exception e) {
+                log.warn("取消时删除持久化行失败: full={}", full, e);
+            }
+            return "[定时已取消] " + name;
+        } catch (Exception e) {
+            return "[取消失败] " + e.getMessage();
+        }
+    }
 
- @Override
- @Tool(description = "列出当前会话下我创建的所有定时任务。")
- public String listSchedules(ToolContext toolContext) {
- // BUG-15: 原 listSchedules 只按 username 过滤,会列出同用户其他会话的定时任务
- // (跨会话越权)。ToolContext 携带 parentConversationId,用它构造精确前缀
- // 过滤,只返回当前会话的任务。BFF 侧的 listSchedulesRaw 保持用户级聚合不变。
- String username = readContextString(toolContext, "username");
- String convId = readContextString(toolContext, "parentConversationId");
- return listSchedulesInConversation(username, convId);
- }
+    @Override
+    @Tool(description = "列出当前会话下我创建的所有定时任务。")
+    public String listSchedules(ToolContext toolContext) {
+        // BUG-15: 原 listSchedules 只按 username 过滤,会列出同用户其他会话的定时任务
+        // (跨会话越权)。ToolContext 携带 parentConversationId,用它构造精确前缀
+        // 过滤,只返回当前会话的任务。BFF 侧的 listSchedulesRaw 保持用户级聚合不变。
+        String username = readContextString(toolContext, "username");
+        String convId = readContextString(toolContext, "parentConversationId");
+        return listSchedulesInConversation(username, convId);
+    }
 
- /**
- * Lists schedules scoped to (username, conversationId). Used by the LLM tool
- * path so a sub-task / main conversation only sees its own schedules.
- */
- private String listSchedulesInConversation(String username, String convId) {
- StringBuilder sb = new StringBuilder();
- sb.append(String.format("定时任务列表:%n%n"));
- if (username == null || username.isBlank() || convId == null || convId.isBlank()) {
- sb.append(String.format("(上下文缺失,无法列出)%n"));
- return sb.toString();
- }
- String prefix = fullName(username, convId, "");
- List<TaskInfo> all = flexService.listTasks();
- int n = 0;
- for (TaskInfo info : all) {
- if (!info.taskName().startsWith(prefix)) continue;
- sb.append(String.format("- %s (type=%s, schedule=%s)%n",
- info.taskName(), info.taskType(), info.schedule()));
- n++;
- }
- if (n == 0) sb.append(String.format("(当前会话无定时任务)%n"));
- return sb.toString();
- }
+    /**
+     * Lists schedules scoped to (username, conversationId). Used by the LLM tool
+     * path so a sub-task / main conversation only sees its own schedules.
+     */
+    private String listSchedulesInConversation(String username, String convId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("定时任务列表:%n%n"));
+        if (username == null || username.isBlank() || convId == null || convId.isBlank()) {
+            sb.append(String.format("(上下文缺失,无法列出)%n"));
+            return sb.toString();
+        }
+        String prefix = fullName(username, convId, "");
+        List<TaskInfo> all = flexService.listTasks();
+        int n = 0;
+        for (TaskInfo info : all) {
+            if (!info.taskName().startsWith(prefix)) continue;
+            sb.append(String.format("- %s (type=%s, schedule=%s)%n",
+                    info.taskName(), info.taskType(), info.schedule()));
+            n++;
+        }
+        if (n == 0) sb.append(String.format("(当前会话无定时任务)%n"));
+        return sb.toString();
+    }
 
- @Override
- public String listSchedulesRaw(String username) {
- StringBuilder sb = new StringBuilder();
- sb.append(String.format("定时任务列表:%n%n"));
- List<TaskInfo> all = flexService.listTasks();
- int n = 0;
- for (TaskInfo info : all) {
- if (info.taskName().startsWith("loom-sched-")) {
- String withoutPrefix = info.taskName().substring("loom-sched-".length());
- int firstDash = withoutPrefix.indexOf('-');
- if (firstDash < 0) continue;
- String owner = withoutPrefix.substring(0, firstDash);
- if (!owner.equals(username)) continue;
- sb.append(String.format("- %s (type=%s, schedule=%s)%n",
- info.taskName(), info.taskType(), info.schedule()));
- n++;
- }
- }
- if (n == 0) sb.append(String.format("(无定时任务)%n"));
- return sb.toString();
- }
+    @Override
+    public String listSchedulesRaw(String username) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("定时任务列表:%n%n"));
+        List<TaskInfo> all = flexService.listTasks();
+        int n = 0;
+        for (TaskInfo info : all) {
+            if (info.taskName().startsWith("loom-sched-")) {
+                String withoutPrefix = info.taskName().substring("loom-sched-".length());
+                int firstDash = withoutPrefix.indexOf('-');
+                if (firstDash < 0) continue;
+                String owner = withoutPrefix.substring(0, firstDash);
+                if (!owner.equals(username)) continue;
+                sb.append(String.format("- %s (type=%s, schedule=%s)%n",
+                        info.taskName(), info.taskType(), info.schedule()));
+                n++;
+            }
+        }
+        if (n == 0) sb.append(String.format("(无定时任务)%n"));
+        return sb.toString();
+    }
 
- @Override
- @Tool(description = "获取某个定时任务的最近执行历史。")
- public String getScheduleHistory(String name, Integer limit, ToolContext toolContext) {
- String username = (String) toolContext.getContext().get("username");
- String convId = (String) toolContext.getContext().get("parentConversationId");
- String full = fullName(username, convId, name);
- int n = limit == null ? 20 : limit;
+    @Override
+    @Tool(description = "获取某个定时任务的最近执行历史。")
+    public String getScheduleHistory(String name, Integer limit, ToolContext toolContext) {
+        String username = (String) toolContext.getContext().get("username");
+        String convId = (String) toolContext.getContext().get("parentConversationId");
+        String full = fullName(username, convId, name);
+        int n = limit == null ? 20 : limit;
 
- StringBuilder sb = new StringBuilder();
- sb.append(String.format("'%s' 的最近 %d 条执行记录:%n%n", name, n));
- List<ExecutionRecord> history;
- try {
- history = flexService.getExecutionHistory(full, n);
- } catch (Exception e) {
- return "[查询失败] " + e.getMessage();
- }
- if (history == null || history.isEmpty()) {
- sb.append(String.format("(暂无执行记录)%n"));
- return sb.toString();
- }
- for (ExecutionRecord r : history) {
- sb.append(String.format("- 触发 %s | 结果=%s | 时长=%s%s%n",
- r.startTime(),
- r.success() ? "成功" : "失败",
- r.duration(),
- r.error() != null ? " | 错误=" + r.error() : ""));
- }
- return sb.toString();
- }
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("'%s' 的最近 %d 条执行记录:%n%n", name, n));
+        List<ExecutionRecord> history;
+        try {
+            history = flexService.getExecutionHistory(full, n);
+        } catch (Exception e) {
+            return "[查询失败] " + e.getMessage();
+        }
+        if (history == null || history.isEmpty()) {
+            sb.append(String.format("(暂无执行记录)%n"));
+            return sb.toString();
+        }
+        for (ExecutionRecord r : history) {
+            sb.append(String.format("- 触发 %s | 结果=%s | 时长=%s%s%n",
+                    r.startTime(),
+                    r.success() ? "成功" : "失败",
+                    r.duration(),
+                    r.error() != null ? " | 错误=" + r.error() : ""));
+        }
+        return sb.toString();
+    }
 }

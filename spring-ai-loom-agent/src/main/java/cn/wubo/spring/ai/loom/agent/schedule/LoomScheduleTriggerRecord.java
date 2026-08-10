@@ -17,22 +17,24 @@ import java.time.Instant;
  * {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener}.</p>
  */
 public record LoomScheduleTriggerRecord(
- String taskName,
- String scheduleType,
- String cronExpression,
- Long intervalSeconds,
- Long initialDelaySeconds,
- Long oneShotDelaySeconds,
- String prompt,
- String username,
- String conversationId,
- boolean paused,
- Instant createdAt,
- Instant updatedAt
+        String taskName,
+        String scheduleType,
+        String cronExpression,
+        Long intervalSeconds,
+        Long initialDelaySeconds,
+        Long oneShotDelaySeconds,
+        String prompt,
+        String username,
+        String conversationId,
+        boolean paused,
+        Instant createdAt,
+        Instant updatedAt
 ) {
- /** Task types this record can carry. Matches the values flex-schedule's TaskBuilder dispatches on. */
- public static final String TYPE_CRON = "cron";
- public static final String TYPE_FIXED_DELAY = "fixed_delay";
- public static final String TYPE_FIXED_RATE = "fixed_rate";
- public static final String TYPE_ONE_SHOT = "one_shot";
+    /**
+     * Task types this record can carry. Matches the values flex-schedule's TaskBuilder dispatches on.
+     */
+    public static final String TYPE_CRON = "cron";
+    public static final String TYPE_FIXED_DELAY = "fixed_delay";
+    public static final String TYPE_FIXED_RATE = "fixed_rate";
+    public static final String TYPE_ONE_SHOT = "one_shot";
 }

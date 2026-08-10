@@ -17,7 +17,8 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link DefaultMavenTool} 安全相关单元测试
@@ -32,128 +33,128 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("DefaultMavenTool 安全测试")
 class DefaultMavenToolSecurityTest {
 
- private DefaultMavenTool tool;
- private MavenProperty props;
- private Path tmpRoot;
- private String username;
+    private DefaultMavenTool tool;
+    private MavenProperty props;
+    private Path tmpRoot;
+    private String username;
 
- @BeforeEach
- void setUp() throws IOException {
- props = new MavenProperty();
- props.setDefaultTimeoutMs(30000L);
- props.setMaxOutputLines(50);
+    private static ToolContext ctx(String username) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("username", username);
+        return new ToolContext(m);
+    }
 
- tmpRoot = Files.createTempDirectory("loom-mvn-sec-");
- username = tmpRoot.getFileName().toString();
- tool = new DefaultMavenTool(props, tmpRoot.getParent().toString());
- }
+    @BeforeEach
+    void setUp() throws IOException {
+        props = new MavenProperty();
+        props.setDefaultTimeoutMs(30000L);
+        props.setMaxOutputLines(50);
 
- @AfterEach
- void tearDown() throws IOException {
- if (tmpRoot != null && Files.exists(tmpRoot)) {
- Files.walkFileTree(tmpRoot, new SimpleFileVisitor<>() {
- @Override
- public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
- Files.delete(file);
- return FileVisitResult.CONTINUE;
- }
+        tmpRoot = Files.createTempDirectory("loom-mvn-sec-");
+        username = tmpRoot.getFileName().toString();
+        tool = new DefaultMavenTool(props, tmpRoot.getParent().toString());
+    }
 
- @Override
- public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
- Files.delete(dir);
- return FileVisitResult.CONTINUE;
- }
- });
- }
- }
+    @AfterEach
+    void tearDown() throws IOException {
+        if (tmpRoot != null && Files.exists(tmpRoot)) {
+            Files.walkFileTree(tmpRoot, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
 
- private static ToolContext ctx(String username) {
- Map<String, Object> m = new HashMap<>();
- m.put("username", username);
- return new ToolContext(m);
- }
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    Files.delete(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+    }
 
- // ==================== username 校验 ====================
+    // ==================== username 校验 ====================
 
- @Test
- @DisplayName("username 为 null 返回错误")
- void nullUsernameRejected() {
- ToolContext noUser = new ToolContext(new HashMap<>());
- String result = tool.mavenBuild(null, null, null, null, noUser);
- assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
- }
+    @Test
+    @DisplayName("username 为 null 返回错误")
+    void nullUsernameRejected() {
+        ToolContext noUser = new ToolContext(new HashMap<>());
+        String result = tool.mavenBuild(null, null, null, null, noUser);
+        assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
+    }
 
- @Test
- @DisplayName("username 为空字符串返回错误")
- void blankUsernameRejected() {
- ToolContext blankUser = ctx("");
- String result = tool.mavenBuild(null, null, null, null, blankUser);
- assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
- }
+    @Test
+    @DisplayName("username 为空字符串返回错误")
+    void blankUsernameRejected() {
+        ToolContext blankUser = ctx("");
+        String result = tool.mavenBuild(null, null, null, null, blankUser);
+        assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
+    }
 
- @Test
- @DisplayName("username 仅含空白返回错误")
- void whitespaceUsernameRejected() {
- ToolContext wsUser = ctx(" ");
- String result = tool.mavenBuild(null, null, null, null, wsUser);
- assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
- }
+    @Test
+    @DisplayName("username 仅含空白返回错误")
+    void whitespaceUsernameRejected() {
+        ToolContext wsUser = ctx(" ");
+        String result = tool.mavenBuild(null, null, null, null, wsUser);
+        assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
+    }
 
- // ==================== 越权拒绝 ====================
+    // ==================== 越权拒绝 ====================
 
- @Test
- @DisplayName("绝对 workingDir 越权 → 视为未找到 pom")
- void absoluteWorkingDirRejected() {
- String result = tool.mavenBuild("C:\\Windows\\System32", null, null, null, ctx(username));
- assertTrue(result.contains("未找到 pom.xml"),
- "绝对路径应被拒绝（pom.xml 找不到）: " + result);
- }
+    @Test
+    @DisplayName("绝对 workingDir 越权 → 视为未找到 pom")
+    void absoluteWorkingDirRejected() {
+        String result = tool.mavenBuild("C:\\Windows\\System32", null, null, null, ctx(username));
+        assertTrue(result.contains("未找到 pom.xml"),
+                "绝对路径应被拒绝（pom.xml 找不到）: " + result);
+    }
 
- @Test
- @DisplayName(".. 穿越 workingDir 越权 → 视为未找到 pom")
- void traversalWorkingDirRejected() {
- String result = tool.mavenBuild("../escape", null, null, null, ctx(username));
- assertTrue(result.contains("未找到 pom.xml"),
- ".. 越权应被拒绝: " + result);
- }
+    @Test
+    @DisplayName(".. 穿越 workingDir 越权 → 视为未找到 pom")
+    void traversalWorkingDirRejected() {
+        String result = tool.mavenBuild("../escape", null, null, null, ctx(username));
+        assertTrue(result.contains("未找到 pom.xml"),
+                ".. 越权应被拒绝: " + result);
+    }
 
- @Test
- @DisplayName("绝对 pomPath 越权 → 视为未找到 pom")
- void absolutePomPathRejected() {
- String result = tool.mavenBuild("C:\\Windows\\System32\\evil.xml", null, null, null, ctx(username));
- assertTrue(result.contains("未找到 pom.xml"),
- "绝对 pomPath 应被拒绝: " + result);
- }
+    @Test
+    @DisplayName("绝对 pomPath 越权 → 视为未找到 pom")
+    void absolutePomPathRejected() {
+        String result = tool.mavenBuild("C:\\Windows\\System32\\evil.xml", null, null, null, ctx(username));
+        assertTrue(result.contains("未找到 pom.xml"),
+                "绝对 pomPath 应被拒绝: " + result);
+    }
 
- @Test
- @DisplayName("symlink 越界 workingDir → 视为未找到 pom")
- void symlinkEscapeRejected() throws IOException {
- // 准备 userDir 外的真实目录，里面放一个 pom.xml
- Path outside = tmpRoot.getParent().resolve("outside-mvn");
- Files.createDirectories(outside);
- Files.writeString(outside.resolve("pom.xml"),
- "<?xml version=\"1.0\"?><project></project>", StandardCharsets.UTF_8);
- try {
- // userDir/evil-link → outside（symlink 在 workingDir 链上）
- Files.createSymbolicLink(tmpRoot.resolve("evil-link"), outside);
- } catch (UnsupportedOperationException | java.nio.file.FileSystemException e) {
- System.out.println("[跳过 symlink 测试，OS 不支持或权限不足] " + e.getMessage());
- Files.delete(outside.resolve("pom.xml"));
- Files.delete(outside);
- return;
- }
+    @Test
+    @DisplayName("symlink 越界 workingDir → 视为未找到 pom")
+    void symlinkEscapeRejected() throws IOException {
+        // 准备 userDir 外的真实目录，里面放一个 pom.xml
+        Path outside = tmpRoot.getParent().resolve("outside-mvn");
+        Files.createDirectories(outside);
+        Files.writeString(outside.resolve("pom.xml"),
+                "<?xml version=\"1.0\"?><project></project>", StandardCharsets.UTF_8);
+        try {
+            // userDir/evil-link → outside（symlink 在 workingDir 链上）
+            Files.createSymbolicLink(tmpRoot.resolve("evil-link"), outside);
+        } catch (UnsupportedOperationException | java.nio.file.FileSystemException e) {
+            System.out.println("[跳过 symlink 测试，OS 不支持或权限不足] " + e.getMessage());
+            Files.delete(outside.resolve("pom.xml"));
+            Files.delete(outside);
+            return;
+        }
 
- try {
- String result = tool.mavenBuild(null, "evil-link", null, null, ctx(username));
- // symlink 越界应被拒绝 → pom.xml 找不到
- assertFalse(result.contains("BUILD SUCCESS"),
- "symlink 越界不应能找到 pom.xml: " + result);
- assertTrue(result.contains("未找到 pom.xml"),
- "symlink 越界应被拒绝: " + result);
- } finally {
- Files.deleteIfExists(tmpRoot.resolve("evil-link"));
- Files.deleteIfExists(outside.resolve("pom.xml"));
- Files.deleteIfExists(outside);
- }
- }
+        try {
+            String result = tool.mavenBuild(null, "evil-link", null, null, ctx(username));
+            // symlink 越界应被拒绝 → pom.xml 找不到
+            assertFalse(result.contains("BUILD SUCCESS"),
+                    "symlink 越界不应能找到 pom.xml: " + result);
+            assertTrue(result.contains("未找到 pom.xml"),
+                    "symlink 越界应被拒绝: " + result);
+        } finally {
+            Files.deleteIfExists(tmpRoot.resolve("evil-link"));
+            Files.deleteIfExists(outside.resolve("pom.xml"));
+            Files.deleteIfExists(outside);
+        }
+    }
 }

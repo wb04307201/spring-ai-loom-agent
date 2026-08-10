@@ -25,40 +25,40 @@ import java.util.Set;
  */
 public class SubTaskHistoryPreloader {
 
- private static final Logger log = LoggerFactory.getLogger(SubTaskHistoryPreloader.class);
+    private static final Logger log = LoggerFactory.getLogger(SubTaskHistoryPreloader.class);
 
- private final SubTaskRegistry registry;
- private final ILoomSubTaskHistoryRepository repo;
- private final int maxHistory;
+    private final SubTaskRegistry registry;
+    private final ILoomSubTaskHistoryRepository repo;
+    private final int maxHistory;
 
- public SubTaskHistoryPreloader(SubTaskRegistry registry,
- ILoomSubTaskHistoryRepository repo,
- int maxHistory) {
- this.registry = registry;
- this.repo = repo;
- this.maxHistory = maxHistory;
- }
+    public SubTaskHistoryPreloader(SubTaskRegistry registry,
+                                   ILoomSubTaskHistoryRepository repo,
+                                   int maxHistory) {
+        this.registry = registry;
+        this.repo = repo;
+        this.maxHistory = maxHistory;
+    }
 
- @EventListener(ApplicationReadyEvent.class)
- public void preload() {
- // At startup no user is logged in yet — we must enumerate via the repo.
- Set<String> users = repo.findAllUsernames();
- if (users.isEmpty()) {
- log.info("SubTaskHistoryPreloader: no persisted history to rehydrate");
- return;
- }
- int totalLoaded = 0;
- for (String user : users) {
- List<SubTaskRegistry.SubTaskRecord> rows = repo.findByUsername(user, maxHistory);
- if (rows.isEmpty()) continue;
- // Oldest first — repository returns newest first; flip order so deque
- // insertion order is chronological, preserving newest-first iteration.
- for (int i = rows.size() - 1; i >= 0; i--) {
- registry.rehydrate(rows.get(i));
- }
- totalLoaded += rows.size();
- }
- log.info("SubTaskHistoryPreloader: rehydrated {} record(s) across {} user(s) into SubTaskRegistry",
- totalLoaded, users.size());
- }
+    @EventListener(ApplicationReadyEvent.class)
+    public void preload() {
+        // At startup no user is logged in yet — we must enumerate via the repo.
+        Set<String> users = repo.findAllUsernames();
+        if (users.isEmpty()) {
+            log.info("SubTaskHistoryPreloader: no persisted history to rehydrate");
+            return;
+        }
+        int totalLoaded = 0;
+        for (String user : users) {
+            List<SubTaskRegistry.SubTaskRecord> rows = repo.findByUsername(user, maxHistory);
+            if (rows.isEmpty()) continue;
+            // Oldest first — repository returns newest first; flip order so deque
+            // insertion order is chronological, preserving newest-first iteration.
+            for (int i = rows.size() - 1; i >= 0; i--) {
+                registry.rehydrate(rows.get(i));
+            }
+            totalLoaded += rows.size();
+        }
+        log.info("SubTaskHistoryPreloader: rehydrated {} record(s) across {} user(s) into SubTaskRegistry",
+                totalLoaded, users.size());
+    }
 }

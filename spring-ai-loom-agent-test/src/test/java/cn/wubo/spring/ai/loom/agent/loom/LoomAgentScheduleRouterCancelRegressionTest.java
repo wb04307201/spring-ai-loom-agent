@@ -38,121 +38,123 @@ import static org.mockito.Mockito.*;
  */
 class LoomAgentScheduleRouterCancelRegressionTest {
 
- @AfterEach
- void clearCaller() {
- UserContextHolder.clear();
- }
+    /**
+     * Minimal owned schedule row for the BUG-13 ownership guard.
+     */
+    private static LoomScheduleTriggerRecord ownedRow(String taskName, String username) {
+        return new LoomScheduleTriggerRecord(
+                taskName, LoomScheduleTriggerRecord.TYPE_FIXED_DELAY,
+                null, 600L, null, null, "p",
+                username, "conv-1", false,
+                Instant.EPOCH, Instant.EPOCH);
+    }
 
- /** Minimal owned schedule row for the BUG-13 ownership guard. */
- private static LoomScheduleTriggerRecord ownedRow(String taskName, String username) {
- return new LoomScheduleTriggerRecord(
- taskName, LoomScheduleTriggerRecord.TYPE_FIXED_DELAY,
- null, 600L, null, null, "p",
- username, "conv-1", false,
- Instant.EPOCH, Instant.EPOCH);
- }
+    @AfterEach
+    void clearCaller() {
+        UserContextHolder.clear();
+    }
 
- @Test
- void handleScheduleCancel_invokesBothFlexServiceCancelAndRepoDelete() {
- FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
- ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
- String fullName = "loom-sched-alice-conv-1-remind";
- UserContextHolder.setCurrentUser("alice");
- when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
+    @Test
+    void handleScheduleCancel_invokesBothFlexServiceCancelAndRepoDelete() {
+        FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-remind";
+        UserContextHolder.setCurrentUser("alice");
+        when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
 
- boolean handled = LoomAgentConfiguration.handleScheduleCancel(
- fullName, flex, repo, LoggerFactory.getLogger(getClass()));
+        boolean handled = LoomAgentConfiguration.handleScheduleCancel(
+                fullName, flex, repo, LoggerFactory.getLogger(getClass()));
 
- assertThat(handled).isTrue();
- verify(repo).findByName(fullName);
- verify(flex).cancel(fullName);
- verify(repo).delete(fullName);
- verifyNoMoreInteractions(flex, repo);
- }
+        assertThat(handled).isTrue();
+        verify(repo).findByName(fullName);
+        verify(flex).cancel(fullName);
+        verify(repo).delete(fullName);
+        verifyNoMoreInteractions(flex, repo);
+    }
 
- @Test
- void handleScheduleCancel_withNullName_skipsBothLayers() {
- FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
- ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+    @Test
+    void handleScheduleCancel_withNullName_skipsBothLayers() {
+        FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
 
- boolean handled = LoomAgentConfiguration.handleScheduleCancel(
- null, flex, repo, LoggerFactory.getLogger(getClass()));
+        boolean handled = LoomAgentConfiguration.handleScheduleCancel(
+                null, flex, repo, LoggerFactory.getLogger(getClass()));
 
- assertThat(handled).isFalse();
- verifyNoInteractions(flex, repo);
- }
+        assertThat(handled).isFalse();
+        verifyNoInteractions(flex, repo);
+    }
 
- @Test
- void handleScheduleCancel_swallowsRepoFailure_butStillCancels() {
- FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
- ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
- String fullName = "loom-sched-alice-conv-1-orphan";
- UserContextHolder.setCurrentUser("alice");
- when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
- when(repo.delete(anyString())).thenThrow(new RuntimeException("db boom"));
+    @Test
+    void handleScheduleCancel_swallowsRepoFailure_butStillCancels() {
+        FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-orphan";
+        UserContextHolder.setCurrentUser("alice");
+        when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
+        when(repo.delete(anyString())).thenThrow(new RuntimeException("db boom"));
 
- // Must not propagate — the user-facing cancel returns true even if
- // persistence cleanup fails (the live task is the part that matters).
- boolean handled = LoomAgentConfiguration.handleScheduleCancel(
- fullName, flex, repo, LoggerFactory.getLogger(getClass()));
+        // Must not propagate — the user-facing cancel returns true even if
+        // persistence cleanup fails (the live task is the part that matters).
+        boolean handled = LoomAgentConfiguration.handleScheduleCancel(
+                fullName, flex, repo, LoggerFactory.getLogger(getClass()));
 
- assertThat(handled).isTrue();
- verify(flex).cancel(fullName);
- verify(repo).delete(fullName);
- }
+        assertThat(handled).isTrue();
+        verify(flex).cancel(fullName);
+        verify(repo).delete(fullName);
+    }
 
- @Test
- void handleScheduleCancel_withUnknownName_isRefused() {
- // BUG-13: an unknown/unowned name has no row to verify ownership against,
- // so REST cancel must REFUSE — never touching flex-schedule or issuing a
- // blind delete-by-name. (This replaces the pre-BUG-13 "best-effort delete
- // by name" contract, which could act on a row the caller doesn't own.)
- FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
- ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
- String fullName = "loom-sched-alice-conv-1-stray";
- UserContextHolder.setCurrentUser("alice");
- when(repo.findByName(fullName)).thenReturn(Optional.empty());
+    @Test
+    void handleScheduleCancel_withUnknownName_isRefused() {
+        // BUG-13: an unknown/unowned name has no row to verify ownership against,
+        // so REST cancel must REFUSE — never touching flex-schedule or issuing a
+        // blind delete-by-name. (This replaces the pre-BUG-13 "best-effort delete
+        // by name" contract, which could act on a row the caller doesn't own.)
+        FlexScheduledTaskService flex = mock(FlexScheduledTaskService.class);
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-stray";
+        UserContextHolder.setCurrentUser("alice");
+        when(repo.findByName(fullName)).thenReturn(Optional.empty());
 
- boolean handled = LoomAgentConfiguration.handleScheduleCancel(
- fullName, flex, repo, LoggerFactory.getLogger(getClass()));
+        boolean handled = LoomAgentConfiguration.handleScheduleCancel(
+                fullName, flex, repo, LoggerFactory.getLogger(getClass()));
 
- assertThat(handled).isFalse();
- verify(repo).findByName(fullName);
- verify(flex, never()).cancel(anyString());
- verify(repo, never()).delete(anyString());
- }
+        assertThat(handled).isFalse();
+        verify(repo).findByName(fullName);
+        verify(flex, never()).cancel(anyString());
+        verify(repo, never()).delete(anyString());
+    }
 
- @Test
- void handleScheduleHistoryOwnership_allowsOwnerOnly() {
- ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
- String fullName = "loom-sched-alice-conv-1-history";
- when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
- UserContextHolder.setCurrentUser("alice");
+    @Test
+    void handleScheduleHistoryOwnership_allowsOwnerOnly() {
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-history";
+        when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
+        UserContextHolder.setCurrentUser("alice");
 
- assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
- fullName, repo, LoggerFactory.getLogger(getClass()))).isTrue();
- }
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                fullName, repo, LoggerFactory.getLogger(getClass()))).isTrue();
+    }
 
- @Test
- void handleScheduleHistoryOwnership_rejectsForeignUnknownAndMissingCaller() {
- ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
- String fullName = "loom-sched-alice-conv-1-history";
- when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
+    @Test
+    void handleScheduleHistoryOwnership_rejectsForeignUnknownAndMissingCaller() {
+        ILoomScheduleTriggerRepository repo = mock(ILoomScheduleTriggerRepository.class);
+        String fullName = "loom-sched-alice-conv-1-history";
+        when(repo.findByName(fullName)).thenReturn(Optional.of(ownedRow(fullName, "alice")));
 
- UserContextHolder.setCurrentUser("bob");
- assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
- fullName, repo, LoggerFactory.getLogger(getClass()))).isFalse();
+        UserContextHolder.setCurrentUser("bob");
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                fullName, repo, LoggerFactory.getLogger(getClass()))).isFalse();
 
- UserContextHolder.clear();
- assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
- fullName, repo, LoggerFactory.getLogger(getClass()))).isFalse();
+        UserContextHolder.clear();
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                fullName, repo, LoggerFactory.getLogger(getClass()))).isFalse();
 
- when(repo.findByName("unknown")).thenReturn(Optional.empty());
- UserContextHolder.setCurrentUser("alice");
- assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
- "unknown", repo, LoggerFactory.getLogger(getClass()))).isFalse();
- assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
- null, repo, LoggerFactory.getLogger(getClass()))).isFalse();
- }
+        when(repo.findByName("unknown")).thenReturn(Optional.empty());
+        UserContextHolder.setCurrentUser("alice");
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                "unknown", repo, LoggerFactory.getLogger(getClass()))).isFalse();
+        assertThat(LoomAgentConfiguration.handleScheduleHistoryOwnership(
+                null, repo, LoggerFactory.getLogger(getClass()))).isFalse();
+    }
 }
 

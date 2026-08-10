@@ -21,49 +21,49 @@ import static org.mockito.Mockito.*;
  */
 class LoomFlexExecutionHistoryRegistrarTest {
 
- private FlexScheduledTaskRegistrar registrar;
- private ExecutionHistory history;
+    private FlexScheduledTaskRegistrar registrar;
+    private ExecutionHistory history;
 
- @BeforeEach
- void setUp() {
- registrar = mock(FlexScheduledTaskRegistrar.class);
- history = new InMemoryExecutionHistory(100);
- }
+    @BeforeEach
+    void setUp() {
+        registrar = mock(FlexScheduledTaskRegistrar.class);
+        history = new InMemoryExecutionHistory(100);
+    }
 
- @Test
- void afterPropertiesSet_wiresExecutionHistoryIntoRegistrar() {
- LoomFlexExecutionHistoryRegistrar bean = new LoomFlexExecutionHistoryRegistrar(registrar, history);
+    @Test
+    void afterPropertiesSet_wiresExecutionHistoryIntoRegistrar() {
+        LoomFlexExecutionHistoryRegistrar bean = new LoomFlexExecutionHistoryRegistrar(registrar, history);
 
- bean.afterPropertiesSet();
+        bean.afterPropertiesSet();
 
- verify(registrar).setExecutionHistory(history);
- }
+        verify(registrar).setExecutionHistory(history);
+    }
 
- @Test
- void afterPropertiesSet_skipsWhenExecutionHistoryIsNull() {
- LoomFlexExecutionHistoryRegistrar bean = new LoomFlexExecutionHistoryRegistrar(registrar, null);
+    @Test
+    void afterPropertiesSet_skipsWhenExecutionHistoryIsNull() {
+        LoomFlexExecutionHistoryRegistrar bean = new LoomFlexExecutionHistoryRegistrar(registrar, null);
 
- bean.afterPropertiesSet();
+        bean.afterPropertiesSet();
 
- verify(registrar, never()).setExecutionHistory(any());
- }
+        verify(registrar, never()).setExecutionHistory(any());
+    }
 
- /**
- * Sanity: the wiring actually takes effect — registering + firing through
- * the {@link InMemoryExecutionHistory} surfaces a row.
- */
- @Test
- void inMemoryHistory_recordsAndReturnsRows() {
- InMemoryExecutionHistory mem = new InMemoryExecutionHistory(50);
- mem.record(new cn.wubo.flex.schedule.core.ExecutionRecord(
- "t1", "ONE_SHOT", java.time.Instant.now(), java.time.Duration.ofMillis(10),
- true, null));
+    /**
+     * Sanity: the wiring actually takes effect — registering + firing through
+     * the {@link InMemoryExecutionHistory} surfaces a row.
+     */
+    @Test
+    void inMemoryHistory_recordsAndReturnsRows() {
+        InMemoryExecutionHistory mem = new InMemoryExecutionHistory(50);
+        mem.record(new cn.wubo.flex.schedule.core.ExecutionRecord(
+                "t1", "ONE_SHOT", java.time.Instant.now(), java.time.Duration.ofMillis(10),
+                true, null));
 
- var rows = mem.getHistory("t1", 10);
- org.assertj.core.api.Assertions.assertThat(rows)
- .hasSize(1)
- .first()
- .extracting(cn.wubo.flex.schedule.core.ExecutionRecord::taskName)
- .isEqualTo("t1");
- }
+        var rows = mem.getHistory("t1", 10);
+        org.assertj.core.api.Assertions.assertThat(rows)
+                .hasSize(1)
+                .first()
+                .extracting(cn.wubo.flex.schedule.core.ExecutionRecord::taskName)
+                .isEqualTo("t1");
+    }
 }

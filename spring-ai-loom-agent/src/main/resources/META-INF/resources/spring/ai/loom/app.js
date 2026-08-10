@@ -6,7 +6,7 @@
  * §2 Global state = only state writes.
  */
 
-import { sanitizeHtml } from './markdown-renderer.js';
+import {sanitizeHtml} from './markdown-renderer.js';
 
 // ===================== §1 Constants & Configuration =====================
 const API_PREFIX = '';
@@ -1569,7 +1569,22 @@ const knowledge = {
  const container = document.getElementById('ks-sidebar');
  const detail = document.getElementById('ks-detail');
 
- if (this.currentTab === 'mine') {
+     // 切 Tab 时重置右侧详情面板标题 + 内容，避免上一个 Tab 选中的 KB 名字残留在标题上
+     const titleEl = document.getElementById('ks-detail-title');
+     if (titleEl) titleEl.textContent = '知识库详情';
+     if (detail) {
+         const placeholderByTab = {
+             market: '<div style="padding: 40px; text-align: center; color: var(--text-muted);">从左侧选一个市场知识库查看详情</div>',
+             share: '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">无审批流，提交即上架，<br>其他用户可在「市场」Tab 立即订阅。</p></div>',
+             mypublish: '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>',
+             mine: null, // 「我的」Tab 用 select() 主动填；列表为空时 sidebar 已自带 empty
+         };
+         if (placeholderByTab[this.currentTab]) {
+             detail.innerHTML = placeholderByTab[this.currentTab];
+         }
+     }
+
+     if (this.currentTab === 'mine') {
  this.renderList(this._kbList);
  } else if (this.currentTab === 'market') {
  this._renderMarketTab(container, detail);
@@ -1588,17 +1603,49 @@ const knowledge = {
  }
  container.innerHTML = '';
 
- for (const kb of list) {
+     // 同名 KB 重复提示：统计每个 name 出现次数，给第 2+ 个加灰色 "(副本 N)" 后缀
+     const nameCounts = {};
+     for (const kb of list) nameCounts[kb.name] = (nameCounts[kb.name] || 0) + 1;
+     const nameSeen = {};
+     const dupSuffix = (kb) => {
+         if (!nameCounts[kb.name] || nameCounts[kb.name] <= 1) return '';
+         nameSeen[kb.name] = (nameSeen[kb.name] || 0) + 1;
+         return nameSeen[kb.name] === 1 ? '' : ` <span class="ks-item-dup-suffix">（副本 ${nameSeen[kb.name]}）</span>`;
+     };
+     const sourceLabel = (s) => {
+         switch (s) {
+             case 'USER_CREATED':
+                 return {text: '自建', bg: '#dbeafe', color: '#1e40af'};
+             case 'MARKET_PULLED':
+                 return {text: '市场', bg: '#d1fae5', color: '#065f46'};
+             case 'ROLE_GRANTED':
+                 return {text: '角色授权', bg: '#fef3c7', color: '#92400e'};
+             default:
+                 return null;
+         }
+     };
+
+     for (const kb of list) {
  const id = kb.id;
  const name = kb.name;
  const isChecked = state.enabledKnowledgeIds.includes(id);
  const isCreator = kb.username === state.username;
+         const lbl = sourceLabel(kb.source);
+         const sourceBadge = lbl
+             ? `<span class="ks-source-tag" style="background:${lbl.bg};color:${lbl.color};">${lbl.text}</span>`
+             : '';
  const div = document.createElement('div');
  div.className = 'ks-item' + (isChecked ? ' active' : '');
+         // 两行布局：行1 = [checkbox] [name+tag] [edit] [del]，行2 = [desc 占满]
+         // 解决 279px 容器装不下 5 列的问题（之前 BUG #6b：徽章越界）
  div.innerHTML = `
  <input type="checkbox" ${isChecked ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
- <span class="ks-item-name">${name}</span>
- <span class="ks-item-desc">${kb.description || ''}</span>
+ <div class="ks-item-main">
+ <div class="ks-item-row1">
+ <span class="ks-item-name">${escapeHtml(name)}${dupSuffix(kb)}${sourceBadge}</span>
+ </div>
+ <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+ </div>
  ${isCreator ? '<button class="ks-item-edit" title="编辑">&#x270E;</button>' : ''}
  ${isCreator ? '<button class="ks-item-delete">&times;</button>' : ''}`;
  const checkbox = div.querySelector('input[type="checkbox"]');
@@ -1874,9 +1921,12 @@ const knowledge = {
  const div = document.createElement('div');
  div.className = 'ks-item';
  div.innerHTML = `
- <span class="ks-item-name">${escapeHtml(kb.name)}</span>
- <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author || '')}</span>
- <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+ <div class="ks-item-main">
+ <div class="ks-item-row1">
+ <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ </div>
+ <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author || '')} · ${escapeHtml(kb.description || '')}</span>
+ </div>
  `;
  div.addEventListener('click', () => this._showMarketKbDetail(kb, div, detail));
  container.appendChild(div);
@@ -1934,8 +1984,12 @@ const knowledge = {
  const div = document.createElement('div');
  div.className = 'ks-item';
  div.innerHTML = `
- <span class="ks-item-name">${escapeHtml(kb.name)}</span>
+ <div class="ks-item-main">
+ <div class="ks-item-row1">
+ <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#dbeafe;color:#1e40af;">自建</span></span>
+ </div>
  <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+ </div>
  `;
  div.addEventListener('click', () => this._showShareForm(kb, detail));
  container.appendChild(div);
@@ -1983,8 +2037,12 @@ const knowledge = {
  const div = document.createElement('div');
  div.className = 'ks-item';
  div.innerHTML = `
- <span class="ks-item-name">${escapeHtml(kb.name)} <span class="km-status-badge" style="background: #d1fae5; color: #065f46; padding: 1px 6px; border-radius: 3px; font-size: 10px;">已上架</span></span>
+ <div class="ks-item-main">
+ <div class="ks-item-row1">
+ <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#d1fae5;color:#065f46;">已上架</span></span>
+ </div>
  <span class="ks-item-desc">${escapeHtml(kb.description || '')}</span>
+ </div>
  `;
  div.addEventListener('click', () => this._showMyPublishDetail(kb, detail));
  container.appendChild(div);
@@ -3104,6 +3162,9 @@ const skills = {
  renderModal() {
  const container = document.getElementById('skills-list');
  const detail = document.getElementById('skills-detail');
+     // 切 Tab 时重置详情标题（避免上一个 Tab 选中的 skill 名字残留在标题上）
+     const titleEl = document.getElementById('skill-detail-title');
+     if (titleEl) titleEl.textContent = '技能详情';
  detail.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情，或点击「新增」创建新技能</p></div>';
  container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
 
@@ -3152,9 +3213,12 @@ const skills = {
  const item = document.createElement('div');
  item.className = 'ks-item';
  item.innerHTML = `
- <span class="ks-item-name">${escapeHtml(m.name)}</span>
- <span class="ks-item-desc">by ${escapeHtml(m.author || '')}</span>
- <span class="ks-item-desc">${escapeHtml(m.description || '')}</span>
+ <div class="ks-item-main">
+ <div class="ks-item-row1">
+ <span class="ks-item-name">${escapeHtml(m.name)} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ </div>
+ <span class="ks-item-desc">by ${escapeHtml(m.author || '')} · ${escapeHtml(m.description || '')}</span>
+ </div>
  `;
  item.addEventListener('click', () => this._selectMarketSkill(m, item));
  container.appendChild(item);

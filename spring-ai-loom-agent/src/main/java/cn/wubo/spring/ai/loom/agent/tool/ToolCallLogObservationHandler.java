@@ -5,7 +5,6 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.observation.ToolCallingObservationContext;
-import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -31,62 +30,62 @@ import java.util.UUID;
 @org.springframework.stereotype.Component
 public class ToolCallLogObservationHandler implements ObservationHandler<ToolCallingObservationContext> {
 
- private final IToolCallLogRepository repository;
+    private final IToolCallLogRepository repository;
 
- public ToolCallLogObservationHandler(IToolCallLogRepository repository) {
- this.repository = repository;
- }
+    public ToolCallLogObservationHandler(IToolCallLogRepository repository) {
+        this.repository = repository;
+    }
 
- @Override
- public void onStart(ToolCallingObservationContext context) {
- // ：Spring AI 1.1.7 的 onStop/onError 有时不触发（实测 onStart 多次
- // FIRED 但 onStop 0 次）所以 onStart + onStop 都写库，靠 conversation_id
- // + tool_call_id + created_at 去重；onStop 的 result 会刷新同一行。
- // （fallback：如果两次写入，DB 有重复行——下次 migration 加 unique index 解决）
- saveLog(context, false);
- }
+    @Override
+    public void onStart(ToolCallingObservationContext context) {
+        // ：Spring AI 1.1.7 的 onStop/onError 有时不触发（实测 onStart 多次
+        // FIRED 但 onStop 0 次）所以 onStart + onStop 都写库，靠 conversation_id
+        // + tool_call_id + created_at 去重；onStop 的 result 会刷新同一行。
+        // （fallback：如果两次写入，DB 有重复行——下次 migration 加 unique index 解决）
+        saveLog(context, false);
+    }
 
- @Override
- public void onError(ToolCallingObservationContext context) {
- log.info(" onError: tool={} err={}", context.getToolDefinition() != null ? context.getToolDefinition().name() : "?", context.getError());
- }
+    @Override
+    public void onError(ToolCallingObservationContext context) {
+        log.info(" onError: tool={} err={}", context.getToolDefinition() != null ? context.getToolDefinition().name() : "?", context.getError());
+    }
 
- @Override
- public void onStop(ToolCallingObservationContext context) {
- log.debug(" onStop FIRED: tool={}", context.getToolDefinition() != null ? context.getToolDefinition().name() : "?");
- saveLog(context, true);
- }
+    @Override
+    public void onStop(ToolCallingObservationContext context) {
+        log.debug(" onStop FIRED: tool={}", context.getToolDefinition() != null ? context.getToolDefinition().name() : "?");
+        saveLog(context, true);
+    }
 
- private void saveLog(ToolCallingObservationContext context, boolean withResult) {
- try {
- String toolName = context.getToolDefinition() != null ? context.getToolDefinition().name() : "unknown";
- String args = context.getToolCallArguments() == null ? "" : context.getToolCallArguments();
- String result = "";
- if (withResult && context.getToolCallResult() != null) {
- result = context.getToolCallResult();
- }
+    private void saveLog(ToolCallingObservationContext context, boolean withResult) {
+        try {
+            String toolName = context.getToolDefinition() != null ? context.getToolDefinition().name() : "unknown";
+            String args = context.getToolCallArguments() == null ? "" : context.getToolCallArguments();
+            String result = "";
+            if (withResult && context.getToolCallResult() != null) {
+                result = context.getToolCallResult();
+            }
 
- ToolCallContextHolder.ToolCallContext holder = ToolCallContextHolder.get();
- String conversationId = holder != null ? holder.conversationId() : "";
- String username = holder != null ? holder.username() : "";
+            ToolCallContextHolder.ToolCallContext holder = ToolCallContextHolder.get();
+            String conversationId = holder != null ? holder.conversationId() : "";
+            String username = holder != null ? holder.username() : "";
 
- String callId = "obs-" + UUID.randomUUID();
+            String callId = "obs-" + UUID.randomUUID();
 
- boolean isError = withResult && result != null && (result.toLowerCase().contains("error")
- || result.toLowerCase().contains("exception"));
+            boolean isError = withResult && result != null && (result.toLowerCase().contains("error")
+                    || result.toLowerCase().contains("exception"));
 
- repository.save(new ToolCallLog(
- null, conversationId, username, callId, toolName, args, result, isError, null, Instant.now()));
+            repository.save(new ToolCallLog(
+                    null, conversationId, username, callId, toolName, args, result, isError, null, Instant.now()));
 
- log.debug(" tool_call log saved: conv={} user={} tool={} callId={} argsLen={} resultLen={} withResult={}",
- conversationId, username, toolName, callId, args.length(), result.length(), withResult);
- } catch (Exception e) {
- log.warn(" tool_call log save failed: {}", e.getMessage());
- }
- }
+            log.debug(" tool_call log saved: conv={} user={} tool={} callId={} argsLen={} resultLen={} withResult={}",
+                    conversationId, username, toolName, callId, args.length(), result.length(), withResult);
+        } catch (Exception e) {
+            log.warn(" tool_call log save failed: {}", e.getMessage());
+        }
+    }
 
- @Override
- public boolean supportsContext(Observation.Context context) {
- return context instanceof ToolCallingObservationContext;
- }
+    @Override
+    public boolean supportsContext(Observation.Context context) {
+        return context instanceof ToolCallingObservationContext;
+    }
 }

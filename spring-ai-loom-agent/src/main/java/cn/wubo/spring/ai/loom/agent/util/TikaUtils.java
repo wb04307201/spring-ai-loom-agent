@@ -11,8 +11,8 @@ import org.apache.tika.Tika;
  */
 public final class TikaUtils {
 
- public static final Tika TIKA = new Tika();
+    public static final Tika TIKA = new Tika();
 
- private TikaUtils() {
- }
+    private TikaUtils() {
+    }
 }

@@ -1446,33 +1446,66 @@ textarea::placeholder {
 }
 
 .ks-item {
-    padding: 10px 16px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 13px;
     color: var(--text-primary);
     transition: all var(--transition-fast);
     display: flex;
     align-items: center;
-    gap: 8px;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border-color);
+    gap: 10px;
+    background: var(--bg-primary);
+}
+
+.ks-item-main {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+}
+
+.ks-item-row1 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 .ks-item-name {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     cursor: pointer;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 600;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .ks-item:hover {
+    border-color: var(--primary-color);
     background: var(--bg-secondary);
+    transform: translateX(4px);
 }
 
 .ks-item.active {
-    background: rgba(99, 102, 241, 0.1);
-    color: var(--primary-color);
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+}
+
+.ks-item.selected {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
 }
 
 .ks-item-delete {
@@ -1528,13 +1561,31 @@ textarea::placeholder {
 
 .ks-item-desc {
     display: block;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted, #9ca3af);
-    margin-top: 2px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 200px;
+    min-width: 0;
+}
+
+/* KB 来源徽章（USER_CREATED / MARKET_PULLED / ROLE_GRANTED） */
+.ks-source-tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--bg-tertiary, #f3f4f6);
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+/* 同名 KB 重复提示 */
+.ks-item-dup-suffix {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 4px;
 }
 
 .ks-detail {

@@ -17,29 +17,30 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class ToolCallContextHolder {
 
- public record ToolCallContext(String conversationId, String username) {}
+    private static final ConcurrentHashMap<String, ToolCallContext> BY_CONVERSATION = new ConcurrentHashMap<>();
+    // 用 conversationId 存一个 placeholder，保证 latest 至少有一个非空 entry
+    private static final AtomicReference<ToolCallContext> LATEST = new AtomicReference<>();
+    private ToolCallContextHolder() {
+    }
 
- private static final ConcurrentHashMap<String, ToolCallContext> BY_CONVERSATION = new ConcurrentHashMap<>();
- // 用 conversationId 存一个 placeholder，保证 latest 至少有一个非空 entry
- private static final AtomicReference<ToolCallContext> LATEST = new AtomicReference<>();
+    public static void set(String conversationId, String username) {
+        ToolCallContext ctx = new ToolCallContext(conversationId, username);
+        BY_CONVERSATION.put(conversationId, ctx);
+        LATEST.set(ctx);
+    }
 
- private ToolCallContextHolder() {}
+    public static ToolCallContext get() {
+        ToolCallContext latest = LATEST.get();
+        if (latest != null) return latest;
+        return BY_CONVERSATION.values().stream().findFirst().orElse(null);
+    }
 
- public static void set(String conversationId, String username) {
- ToolCallContext ctx = new ToolCallContext(conversationId, username);
- BY_CONVERSATION.put(conversationId, ctx);
- LATEST.set(ctx);
- }
+    public static void clear() {
+        // 清理所有 entries
+        BY_CONVERSATION.clear();
+        LATEST.set(null);
+    }
 
- public static ToolCallContext get() {
- ToolCallContext latest = LATEST.get();
- if (latest != null) return latest;
- return BY_CONVERSATION.values().stream().findFirst().orElse(null);
- }
-
- public static void clear() {
- // 清理所有 entries
- BY_CONVERSATION.clear();
- LATEST.set(null);
- }
+    public record ToolCallContext(String conversationId, String username) {
+    }
 }

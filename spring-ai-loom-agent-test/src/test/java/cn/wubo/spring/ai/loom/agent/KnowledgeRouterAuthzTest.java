@@ -18,7 +18,7 @@ import org.springframework.web.servlet.function.ServerResponse;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
 /**
@@ -27,54 +27,54 @@ import static org.mockito.Mockito.*;
 @DisplayName("knowledge router 抽测")
 class KnowledgeRouterAuthzTest {
 
- private IKnowledge knowledge;
- private IUpload upload;
- private RouterFunction<ServerResponse> router;
+    private IKnowledge knowledge;
+    private IUpload upload;
+    private RouterFunction<ServerResponse> router;
 
- @BeforeEach
- void setUp() {
- UserContextHolder.setCurrentUser("alice");
- knowledge = mock(IKnowledge.class);
- upload = mock(IUpload.class);
- router = new LoomAgentConfiguration.WebConfiguration()
- .loomAgentKnowledgeRouter(knowledge, upload, mock(IFile.class));
- }
+    @BeforeEach
+    void setUp() {
+        UserContextHolder.setCurrentUser("alice");
+        knowledge = mock(IKnowledge.class);
+        upload = mock(IUpload.class);
+        router = new LoomAgentConfiguration.WebConfiguration()
+                .loomAgentKnowledgeRouter(knowledge, upload, mock(IFile.class));
+    }
 
- @AfterEach
- void tearDown() {
- UserContextHolder.clear();
- }
+    @AfterEach
+    void tearDown() {
+        UserContextHolder.clear();
+    }
 
- private ServerResponse route(String method, String path) throws Exception {
- MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
- servletRequest.setRequestURI(path);
- servletRequest.setServletPath(path);
- ServerRequest request = ServerRequest.create(servletRequest, List.of(new MappingJackson2HttpMessageConverter()));
- return router.route(request).orElseThrow().handle(request);
- }
+    private ServerResponse route(String method, String path) throws Exception {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
+        servletRequest.setRequestURI(path);
+        servletRequest.setServletPath(path);
+        ServerRequest request = ServerRequest.create(servletRequest, List.of(new MappingJackson2HttpMessageConverter()));
+        return router.route(request).orElseThrow().handle(request);
+    }
 
- @Test
- @DisplayName("can-edit：透传 knowledge.canEdit 结果")
- @SuppressWarnings("unchecked")
- void canEditPassthrough() throws Exception {
- when(knowledge.canEdit("kb-1")).thenReturn(false);
+    @Test
+    @DisplayName("can-edit：透传 knowledge.canEdit 结果")
+    @SuppressWarnings("unchecked")
+    void canEditPassthrough() throws Exception {
+        when(knowledge.canEdit("kb-1")).thenReturn(false);
 
- ServerResponse response = route("GET", "/spring/ai/loom/knowledge/kb-1/can-edit");
+        ServerResponse response = route("GET", "/spring/ai/loom/knowledge/kb-1/can-edit");
 
- assertEquals(200, response.statusCode().value());
- Map<String, Object> body = (Map<String, Object>) ((EntityResponse<?>) response).entity();
- assertEquals(false, body.get("canEdit"));
- verify(knowledge).canEdit("kb-1");
- }
+        assertEquals(200, response.statusCode().value());
+        Map<String, Object> body = (Map<String, Object>) ((EntityResponse<?>) response).entity();
+        assertEquals(false, body.get("canEdit"));
+        verify(knowledge).canEdit("kb-1");
+    }
 
- @Test
- @DisplayName("DELETE 知识库：委派 upload.deleteAllKnowledge")
- void deleteDelegatesToUpload() throws Exception {
- when(upload.deleteAllKnowledge("kb-1")).thenReturn(3);
+    @Test
+    @DisplayName("DELETE 知识库：委派 upload.deleteAllKnowledge")
+    void deleteDelegatesToUpload() throws Exception {
+        when(upload.deleteAllKnowledge("kb-1")).thenReturn(3);
 
- ServerResponse response = route("DELETE", "/spring/ai/loom/knowledge/kb-1");
+        ServerResponse response = route("DELETE", "/spring/ai/loom/knowledge/kb-1");
 
- assertEquals(200, response.statusCode().value());
- verify(upload).deleteAllKnowledge("kb-1");
- }
+        assertEquals(200, response.statusCode().value());
+        verify(upload).deleteAllKnowledge("kb-1");
+    }
 }

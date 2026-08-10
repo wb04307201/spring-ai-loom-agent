@@ -8,14 +8,14 @@ import java.time.Instant;
  * prompt / completion / total），这里保留一个 record 形态以备未来暴露 API。
  */
 public record TokenUsageRecord(
- String conversationId,
- String username,
- long promptTokens,
- long completionTokens,
- long totalTokens,
- Instant createdAt
+        String conversationId,
+        String username,
+        long promptTokens,
+        long completionTokens,
+        long totalTokens,
+        Instant createdAt
 ) {
- public TokenUsageRecord(String conversationId, String username, long prompt, long completion, long total) {
- this(conversationId, username, prompt, completion, total, Instant.now());
- }
+    public TokenUsageRecord(String conversationId, String username, long prompt, long completion, long total) {
+        this(conversationId, username, prompt, completion, total, Instant.now());
+    }
 }

@@ -18,29 +18,29 @@ import java.time.Instant;
  */
 public class ScheduleExecutionCleanup {
 
- private static final Logger log = LoggerFactory.getLogger(ScheduleExecutionCleanup.class);
+    private static final Logger log = LoggerFactory.getLogger(ScheduleExecutionCleanup.class);
 
- private final ILoomScheduleExecutionRepository repo;
- private final ScheduleExecutionProperties props;
+    private final ILoomScheduleExecutionRepository repo;
+    private final ScheduleExecutionProperties props;
 
- public ScheduleExecutionCleanup(ILoomScheduleExecutionRepository repo, ScheduleExecutionProperties props) {
- this.repo = repo;
- this.props = props;
- }
+    public ScheduleExecutionCleanup(ILoomScheduleExecutionRepository repo, ScheduleExecutionProperties props) {
+        this.repo = repo;
+        this.props = props;
+    }
 
- @Scheduled(cron = "${spring.ai.loom.agent.schedule.execution.cleanup-cron:0 0 3 * * *}")
- public void cleanup() {
- Instant cutoff = Instant.now().minus(props.getRetention());
- try {
- int n = repo.deleteOlderThan(cutoff);
- if (n > 0) {
- log.info("ScheduleExecutionCleanup: deleted {} execution row(s) older than {}",
- n, cutoff);
- } else {
- log.debug("ScheduleExecutionCleanup: nothing to delete (cutoff={})", cutoff);
- }
- } catch (Exception e) {
- log.warn("ScheduleExecutionCleanup failed: {}", e.getMessage());
- }
- }
+    @Scheduled(cron = "${spring.ai.loom.agent.schedule.execution.cleanup-cron:0 0 3 * * *}")
+    public void cleanup() {
+        Instant cutoff = Instant.now().minus(props.getRetention());
+        try {
+            int n = repo.deleteOlderThan(cutoff);
+            if (n > 0) {
+                log.info("ScheduleExecutionCleanup: deleted {} execution row(s) older than {}",
+                        n, cutoff);
+            } else {
+                log.debug("ScheduleExecutionCleanup: nothing to delete (cutoff={})", cutoff);
+            }
+        } catch (Exception e) {
+            log.warn("ScheduleExecutionCleanup failed: {}", e.getMessage());
+        }
+    }
 }

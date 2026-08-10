@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 @SpringBootApplication
 @EnableConfigurationProperties(LoomCompileMcpProperties.class)
 public class LoomCompileMcpApplication {
- public static void main(String[] args) {
- SpringApplication.run(LoomCompileMcpApplication.class, args);
- }
+    public static void main(String[] args) {
+        SpringApplication.run(LoomCompileMcpApplication.class, args);
+    }
 }

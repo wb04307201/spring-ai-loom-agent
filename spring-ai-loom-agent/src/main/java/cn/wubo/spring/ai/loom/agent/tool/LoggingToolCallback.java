@@ -24,49 +24,49 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LoggingToolCallback implements ToolCallback {
 
- private final ToolCallback delegate;
- private final String conversationId;
- private final String username;
- private final IToolCallLogRepository repository;
+    private final ToolCallback delegate;
+    private final String conversationId;
+    private final String username;
+    private final IToolCallLogRepository repository;
 
- @Override
- public ToolDefinition getToolDefinition() {
- return delegate.getToolDefinition();
- }
+    @Override
+    public ToolDefinition getToolDefinition() {
+        return delegate.getToolDefinition();
+    }
 
- @Override
- public String call(String arguments) {
- // abstract 方法（没 ToolContext 上下文），委托给 default 实现走 call(String, null)
- return call(arguments, null);
- }
+    @Override
+    public String call(String arguments) {
+        // abstract 方法（没 ToolContext 上下文），委托给 default 实现走 call(String, null)
+        return call(arguments, null);
+    }
 
- @Override
- public String call(String arguments, ToolContext toolContext) {
- String toolName = delegate.getToolDefinition().name();
- Instant start = Instant.now();
- boolean isError = false;
- String result = "";
- try {
- result = delegate.call(arguments, toolContext);
- return result;
- } catch (Exception e) {
- isError = true;
- result = "ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage();
- log.warn(" tool_call error: tool={} err={}", toolName, e.getMessage());
- throw e;
- } finally {
- try {
- long durationMs = Duration.between(start, Instant.now()).toMillis();
- String callId = "wrap-" + UUID.randomUUID();
- repository.save(new cn.wubo.spring.ai.loom.agent.model.ToolCallLog(
- null, conversationId, username, callId, toolName,
- arguments == null ? "" : arguments,
- result, isError, durationMs, Instant.now()));
- log.debug(" tool_call log saved: conv={} tool={} callId={} dur={}ms err={}",
- conversationId, toolName, callId, durationMs, isError);
- } catch (Exception ex) {
- log.warn(" tool_call log save failed: {}", ex.getMessage());
- }
- }
- }
+    @Override
+    public String call(String arguments, ToolContext toolContext) {
+        String toolName = delegate.getToolDefinition().name();
+        Instant start = Instant.now();
+        boolean isError = false;
+        String result = "";
+        try {
+            result = delegate.call(arguments, toolContext);
+            return result;
+        } catch (Exception e) {
+            isError = true;
+            result = "ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+            log.warn(" tool_call error: tool={} err={}", toolName, e.getMessage());
+            throw e;
+        } finally {
+            try {
+                long durationMs = Duration.between(start, Instant.now()).toMillis();
+                String callId = "wrap-" + UUID.randomUUID();
+                repository.save(new cn.wubo.spring.ai.loom.agent.model.ToolCallLog(
+                        null, conversationId, username, callId, toolName,
+                        arguments == null ? "" : arguments,
+                        result, isError, durationMs, Instant.now()));
+                log.debug(" tool_call log saved: conv={} tool={} callId={} dur={}ms err={}",
+                        conversationId, toolName, callId, durationMs, isError);
+            } catch (Exception ex) {
+                log.warn(" tool_call log save failed: {}", ex.getMessage());
+            }
+        }
+    }
 }

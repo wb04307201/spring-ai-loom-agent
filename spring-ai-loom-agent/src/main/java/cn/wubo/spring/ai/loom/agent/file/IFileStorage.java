@@ -10,36 +10,36 @@ import java.io.InputStream;
  */
 public interface IFileStorage {
 
- /**
- * 保存文件到存储
- *
- * @param knowledgeId 知识库 ID
- * @param fileName 文件名
- * @param inputStream 文件内容
- * @param mimeType MIME 类型
- * @return 存储位置标识（数据库为 fileId，磁盘为路径）
- */
- String save(String knowledgeId, String fileName, InputStream inputStream, String mimeType);
+    /**
+     * 保存文件到存储
+     *
+     * @param knowledgeId 知识库 ID
+     * @param fileName    文件名
+     * @param inputStream 文件内容
+     * @param mimeType    MIME 类型
+     * @return 存储位置标识（数据库为 fileId，磁盘为路径）
+     */
+    String save(String knowledgeId, String fileName, InputStream inputStream, String mimeType);
 
- /**
- * 读取文件内容
- *
- * @param location 存储位置标识
- * @return 文件内容字节数组
- */
- byte[] read(String location);
+    /**
+     * 读取文件内容
+     *
+     * @param location 存储位置标识
+     * @return 文件内容字节数组
+     */
+    byte[] read(String location);
 
- /**
- * 删除文件
- *
- * @param location 存储位置标识
- */
- void delete(String location);
+    /**
+     * 删除文件
+     *
+     * @param location 存储位置标识
+     */
+    void delete(String location);
 
- /**
- * 删除知识库所有文件
- *
- * @param knowledgeId 知识库 ID
- */
- void deleteByKnowledgeId(String knowledgeId);
+    /**
+     * 删除知识库所有文件
+     *
+     * @param knowledgeId 知识库 ID
+     */
+    void deleteByKnowledgeId(String knowledgeId);
 }

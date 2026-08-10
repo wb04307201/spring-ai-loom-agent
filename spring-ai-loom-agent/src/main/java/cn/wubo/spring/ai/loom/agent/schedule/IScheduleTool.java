@@ -19,24 +19,26 @@ import org.springframework.ai.tool.annotation.ToolParam;
  */
 public interface IScheduleTool extends IEmbedTool {
 
- String createSchedule(
- @ToolParam(description = "任务名,字母数字下划线。在同一会话内需唯一。") String name,
- @ToolParam(description = "调度类型: cron | fixed_delay | fixed_rate | one_shot") String scheduleType,
- @ToolParam(description = "表达式: cron 字符串 / 间隔秒数 / one_shot 的延迟秒数") String expression,
- @ToolParam(description = "触发时作为子任务运行的提示词") String prompt,
- ToolContext toolContext);
+    String createSchedule(
+            @ToolParam(description = "任务名,字母数字下划线。在同一会话内需唯一。") String name,
+            @ToolParam(description = "调度类型: cron | fixed_delay | fixed_rate | one_shot") String scheduleType,
+            @ToolParam(description = "表达式: cron 字符串 / 间隔秒数 / one_shot 的延迟秒数") String expression,
+            @ToolParam(description = "触发时作为子任务运行的提示词") String prompt,
+            ToolContext toolContext);
 
- String cancelSchedule(
- @ToolParam(description = "任务名(用户给定的短名,无需前缀)") String name,
- ToolContext toolContext);
+    String cancelSchedule(
+            @ToolParam(description = "任务名(用户给定的短名,无需前缀)") String name,
+            ToolContext toolContext);
 
- String listSchedules(ToolContext toolContext);
+    String listSchedules(ToolContext toolContext);
 
- String getScheduleHistory(
- @ToolParam(description = "任务名") String name,
- @ToolParam(description = "返回多少条,默认 20") Integer limit,
- ToolContext toolContext);
+    String getScheduleHistory(
+            @ToolParam(description = "任务名") String name,
+            @ToolParam(description = "返回多少条,默认 20") Integer limit,
+            ToolContext toolContext);
 
- /** Used internally by the BFF (not exposed as a tool). */
- String listSchedulesRaw(String username);
+    /**
+     * Used internally by the BFF (not exposed as a tool).
+     */
+    String listSchedulesRaw(String username);
 }

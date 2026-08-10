@@ -8,11 +8,11 @@ import java.util.List;
  * isActive 已删除（V7）；defaultSelected 表示普通用户进聊天界面时是否默认勾选。
  */
 public record McpSystemView(
- String name,
- String title,
- String description,
- boolean maintained,
- boolean defaultSelected, // 普通用户默认勾选；admin 始终 true
- List<McpToolSystemView> tools
+        String name,
+        String title,
+        String description,
+        boolean maintained,
+        boolean defaultSelected, // 普通用户默认勾选；admin 始终 true
+        List<McpToolSystemView> tools
 ) {
 }

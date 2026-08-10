@@ -4,7 +4,7 @@ import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 
 public interface ITimeTool extends IEmbedTool {
 
- String getCurrentTime(String timezone);
+    String getCurrentTime(String timezone);
 
- String convertTime(String sourceTimezone, String time, String targetTimezone);
+    String convertTime(String sourceTimezone, String time, String targetTimezone);
 }

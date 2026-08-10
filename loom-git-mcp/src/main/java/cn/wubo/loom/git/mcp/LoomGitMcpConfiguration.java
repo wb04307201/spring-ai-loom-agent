@@ -5,8 +5,8 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class LoomGitMcpConfiguration {
- @Bean
- public LoomGitMcpService loomGitMcpService(LoomGitMcpProperties properties) {
- return new LoomGitMcpService(properties);
- }
+    @Bean
+    public LoomGitMcpService loomGitMcpService(LoomGitMcpProperties properties) {
+        return new LoomGitMcpService(properties);
+    }
 }

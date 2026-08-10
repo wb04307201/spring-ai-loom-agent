@@ -16,9 +16,10 @@ package cn.wubo.spring.ai.loom.agent.tool;
  */
 public final class ToolCallbacks {
 
- private ToolCallbacks() {}
+    private ToolCallbacks() {
+    }
 
- public static org.springframework.ai.tool.ToolCallback[] from(Object... toolObjects) {
- return org.springframework.ai.support.ToolCallbacks.from(toolObjects);
- }
+    public static org.springframework.ai.tool.ToolCallback[] from(Object... toolObjects) {
+        return org.springframework.ai.support.ToolCallbacks.from(toolObjects);
+    }
 }

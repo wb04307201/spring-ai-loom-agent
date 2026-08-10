@@ -11,19 +11,23 @@ package cn.wubo.loom.compile.core;
  */
 public class BuildStageException extends RuntimeException {
 
- @java.io.Serial
- private static final long serialVersionUID = 1L;
+    @java.io.Serial
+    private static final long serialVersionUID = 1L;
 
- /** Captured build output (stdout + stderr). May be {@code null} if the process produced none. */
- private final String buildOutput;
+    /**
+     * Captured build output (stdout + stderr). May be {@code null} if the process produced none.
+     */
+    private final String buildOutput;
 
- public BuildStageException(String message, String buildOutput) {
- super(message);
- this.buildOutput = buildOutput;
- }
+    public BuildStageException(String message, String buildOutput) {
+        super(message);
+        this.buildOutput = buildOutput;
+    }
 
- /** @return captured build output; may be {@code null}. */
- public String buildOutput() {
- return buildOutput;
- }
+    /**
+     * @return captured build output; may be {@code null}.
+     */
+    public String buildOutput() {
+        return buildOutput;
+    }
 }
