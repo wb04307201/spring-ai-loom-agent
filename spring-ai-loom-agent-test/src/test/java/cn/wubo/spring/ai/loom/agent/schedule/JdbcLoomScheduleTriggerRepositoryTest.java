@@ -21,18 +21,6 @@ class JdbcLoomScheduleTriggerRepositoryTest {
 
     private JdbcLoomScheduleTriggerRepository repository;
 
-    @BeforeEach
-    void setUp() {
-        DriverManagerDataSource ds = new DriverManagerDataSource();
-        ds.setDriverClassName("org.h2.Driver");
-        ds.setUrl("jdbc:h2:mem:test-loom-" + System.nanoTime() + ";DB_CLOSE_DELAY=-1");
-        ds.setUsername("sa");
-        ds.setPassword("");
-        JdbcTemplate jdbc = new JdbcTemplate(ds);
-        repository = new JdbcLoomScheduleTriggerRepository(jdbc);
-        repository.ensureSchema();
-    }
-
     private static LoomScheduleTriggerRecord sample(String taskName, String scheduleType, long nowSec) {
         return sample(taskName, scheduleType, nowSec, "alice", "conv-1");
     }
@@ -56,6 +44,18 @@ class JdbcLoomScheduleTriggerRepositoryTest {
                 false,
                 now,
                 now);
+    }
+
+    @BeforeEach
+    void setUp() {
+        DriverManagerDataSource ds = new DriverManagerDataSource();
+        ds.setDriverClassName("org.h2.Driver");
+        ds.setUrl("jdbc:h2:mem:test-loom-" + System.nanoTime() + ";DB_CLOSE_DELAY=-1");
+        ds.setUsername("sa");
+        ds.setPassword("");
+        JdbcTemplate jdbc = new JdbcTemplate(ds);
+        repository = new JdbcLoomScheduleTriggerRepository(jdbc);
+        repository.ensureSchema();
     }
 
     @Test

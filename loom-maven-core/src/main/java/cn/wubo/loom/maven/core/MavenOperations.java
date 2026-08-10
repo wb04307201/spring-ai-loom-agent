@@ -9,7 +9,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,13 +29,15 @@ public class MavenOperations {
     private final String localRepository;
     private final int maxOutputLines;
     private final long defaultTimeoutMs;
-    /** Resolved Maven Home (user-configured or auto-detected). */
+    /**
+     * Resolved Maven Home (user-configured or auto-detected).
+     */
     private final String resolvedMavenHome;
 
     /**
-     * @param mavenHome       Maven installation directory (may be null for auto-detect)
-     * @param localRepository local Maven repository path (may be null/blank)
-     * @param maxOutputLines  maximum output lines to show before truncation
+     * @param mavenHome        Maven installation directory (may be null for auto-detect)
+     * @param localRepository  local Maven repository path (may be null/blank)
+     * @param maxOutputLines   maximum output lines to show before truncation
      * @param defaultTimeoutMs default timeout in milliseconds
      */
     public MavenOperations(String mavenHome, String localRepository, int maxOutputLines, long defaultTimeoutMs) {
@@ -47,6 +51,82 @@ public class MavenOperations {
     }
 
     // ==================== Main Execute Method ====================
+
+    /**
+     * Resolve Maven home directory.
+     * Falls back to auto-detection (common Maven installation paths) if not configured.
+     */
+    private static String resolveMavenHome(String configuredHome) {
+        if (configuredHome != null && !configuredHome.isBlank()) {
+            return configuredHome;
+        }
+        // Auto-detect common Maven installation paths
+        String[] commonPaths = {
+                System.getenv("MAVEN_HOME"),
+                System.getenv("M2_HOME"),
+                // Windows common locations
+                "C:\\developer\\apache-maven-latest",
+                "C:\\apache-maven",
+                "C:\\Program Files\\apache-maven",
+                // Linux common locations
+                "/usr/share/maven",
+                "/opt/maven",
+                // macOS (Homebrew)
+                "/opt/homebrew/opt/maven/libexec",
+                "/usr/local/Cellar/maven",
+        };
+        for (String p : commonPaths) {
+            if (p != null && !p.isBlank() && new File(p).isDirectory()) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get user file directory: {basePath}/{username}/
+     */
+    private static Path getUserFileDir(String basePath, String username) {
+        return Paths.get(basePath != null ? basePath : ".local/file", username);
+    }
+
+    // ==================== Path Resolution ====================
+
+    /**
+     * Validate that a path is within the user's file directory ({basePath}/{username}/).
+     * Prevents directory traversal and symlink escape.
+     *
+     * @return validated File, or null if out of bounds
+     */
+    private static File validatePathInBaseDir(String basePath, String username,
+                                              String path, String paramName) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
+        Path userDir = getUserFileDir(basePath, username);
+        Path inputPath = Paths.get(path);
+        Path resolved;
+
+        if (inputPath.isAbsolute()) {
+            resolved = inputPath.toAbsolutePath().normalize();
+        } else {
+            resolved = userDir.resolve(path).toAbsolutePath().normalize();
+        }
+
+        Path baseNorm = userDir.toAbsolutePath().normalize();
+        if (!resolved.startsWith(baseNorm)) {
+            log.warn("{} out of user file directory: {} (userDir={})", paramName, resolved, userDir);
+            return null;
+        }
+        // Symlink defense
+        try {
+            PathSecurityUtils.assertInsideBaseDir(resolved, userDir, true);
+        } catch (IOException | SecurityException e) {
+            log.warn("{} symlink check failed: {} - {}", paramName, resolved, e.getMessage());
+            return null;
+        }
+        return resolved.toFile();
+    }
 
     /**
      * Execute Maven goals.
@@ -74,6 +154,8 @@ public class MavenOperations {
                     "Full stack trace logged; report with stacktrace if recurring");
         }
     }
+
+    // ==================== Formatting ====================
 
     private String executeInternal(List<String> goals, File workDir, File pomFile,
                                    Map<String, String> props, Long timeoutMs, long startTime) {
@@ -186,8 +268,6 @@ public class MavenOperations {
         return result;
     }
 
-    // ==================== Path Resolution ====================
-
     /**
      * Resolve working directory, scoped within basePath/{username}/.
      *
@@ -207,10 +287,10 @@ public class MavenOperations {
     /**
      * Resolve pom.xml file, scoped within basePath/{username}/.
      *
-     * @param pomPath    explicit pom path (may be null to auto-detect)
-     * @param username   username
-     * @param basePath   base file storage path
-     * @param workDir    working directory (may be null)
+     * @param pomPath  explicit pom path (may be null to auto-detect)
+     * @param username username
+     * @param basePath base file storage path
+     * @param workDir  working directory (may be null)
      * @return resolved pom file, or null if not found / out of bounds
      */
     public File resolvePomFile(String pomPath, String username, String basePath, File workDir) {
@@ -249,7 +329,7 @@ public class MavenOperations {
         return new File(getUserFileDir(basePath, username).toFile(), "pom.xml");
     }
 
-    // ==================== Formatting ====================
+    // ==================== Internal Helpers ====================
 
     /**
      * Format error result.
@@ -257,14 +337,14 @@ public class MavenOperations {
     private String formatError(List<String> goals, File workDir, File pomFile,
                                long startTime, String errorMsg, String hint) {
         return String.format("""
-                Maven Execution Error
-                Command: mvn %s
-                Working Directory: %s
-                POM: %s
-                Elapsed: %dms
-                Error: %s
-                %s
-                """, String.join(" ", goals), workDir, pomFile,
+                        Maven Execution Error
+                        Command: mvn %s
+                        Working Directory: %s
+                        POM: %s
+                        Elapsed: %dms
+                        Error: %s
+                        %s
+                        """, String.join(" ", goals), workDir, pomFile,
                 System.currentTimeMillis() - startTime, errorMsg,
                 hint == null ? "" : hint);
     }
@@ -313,99 +393,23 @@ public class MavenOperations {
         String envM2 = System.getenv("MAVEN_HOME");
         String envM1 = System.getenv("M2_HOME");
         return String.format("""
-                Hint: maven-invoker could not find a usable Maven executable. Possible causes:
-                  1) mvn/mvn.cmd on system PATH is broken or not real Maven
-                  2) MAVEN_HOME / M2_HOME environment variable not set
-                  3) mavenHome not configured
-                Current state:
-                  - Configured mavenHome : %s
-                  - Resolved mavenHome   : %s
-                  - MAVEN_HOME env       : %s
-                  - M2_HOME env          : %s
-                Solutions:
-                  A) Configure mavenHome explicitly:
-                       spring.ai.loom.agent.maven.mavenHome: C:\\developer\\apache-maven-3.9.16
-                  B) Set MAVEN_HOME environment variable to the real Maven installation directory
-                """,
+                        Hint: maven-invoker could not find a usable Maven executable. Possible causes:
+                        1) mvn/mvn.cmd on system PATH is broken or not real Maven
+                        2) MAVEN_HOME / M2_HOME environment variable not set
+                        3) mavenHome not configured
+                        Current state:
+                        - Configured mavenHome : %s
+                        - Resolved mavenHome : %s
+                        - MAVEN_HOME env : %s
+                        - M2_HOME env : %s
+                        Solutions:
+                        A) Configure mavenHome explicitly:
+                        spring.ai.loom.agent.maven.mavenHome: C:\\developer\\apache-maven-3.9.16
+                        B) Set MAVEN_HOME environment variable to the real Maven installation directory
+                        """,
                 mavenHome,
                 resolvedMavenHome,
                 envM2 == null ? "<not set>" : envM2,
                 envM1 == null ? "<not set>" : envM1);
-    }
-
-    // ==================== Internal Helpers ====================
-
-    /**
-     * Resolve Maven home directory.
-     * Falls back to auto-detection (common Maven installation paths) if not configured.
-     */
-    private static String resolveMavenHome(String configuredHome) {
-        if (configuredHome != null && !configuredHome.isBlank()) {
-            return configuredHome;
-        }
-        // Auto-detect common Maven installation paths
-        String[] commonPaths = {
-                System.getenv("MAVEN_HOME"),
-                System.getenv("M2_HOME"),
-                // Windows common locations
-                "C:\\developer\\apache-maven-latest",
-                "C:\\apache-maven",
-                "C:\\Program Files\\apache-maven",
-                // Linux common locations
-                "/usr/share/maven",
-                "/opt/maven",
-                // macOS (Homebrew)
-                "/opt/homebrew/opt/maven/libexec",
-                "/usr/local/Cellar/maven",
-        };
-        for (String p : commonPaths) {
-            if (p != null && !p.isBlank() && new File(p).isDirectory()) {
-                return p;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Get user file directory: {basePath}/{username}/
-     */
-    private static Path getUserFileDir(String basePath, String username) {
-        return Paths.get(basePath != null ? basePath : ".local/file", username);
-    }
-
-    /**
-     * Validate that a path is within the user's file directory ({basePath}/{username}/).
-     * Prevents directory traversal and symlink escape.
-     *
-     * @return validated File, or null if out of bounds
-     */
-    private static File validatePathInBaseDir(String basePath, String username,
-                                               String path, String paramName) {
-        if (username == null || username.isBlank()) {
-            return null;
-        }
-        Path userDir = getUserFileDir(basePath, username);
-        Path inputPath = Paths.get(path);
-        Path resolved;
-
-        if (inputPath.isAbsolute()) {
-            resolved = inputPath.toAbsolutePath().normalize();
-        } else {
-            resolved = userDir.resolve(path).toAbsolutePath().normalize();
-        }
-
-        Path baseNorm = userDir.toAbsolutePath().normalize();
-        if (!resolved.startsWith(baseNorm)) {
-            log.warn("{} out of user file directory: {} (userDir={})", paramName, resolved, userDir);
-            return null;
-        }
-        // Symlink defense
-        try {
-            PathSecurityUtils.assertInsideBaseDir(resolved, userDir, true);
-        } catch (IOException | SecurityException e) {
-            log.warn("{} symlink check failed: {} - {}", paramName, resolved, e.getMessage());
-            return null;
-        }
-        return resolved.toFile();
     }
 }

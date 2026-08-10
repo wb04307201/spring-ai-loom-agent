@@ -7,12 +7,10 @@ import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.cache.Cache;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,6 +24,17 @@ public class DefaultUserConversation implements IUserConversation {
         this.jdbcTemplate = jdbcTemplate;
         this.chatMemory = chatMemory;
         this.sessionCache = sessionCache;
+    }
+
+    private static String normalizeTitle(String title) {
+        String normalized = title == null ? "" : title.trim();
+        if (normalized.isEmpty()) normalized = "新对话";
+        if (normalized.length() > 100) normalized = normalized.substring(0, 100);
+        return normalized;
+    }
+
+    private static Instant toInstant(Timestamp ts) {
+        return ts == null ? null : ts.toInstant();
     }
 
     @Override
@@ -129,13 +138,6 @@ public class DefaultUserConversation implements IUserConversation {
                 normalizedTitle, username, conversationId);
     }
 
-    private static String normalizeTitle(String title) {
-        String normalized = title == null ? "" : title.trim();
-        if (normalized.isEmpty()) normalized = "新对话";
-        if (normalized.length() > 100) normalized = normalized.substring(0, 100);
-        return normalized;
-    }
-
     @Override
     public int deleteById(String conversationId) {
         String username = UserContextHolder.getCurrentUser();
@@ -148,23 +150,43 @@ public class DefaultUserConversation implements IUserConversation {
 
     @Override
     public List<AdminConversationView> adminListByUsername(String username) {
+        // 单次 SQL 拉所有会话 + 6 个标量子查询聚合 stats（按 conversation_id 过滤）
+        // 子查询用 scalar correlated subquery，H2 支持且计划器会按主键索引加速。
+        // 对 N 个会话：6N 次子查询被合并到 1 个 round-trip，整体仍是 1 次 SELECT。
         return jdbcTemplate.query(
-                "select uc.conversation_id, uc.username, uc.deleted_at, uc.content_cleaned " +
-                        "from user_conversation uc where uc.username = ? order by uc.deleted_at desc nulls first",
+                "select uc.conversation_id, uc.username, uc.deleted_at, uc.content_cleaned, " +
+                        "uc.created_at, uc.updated_at, " +
+                        "(select count(*) from spring_ai_chat_memory m where m.conversation_id = uc.conversation_id) as msg_count, " +
+                        "(select coalesce(sum(total_tokens), 0) from loom_chat_usage u where u.conversation_id = uc.conversation_id) as total_tokens, " +
+                        "(select count(*) from loom_tool_call_log t where t.conversation_id = uc.conversation_id) as tool_count, " +
+                        "(select count(*) from loom_subtask_history s where s.conversation_id = uc.conversation_id) as sub_count, " +
+                        "(select count(*) from loom_scheduled_task sch where sch.conversation_id = uc.conversation_id) as sch_count, " +
+                        "(select count(*) from loom_tool_call_log t where t.conversation_id = uc.conversation_id and t.result_is_error = true) as err_count " +
+                        "from user_conversation uc where uc.username = ? " +
+                        "order by uc.updated_at desc",
                 (rs, rowNum) -> {
                     String convId = rs.getString("conversation_id");
                     Instant deletedAt = toInstant(rs.getTimestamp("deleted_at"));
                     Boolean cleaned = rs.getBoolean("content_cleaned");
                     String preview = cleaned ? "(内容已清理)" : buildPreview(convId);
+                    Instant createdAt = toInstant(rs.getTimestamp("created_at"));
+                    Instant updatedAt = toInstant(rs.getTimestamp("updated_at"));
                     return new AdminConversationView(convId, rs.getString("username"),
-                            null, preview, null, deletedAt, cleaned);
+                            null, preview, createdAt, updatedAt, deletedAt, cleaned,
+                            rs.getLong("msg_count"),
+                            rs.getLong("total_tokens"),
+                            rs.getLong("tool_count"),
+                            rs.getLong("sub_count"),
+                            rs.getLong("sch_count"),
+                            rs.getLong("err_count"));
                 }, username);
     }
 
     @Override
     public List<AdminConversationView> listAllCleanable() {
         return jdbcTemplate.query(
-                "select conversation_id, username, deleted_at, content_cleaned " +
+                "select conversation_id, username, deleted_at, content_cleaned, " +
+                        "created_at, updated_at " +
                         "from user_conversation where content_cleaned = false " +
                         "order by username, conversation_id",
                 (rs, rowNum) -> {
@@ -176,9 +198,11 @@ public class DefaultUserConversation implements IUserConversation {
                             rs.getString("username"),
                             null,
                             preview,
-                            null,
+                            toInstant(rs.getTimestamp("created_at")),
+                            toInstant(rs.getTimestamp("updated_at")),
                             deletedAt,
-                            rs.getBoolean("content_cleaned"));
+                            rs.getBoolean("content_cleaned"),
+                            0L, 0L, 0L, 0L, 0L, 0L);
                 });
     }
 
@@ -200,9 +224,5 @@ public class DefaultUserConversation implements IUserConversation {
 
     private UserConversationRecord mapUserConversationRecord(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new UserConversationRecord(rs.getString("username"), rs.getString("conversation_id"));
-    }
-
-    private static Instant toInstant(Timestamp ts) {
-        return ts == null ? null : ts.toInstant();
     }
 }

@@ -53,7 +53,7 @@ public abstract class AbstractMcp implements IMcp {
         List<ToolRecord> tools = mcpSchemaTools.stream()
                 .map(t -> {
                     String dbDesc = toolDescByName.get(t.name());
-                    String desc = (dbDesc != null && StringUtils.hasText(dbDesc)) ? dbDesc : t.description();
+                    String desc = (StringUtils.hasText(dbDesc)) ? dbDesc : t.description();
                     return new ToolRecord(t.name(), desc);
                 })
                 .toList();

@@ -5,7 +5,7 @@ package cn.wubo.spring.ai.loom.agent.model;
  */
 public record McpToolSystemView(
         String name,
-        String description,   // DB description，未维护时为 null
-        boolean maintained    // DB 有记录
+        String description, // DB description，未维护时为 null
+        boolean maintained // DB 有记录
 ) {
 }

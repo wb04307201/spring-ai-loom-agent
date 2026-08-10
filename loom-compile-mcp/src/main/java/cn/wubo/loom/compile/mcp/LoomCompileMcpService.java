@@ -10,7 +10,6 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -70,7 +69,7 @@ public class LoomCompileMcpService {
         if (r.steps() != null) {
             sb.append("步骤:\n");
             for (String step : r.steps()) {
-                sb.append("  ").append(step).append("\n");
+                sb.append(" ").append(step).append("\n");
             }
         }
         if (r.errorMessage() != null) sb.append("错误: ").append(r.errorMessage()).append("\n");

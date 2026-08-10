@@ -21,10 +21,14 @@ public interface IRoleService {
 
     void setUserRolesOrSkipAdmin(String username, List<String> roleCodes);
 
-    /** 角色授权 mcp 列表（按 sort_order 升序） */
+    /**
+     * 角色授权 mcp 列表（按 sort_order 升序）
+     */
     List<String> getRoleMcps(String roleCode);
 
-    /** 角色授权 mcp 列表（带 defaultEnabled） */
+    /**
+     * 角色授权 mcp 列表（带 defaultEnabled）
+     */
     List<RoleMcpItem> getRoleMcpsWithDefault(String roleCode);
 
     /**
@@ -39,5 +43,6 @@ public interface IRoleService {
      */
     List<McpSystemView> getVisibleMcpsForUser(String username);
 
-    record RoleMcpItem(String name, Boolean defaultEnabled) {}
+    record RoleMcpItem(String name, Boolean defaultEnabled) {
+    }
 }

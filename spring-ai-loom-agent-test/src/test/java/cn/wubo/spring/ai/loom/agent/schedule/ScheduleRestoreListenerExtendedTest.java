@@ -1,12 +1,10 @@
 package cn.wubo.spring.ai.loom.agent.schedule;
 
-import cn.wubo.flex.schedule.core.ExecutionRecord;
 import cn.wubo.flex.schedule.core.FlexScheduledTaskService;
 import cn.wubo.flex.schedule.core.TaskBuilder;
 import cn.wubo.flex.schedule.core.TaskLimits;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
-import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
 import cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,37 +14,34 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
  * Extended coverage for {@link ScheduleRestoreListener} — branches the original
  * {@link ScheduleRestoreListenerTest} left open:
  * <ul>
- *   <li><b>WARN mode</b> &mdash; expired rows are NOT deleted but ARE registered
- *       (lifetime math continues but the listener opts to keep the task alive).</li>
- *   <li><b>Orphan filter</b> &mdash; rows whose owner is missing from
- *       {@code user_info} are deleted without re-register.</li>
- *   <li><b>Orphan filter disabled</b> &mdash; when no {@link JdbcTemplate} is
- *       wired (legacy constructor), all rows are restored without owner
- *       checking.</li>
- *   <li><b>one_shot skip-on-already-fired</b> &mdash; when
- *       {@link ILoomScheduleExecutionRepository} reports an existing execution
- *       row for a {@code one_shot} task, the listener leaves the declaration
- *       alone and skips {@code register} so the task doesn't re-fire after a
- *       restart.</li>
- *   <li><b>Sub-task restore path</b> &mdash; the {@code Runnable} registered by
- *       the listener re-dispatches via {@link ISubTaskExecutor} and dual-writes
- *       the outcome to {@link ILoomScheduleExecutionRepository}; on FAILED the
- *       row is written with success=false.</li>
- *   <li><b>executionRepo == null branch</b> &mdash; listener's
- *       {@code recordExecution} logs a warn and returns when no execution repo
- *       is wired (older {@code @Bean} shapes).</li>
+ * <li><b>WARN mode</b> &mdash; expired rows are NOT deleted but ARE registered
+ * (lifetime math continues but the listener opts to keep the task alive).</li>
+ * <li><b>Orphan filter</b> &mdash; rows whose owner is missing from
+ * {@code user_info} are deleted without re-register.</li>
+ * <li><b>Orphan filter disabled</b> &mdash; when no {@link JdbcTemplate} is
+ * wired (legacy constructor), all rows are restored without owner
+ * checking.</li>
+ * <li><b>one_shot skip-on-already-fired</b> &mdash; when
+ * {@link ILoomScheduleExecutionRepository} reports an existing execution
+ * row for a {@code one_shot} task, the listener leaves the declaration
+ * alone and skips {@code register} so the task doesn't re-fire after a
+ * restart.</li>
+ * <li><b>Sub-task restore path</b> &mdash; the {@code Runnable} registered by
+ * the listener re-dispatches via {@link ISubTaskExecutor} and dual-writes
+ * the outcome to {@link ILoomScheduleExecutionRepository}; on FAILED the
+ * row is written with success=false.</li>
+ * <li><b>executionRepo == null branch</b> &mdash; listener's
+ * {@code recordExecution} logs a warn and returns when no execution repo
+ * is wired (older {@code @Bean} shapes).</li>
  * </ul>
  */
 class ScheduleRestoreListenerExtendedTest {
@@ -57,6 +52,26 @@ class ScheduleRestoreListenerExtendedTest {
     private ILoomScheduleExecutionRepository execRepo;
     private ISubTaskExecutor subTaskExecutor;
     private JdbcTemplate userJdbcTemplate;
+
+    private static LoomScheduleTriggerRecord record(
+            String taskName,
+            String scheduleType,
+            Instant createdAt,
+            String username,
+            boolean paused) {
+        return new LoomScheduleTriggerRecord(
+                taskName, scheduleType,
+                "cron".equals(scheduleType) ? "0 * * * * *" : null,
+                ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? 600L : null,
+                null,
+                "one_shot".equals(scheduleType) ? 30L : null,
+                "do work",
+                username, "conv-1", paused, createdAt, createdAt);
+    }
+
+    private static int anyInt() {
+        return org.mockito.ArgumentMatchers.anyInt();
+    }
 
     @BeforeEach
     void setUp() {
@@ -77,22 +92,6 @@ class ScheduleRestoreListenerExtendedTest {
         when(builder.fixedRate(any(Duration.class), any(Duration.class))).thenReturn(builder);
         when(builder.oneShot(any(Duration.class))).thenReturn(builder);
         when(builder.createdAt(any(Instant.class))).thenReturn(builder);
-    }
-
-    private static LoomScheduleTriggerRecord record(
-            String taskName,
-            String scheduleType,
-            Instant createdAt,
-            String username,
-            boolean paused) {
-        return new LoomScheduleTriggerRecord(
-                taskName, scheduleType,
-                "cron".equals(scheduleType) ? "0 * * * * *" : null,
-                ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? 600L : null,
-                null,
-                "one_shot".equals(scheduleType) ? 30L : null,
-                "do work",
-                username, "conv-1", paused, createdAt, createdAt);
     }
 
     private ScheduleRestoreListener listener(TaskLimits limits) {
@@ -257,7 +256,7 @@ class ScheduleRestoreListenerExtendedTest {
                 Instant.now().minus(Duration.ofMinutes(1)), "alice", false);
 
         // Drive the runnable the listener would have registered.
-        Runnable runnable = (Runnable) captureRegisteredRunnable(l, "alive-task");
+        Runnable runnable = captureRegisteredRunnable(l, "alive-task");
 
         runnable.run();
 
@@ -287,7 +286,7 @@ class ScheduleRestoreListenerExtendedTest {
         record("failed-task", "cron",
                 Instant.now().minus(Duration.ofMinutes(1)), "alice", false);
 
-        Runnable runnable = (Runnable) captureRegisteredRunnable(l, "failed-task");
+        Runnable runnable = captureRegisteredRunnable(l, "failed-task");
 
         runnable.run();
 
@@ -308,9 +307,9 @@ class ScheduleRestoreListenerExtendedTest {
         record("kaboom-task", "cron",
                 Instant.now().minus(Duration.ofMinutes(1)), "alice", false);
 
-        Runnable runnable = (Runnable) captureRegisteredRunnable(l, "kaboom-task");
+        Runnable runnable = captureRegisteredRunnable(l, "kaboom-task");
 
-        runnable.run();   // must NOT throw — restores are best-effort.
+        runnable.run(); // must NOT throw — restores are best-effort.
 
         ArgumentCaptor<LoomScheduleExecutionRecord> saved = ArgumentCaptor.forClass(LoomScheduleExecutionRecord.class);
         verify(execRepo).save(saved.capture());
@@ -332,7 +331,7 @@ class ScheduleRestoreListenerExtendedTest {
         record("legacy-task", "cron",
                 Instant.now().minus(Duration.ofMinutes(1)), "alice", false);
 
-        Runnable runnable = (Runnable) captureRegisteredRunnable(l, "legacy-task");
+        Runnable runnable = captureRegisteredRunnable(l, "legacy-task");
 
         // Doesn't throw — recordExecution early-returns when executionRepo is null.
         runnable.run();
@@ -340,6 +339,8 @@ class ScheduleRestoreListenerExtendedTest {
         // No exec-repo interaction at all.
         verifyNoInteractions(execRepo);
     }
+
+    // Helpers
 
     @Test
     void restore_mixedRowsAcrossAllPaths_keepsEachOnItsOwnTrack() {
@@ -371,13 +372,12 @@ class ScheduleRestoreListenerExtendedTest {
         verify(repo, never()).delete("fired-once");
     }
 
-    // Helpers
-
-    /** Invoke listener.restoreOnStartup() and capture the Runnable the builder
-     *  would have registered. Mockito forbids {@code doNothing().when(x).foo(captor.capture())}
-     *  (capture is only reliable on verify) so we register the runnable through
-     *  the verify-capture idiom: drive restore, then capture the runnable the
-     *  builder.register(…) call received.
+    /**
+     * Invoke listener.restoreOnStartup() and capture the Runnable the builder
+     * would have registered. Mockito forbids {@code doNothing().when(x).foo(captor.capture())}
+     * (capture is only reliable on verify) so we register the runnable through
+     * the verify-capture idiom: drive restore, then capture the runnable the
+     * builder.register(…) call received.
      */
     private Runnable captureRegisteredRunnable(ScheduleRestoreListener l, String taskName) {
         when(repo.findAll()).thenReturn(List.of(
@@ -388,9 +388,5 @@ class ScheduleRestoreListenerExtendedTest {
         ArgumentCaptor<Runnable> reg = ArgumentCaptor.forClass(Runnable.class);
         verify(builder).register(reg.capture());
         return reg.getValue();
-    }
-
-    private static int anyInt() {
-        return org.mockito.ArgumentMatchers.anyInt();
     }
 }

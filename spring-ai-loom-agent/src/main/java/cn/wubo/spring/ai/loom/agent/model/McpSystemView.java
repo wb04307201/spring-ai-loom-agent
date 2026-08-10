@@ -12,7 +12,7 @@ public record McpSystemView(
         String title,
         String description,
         boolean maintained,
-        boolean defaultSelected,   // 普通用户默认勾选；admin 始终 true
+        boolean defaultSelected, // 普通用户默认勾选；admin 始终 true
         List<McpToolSystemView> tools
 ) {
 }

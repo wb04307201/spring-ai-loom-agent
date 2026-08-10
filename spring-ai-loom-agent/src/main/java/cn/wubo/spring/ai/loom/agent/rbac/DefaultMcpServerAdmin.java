@@ -1,24 +1,17 @@
 package cn.wubo.spring.ai.loom.agent.rbac;
 
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
-import cn.wubo.spring.ai.loom.agent.model.McpRecord;
-import cn.wubo.spring.ai.loom.agent.model.McpServerInfo;
-import cn.wubo.spring.ai.loom.agent.model.McpSystemView;
-import cn.wubo.spring.ai.loom.agent.model.McpToolInfo;
-import cn.wubo.spring.ai.loom.agent.model.McpToolSystemView;
-import cn.wubo.spring.ai.loom.agent.model.ToolRecord;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.dao.EmptyResultDataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
+import cn.wubo.spring.ai.loom.agent.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @Component
 public class DefaultMcpServerAdmin implements IMcpServerAdmin {
@@ -75,7 +68,7 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
             jdbcTemplate.query(
                     "SELECT name, title, description FROM mcp_server WHERE name IN (" + placeholders + ")",
                     serverMapper,
-                    (Object[]) names.toArray());
+                    names.toArray());
         } catch (Exception e) {
             log.warn("查询 mcp_server 元数据失败，将回退为未维护视图: {}", e.getMessage(), e);
         }
@@ -90,7 +83,7 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
             jdbcTemplate.query(
                     "SELECT mcp_name, name, description FROM mcp_tool WHERE mcp_name IN (" + placeholders + ")",
                     toolMapper,
-                    (Object[]) names.toArray());
+                    names.toArray());
         } catch (Exception e) {
             log.warn("查询 mcp_tool 描述失败，将使用 SDK 默认描述: {}", e.getMessage(), e);
         }
@@ -126,7 +119,10 @@ public class DefaultMcpServerAdmin implements IMcpServerAdmin {
         List<McpRecord> liveMcps = mcp().mcps();
         if (liveMcps != null) {
             for (McpRecord r : liveMcps) {
-                if (r.name().equals(name)) { live = true; break; }
+                if (r.name().equals(name)) {
+                    live = true;
+                    break;
+                }
             }
         }
         if (!live) {

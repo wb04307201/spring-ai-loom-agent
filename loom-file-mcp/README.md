@@ -10,17 +10,17 @@ Run the MCP server without local installation via [jbang](https://www.jbang.dev/
 
 ```json
 {
-  "mcpServers": {
-    "loom-file-mcp": {
-      "command": "jbang",
-      "args": [
-        "io.github.wb04307201:loom-file-mcp:1.0-SNAPSHOT",
-        "--loom.file.mcp.basePath=/workspace",
-        "--loom.file.mcp.maxFileSize=10485760",
-        "--loom.file.mcp.deleteConfirmToken=I_CONFIRM_DELETE"
-      ]
-    }
-  }
+ "mcpServers": {
+ "loom-file-mcp": {
+ "command": "jbang",
+ "args": [
+ "io.github.wb04307201:loom-file-mcp:1.0-SNAPSHOT",
+ "--loom.file.mcp.basePath=/workspace",
+ "--loom.file.mcp.maxFileSize=10485760",
+ "--loom.file.mcp.deleteConfirmToken=I_CONFIRM_DELETE"
+ ]
+ }
+ }
 }
 ```
 

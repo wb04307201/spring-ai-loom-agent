@@ -17,19 +17,29 @@ import java.util.Optional;
  */
 public interface ILoomScheduleTriggerRepository {
 
-    /** Inserts or updates the row for {@code record.taskName()}. */
+    /**
+     * Inserts or updates the row for {@code record.taskName()}.
+     */
     void save(LoomScheduleTriggerRecord record);
 
-    /** Returns the row matching {@code taskName}, or empty if none. */
+    /**
+     * Returns the row matching {@code taskName}, or empty if none.
+     */
     Optional<LoomScheduleTriggerRecord> findByName(String taskName);
 
-    /** All rows, ordered by task_name for stable iteration. Used by the restore listener. */
+    /**
+     * All rows, ordered by task_name for stable iteration. Used by the restore listener.
+     */
     List<LoomScheduleTriggerRecord> findAll();
 
-    /** Scoped lookup for endpoints that list a single conversation's schedules. */
+    /**
+     * Scoped lookup for endpoints that list a single conversation's schedules.
+     */
     List<LoomScheduleTriggerRecord> findByUserAndConv(String username, String conversationId);
 
-    /** Deletes the row matching {@code taskName}. Returns the affected row count. */
+    /**
+     * Deletes the row matching {@code taskName}. Returns the affected row count.
+     */
     int delete(String taskName);
 
     /**
@@ -39,9 +49,13 @@ public interface ILoomScheduleTriggerRepository {
      */
     int deleteAllForConversation(String username, String conversationId);
 
-    /** Total row count. Used by tests + ops dashboards. */
+    /**
+     * Total row count. Used by tests + ops dashboards.
+     */
     int count();
 
-    /** Convenience existence check. */
+    /**
+     * Convenience existence check.
+     */
     boolean exists(String taskName);
 }

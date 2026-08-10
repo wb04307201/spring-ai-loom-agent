@@ -3,7 +3,6 @@ package cn.wubo.spring.ai.loom.agent.tool.compile;
 import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.CompileProperty;
-import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.MavenProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,10 +21,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * 重构后 DefaultCompileAndDeployTool 变成了委托给 loom-compile-core 的薄包装层。
  * 本测试仅覆盖仍在本模块可测试的行为：
  * <ul>
- *   <li>username 缺失时立即返回失败</li>
- *   <li>无效参数（空 gitUrl）立即返回失败</li>
- *   <li>配置属性默认值</li>
- *   <li>CompileAndDeployResult 工厂方法</li>
+ * <li>username 缺失时立即返回失败</li>
+ * <li>无效参数（空 gitUrl）立即返回失败</li>
+ * <li>配置属性默认值</li>
+ * <li>CompileAndDeployResult 工厂方法</li>
  * </ul>
  * 内部管线逻辑（writeDockerfile / findBuiltJar / dockerBuild 等）的测试
  * 已移至 loom-compile-core 模块。
@@ -36,18 +35,18 @@ class DefaultCompileAndDeployToolTest {
     private DefaultCompileAndDeployTool tool;
     private CompileProperty compile;
 
-    @BeforeEach
-    void setUp() {
-        compile = new CompileProperty();
-        tool = new DefaultCompileAndDeployTool(compile, null, ".local/file");
-    }
-
     private static ToolContext ctx(String username) {
         Map<String, Object> m = new HashMap<>();
         if (username != null) {
             m.put("username", username);
         }
         return new ToolContext(m);
+    }
+
+    @BeforeEach
+    void setUp() {
+        compile = new CompileProperty();
+        tool = new DefaultCompileAndDeployTool(compile, null, ".local/file");
     }
 
     @Test

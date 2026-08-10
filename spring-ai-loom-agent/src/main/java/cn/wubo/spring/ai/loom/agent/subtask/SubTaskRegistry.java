@@ -2,11 +2,7 @@ package cn.wubo.spring.ai.loom.agent.subtask;
 
 import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,12 +46,16 @@ public class SubTaskRegistry {
      */
     private final Consumer<SubTaskRecord> writeHook;
 
-    /** Backward-compatible constructor with no cancel hook. */
+    /**
+     * Backward-compatible constructor with no cancel hook.
+     */
     public SubTaskRegistry(int maxConcurrent, int maxHistory) {
         this(maxConcurrent, maxHistory, null, null);
     }
 
-    /** Backward-compatible constructor with cancel hook only. */
+    /**
+     * Backward-compatible constructor with cancel hook only.
+     */
     public SubTaskRegistry(int maxConcurrent, int maxHistory, Consumer<String> cancelHook) {
         this(maxConcurrent, maxHistory, cancelHook, null);
     }
@@ -67,6 +67,14 @@ public class SubTaskRegistry {
         this.writeHook = writeHook;
     }
 
+    private static String safeUsername(String s) {
+        return s == null ? "" : s;
+    }
+
+    private static String safeConv(String s) {
+        return s == null ? "" : s;
+    }
+
     /**
      * Registers a new sub-task and returns its assigned UUID. Throws if
      * {@link #maxConcurrent} active tasks are already in flight.
@@ -74,7 +82,7 @@ public class SubTaskRegistry {
     public String register(String username, String conversationId, String prompt) {
         if (activeCount.get() >= maxConcurrent) {
             throw new IllegalStateException(
-                "已达最大并发子任务数 " + maxConcurrent + ", 请稍后再试");
+                    "已达最大并发子任务数 " + maxConcurrent + ", 请稍后再试");
         }
         String id = UUID.randomUUID().toString();
         return registerWithId(id, username, conversationId, prompt);
@@ -94,7 +102,7 @@ public class SubTaskRegistry {
     public String registerWithId(String subTaskId, String username, String conversationId, String prompt) {
         if (activeCount.get() >= maxConcurrent) {
             throw new IllegalStateException(
-                "已达最大并发子任务数 " + maxConcurrent + ", 请稍后再试");
+                    "已达最大并发子任务数 " + maxConcurrent + ", 请稍后再试");
         }
         if (subTaskId == null || subTaskId.isBlank()) {
             throw new IllegalArgumentException("subTaskId must be non-blank");
@@ -339,7 +347,7 @@ public class SubTaskRegistry {
     }
 
     private void archive(SubTaskRecord rec) {
-        if (rec.username() == null) return;       // skip anonymous records (would NPE historyByUser)
+        if (rec.username() == null) return; // skip anonymous records (would NPE historyByUser)
         Deque<SubTaskRecord> deque = historyByUser.computeIfAbsent(rec.username(), k -> new ArrayDeque<>());
         synchronized (deque) {
             deque.addLast(rec);
@@ -364,14 +372,6 @@ public class SubTaskRegistry {
         archive(rec);
     }
 
-    private static String safeUsername(String s) {
-        return s == null ? "" : s;
-    }
-
-    private static String safeConv(String s) {
-        return s == null ? "" : s;
-    }
-
     /**
      * Immutable view of a sub-task record. Terminal state is decided at construction
      * time via {@link SubTaskStatus}.
@@ -387,5 +387,6 @@ public class SubTaskRegistry {
             String errorMessage,
             String resultText,
             CompletableFuture<?> future
-    ) {}
+    ) {
+    }
 }

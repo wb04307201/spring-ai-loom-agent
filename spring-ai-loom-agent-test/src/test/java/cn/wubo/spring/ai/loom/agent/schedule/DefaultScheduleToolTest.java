@@ -12,9 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class DefaultScheduleToolTest {
@@ -23,6 +21,17 @@ class DefaultScheduleToolTest {
     private ISubTaskExecutor executor;
     private ILoomScheduleTriggerRepository repo;
     private DefaultScheduleTool tool;
+
+    /**
+     * Minimal owned schedule row for BUG-13 ownership-guard tests.
+     */
+    private static LoomScheduleTriggerRecord ownedRow(String taskName, String username, String convId) {
+        return new LoomScheduleTriggerRecord(
+                taskName, LoomScheduleTriggerRecord.TYPE_FIXED_DELAY,
+                null, 600L, null, null, "say hi",
+                username, convId, false,
+                java.time.Instant.EPOCH, java.time.Instant.EPOCH);
+    }
 
     @BeforeEach
     void setUp() {
@@ -77,15 +86,6 @@ class DefaultScheduleToolTest {
         verify(flexService).cancel(full);
     }
 
-    /** Minimal owned schedule row for BUG-13 ownership-guard tests. */
-    private static LoomScheduleTriggerRecord ownedRow(String taskName, String username, String convId) {
-        return new LoomScheduleTriggerRecord(
-                taskName, LoomScheduleTriggerRecord.TYPE_FIXED_DELAY,
-                null, 600L, null, null, "say hi",
-                username, convId, false,
-                java.time.Instant.EPOCH, java.time.Instant.EPOCH);
-    }
-
     @Test
     void listSchedulesFiltersByConversation() {
         // BUG-15: listSchedules should only return schedules in the current conversation,
@@ -122,7 +122,7 @@ class DefaultScheduleToolTest {
     void getScheduleHistoryCallsHistoryWithLimit() {
         ToolContext ctx = new ToolContext(Map.of("username", "alice", "parentConversationId", "conv-1"));
         when(flexService.getExecutionHistory(eq("loom-sched-alice-conv-1-remind"), eq(10)))
-                .thenReturn(List.<ExecutionRecord>of());
+                .thenReturn(List.of());
 
         String response = tool.getScheduleHistory("remind", 10, ctx);
         assertThat(response).contains("remind");

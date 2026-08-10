@@ -9,33 +9,26 @@ import java.util.concurrent.TimeUnit;
 /**
  * 跨平台进程管理工具。统一封装：
  * <ul>
- *   <li>子进程启动（含 Windows .bat 临时文件兜底）</li>
- *   <li>stdout/stderr 流消费（守护线程，防管道满阻塞）</li>
- *   <li>超时控制 + 进程树杀死（Windows taskkill /T、Unix ps+kill 递归）</li>
- *   <li>Maven 可执行文件定位</li>
+ * <li>子进程启动（含 Windows .bat 临时文件兜底）</li>
+ * <li>stdout/stderr 流消费（守护线程，防管道满阻塞）</li>
+ * <li>超时控制 + 进程树杀死（Windows taskkill /T、Unix ps+kill 递归）</li>
+ * <li>Maven 可执行文件定位</li>
  * </ul>
  */
 public final class ProcessUtils {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ProcessUtils.class);
 
-    private ProcessUtils() {}
+    private ProcessUtils() {
+    }
 
     // ==================== 执行结果 ====================
 
     /**
-     * 进程执行结果。
-     */
-    public record ExecOutcome(int exitCode, String output, boolean timeout) {
-    }
-
-    // ==================== 通用进程执行 ====================
-
-    /**
      * 执行命令并等待完成。合并 stderr 到 stdout。
      *
-     * @param cmd      命令行
-     * @param workDir  工作目录
+     * @param cmd       命令行
+     * @param workDir   工作目录
      * @param timeoutMs 超时毫秒数
      * @return 执行结果
      */
@@ -97,11 +90,13 @@ public final class ProcessUtils {
         }
     }
 
+    // ==================== 通用进程执行 ====================
+
     /**
      * 执行命令，分离 stdout/stderr。
      *
-     * @param cmd      命令行
-     * @param workDir  工作目录
+     * @param cmd       命令行
+     * @param workDir   工作目录
      * @param timeoutMs 超时毫秒数
      * @return 执行结果（stdout + stderr 合并）
      */
@@ -165,8 +160,6 @@ public final class ProcessUtils {
         }
     }
 
-    // ==================== 进程启动 ====================
-
     /**
      * 启动子进程。Windows 下 cmd.exe /c 命令通过临时 .bat 文件执行，
      * 绕开命令行解析的坑。
@@ -193,6 +186,8 @@ public final class ProcessUtils {
         return pb.start();
     }
 
+    // ==================== 进程启动 ====================
+
     /**
      * 创建临时 .bat 文件。
      */
@@ -210,8 +205,6 @@ public final class ProcessUtils {
         Files.writeString(bat.toPath(), sb.toString(), StandardCharsets.UTF_8);
         return bat;
     }
-
-    // ==================== 流处理 ====================
 
     /**
      * 启动守护线程消费进程输出流，防止管道满阻塞。
@@ -233,6 +226,8 @@ public final class ProcessUtils {
         return t;
     }
 
+    // ==================== 流处理 ====================
+
     public static void joinQuietly(Thread t, long millis) {
         if (t == null) return;
         try {
@@ -250,8 +245,6 @@ public final class ProcessUtils {
         }
     }
 
-    // ==================== 进程 PID ====================
-
     /**
      * 安全获取进程 PID。
      */
@@ -265,13 +258,13 @@ public final class ProcessUtils {
         }
     }
 
-    // ==================== 进程树杀死 ====================
+    // ==================== 进程 PID ====================
 
     /**
      * 杀掉整个进程树。
      * <ul>
-     *   <li>Windows: taskkill /F /T /PID</li>
-     *   <li>Unix: destroyForcibly + 递归杀子进程</li>
+     * <li>Windows: taskkill /F /T /PID</li>
+     * <li>Unix: destroyForcibly + 递归杀子进程</li>
      * </ul>
      */
     public static void killProcessTree(Process process, long pid) {
@@ -316,6 +309,8 @@ public final class ProcessUtils {
             }
         }
     }
+
+    // ==================== 进程树杀死 ====================
 
     /**
      * Unix 下递归杀子进程。通过 ps 获取进程树，DFS 遍历并 kill -9。
@@ -369,8 +364,6 @@ public final class ProcessUtils {
         }
     }
 
-    // ==================== Maven 定位 ====================
-
     /**
      * 在 mavenHome/bin/ 下定位 mvn 可执行文件。
      *
@@ -391,7 +384,7 @@ public final class ProcessUtils {
         return null;
     }
 
-    // ==================== 输出处理 ====================
+    // ==================== Maven 定位 ====================
 
     /**
      * 截断输出到指定行数（保留前 N 行）。
@@ -405,6 +398,8 @@ public final class ProcessUtils {
                 + "\n... (输出已截断，共 " + lines.length + " 行，仅显示前 " + maxLines + " 行)";
     }
 
+    // ==================== 输出处理 ====================
+
     /**
      * 取最后 N 行。
      */
@@ -415,9 +410,15 @@ public final class ProcessUtils {
         return String.join("\n", Arrays.copyOfRange(lines, lines.length - n, lines.length));
     }
 
-    // ==================== 平台检测 ====================
-
     public static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    // ==================== 平台检测 ====================
+
+    /**
+     * 进程执行结果。
+     */
+    public record ExecOutcome(int exitCode, String output, boolean timeout) {
     }
 }

@@ -3,11 +3,7 @@ package cn.wubo.spring.ai.loom.agent.vectorstore;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import io.github.jbellis.jvector.graph.GraphIndex;
-import io.github.jbellis.jvector.graph.GraphIndexBuilder;
-import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
-import io.github.jbellis.jvector.graph.SearchResult;
+import io.github.jbellis.jvector.graph.*;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -33,14 +29,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 /**
@@ -53,27 +44,25 @@ public class JVectorStore extends AbstractObservationVectorStore {
     private static final Logger logger = LoggerFactory.getLogger(JVectorStore.class);
 
     private static final String METADATA_FILE = "docs.json";
-
+    private static final SimpleVectorStoreFilterExpressionConverter FILTER_CONVERTER = new SimpleVectorStoreFilterExpressionConverter();
     private final String indexPath;
     private final int m;
     private final int efConstruction;
     private final int efSearch;
     private final VectorSimilarityFunction similarityFunction;
-
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
     private final ConcurrentHashMap<String, Document> documentStore = new ConcurrentHashMap<>();
     // Ordered list of document IDs -- index matches JVector graph node index
     private final List<String> documentIds = Collections.synchronizedList(new ArrayList<>());
     // Vector storage keyed by document ID (as VectorFloat)
     private final Map<String, VectorFloat<?>> embeddingMap = new ConcurrentHashMap<>();
+    private final ObjectMapper objectMapper;
+    private final ExpressionParser expressionParser;
+    private final VectorizationProvider vectorizationProvider;
     // Current vector list for search-time RAVV construction
     private volatile List<VectorFloat<?>> currentVectors = List.of();
     @SuppressWarnings("rawtypes")
     private volatile GraphIndex graphIndex;
-    private static final SimpleVectorStoreFilterExpressionConverter FILTER_CONVERTER = new SimpleVectorStoreFilterExpressionConverter();
-    private final ObjectMapper objectMapper;
-    private final ExpressionParser expressionParser;
-    private final VectorizationProvider vectorizationProvider;
 
     public JVectorStore(JVectorStoreBuilder builder) {
         super(builder);
@@ -105,7 +94,8 @@ public class JVectorStore extends AbstractObservationVectorStore {
 
     private void loadFromDisk(Path path, Path metadataFile) {
         try {
-            TypeReference<Map<String, Map<String, Object>>> typeRef = new TypeReference<>() {};
+            TypeReference<Map<String, Map<String, Object>>> typeRef = new TypeReference<>() {
+            };
             Map<String, Map<String, Object>> rawDocs = objectMapper.readValue(metadataFile.toFile(), typeRef);
 
             for (Map.Entry<String, Map<String, Object>> entry : rawDocs.entrySet()) {
@@ -130,7 +120,8 @@ public class JVectorStore extends AbstractObservationVectorStore {
 
             Path idsFile = path.resolve("ids.json");
             if (Files.exists(idsFile)) {
-                TypeReference<List<String>> idTypeRef = new TypeReference<>() {};
+                TypeReference<List<String>> idTypeRef = new TypeReference<>() {
+                };
                 List<String> loadedIds = objectMapper.readValue(idsFile.toFile(), idTypeRef);
                 // Only include IDs that have corresponding documents
                 for (String id : loadedIds) {

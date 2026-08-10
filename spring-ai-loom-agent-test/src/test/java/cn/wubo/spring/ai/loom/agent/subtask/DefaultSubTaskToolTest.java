@@ -83,7 +83,8 @@ class DefaultSubTaskToolTest {
 
     @Test
     void listSubTasksShowsActiveTasksForCurrentConversation() {
-        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {});
+        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {
+        });
         ISubTaskExecutor executor = mock(ISubTaskExecutor.class);
         DefaultSubTaskTool tool = new DefaultSubTaskTool(executor, registry);
 
@@ -114,7 +115,8 @@ class DefaultSubTaskToolTest {
 
     @Test
     void cancelSubTaskRejectsCrossConversationAttempts() {
-        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {});
+        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {
+        });
         ISubTaskExecutor executor = mock(ISubTaskExecutor.class);
         DefaultSubTaskTool tool = new DefaultSubTaskTool(executor, registry);
 
@@ -132,7 +134,8 @@ class DefaultSubTaskToolTest {
 
     @Test
     void cancelSubTaskWorksForSameConversation() {
-        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {});
+        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {
+        });
         ISubTaskExecutor executor = mock(ISubTaskExecutor.class);
         DefaultSubTaskTool tool = new DefaultSubTaskTool(executor, registry);
 
@@ -173,7 +176,8 @@ class DefaultSubTaskToolTest {
 
     @Test
     void cancelSubTaskRejectsNonRunningTask() {
-        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {});
+        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {
+        });
         ISubTaskExecutor executor = mock(ISubTaskExecutor.class);
         DefaultSubTaskTool tool = new DefaultSubTaskTool(executor, registry);
 
@@ -190,7 +194,8 @@ class DefaultSubTaskToolTest {
 
     @Test
     void getSubTaskHistoryReturnsHistoryForCurrentConversation() {
-        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {});
+        SubTaskRegistry registry = new SubTaskRegistry(8, 100, id -> {
+        });
         ISubTaskExecutor executor = mock(ISubTaskExecutor.class);
         DefaultSubTaskTool tool = new DefaultSubTaskTool(executor, registry);
 

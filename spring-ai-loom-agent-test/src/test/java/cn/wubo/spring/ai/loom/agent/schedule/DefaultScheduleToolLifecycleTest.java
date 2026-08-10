@@ -3,9 +3,7 @@ package cn.wubo.spring.ai.loom.agent.schedule;
 import cn.wubo.flex.schedule.core.ExecutionRecord;
 import cn.wubo.flex.schedule.core.FlexScheduledTaskService;
 import cn.wubo.flex.schedule.core.TaskBuilder;
-import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
-import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
 import cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,10 +19,9 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.argThat;
 
 /**
  * Lifecycle tests for {@link DefaultScheduleTool} after the
@@ -32,19 +29,19 @@ import static org.mockito.Mockito.*;
  *
  * <p>Covers the gaps in the original {@link DefaultScheduleToolTest}:
  * <ul>
- *   <li><b>parseSeconds</b> lenient parser — every suffix/numeric/null/garbage variant.</li>
- *   <li><b>runAsSubTask</b> success / failure / exception paths — verifies the
- *       re-throw on FAILED (Fix-E) plus the dual-write into the execution repo
- *       plus the trim call.</li>
- *   <li><b>recordExecution</b> trim behavior — confirms the per-task cap is honored
- *       and that a null executionRepo short-circuits cleanly.</li>
- *   <li><b>Persistence rollback</b> — when {@code loomScheduleTriggerRepository.save}
- *       throws, {@code flexService.cancel(full)} must be called so the in-memory and
- *       DB layers stay aligned.</li>
- *   <li><b>prompt blank guard</b> — empty/whitespace prompt rejected up-front, no
- *       call to {@code flexService.task(...)} at all.</li>
- *   <li><b>cancelSchedule owner mismatch</b> — foreign user hitting the cancel
- *       tool gets the same "not found" message (no information leak).</li>
+ * <li><b>parseSeconds</b> lenient parser — every suffix/numeric/null/garbage variant.</li>
+ * <li><b>runAsSubTask</b> success / failure / exception paths — verifies the
+ * re-throw on FAILED (Fix-E) plus the dual-write into the execution repo
+ * plus the trim call.</li>
+ * <li><b>recordExecution</b> trim behavior — confirms the per-task cap is honored
+ * and that a null executionRepo short-circuits cleanly.</li>
+ * <li><b>Persistence rollback</b> — when {@code loomScheduleTriggerRepository.save}
+ * throws, {@code flexService.cancel(full)} must be called so the in-memory and
+ * DB layers stay aligned.</li>
+ * <li><b>prompt blank guard</b> — empty/whitespace prompt rejected up-front, no
+ * call to {@code flexService.task(...)} at all.</li>
+ * <li><b>cancelSchedule owner mismatch</b> — foreign user hitting the cancel
+ * tool gets the same "not found" message (no information leak).</li>
  * </ul>
  */
 class DefaultScheduleToolLifecycleTest {
@@ -54,15 +51,6 @@ class DefaultScheduleToolLifecycleTest {
     private ILoomScheduleTriggerRepository triggerRepo;
     private ILoomScheduleExecutionRepository execRepo;
     private DefaultScheduleTool tool;
-
-    @BeforeEach
-    void setUp() {
-        flexService = mock(FlexScheduledTaskService.class);
-        executor = mock(ISubTaskExecutor.class);
-        triggerRepo = mock(ILoomScheduleTriggerRepository.class);
-        execRepo = mock(ILoomScheduleExecutionRepository.class);
-        tool = new DefaultScheduleTool(flexService, executor, triggerRepo, execRepo, 1000);
-    }
 
     private static ToolContext ctx(String user, String conv) {
         return new ToolContext(Map.of("username", user, "parentConversationId", conv));
@@ -75,21 +63,35 @@ class DefaultScheduleToolLifecycleTest {
                 user, conv, false, Instant.EPOCH, Instant.EPOCH);
     }
 
+    // Helper to keep argThat usage concise.
+    private static int anyInt() {
+        return org.mockito.ArgumentMatchers.anyInt();
+    }
+
+    @BeforeEach
+    void setUp() {
+        flexService = mock(FlexScheduledTaskService.class);
+        executor = mock(ISubTaskExecutor.class);
+        triggerRepo = mock(ILoomScheduleTriggerRepository.class);
+        execRepo = mock(ILoomScheduleExecutionRepository.class);
+        tool = new DefaultScheduleTool(flexService, executor, triggerRepo, execRepo, 1000);
+    }
+
     @ParameterizedTest(name = "[{index}] parseSeconds(\"{0}\") -> {1}")
     @CsvSource(textBlock = """
-            '10',        10
-            '10s',       10
-            '10S',       10
-            '10 secs',   10
-            '10sec',     10
-            '10秒',      10
-            '10 秒',     10
-            '1m',        60
-            '5min',      300
-            '5 minute',  300
-            '10 mins',   600
+            '10', 10
+            '10s', 10
+            '10S', 10
+            '10 secs', 10
+            '10sec', 10
+            '10秒', 10
+            '10 秒', 10
+            '1m', 60
+            '5min', 300
+            '5 minute', 300
+            '10 mins', 600
             '10 minutes',600
-            '10 分钟',   600
+            '10 分钟', 600
             """)
     void parseSeconds_acceptsPlainAndSuffixedExpressions(String input, long expected) {
         // Exercise the parser indirectly through the LLM-driven create path.
@@ -105,7 +107,7 @@ class DefaultScheduleToolLifecycleTest {
 
     @ParameterizedTest(name = "[{index}] parseSeconds rejects \"{0}\"")
     @NullSource
-    @ValueSource(strings = {"banana", "5h", "ZZZ", "  ", "##"})
+    @ValueSource(strings = {"banana", "5h", "ZZZ", " ", "##"})
     void parseSeconds_rejectsGarbageAsMinusOne(String input) {
         TaskBuilder builder = mock(TaskBuilder.class);
         when(flexService.task(any())).thenReturn(builder);
@@ -121,7 +123,7 @@ class DefaultScheduleToolLifecycleTest {
 
     @Test
     void createSchedule_blankPrompt_returnsFriendlyMessage_noFlexCall() {
-        String response = tool.createSchedule("n", "fixed_delay", "600", "  ", ctx("alice", "conv-1"));
+        String response = tool.createSchedule("n", "fixed_delay", "600", " ", ctx("alice", "conv-1"));
 
         assertThat(response).contains("prompt 不能为空");
         verifyNoInteractions(flexService);
@@ -387,7 +389,9 @@ class DefaultScheduleToolLifecycleTest {
         assertThat(response).startsWith("[");
     }
 
-    /** Sanity: the getScheduleHistory tool returns the formatted list. */
+    /**
+     * Sanity: the getScheduleHistory tool returns the formatted list.
+     */
     @Test
     void getScheduleHistory_formatsHistoryEntries() {
         Instant when = Instant.parse("2026-07-23T10:15:30Z");
@@ -406,10 +410,5 @@ class DefaultScheduleToolLifecycleTest {
         assertThat(response).contains("remind");
         assertThat(response).contains("成功");
         assertThat(response).contains("PT0.25S");
-    }
-
-    // Helper to keep argThat usage concise.
-    private static int anyInt() {
-        return org.mockito.ArgumentMatchers.anyInt();
     }
 }

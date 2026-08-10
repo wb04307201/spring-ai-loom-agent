@@ -48,7 +48,7 @@ class SubTaskRegistryTest {
     void listActiveFilteredByUsername() {
         registry.register("alice", "conv-1", "p1");
         registry.register("alice", "conv-2", "p2");
-        registry.register("bob",   "conv-3", "p3");
+        registry.register("bob", "conv-3", "p3");
 
         assertThat(registry.listActive("alice")).hasSize(2);
         assertThat(registry.listActive("bob")).hasSize(1);
@@ -72,7 +72,7 @@ class SubTaskRegistryTest {
         assertThat(f1.isCancelled()).isTrue();
         assertThat(f2.isCancelled()).isTrue();
         assertThat(registry.get(id1).status()).isEqualTo(SubTaskStatus.CANCELLED);
-        assertThat(registry.get(id3).status()).isEqualTo(SubTaskStatus.RUNNING);  // untouched
+        assertThat(registry.get(id3).status()).isEqualTo(SubTaskStatus.RUNNING); // untouched
     }
 
     @Test
@@ -157,7 +157,7 @@ class SubTaskRegistryTest {
     void killFallsBackToAttachFutureWhenNoHookRegistered() {
         // No cancel hook — uses legacy attachFuture path. Future is not attached here,
         // so kill() should still mark the record CANCELLED without NPE.
-        registry = new SubTaskRegistry(8, 100);   // 2-arg ctor: no hook
+        registry = new SubTaskRegistry(8, 100); // 2-arg ctor: no hook
         String id = registry.register("alice", "conv-1", "p1");
 
         boolean killed = registry.kill("alice", id);
@@ -169,11 +169,12 @@ class SubTaskRegistryTest {
 
     @Test
     void killAllByConversationToleratesNullConversationId() {
-        registry = new SubTaskRegistry(8, 100, id -> {});
+        registry = new SubTaskRegistry(8, 100, id -> {
+        });
         registry.register("alice", "conv-1", "p1");
 
         int n = registry.killAllByConversation(null);
 
-        assertThat(n).isZero();   // defensive — no NPE
+        assertThat(n).isZero(); // defensive — no NPE
     }
 }

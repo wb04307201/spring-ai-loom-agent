@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API 文档
 
 > **Base URL**: `http://localhost:8080`（测试环境默认端口）
-> **版本**: 1.1.36
+> **版本**: 1.1.37
 > **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
@@ -15,11 +15,13 @@
 - [5. 知识库管理](#5-知识库管理)
 - [6. 技能管理](#6-技能管理)
 - [7. MCP 工具](#7-mcp-工具)
-- [8. 终端管理](#8-终端管理)
-- [9. Maven 构建工具](#9-maven-构建工具)
-  - [9.7 文件工具（@Tool 注解）](#97-文件工具tool-注解)
-- [10. 数据模型](#10-数据模型)
-- [11. 配置属性](#11-配置属性)
+- [8. 技能工具（@Tool 注解）](#8-技能工具tool-注解)
+- [9. 知识库工具（@Tool 注解）](#9-知识库工具tool-注解)
+- [10. 终端管理](#10-终端管理)
+- [11. Maven 构建工具](#11-maven-构建工具)
+ - [11.7 文件工具（@Tool 注解）](#117-文件工具tool-注解)
+- [12. 数据模型](#12-数据模型)
+- [13. 配置属性](#13-配置属性)
 
 ---
 
@@ -59,8 +61,8 @@ POST /spring/ai/loom/user/login
 
 ```json
 {
-  "username": "testuser",
-  "verified": ""
+ "username": "testuser",
+ "verified": ""
 }
 ```
 
@@ -78,8 +80,8 @@ POST /spring/ai/loom/user/login
 
 ```json
 {
-  "token": "567fb50c-b293-403b-a903-f6b7b597c318",
-  "nickname": "用户"
+ "token": "567fb50c-b293-403b-a903-f6b7b597c318",
+ "nickname": "用户"
 }
 ```
 
@@ -120,10 +122,10 @@ GET /spring/ai/loom/conversation
 
 ```json
 [
-  {
-    "conversationId": "conv-001",
-    "title": "第一次对话"
-  }
+ {
+ "conversationId": "conv-001",
+ "title": "第一次对话"
+ }
 ]
 ```
 
@@ -185,11 +187,11 @@ Accept: text/event-stream
 
 ```json
 {
-  "message": "请帮我总结这份文档",
-  "conversationId": "conv-001",
-  "knowledgeId": "kb-001",
-  "mcps": [],
-  "fileIds": ["file-abc123", "file-def456"]
+ "message": "请帮我总结这份文档",
+ "conversationId": "conv-001",
+ "knowledgeId": "kb-001",
+ "mcps": [],
+ "fileIds": ["file-abc123", "file-def456"]
 }
 ```
 
@@ -242,8 +244,8 @@ Content-Type: multipart/form-data
 
 ```json
 {
-  "fileId": "file-abc123",
-  "status": "success"
+ "fileId": "file-abc123",
+ "status": "success"
 }
 ```
 
@@ -269,18 +271,18 @@ GET /spring/ai/loom/file/tree
 
 ```json
 {
-  "name": ".",
-  "type": "directory",
-  "children": [
-    { "name": "report.pdf", "type": "file", "size": 102400 },
-    {
-      "name": "docs",
-      "type": "directory",
-      "children": [
-        { "name": "guide.md", "type": "file", "size": 4096 }
-      ]
-    }
-  ]
+ "name": ".",
+ "type": "directory",
+ "children": [
+ { "name": "report.pdf", "type": "file", "size": 102400 },
+ {
+ "name": "docs",
+ "type": "directory",
+ "children": [
+ { "name": "guide.md", "type": "file", "size": 4096 }
+ ]
+ }
+ ]
 }
 ```
 
@@ -366,11 +368,11 @@ GET /spring/ai/loom/knowledge
 
 ```json
 [
-  {
-    "id": "kb-001",
-    "username": "admin",
-    "name": "产品文档"
-  }
+ {
+ "id": "kb-001",
+ "username": "admin",
+ "name": "产品文档"
+ }
 ]
 ```
 
@@ -393,7 +395,7 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "产品文档"
+ "name": "产品文档"
 }
 ```
 
@@ -442,8 +444,8 @@ Content-Type: multipart/form-data
 
 ```json
 {
-  "fileId": "file-xyz789",
-  "status": "success"
+ "fileId": "file-xyz789",
+ "status": "success"
 }
 ```
 
@@ -484,7 +486,7 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ### 5.8 知识市场
 
-> 知识市场支持跨用户共享知识库。流程：提交 → PENDING → admin 审批 → APPROVED → 其他用户可订阅。
+> 知识市场支持跨用户共享知识库。 起无审批流：提交 → 直接 APPROVED → 其他用户可订阅。
 
 #### 5.8.1 浏览已审批的市场知识库
 
@@ -494,22 +496,22 @@ GET /spring/ai/loom/api/knowledge-market?page=1&size=20
 
 **查询参数**:
 
-| 参数   | 类型 | 必填 | 说明               |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|------|------|--------------------|
-| `page` | int  | 否   | 页码（默认 1）     |
-| `size` | int  | 否   | 每页条数（默认 20）|
+| `page` | int | 否 | 页码（默认 1） |
+| `size` | int | 否 | 每页条数（默认 20）|
 
 **响应**: `MarketKnowledgeRecord[]` — 已审批的市场知识库列表。
 
-| 字段          | 类型   | 说明             |
+| 字段 | 类型 | 说明 |
 |---------------|--------|------------------|
-| `id`          | string | 市场知识库 ID    |
-| `username`    | string | 原始作者用户名   |
-| `name`        | string | 知识库名称       |
-| `description` | string | 知识库描述       |
-| `status`      | string | `APPROVED`       |
-| `submittedAt` | string | 提交时间         |
-| `reviewedAt`  | string | 审核时间         |
+| `id` | string | 市场知识库 ID |
+| `username` | string | 原始作者用户名 |
+| `name` | string | 知识库名称 |
+| `description` | string | 知识库描述 |
+| `status` | string | `APPROVED` |
+| `submittedAt` | string | 提交时间 |
+| `reviewedAt` | string | 审核时间 |
 
 ---
 
@@ -521,9 +523,9 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
 
 **路径参数**:
 
-| 参数       | 类型   | 说明           |
+| 参数 | 类型 | 说明 |
 |------------|--------|----------------|
-| `marketId` | string | 市场知识库 ID  |
+| `marketId` | string | 市场知识库 ID |
 
 **响应**: 成功返回 `{"success": true}`。在 `loom_user_knowledge` 表中创建 `source=MARKET_PULLED` 的订阅记录。
 
@@ -537,13 +539,13 @@ POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
 
 **路径参数**:
 
-| 参数          | 类型   | 说明       |
+| 参数 | 类型 | 说明 |
 |---------------|--------|------------|
-| `knowledgeId` | string | 知识库 ID  |
+| `knowledgeId` | string | 知识库 ID |
 
-**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status=PENDING`。
+**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status='APPROVED'`（ 起无审批流）。
 
-**约束**: `(username, name)` 必须唯一，重复提交返回 409。
+**行为**: 同一 `(username, name)` 已存在 → UPSERT（更新 description；不新增行）；不存在 → INSERT 全新行（直接 APPROVED）。
 
 ---
 
@@ -555,29 +557,41 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **路径参数**:
 
-| 参数       | 类型   | 说明           |
+| 参数 | 类型 | 说明 |
 |------------|--------|----------------|
-| `marketId` | string | 市场知识库 ID  |
+| `marketId` | string | 市场知识库 ID |
 
 **响应**: 成功返回 `{"success": true}`。仅原始提交者可撤回。
 
 ---
 
-#### 5.8.5 管理员审批市场提交
+#### 5.8.5 管理员下架 / 用户撤回（统一 DELETE）
+
+** 起统一端点**：作者撤回 / admin 下架都走 `DELETE /api/knowledge-market/{marketId}`（内部权限判断）。
 
 ```
-POST /spring/ai/loom/api/knowledge-market/{marketId}/approve
+DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 ```
 
 **路径参数**:
 
-| 参数       | 类型   | 说明           |
+| 参数 | 类型 | 说明 |
 |------------|--------|----------------|
-| `marketId` | string | 市场知识库 ID  |
+| `marketId` | string | 市场知识库 ID |
 
-**响应**: `MarketKnowledgeRecord` — 更新后的记录，`status=APPROVED`。
+**响应**: 成功返回 `{"success": true}`。
 
-**权限**: 仅管理员。非管理员返回 403。
+**权限**: 仅作者本人（撤回）或 admin（下架）。
+
+**级联清理**: 自动删除 `loom_user_knowledge`（拉取者订阅）+ `loom_role_knowledge`（角色授权）。
+
+** 移除的端点**:
+- `_已移除_ /api/knowledge-market/{marketId}/approve` — 无审批流
+- `_已移除_ /api/knowledge-market/{marketId}/reject` — 无审批流
+
+**新增 admin 端点**（新增）：
+- `GET /admin/market-knowledge` — admin 列出所有市场知识库（所有都是 APPROVED）
+- `DELETE /admin/market-knowledge/{marketId}` — admin 下架（级联清理）
 
 ---
 
@@ -589,9 +603,9 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
 
 **路径参数**:
 
-| 参数       | 类型   | 说明           |
+| 参数 | 类型 | 说明 |
 |------------|--------|----------------|
-| `marketId` | string | 市场知识库 ID  |
+| `marketId` | string | 市场知识库 ID |
 
 **响应**: `MarketKnowledgeRecord` — 更新后的记录，`status=REJECTED`。
 
@@ -615,19 +629,18 @@ GET /spring/ai/loom/api/knowledge-market/my-pulled
 GET /spring/ai/loom/api/knowledge-market/my-submitted
 ```
 
-**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（所有状态：PENDING / APPROVED / REJECTED）。
+**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（ 后全是 APPROVED）。
 
 ---
 
 ## 6. 技能管理
 
-> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 改为 6 个 system seed 进 `market_skill`，加一套 admin 管理的市场流程。
+> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 改为 6 个 system seed 进默认 admin 用户（wb04307201）的 `user_skill`，加一套 admin 管理的市场流程。
 >
 > `user_skill.source` 字段反映 Skill 三个来源：
-> - `USER_CREATED` — 用户通过 API 或聊天 UI 自己创建；**完全可编辑**（name/desc/content/default_loaded）
-> - `MARKET_PULLED` — 用户从已审批的市场拉取；**只能改 desc / default_loaded**（content 锁定为市场快照，要更新就重新拉取）
+> - `USER_CREATED` — 用户通过 API 或聊天 UI 自己创建；**完全可编辑**（name/desc/content/default_loaded）。若该 skill 已共享到市场，作者保存时会**自动反向同步**到对应的 `market_skill` 行，并**推送给所有 MARKET_PULLED 拉取者**
+> - `MARKET_PULLED` — 用户从已审批的市场获取（拉取）；**只能切 default_loaded**（name / content / desc 锁自市场；要修改请用 `POST /skill/{name}/duplicate` 复制为 USER_CREATED 后改）
 > - `ROLE_GRANTED` — admin 通过角色授权自动注入；**只读**（locked=true；不能改不能删）
-> - `MARKET_VIEW` — 仅 admin：把"全部 APPROVED + 自己的 PENDING"虚拟展示在聊天界面（带 `市` 角标），不写 `user_skill`
 >
 > 每次 list/get 接口都会自动跑 `role_skill` → `user_skill` 同步，所以新授权的 Skill 在下次 list 时立刻可见。
 
@@ -647,9 +660,9 @@ GET /spring/ai/loom/skill
 | `description` | string | 技能描述 |
 | `load` | boolean | 是否预加载到 LLM 系统提示 |
 | `content` | string | 技能内容（如果存的是 `classpath:xxx`，会在读时自动 resolve 成真实文本） |
-| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` /（仅 admin）`MARKET_VIEW` |
+| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（ 起移除 `MARKET_VIEW`；admin 也只看到自己 user_skill） |
 
-admin 还会附带 `MARKET_VIEW` union（全部 APPROVED + 自己的 PENDING）。
+admin 也只看到自己的 `user_skill`（与普通用户一致）；浏览市场 APPROVED 用 `GET /market-skills`。
 
 ---
 
@@ -675,10 +688,10 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "email_writer",
-  "description": "专业邮件撰写助手",
-  "load": true,
-  "content": "你是一名邮件助手。收件人是 {recipient}..."
+ "name": "email_writer",
+ "description": "专业邮件撰写助手",
+ "load": true,
+ "content": "你是一名邮件助手。收件人是 {recipient}..."
 }
 ```
 
@@ -716,7 +729,7 @@ GET /spring/ai/loom/skill/{name}
 |---|---|---|
 | `name` | string | 技能名称 |
 
-**响应**: `SkillRecord`。admin 若本地无副本，会 fallback 到市场视图。
+**响应**: `SkillRecord`。**MARKET_PULLED 行始终是市场最新快照**（作者 save 时自动推送到所有拉取者；拉取者无需主动 re-pull）。
 
 ---
 
@@ -746,7 +759,7 @@ POST /spring/ai/loom/skill/sync
 GET /spring/ai/loom/market-skills
 ```
 
-返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name, version DESC` 排序。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `version` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
+返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name` 排序（ 去掉 version 字段后无 version DESC 排序）。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
 
 ---
 
@@ -780,7 +793,7 @@ POST /spring/ai/loom/user/market-skills
 Content-Type: application/json
 ```
 
-新建一条 `market_skill`，`status=PENDING`，`author=currentUser`。
+新建一条 `market_skill`，`status='APPROVED'`（ 起无需审批，提交即上架），`author=currentUser`。
 
 **请求体** (`MarketSkillSubmitRequest`):
 
@@ -789,25 +802,24 @@ Content-Type: application/json
 | `name` | string | 是 | 技能名称 |
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
-| `version` | string | 是 | 语义化版本号 |
 
-约束：`(author, name, version)` 三元组必须唯一。重复的 PENDING 需用新版本号重新提交。
+：去掉 `version` 字段 — 唯一约束改为 `(author, name)`。同一作者同名直接 UPSERT（覆盖内容 + 重置 APPROVED），无需新版本号。
 
 ---
 
 ### 6.11 管理员 — 市场 CRUD
 
-> 仅 admin。路由层校验 `auth.adminPathPatterns`，handler 内二次校验 `isAdmin()`。
+> 仅 admin。路由层校验 `auth.adminPathPatterns`，handler 内二次校验 `isAdmin`。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET    | `/spring/ai/loom/admin/market-skills`             | 列出**所有**（PENDING/APPROVED/REJECTED） |
-| GET    | `/spring/ai/loom/admin/market-skills/pending`     | 只列 PENDING                                |
-| POST   | `/spring/ai/loom/admin/market-skills`             | 直接以 `status=APPROVED` 创建（绕过审批） |
-| PUT    | `/spring/ai/loom/admin/market-skills/{id}`        | 改任意字段                                  |
-| DELETE | `/spring/ai/loom/admin/market-skills/{id}`        | 级联删除 user_skill / role_skill 引用        |
-| POST   | `/spring/ai/loom/admin/market-skills/{id}/approve`| 审批通过 PENDING                              |
-| POST   | `/spring/ai/loom/admin/market-skills/{id}/reject` | 拒绝 PENDING；body: `{comment}`              |
+| GET | `/spring/ai/loom/admin/market-skills` | 列出**所有**（ 起所有都是 APPROVED，无审批流） |
+| POST | `/spring/ai/loom/admin/market-skills` | 直接以 `status=APPROVED` 创建 |
+| PUT | `/spring/ai/loom/admin/market-skills/{id}` | 改任意字段 |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | 级联删除 user_skill / role_skill 引用（：这就是"下架"，拉取者失去该 skill） |
+| _已移除_ | `/admin/market-skills/pending` | ：去掉（无审批流，没有 PENDING 状态） |
+| _已移除_ | `/admin/market-skills/{id}/approve` | ：去掉（提交即上架） |
+| _已移除_ | `/admin/market-skills/{id}/reject` | ：去掉（需要下架请用 DELETE） |
 
 `MarketSkillUpsertRequest`（POST/PUT 通用）:
 
@@ -816,8 +828,7 @@ Content-Type: application/json
 | `name` | string | 是 | 技能名称 |
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
-| `version` | string | 是 | 版本号 |
-| `status` | string | 否 | 默认 `APPROVED`（admin 提交/编辑时） |
+| `status` | string | 否 | 默认 `APPROVED`（：admin 不再新建技能 — 此端点为向后兼容保留） |
 
 ---
 
@@ -834,10 +845,10 @@ PUT /spring/ai/loom/admin/roles/{code}/skills
 
 ```json
 {
-  "items": [
-    {"marketSkillId": 1, "defaultLoaded": true},
-    {"marketSkillId": 5, "defaultLoaded": false}
-  ]
+ "items": [
+ {"marketSkillId": 1, "defaultLoaded": true},
+ {"marketSkillId": 5, "defaultLoaded": false}
+ ]
 }
 ```
 
@@ -875,29 +886,102 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 [
-  {
-    "name": "weather-mcp",
-    "title": "天气查询",
-    "version": "1.1.36",
-    "description": "提供实时天气查询服务",
-    "defaultSelected": true,
-    "tools": [
-      {
-        "name": "getWeather",
-        "description": "查询指定城市的当前天气"
-      }
-    ]
-  }
+ {
+ "name": "weather-mcp",
+ "title": "天气查询",
+ "version": "1.1.37",
+ "description": "提供实时天气查询服务",
+ "defaultSelected": true,
+ "tools": [
+ {
+ "name": "getWeather",
+ "description": "查询指定城市的当前天气"
+ }
+ ]
+ }
 ]
 ```
 
 ---
 
-## 8. 终端管理
+## 8. 技能工具（@Tool 注解）
+
+`ISkillTool` 注册给 LLM 调用的 `@Tool` 方法。**与** `## 6. 技能管理` **的服务端 REST API 不同**（后者服务于管理控制台 UI）。
+
+### 10.1 `listSkills` — 列出可用技能
+
+```
+@Tool: listSkills
+```
+
+列出当前用户可访问的技能（渐进式披露风格）。默认返回全部（上限 200），可按 `keyword` 和 `source` 过滤。
+
+| 参数 | 类型 | 必填 | 说明 |
+|-------------|---------|------|----------------------------------------------------------------------------------------------|
+| `keyword` | string | 否 | 子串过滤（不区分大小写），匹配 `name` 或 `description` |
+| `source` | string | 否 | 按 source 过滤：`USER_CREATED` / `ROLE_GRANTED` / `MARKET_PULLED` |
+| `maxCount` | integer | 否 | 最多返回数量，默认 `200` |
+
+**返回**：文本表格列出匹配的技能（name + source + description），结果数小于用户全部可访问技能数时附带截断提示。
+
+### 10.2 `getSkill` — 获取单个技能的内容
+
+```
+@Tool: getSkill
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|--------|--------|------|--------------|
+| `name` | string | 是 | 技能名称 |
+
+**返回**：包含 `技能名`、`技能描述` 和完整 `技能内容` 的文本。用户无访问权限时抛出异常。
+
+### 10.3 `createOrUpdateSkill` — 创建或更新自建技能
+
+```
+@Tool: createOrUpdateSkill
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|---------------|--------|------|--------------------------------------------------------------------|
+| `name` | string | 是 | 技能名；去前后空白；最长 128 |
+| `description` | string | 否 | 技能描述 |
+| `content` | string | 是 | 技能 Prompt 内容（非空） |
+
+**行为**：
+- 若用户已拥有同名技能，内容/描述被覆盖。
+- `ROLE_GRANTED` / `MARKET_PULLED` 技能**已锁定**，返回 403。
+- 返回 "已创建技能 X" 或 "已更新技能 X"。
+
+---
+
+## 9. 知识库工具（@Tool 注解）
+
+`IKnowledgeTool` 注册给 LLM 的工具化 RAG 检索方法。已启用的知识库列表在 system prompt `【知识库】` 段自动展示——LLM 不需要列表工具来发现它们。
+
+### 11.1 `searchKnowledge` — 向量检索知识库
+
+```
+@Tool: searchKnowledge
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|---------------|---------|------|----------------------------------------------------------------------|
+| `knowledgeId` | string | 是 | 目标知识库 ID |
+| `query` | string | 是 | 检索查询（语义相似度） |
+| `topK` | integer | 否 | 最多返回 chunk 数，默认取 `rag.topK` 配置 |
+
+**返回**：top-k chunk 列表，含相似度分数和文本内容。空结果返回 "未检索到相关文档片段"。权限检查：仅 own / subscribed / role-granted 知识库可检索；否则返回 "没有权限访问该知识库"。
+
+**相似度阈值**：通过 `rag.similarityThreshold` 配置（默认 0.50）。低于阈值的 chunk 在返回前被过滤。
+
+---
+
+## 10. 终端管理
 
 通过 `@Tool` 注解暴露的进程管理工具，供 LLM 在对话中启动和管理系统进程。
 
-### 8.1 `startProcess` — 启动进程
+### 10.1 `startProcess` — 启动进程
 
 ```
 @Tool: startProcess
@@ -918,14 +1002,14 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "sessionId": "auto-generated-id",
-  "pid": 12345,
-  "status": "RUNNING",
-  "output": "...initial output..."
+ "sessionId": "auto-generated-id",
+ "pid": 12345,
+ "status": "RUNNING",
+ "output": "...initial output..."
 }
 ```
 
-### 8.2 `interactWithProcess` — 与进程交互
+### 10.2 `interactWithProcess` — 与进程交互
 
 ```
 @Tool: interactWithProcess
@@ -941,7 +1025,7 @@ GET /spring/ai/chat/loom/mcp
 | `input` | `String` | ✅ | 要发送的输入（自动追加换行符） |
 | `timeout` | `Long` | | 等待响应超时（毫秒，默认 10000） |
 
-### 8.3 `readProcessOutput` — 读取进程输出
+### 10.3 `readProcessOutput` — 读取进程输出
 
 ```
 @Tool: readProcessOutput
@@ -958,7 +1042,7 @@ GET /spring/ai/chat/loom/mcp
 | `position` | `Integer` | | 绝对字符位置（仅 `mode=absolute` 时） |
 | `lines` | `Integer` | | 行数（仅 `mode=tail` 时，默认 50） |
 
-### 8.4 `forceTerminate` — 强制终止进程
+### 10.4 `forceTerminate` — 强制终止进程
 
 ```
 @Tool: forceTerminate
@@ -972,7 +1056,7 @@ GET /spring/ai/chat/loom/mcp
 |------|------|------|------|
 | `sessionId` | `String` | ✅ | 会话 ID |
 
-### 8.5 `listSessions` — 列出所有会话
+### 10.5 `listSessions` — 列出所有会话
 
 ```
 @Tool: listSessions
@@ -980,7 +1064,7 @@ GET /spring/ai/chat/loom/mcp
 
 列出当前用户所有活跃的终端会话。
 
-### 8.6 `getProcessInfo` — 获取进程信息
+### 10.6 `getProcessInfo` — 获取进程信息
 
 ```
 @Tool: getProcessInfo
@@ -994,7 +1078,7 @@ GET /spring/ai/chat/loom/mcp
 |------|------|------|------|
 | `sessionId` | `String` | ✅ | 会话 ID |
 
-### 8.7 `sendSignal` — 发送信号
+### 10.7 `sendSignal` — 发送信号
 
 ```
 @Tool: sendSignal
@@ -1009,7 +1093,7 @@ GET /spring/ai/chat/loom/mcp
 | `sessionId` | `String` | ✅ | 会话 ID |
 | `signal` | `String` | ✅ | 信号类型：`interrupt` / `eof` / `quit` |
 
-### 8.8 `listProcesses` — 列出系统进程
+### 10.8 `listProcesses` — 列出系统进程
 
 ```
 @Tool: listProcesses
@@ -1024,7 +1108,7 @@ GET /spring/ai/chat/loom/mcp
 | `maxResults` | `Integer` | | 每页最大结果数（默认 50，最大 200） |
 | `page` | `Integer` | | 页码，从 0 开始（默认 0） |
 
-### 8.9 `killProcess` — 杀死指定进程
+### 10.9 `killProcess` — 杀死指定进程
 
 ```
 @Tool: killProcess
@@ -1041,11 +1125,11 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 9. Maven 构建工具
+## 11. Maven 构建工具
 
 所有 Maven 工具的操作范围限定在用户文件目录（`{fileBasePath}/{username}/`）内。超出该范围的绝对路径将被拒绝。
 
-### 9.1 通用执行
+### 11.1 通用执行
 
 ```
 @Tool: mavenExecute
@@ -1053,17 +1137,17 @@ GET /spring/ai/chat/loom/mcp
 
 执行任意 Maven goals（通用入口）。
 
-| 参数           | 类型               | 必填 | 说明                                                            |
+| 参数 | 类型 | 必填 | 说明 |
 |----------------|--------------------|------|-----------------------------------------------------------------|
-| `goals`        | string[]           | 是   | 要执行的 Maven 目标（如 `["clean", "package"]`）                  |
-| `pomPath`      | string             | 否   | pom.xml 路径（相对于用户目录或在范围内的绝对路径）                 |
-| `workingDir`   | string             | 否   | 工作目录（必须在用户文件目录内）                                    |
-| `properties`   | Map<string,string> | 否   | Maven -D 属性                                                    |
-| `timeoutMs`    | long               | 否   | 超时时间（毫秒），默认 300000                                     |
+| `goals` | string[] | 是 | 要执行的 Maven 目标（如 `["clean", "package"]`） |
+| `pomPath` | string | 否 | pom.xml 路径（相对于用户目录或在范围内的绝对路径） |
+| `workingDir` | string | 否 | 工作目录（必须在用户文件目录内） |
+| `properties` | Map<string,string> | 否 | Maven -D 属性 |
+| `timeoutMs` | long | 否 | 超时时间（毫秒），默认 300000 |
 
 ---
 
-### 9.2 编译
+### 11.2 编译
 
 ```
 @Tool: mavenBuild
@@ -1071,16 +1155,16 @@ GET /spring/ai/chat/loom/mcp
 
 编译项目（`mvn compile`）。自动查找 pom.xml。
 
-| 参数           | 类型               | 必填 | 说明                                                            |
+| 参数 | 类型 | 必填 | 说明 |
 |----------------|--------------------|------|-----------------------------------------------------------------|
-| `pomPath`      | string             | 否   | pom.xml 路径                                                     |
-| `workingDir`   | string             | 否   | 工作目录                                                          |
-| `properties`   | Map<string,string> | 否   | Maven -D 属性                                                    |
-| `skipTests`    | boolean            | 否   | 跳过测试（默认 false）                                             |
+| `pomPath` | string | 否 | pom.xml 路径 |
+| `workingDir` | string | 否 | 工作目录 |
+| `properties` | Map<string,string> | 否 | Maven -D 属性 |
+| `skipTests` | boolean | 否 | 跳过测试（默认 false） |
 
 ---
 
-### 9.3 打包
+### 11.3 打包
 
 ```
 @Tool: mavenPackage
@@ -1088,16 +1172,16 @@ GET /spring/ai/chat/loom/mcp
 
 打包项目（`mvn package`），生成 JAR/WAR 等构件。
 
-| 参数           | 类型               | 必填 | 说明                                                            |
+| 参数 | 类型 | 必填 | 说明 |
 |----------------|--------------------|------|-----------------------------------------------------------------|
-| `pomPath`      | string             | 否   | pom.xml 路径                                                     |
-| `workingDir`   | string             | 否   | 工作目录                                                          |
-| `properties`   | Map<string,string> | 否   | Maven -D 属性                                                    |
-| `skipTests`    | boolean            | 否   | 跳过测试（默认 true）                                              |
+| `pomPath` | string | 否 | pom.xml 路径 |
+| `workingDir` | string | 否 | 工作目录 |
+| `properties` | Map<string,string> | 否 | Maven -D 属性 |
+| `skipTests` | boolean | 否 | 跳过测试（默认 true） |
 
 ---
 
-### 9.4 测试
+### 11.4 测试
 
 ```
 @Tool: mavenTest
@@ -1105,16 +1189,16 @@ GET /spring/ai/chat/loom/mcp
 
 运行单元测试（`mvn test`）。支持测试类名模式匹配。
 
-| 参数           | 类型               | 必填 | 说明                                                            |
+| 参数 | 类型 | 必填 | 说明 |
 |----------------|--------------------|------|-----------------------------------------------------------------|
-| `pomPath`      | string             | 否   | pom.xml 路径                                                     |
-| `workingDir`   | string             | 否   | 工作目录                                                          |
-| `testPattern`  | string             | 否   | 测试类名模式（如 `*ServiceTest`，对应 `-Dtest`）                   |
-| `properties`   | Map<string,string> | 否   | Maven -D 属性                                                    |
+| `pomPath` | string | 否 | pom.xml 路径 |
+| `workingDir` | string | 否 | 工作目录 |
+| `testPattern` | string | 否 | 测试类名模式（如 `*ServiceTest`，对应 `-Dtest`） |
+| `properties` | Map<string,string> | 否 | Maven -D 属性 |
 
 ---
 
-### 9.5 依赖树
+### 11.5 依赖树
 
 ```
 @Tool: mavenDependencyTree
@@ -1122,15 +1206,15 @@ GET /spring/ai/chat/loom/mcp
 
 查看项目依赖树（`mvn dependency:tree`）。支持范围过滤。
 
-| 参数             | 类型   | 必填 | 说明                                                  |
+| 参数 | 类型 | 必填 | 说明 |
 |------------------|--------|------|-------------------------------------------------------|
-| `pomPath`        | string | 否   | pom.xml 路径                                           |
-| `workingDir`     | string | 否   | 工作目录                                                |
-| `includeScope`   | string | 否   | 依赖范围过滤：compile/runtime/test/provided             |
+| `pomPath` | string | 否 | pom.xml 路径 |
+| `workingDir` | string | 否 | 工作目录 |
+| `includeScope` | string | 否 | 依赖范围过滤：compile/runtime/test/provided |
 
 ---
 
-### 9.6 验证
+### 11.6 验证
 
 ```
 @Tool: mavenValidate
@@ -1138,14 +1222,14 @@ GET /spring/ai/chat/loom/mcp
 
 验证项目结构（`mvn validate`）。检查 pom.xml 和必要资源是否存在。
 
-| 参数           | 类型   | 必填 | 说明              |
+| 参数 | 类型 | 必填 | 说明 |
 |----------------|--------|------|-------------------|
-| `pomPath`      | string | 否   | pom.xml 路径       |
-| `workingDir`   | string | 否   | 工作目录            |
+| `pomPath` | string | 否 | pom.xml 路径 |
+| `workingDir` | string | 否 | 工作目录 |
 
 ---
 
-## 9.7 文件工具（@Tool 注解）
+## 11.7 文件工具（@Tool 注解）
 
 所有文件工具均限定在用户文件目录（`{fileBasePath}/{username}/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
 
@@ -1159,11 +1243,11 @@ GET /spring/ai/chat/loom/mcp
 
 读取本地文件内容为文本。支持 `head`（仅前 N 行）或 `tail`（仅后 N 行）参数。
 
-| 参数    | 类型    | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |---------|---------|------|---------------------------------|
-| `path`  | string  | 是   | 相对于用户文件目录的路径          |
-| `head`  | integer | 否   | 若提供，仅返回前 N 行            |
-| `tail`  | integer | 否   | 若提供，仅返回后 N 行            |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
+| `head` | integer | 否 | 若提供，仅返回前 N 行 |
+| `tail` | integer | 否 | 若提供，仅返回后 N 行 |
 
 ### 9.7.2 读取媒体文件
 
@@ -1173,9 +1257,9 @@ GET /spring/ai/chat/loom/mcp
 
 读取本地图片或音频文件，返回 base64 编码数据和 MIME 类型。
 
-| 参数   | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|---------------------------------|
-| `path` | string | 是   | 相对于用户文件目录的路径          |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
 
 ### 9.7.3 批量读取
 
@@ -1185,9 +1269,9 @@ GET /spring/ai/chat/loom/mcp
 
 一次读取多个文件，单个失败不影响其他文件。
 
-| 参数    | 类型     | 必填 | 说明                                  |
+| 参数 | 类型 | 必填 | 说明 |
 |---------|----------|------|---------------------------------------|
-| `paths` | string[] | 是   | 相对于用户文件目录的路径列表          |
+| `paths` | string[] | 是 | 相对于用户文件目录的路径列表 |
 
 ### 9.7.4 写入文件
 
@@ -1197,10 +1281,10 @@ GET /spring/ai/chat/loom/mcp
 
 创建新文件或完全覆盖已有文件。父目录不存在会自动创建。写入走 **原子写**（写 `.tmp` 再 `Files.move(ATOMIC_MOVE)`），避免断电导致文件损坏；跨卷时退化。
 
-| 参数      | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |-----------|--------|------|---------------------------------|
-| `path`    | string | 是   | 相对于用户文件目录的路径          |
-| `content` | string | 是   | 要写入的文本内容；超过 `file.maxFileSize` 时拒绝写入并返回错误 |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
+| `content` | string | 是 | 要写入的文本内容；超过 `file.maxFileSize` 时拒绝写入并返回错误 |
 
 ### 9.7.5 编辑文件
 
@@ -1210,10 +1294,10 @@ GET /spring/ai/chat/loom/mcp
 
 按行编辑：基于精确文本匹配做替换，返回 git 风格的 diff。
 
-| 参数    | 类型                       | 必填 | 说明                                          |
+| 参数 | 类型 | 必填 | 说明 |
 |---------|----------------------------|------|-----------------------------------------------|
-| `path`  | string                     | 是   | 相对于用户文件目录的路径                       |
-| `edits` | Array<{oldText, newText}>  | 是   | 编辑列表，每项必须含 `oldText` 和 `newText`  |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
+| `edits` | Array<{oldText, newText}> | 是 | 编辑列表，每项必须含 `oldText` 和 `newText` |
 
 **唯一性校验**：`oldText` 在文件中出现 >1 次时**直接拒绝**（避免 LLM 误传导致多处被错误替换），并提示"在文件中出现 N 次，请提供更精确的上下文使其唯一"。空 `oldText` 也被拒绝。
 
@@ -1225,9 +1309,9 @@ GET /spring/ai/chat/loom/mcp
 
 创建新目录（若已存在则幂等成功），支持多级嵌套。
 
-| 参数   | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|---------------------------------|
-| `path` | string | 是   | 相对于用户文件目录的路径          |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
 
 ### 9.7.7 移动文件
 
@@ -1237,10 +1321,10 @@ GET /spring/ai/chat/loom/mcp
 
 移动或重命名文件/目录（支持跨目录），使用原子移动。
 
-| 参数          | 类型   | 必填 | 说明                              |
+| 参数 | 类型 | 必填 | 说明 |
 |---------------|--------|------|-----------------------------------|
-| `source`      | string | 是   | 源路径（相对于用户文件目录）       |
-| `destination` | string | 是   | 目标路径（相对于用户文件目录）     |
+| `source` | string | 是 | 源路径（相对于用户文件目录） |
+| `destination` | string | 是 | 目标路径（相对于用户文件目录） |
 
 ### 9.7.8 搜索文件
 
@@ -1250,9 +1334,9 @@ GET /spring/ai/chat/loom/mcp
 
 按 glob 模式（`*.txt`、`**/*.java` 等）递归搜索文件。空模式返回所有文件。
 
-| 参数      | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |-----------|--------|------|---------------------------------|
-| `pattern` | string | 否   | glob 模式，如 `*.txt`           |
+| `pattern` | string | 否 | glob 模式，如 `*.txt` |
 
 ### 9.7.9 列出允许目录
 
@@ -1270,10 +1354,10 @@ GET /spring/ai/chat/loom/mcp
 
 列出目录内容，区分 `[FILE]` 和 `[DIR]`。支持 `depth` 参数控制递归深度。
 
-| 参数    | 类型    | 必填 | 说明                                |
+| 参数 | 类型 | 必填 | 说明 |
 |---------|---------|------|-------------------------------------|
-| `path`  | string  | 是   | 目录路径（空字符串 = 根目录）        |
-| `depth` | integer | 否   | 递归深度（默认 1）                   |
+| `path` | string | 是 | 目录路径（空字符串 = 根目录） |
+| `depth` | integer | 否 | 递归深度（默认 1） |
 
 ### 9.7.11 列出目录（带大小）
 
@@ -1283,9 +1367,9 @@ GET /spring/ai/chat/loom/mcp
 
 列出目录内容及每项的大小。`[FILE]` 和 `[DIR]` 标记。
 
-| 参数   | 类型   | 必填 | 说明                                |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|-------------------------------------|
-| `path` | string | 是   | 目录路径（空字符串 = 根目录）        |
+| `path` | string | 是 | 目录路径（空字符串 = 根目录） |
 
 ### 9.7.12 目录树
 
@@ -1295,9 +1379,9 @@ GET /spring/ai/chat/loom/mcp
 
 返回目录的递归树视图，JSON 格式。
 
-| 参数   | 类型   | 必填 | 说明                                |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|-------------------------------------|
-| `path` | string | 是   | 目录路径（空字符串 = 根目录）        |
+| `path` | string | 是 | 目录路径（空字符串 = 根目录） |
 
 ### 9.7.13 文件信息
 
@@ -1307,9 +1391,9 @@ GET /spring/ai/chat/loom/mcp
 
 返回文件或目录的详细元数据（大小、创建/修改/访问时间、权限，文件还包含行数）。
 
-| 参数   | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|---------------------------------|
-| `path` | string | 是   | 相对于用户文件目录的路径          |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
 
 ### 9.7.14 下载链接
 
@@ -1319,9 +1403,9 @@ GET /spring/ai/chat/loom/mcp
 
 生成原始文件下载链接。自动创建临时 `file_info` 记录（`usage="temp"`）。
 
-| 参数   | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|---------------------------------|
-| `path` | string | 是   | 相对于用户文件目录的路径          |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
 
 ### 9.7.15 预览链接
 
@@ -1331,9 +1415,9 @@ GET /spring/ai/chat/loom/mcp
 
 生成在线预览链接。支持 PDF、Word、Excel、PPT、图片、Markdown 等格式。自动创建临时 `file_info` 记录。
 
-| 参数   | 类型   | 必填 | 说明                            |
+| 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|---------------------------------|
-| `path` | string | 是   | 相对于用户文件目录的路径          |
+| `path` | string | 是 | 相对于用户文件目录的路径 |
 
 ### 9.7.16 删除文件或目录
 
@@ -1343,10 +1427,10 @@ GET /spring/ai/chat/loom/mcp
 
 删除本地文件或目录（目录会递归删除）。**必须显式确认**（传入 `confirm` 参数且与 `spring.ai.loom.agent.file.deleteConfirmToken` 配置值一致，默认 `I_CONFIRM_DELETE`）才能执行，避免 LLM 误删。删除时同步清理对应已注册文件在 `file_info` 表中的 `usage="temp"` 记录。
 
-| 参数      | 类型   | 必填 | 说明                                                                          |
+| 参数 | 类型 | 必填 | 说明 |
 |-----------|--------|------|-------------------------------------------------------------------------------|
-| `path`    | string | 是   | 相对于用户文件目录的路径（可以是文件或目录）                                  |
-| `confirm` | string | 是   | 确认值，必须与配置的 `deleteConfirmToken`（默认 `I_CONFIRM_DELETE`）完全一致，否则拒绝执行（不改动文件系统） |
+| `path` | string | 是 | 相对于用户文件目录的路径（可以是文件或目录） |
+| `confirm` | string | 是 | 确认值，必须与配置的 `deleteConfirmToken`（默认 `I_CONFIRM_DELETE`）完全一致，否则拒绝执行（不改动文件系统） |
 
 **确认规则：**
 
@@ -1359,17 +1443,17 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 10. 数据模型
+## 12. 数据模型
 
 ### ChatRequestRecord
 
 ```json
 {
-  "message": "string",
-  "conversationId": "string",
-  "mcps": ["string"],
-  "knowledgeId": "string",
-  "fileIds": ["string"]
+ "message": "string",
+ "conversationId": "string",
+ "mcps": ["string"],
+ "knowledgeId": "string",
+ "fileIds": ["string"]
 }
 ```
 
@@ -1377,8 +1461,8 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "content": "string",
-  "reasoningContent": "string"
+ "content": "string",
+ "reasoningContent": "string"
 }
 ```
 
@@ -1386,8 +1470,8 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "conversationId": "string",
-  "title": "string"
+ "conversationId": "string",
+ "title": "string"
 }
 ```
 
@@ -1395,8 +1479,8 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "username": "string",
-  "verified": "string"
+ "username": "string",
+ "verified": "string"
 }
 ```
 
@@ -1404,8 +1488,8 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "token": "string",
-  "nickname": "string"
+ "token": "string",
+ "nickname": "string"
 }
 ```
 
@@ -1415,14 +1499,14 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "id": "string",
-  "knowledgeId": "string",
-  "fileName": "string",
-  "size": 0,
-  "uploadTime": "2026-05-10T10:30:00",
-  "path": "string",
-  "usage": "conversation",
-  "mimeType": "application/pdf"
+ "id": "string",
+ "knowledgeId": "string",
+ "fileName": "string",
+ "size": 0,
+ "uploadTime": "2026-05-10T10:30:00",
+ "path": "string",
+ "usage": "conversation",
+ "mimeType": "application/pdf"
 }
 ```
 
@@ -1430,9 +1514,9 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "id": "string",
-  "username": "string",
-  "name": "string"
+ "id": "string",
+ "username": "string",
+ "name": "string"
 }
 ```
 
@@ -1440,17 +1524,17 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "name": "string",
-  "title": "string",
-  "version": "string",
-  "description": "string",
-  "defaultSelected": true,
-  "tools": [
-    {
-      "name": "string",
-      "description": "string"
-    }
-  ]
+ "name": "string",
+ "title": "string",
+ "version": "string",
+ "description": "string",
+ "defaultSelected": true,
+ "tools": [
+ {
+ "name": "string",
+ "description": "string"
+ }
+ ]
 }
 ```
 
@@ -1458,19 +1542,19 @@ GET /spring/ai/chat/loom/mcp
 
 ```json
 {
-  "name": "string",
-  "description": "string",
-  "load": true,
-  "content": "string",
-  "source": "USER_CREATED | MARKET_PULLED | ROLE_GRANTED | MARKET_VIEW"
+ "name": "string",
+ "description": "string",
+ "load": true,
+ "content": "string",
+ "source": "USER_CREATED | MARKET_PULLED | ROLE_GRANTED"
 }
 ```
 
-> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` / `MARKET_VIEW`。
+> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（ 起移除 `MARKET_VIEW`）。
 
 ---
 
-## 11. 配置属性
+## 13. 配置属性
 
 所有配置项在 `application.yml` 中以 `spring.ai.loom.agent` 为前缀。
 
@@ -1550,53 +1634,53 @@ GET /spring/ai/chat/loom/mcp
 **安全机制**：
 
 - 所有路径解析都委托给 `PathSecurityUtils.assertInsideUserDir(resolved, userDir, mustExist)`，统一处理：
-  - `..` 越权（`Path.normalize` 即可防）
-  - **symlink 越界**（`Path.toRealPath` 跟链）—— 即使用户在 `userDir` 里放了一个指向 `C:\Windows` 的软链，也不会读到
-  - 大小写不敏感文件系统的 size-bypass（Windows / macOS）
+ - `..` 越权（`Path.normalize` 即可防）
+ - **symlink 越界**（`Path.toRealPath` 跟链）—— 即使用户在 `userDir` 里放了一个指向 `C:\Windows` 的软链，也不会读到
+ - 大小写不敏感文件系统的 size-bypass（Windows / macOS）
 - 原子写：`writeFile` / `editFile` 写 `.tmp` 再 `Files.move(ATOMIC_MOVE)`，避免写到一半断电导致目标文件损坏。跨卷时退化到非原子替换。
 - `editFile` 唯一性校验：`oldText` 在文件中出现 >1 次时拒绝，要求 LLM 提供更精确的上下文。
 
 ### 11.8 Maven 构建配置
 
-| 属性                                              | 类型     | 默认值       | 说明                                                                                                          |
+| 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled`              | boolean  | `false`     | 是否启用 Maven 工具（**opt-in**）—— 部署场景的编译/打包由 `ICompileAndDeployTool` 处理                                  |
-| `spring.ai.loom.agent.maven.mavenHome`            | string   | —           | Maven 安装目录。**为空时工具会自动探测**：依次尝试 `MAVEN_HOME` / `M2_HOME` 环境变量，再扫描 Windows 常见路径（如 `C:\developer\apache-maven-*`、`C:\Program Files\Apache Maven`）。自动探测**不依赖系统 PATH**，避免被损坏的 mvn 包装脚本（如 npm 全局 mvn）遮蔽而让 `maven-invoker` 抛 `Error configuring command line`。 |
-| `spring.ai.loom.agent.maven.localRepository`      | string   | —           | 本地仓库路径（为空时使用默认路径）                                                                                |
-| `spring.ai.loom.agent.maven.maxOutputLines`       | int      | `200`       | 输出最大行数（超出截断）                                                                                          |
-| `spring.ai.loom.agent.maven.defaultTimeoutMs`     | long     | `300000`    | 默认执行超时（毫秒），5 分钟                                                                                      |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | 是否启用 Maven 工具（**opt-in**）—— 部署场景的编译/打包由 `ICompileAndDeployTool` 处理 |
+| `spring.ai.loom.agent.maven.mavenHome` | string | — | Maven 安装目录。**为空时工具会自动探测**：依次尝试 `MAVEN_HOME` / `M2_HOME` 环境变量，再扫描 Windows 常见路径（如 `C:\developer\apache-maven-*`、`C:\Program Files\Apache Maven`）。自动探测**不依赖系统 PATH**，避免被损坏的 mvn 包装脚本（如 npm 全局 mvn）遮蔽而让 `maven-invoker` 抛 `Error configuring command line`。 |
+| `spring.ai.loom.agent.maven.localRepository` | string | — | 本地仓库路径（为空时使用默认路径） |
+| `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | 输出最大行数（超出截断） |
+| `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | 默认执行超时（毫秒），5 分钟 |
 
 > 所有 Maven 工具的操作范围限定在 `{fileBasePath}/{username}/` 内，超出该范围的路径将被拒绝。
 >
 > **排错提示 — `MavenInvocationException: Error configuring command line`**：表示 `maven-invoker` 找不到可用的 `mvn` / `mvn.cmd`。工具启动日志会打印实际解析到的 `mavenHome` 和一份诊断提示（包含所有搜索过的路径、环境变量、修好方法）。最常见原因是 `PATH` 上有损坏或遮蔽的 `mvn`（例如 npm 全局 mvn 包装脚本），此时在 `application.yml` 显式设置 `spring.ai.loom.agent.maven.mavenHome` 指向真实 Maven 安装目录即可绕过。
 >
-> **排错提示 — Windows 上删除项目目录报"文件被锁定"**：旧版本是因为 `maven-invoker 3.3.0` / `plexus-utils 3.3.0`（a）在异常/取消路径上注册的 JVM shutdown hook 永不释放持有的 `Process` 引用，（b）`Invoker.execute()` 拿不到子进程句柄、无法把取消/超时向下传播给 mvn 子进程。结果是：一次被取消或超时的 Maven 调用会留下 mvn 子进程继续运行，持续对 `target/classes`、`~/.m2/repository/*.jar` 持有 mmap 句柄，在 Windows 上锁住这些文件。**新版本不再用 `Invoker.execute()` 跑进程**——直接用 `ProcessBuilder` fork mvn、用 `Process.waitFor(timeout, unit)` 做干净超时、超时后 `Process.destroyForcibly()` + 显式关闭流。**不再注册任何 JVM shutdown hook，mvn 子进程在超时/取消时一定被杀。** 升级后如果还看到锁，多半是上一次 JVM 留下的孤儿 mvn 进程，用 `tasklist /FI "IMAGENAME eq cmd.exe"` 找到并 `taskkill /F /PID <pid>` 即可。
+> **排错提示 — Windows 上删除项目目录报"文件被锁定"**：旧版本是因为 `maven-invoker 3.3.0` / `plexus-utils 3.3.0`（a）在异常/取消路径上注册的 JVM shutdown hook 永不释放持有的 `Process` 引用，（b）`Invoker.execute` 拿不到子进程句柄、无法把取消/超时向下传播给 mvn 子进程。结果是：一次被取消或超时的 Maven 调用会留下 mvn 子进程继续运行，持续对 `target/classes`、`~/.m2/repository/*.jar` 持有 mmap 句柄，在 Windows 上锁住这些文件。**新版本不再用 `Invoker.execute` 跑进程**——直接用 `ProcessBuilder` fork mvn、用 `Process.waitFor(timeout, unit)` 做干净超时、超时后 `Process.destroyForcibly` + 显式关闭流。**不再注册任何 JVM shutdown hook，mvn 子进程在超时/取消时一定被杀。** 升级后如果还看到锁，多半是上一次 JVM 留下的孤儿 mvn 进程，用 `tasklist /FI "IMAGENAME eq cmd.exe"` 找到并 `taskkill /F /PID <pid>` 即可。
 
 ### 11.9 工具组开关
 
 所有内置工具组**默认全部启用**（`matchIfMissing=true`）。在 yml 中将下列任一属性设为 `false` 即可关闭对应工具组。
 
-| 属性                                          | 类型     | 默认值 | 说明                                                                                            |
+| 属性 | 类型 | 默认值 | 说明 |
 |-----------------------------------------------|----------|-------|-------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.time.enabled`           | boolean  | `true` | 时间工具（`ITimeTool` — 获取当前时间、时区转换）                                                  |
-| `spring.ai.loom.agent.file.enabled`           | boolean  | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/搜索/删除操作）                                   |
-| `spring.ai.loom.agent.skill.enabled`          | boolean  | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情）                                                  |
-| `spring.ai.loom.agent.git.enabled`            | boolean  | `false` | Git 工具（`IGitTool` — 28 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
-| `spring.ai.loom.agent.maven.enabled`          | boolean  | `false` | Maven 工具（同时需要 classpath 上有 `maven-invoker`）。**opt-in** —— 部署场景的编译/打包走 `ICompileAndDeployTool`。 |
-| `spring.ai.loom.agent.git.username`           | string   | —     | HTTP(S) Git 认证用户名（clone/pull/push）                                                          |
-| `spring.ai.loom.agent.git.token`              | string   | —     | HTTP(S) Git 认证 token / 密码                                                                    |
-| `spring.ai.loom.agent.gitUsername`            | string   | —     | **遗留**顶层别名，等价于 `git.username`                                                            |
-| `spring.ai.loom.agent.gitToken`               | string   | —     | **遗留**顶层别名，等价于 `git.token`                                                               |
+| `spring.ai.loom.agent.time.enabled` | boolean | `true` | 时间工具（`ITimeTool` — 获取当前时间、时区转换） |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/搜索/删除操作） |
+| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情） |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Maven 工具（同时需要 classpath 上有 `maven-invoker`）。**opt-in** —— 部署场景的编译/打包走 `ICompileAndDeployTool`。 |
+| `spring.ai.loom.agent.git.username` | string | — | HTTP(S) Git 认证用户名（clone/pull/push） |
+| `spring.ai.loom.agent.git.token` | string | — | HTTP(S) Git 认证 token / 密码 |
+| `spring.ai.loom.agent.gitUsername` | string | — | **遗留**顶层别名，等价于 `git.username` |
+| `spring.ai.loom.agent.gitToken` | string | — | **遗留**顶层别名，等价于 `git.token` |
 
 **示例 — 启用 Git 工具**：
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        git:
-          enabled: true   # 默认 false；设为 true 启用
+ ai:
+ loom:
+ agent:
+ git:
+ enabled: true # 默认 false；设为 true 启用
 ```
 
 > 即便工具组被关闭，你仍可以通过自定义 `@Bean IGitTool` / `@Bean IMavenTool` 重新启用 —— `@ConditionalOnMissingBean` 始终优先采用用户提供的 Bean。
@@ -1605,39 +1689,39 @@ spring:
 
 `ICompileAndDeployTool` 在单次 LLM tool call 内完成 `git clone → 按 buildTool 打包（maven / npm / pip）→ docker build → docker run → health check` 整条部署流水线。支持 Maven、Node.js（后端 + 静态前端 → nginx）、Python 等多栈项目。所有配置项均在 `spring.ai.loom.agent.compile.*` 下。
 
-| 属性                                              | 类型     | 默认值       | 说明                                                                                                          |
+| 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`      | 是否启用端到端部署工具。默认开启，是部署场景的推荐入口。                                                                            |
-| `spring.ai.loom.agent.compile.imageTemplates`     | map<string, ImageTemplate> | `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` | 预置基础镜像别名（`ImageTemplate { image, command[] }`），可通过工具入参 `baseImage` 选择。                              |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | 是否启用端到端部署工具。默认开启，是部署场景的推荐入口。 |
+| `spring.ai.loom.agent.compile.imageTemplates` | map<string, ImageTemplate> | `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` | 预置基础镜像别名（`ImageTemplate { image, command[] }`），可通过工具入参 `baseImage` 选择。 |
 
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        compile:
-          image-templates:
-            java17:
-              image: eclipse-temurin:17-jre-alpine
-              command: [java, -jar, app.jar]
-            nginx:
-              image: nginx:1.27-alpine
-              command: [nginx, -g, "daemon off;"]
+ ai:
+ loom:
+ agent:
+ compile:
+ image-templates:
+ java17:
+ image: eclipse-temurin:17-jre-alpine
+ command: [java, -jar, app.jar]
+ nginx:
+ image: nginx:1.27-alpine
+ command: [nginx, -g, "daemon off;"]
 ```
 
 工具入参示例：
 
 ```json
 {
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "port": 8081,
-  "containerPort": 8080,
-  "subDir": "sql-forge-web",
-  "buildTool": "maven",
-  "baseImage": "java17",
-  "healthPath": "sql-forge-demo"
+ "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+ "port": 8081,
+ "containerPort": 8080,
+ "subDir": "sql-forge-web",
+ "buildTool": "maven",
+ "baseImage": "java17",
+ "healthPath": "sql-forge-demo"
 }
 ```
 

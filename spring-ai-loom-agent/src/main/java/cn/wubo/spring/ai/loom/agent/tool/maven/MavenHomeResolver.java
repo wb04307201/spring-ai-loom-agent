@@ -19,16 +19,16 @@ public final class MavenHomeResolver {
      * <p>
      * 优先级：
      * <ol>
-     *   <li>显式配置的路径（{@code configured}）</li>
-     *   <li>环境变量 {@code MAVEN_HOME}</li>
-     *   <li>环境变量 {@code M2_HOME}</li>
-     *   <li>Windows 常见路径下自动探测：
-     *       {@code C:\developer\apache-maven-*},
-     *       {@code C:\Program Files\Apache Maven},
-     *       {@code C:\Program Files (x86)\Apache Maven},
-     *       {@code C:\apache-maven-*},
-     *       {@code C:\Tools\maven*}，
-     *       以及 {@code ~/.m2/wrapper/dists}</li>
+     * <li>显式配置的路径（{@code configured}）</li>
+     * <li>环境变量 {@code MAVEN_HOME}</li>
+     * <li>环境变量 {@code M2_HOME}</li>
+     * <li>Windows 常见路径下自动探测：
+     * {@code C:\developer\apache-maven-*},
+     * {@code C:\Program Files\Apache Maven},
+     * {@code C:\Program Files (x86)\Apache Maven},
+     * {@code C:\apache-maven-*},
+     * {@code C:\Tools\maven*}，
+     * 以及 {@code ~/.m2/wrapper/dists}</li>
      * </ol>
      * <p>
      * 故意不依赖系统 {@code PATH} 上的 {@code mvn} 命令——部分 Windows 环境下

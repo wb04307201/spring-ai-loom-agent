@@ -1,7 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.tool.maven;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.MavenProperty;
-import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,6 +40,98 @@ class DefaultMavenToolTest {
     private Path tmpRoot;
     private String username;
 
+    private static ToolContext ctx(String username) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("username", username);
+        return new ToolContext(m);
+    }
+
+    /**
+     * PowerShell 查询：所有命令行包含 marker 的 cmd.exe 进程数。
+     * -1 表示查询失败（PowerShell 不可用等），调用方应当容忍。
+     * <p>
+     * 实现说明：直接用 {@code Get-CimInstance} + 单引号 WQL 过滤，
+     * 把整个查询脚本放在 PowerShell 单引号字符串里执行，
+     * 避免 Java 字符串到 PowerShell 的多层引号嵌套噩梦。
+     */
+    private static int countProcessesWithMarker(String marker) {
+        // PowerShell 单引号字符串里 ' 用 '' 转义。
+        String escaped = marker.replace("'", "''");
+        // 用 here-string @'...'@ 进一步避免转义麻烦
+        String ps = "$ErrorActionPreference='SilentlyContinue';" +
+                "$count = 0;" +
+                "Get-CimInstance Win32_Process |" +
+                " Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -and ($_.CommandLine -like '*" + escaped + "*') } |" +
+                " ForEach-Object { $count++ };" +
+                "Write-Output $count";
+        try {
+            Process p = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+                    .redirectErrorStream(true).start();
+            String out;
+            try (var br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line).append("\n");
+                out = sb.toString().trim();
+            }
+            boolean done = p.waitFor(15, TimeUnit.SECONDS);
+            if (!done) {
+                p.destroyForcibly();
+                System.err.println("[test] PowerShell query timed out for marker=" + marker);
+                return -1;
+            }
+            if (out.isEmpty()) return 0;
+            try {
+                return Integer.parseInt(out);
+            } catch (NumberFormatException nfe) {
+                System.err.println("[test] PowerShell returned non-integer: '" + out + "'");
+                return -1;
+            }
+        } catch (Throwable t) {
+            System.err.println("[test] PowerShell query failed: " + t.getMessage());
+            return -1;
+        }
+    }
+
+    /**
+     * PowerShell 兜底清理：杀掉所有命令行包含 marker 的 cmd.exe（及其子孙）。
+     * 测试失败时保证下个测试运行不踩到上次残留。
+     */
+    private static void killAllWithMarker(String marker) {
+        String escaped = marker.replace("'", "''");
+        String ps = "$ErrorActionPreference='SilentlyContinue';" +
+                "Get-CimInstance Win32_Process |" +
+                " Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -and ($_.CommandLine -like '*" + escaped + "*') } |" +
+                " ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+        try {
+            Process p = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+                    .redirectErrorStream(true).start();
+            p.waitFor(15, TimeUnit.SECONDS);
+            if (p.isAlive()) p.destroyForcibly();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void deleteRecursive(Path p) throws IOException {
+        if (p == null || !Files.exists(p)) return;
+        Files.walkFileTree(p, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    // ==================== username / goals / pom 校验 ====================
+
     @BeforeEach
     void setUp() throws IOException {
         props = new MavenProperty();
@@ -71,19 +162,13 @@ class DefaultMavenToolTest {
         }
     }
 
-    private static ToolContext ctx(String username) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("username", username);
-        return new ToolContext(m);
-    }
-
     private void writePom(String... lines) throws IOException {
         StringBuilder sb = new StringBuilder();
         for (String l : lines) sb.append(l).append("\n");
         Files.writeString(tmpRoot.resolve("pom.xml"), sb.toString(), StandardCharsets.UTF_8);
     }
 
-    // ==================== username / goals / pom 校验 ====================
+    // ==================== 路径越权 ====================
 
     @Test
     @DisplayName("username 缺失返回错误")
@@ -108,7 +193,7 @@ class DefaultMavenToolTest {
         assertTrue(result.contains("未找到 pom.xml"), "应提示找不到 pom.xml: " + result);
     }
 
-    // ==================== 路径越权 ====================
+    // ==================== 工作目录解析 ====================
 
     @Test
     @DisplayName("绝对路径 workingDir 越权返回错误（pom.xml 找不到）")
@@ -128,6 +213,8 @@ class DefaultMavenToolTest {
                 "路径穿越应被拒绝: " + result);
     }
 
+    // ==================== pom.xml 存在但不合法 ====================
+
     @Test
     @DisplayName("绝对 pomPath 越权返回错误")
     void absolutePomPathRejected() {
@@ -136,7 +223,7 @@ class DefaultMavenToolTest {
                 "绝对 pomPath 应导致找不到 pom.xml: " + result);
     }
 
-    // ==================== 工作目录解析 ====================
+    // ==================== 通用入口 ====================
 
     @Test
     @DisplayName("workingDir 为 null 时使用用户文件目录")
@@ -149,6 +236,8 @@ class DefaultMavenToolTest {
                 "应提及用户文件目录: " + result);
     }
 
+    // ==================== 各种 goal 入口的参数 ====================
+
     @Test
     @DisplayName("workingDir 指定子目录在用户目录内合法")
     void workingDirWithinUserDir() throws IOException {
@@ -159,8 +248,6 @@ class DefaultMavenToolTest {
         assertTrue(result.contains("未找到 pom.xml") || result.contains("Maven"),
                 "合法子目录应能处理: " + result);
     }
-
-    // ==================== pom.xml 存在但不合法 ====================
 
     @Test
     @DisplayName("pom.xml 不是合法 XML 时 Maven 执行失败但工具优雅返回")
@@ -174,8 +261,6 @@ class DefaultMavenToolTest {
                 "应给出 Maven 错误信息: " + result);
     }
 
-    // ==================== 通用入口 ====================
-
     @Test
     @DisplayName("mavenExecute 调用 dependency:tree 在无效 pom 上返回错误")
     void executeWithInvalidPom() throws IOException {
@@ -184,8 +269,6 @@ class DefaultMavenToolTest {
         assertNotNull(result);
         assertTrue(result.length() > 0, "应返回非空结果");
     }
-
-    // ==================== 各种 goal 入口的参数 ====================
 
     @Test
     @DisplayName("mavenPackage 默认跳过测试")
@@ -196,6 +279,8 @@ class DefaultMavenToolTest {
         assertNotNull(result);
     }
 
+    // ==================== truncateOutput 行为 ====================
+
     @Test
     @DisplayName("mavenTest 接收 testPattern")
     void testWithPattern() throws IOException {
@@ -203,6 +288,8 @@ class DefaultMavenToolTest {
         String result = tool.mavenTest(null, null, "*ServiceTest", null, ctx(username));
         assertNotNull(result);
     }
+
+    // ==================== Maven Home 解析 ====================
 
     @Test
     @DisplayName("mavenDependencyTree 接收 includeScope")
@@ -220,8 +307,6 @@ class DefaultMavenToolTest {
         assertNotNull(result);
     }
 
-    // ==================== truncateOutput 行为 ====================
-
     @Test
     @DisplayName("pom.xml 缺失的错误信息包含用户目录路径")
     void errorMessageIncludesUserDir() {
@@ -229,8 +314,6 @@ class DefaultMavenToolTest {
         assertTrue(result.contains(tmpRoot.toString()),
                 "错误信息应包含用户文件目录路径: " + result);
     }
-
-    // ==================== Maven Home 解析 ====================
 
     @Test
     @DisplayName("configured 路径合法时优先使用")
@@ -259,15 +342,17 @@ class DefaultMavenToolTest {
         // 如果命中，应是绝对路径
         if (resolved != null) {
             assertTrue(resolved.equals(new java.io.File("Z:/__no_such_maven_home__/").getAbsolutePath())
-                    || new java.io.File(resolved).isDirectory(),
+                            || new java.io.File(resolved).isDirectory(),
                     "应指向一个真实目录或保留原值: " + resolved);
         }
     }
 
+    // ==================== 进程管理与超时销毁 ====================
+
     @Test
     @DisplayName("configured 路径为空字符串走自动探测/环境变量")
     void resolveMavenHome_blankConfiguredFallsThrough() {
-        String resolved = MavenHomeResolver.resolve("  ");
+        String resolved = MavenHomeResolver.resolve(" ");
         // 不抛异常；可能命中环境变量/自动探测，也可能为 null
         assertTrue(resolved == null || new java.io.File(resolved).isDirectory());
     }
@@ -296,7 +381,7 @@ class DefaultMavenToolTest {
         assertDoesNotThrow(() -> new DefaultMavenTool(p, tmpRoot.getParent().toString()));
     }
 
-    // ==================== 进程管理与超时销毁 ====================
+    // ==================== taskkill /F /T 杀进程树回归 ====================
 
     @Test
     @DisplayName("超时后会强制销毁 mvn 子进程（不再依赖 maven-invoker 的 Future.cancel）")
@@ -329,7 +414,7 @@ class DefaultMavenToolTest {
 
         try {
             MavenProperty p = new MavenProperty();
-            p.setDefaultTimeoutMs(500L);  // 500ms 超时
+            p.setDefaultTimeoutMs(500L); // 500ms 超时
             p.setMaxOutputLines(50);
             p.setMavenHome(fakeMavenHome.toString());
             DefaultMavenTool t = new DefaultMavenTool(p, work.getParent().toString());
@@ -353,7 +438,7 @@ class DefaultMavenToolTest {
                     "结果应带超时标志。实际:\n" + result);
 
             // 关键断言 4：调用结束后，fake 脚本进程（cmd.exe + 子进程）应都已退出
-            //           —— 否则就是资源泄露，正是用户报告的 file lock 根因
+            // —— 否则就是资源泄露，正是用户报告的 file lock 根因
             Thread.sleep(300); // 给 OS 一点时间回收
             assertNoFakeMvnLingering(fakeMvn);
         } finally {
@@ -477,8 +562,6 @@ class DefaultMavenToolTest {
         assertNotNull(output);
     }
 
-    // ==================== taskkill /F /T 杀进程树回归 ====================
-
     /**
      * 验证超时后 taskkill /F /T 把整个进程树（不仅 immediate child）都杀干净。
      * <p>
@@ -523,7 +606,7 @@ class DefaultMavenToolTest {
 
         try {
             MavenProperty p = new MavenProperty();
-            p.setDefaultTimeoutMs(500L);  // 500ms 超时
+            p.setDefaultTimeoutMs(500L); // 500ms 超时
             p.setMaxOutputLines(50);
             p.setMavenHome(fakeMavenHome.toString());
             DefaultMavenTool t = new DefaultMavenTool(p, work.getParent().toString());
@@ -546,7 +629,7 @@ class DefaultMavenToolTest {
             int lingering = countProcessesWithMarker(marker);
             assertEquals(0, lingering,
                     "taskkill /F /T 后仍有进程残留 —— 孤儿 mvn 子孙会继续下载/锁文件。" +
-                    "残留数=" + lingering);
+                            "残留数=" + lingering);
         } finally {
             // 兜底清理：万一测试失败残留了进程，下一次跑前清干净
             killAllWithMarker(marker);
@@ -554,89 +637,5 @@ class DefaultMavenToolTest {
             deleteRecursive(fakeMavenHome);
             deleteRecursive(work);
         }
-    }
-
-    /**
-     * PowerShell 查询：所有命令行包含 marker 的 cmd.exe 进程数。
-     * -1 表示查询失败（PowerShell 不可用等），调用方应当容忍。
-     * <p>
-     * 实现说明：直接用 {@code Get-CimInstance} + 单引号 WQL 过滤，
-     * 把整个查询脚本放在 PowerShell 单引号字符串里执行，
-     * 避免 Java 字符串到 PowerShell 的多层引号嵌套噩梦。
-     */
-    private static int countProcessesWithMarker(String marker) {
-        // PowerShell 单引号字符串里 ' 用 '' 转义。
-        String escaped = marker.replace("'", "''");
-        // 用 here-string @'...'@ 进一步避免转义麻烦
-        String ps = "$ErrorActionPreference='SilentlyContinue';" +
-                "$count = 0;" +
-                "Get-CimInstance Win32_Process |" +
-                "  Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -and ($_.CommandLine -like '*" + escaped + "*') } |" +
-                "  ForEach-Object { $count++ };" +
-                "Write-Output $count";
-        try {
-            Process p = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-                    .redirectErrorStream(true).start();
-            String out;
-            try (var br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line).append("\n");
-                out = sb.toString().trim();
-            }
-            boolean done = p.waitFor(15, TimeUnit.SECONDS);
-            if (!done) {
-                p.destroyForcibly();
-                System.err.println("[test] PowerShell query timed out for marker=" + marker);
-                return -1;
-            }
-            if (out.isEmpty()) return 0;
-            try {
-                return Integer.parseInt(out);
-            } catch (NumberFormatException nfe) {
-                System.err.println("[test] PowerShell returned non-integer: '" + out + "'");
-                return -1;
-            }
-        } catch (Throwable t) {
-            System.err.println("[test] PowerShell query failed: " + t.getMessage());
-            return -1;
-        }
-    }
-
-    /**
-     * PowerShell 兜底清理：杀掉所有命令行包含 marker 的 cmd.exe（及其子孙）。
-     * 测试失败时保证下个测试运行不踩到上次残留。
-     */
-    private static void killAllWithMarker(String marker) {
-        String escaped = marker.replace("'", "''");
-        String ps = "$ErrorActionPreference='SilentlyContinue';" +
-                "Get-CimInstance Win32_Process |" +
-                "  Where-Object { $_.Name -eq 'cmd.exe' -and $_.CommandLine -and ($_.CommandLine -like '*" + escaped + "*') } |" +
-                "  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
-        try {
-            Process p = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-                    .redirectErrorStream(true).start();
-            p.waitFor(15, TimeUnit.SECONDS);
-            if (p.isAlive()) p.destroyForcibly();
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void deleteRecursive(Path p) throws IOException {
-        if (p == null || !Files.exists(p)) return;
-        Files.walkFileTree(p, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Files.delete(file);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                Files.delete(dir);
-                return FileVisitResult.CONTINUE;
-            }
-        });
     }
 }

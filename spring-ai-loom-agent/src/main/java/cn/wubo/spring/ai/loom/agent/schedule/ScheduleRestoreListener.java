@@ -23,28 +23,28 @@ import java.util.UUID;
  * <p>Why a loom-agent-owned listener (instead of flex-schedule's
  * {@code FlexScheduledTaskRegistrar.restoreTasks()})?</p>
  * <ul>
- *   <li>flex-schedule's restore path requires {@code beanName+methodName} on the
- *       stored task definition — it skips any lambda-style task with a WARN log.
- *       loom-agent's triggers are pure lambdas (prompt captured in closure).</li>
- *   <li>flex-schedule's restore path cannot handle {@code ONE_SHOT} tasks
- *       (its {@code scheduleByType} switch has no {@code ONE_SHOT} arm).</li>
- *   <li>The schema is now loom-agent-owned ({@code loom_scheduled_task} with prompt
- *       columns) so the repository reads {@link LoomScheduleTriggerRecord} not
- *       {@code TaskDefinition}.</li>
+ * <li>flex-schedule's restore path requires {@code beanName+methodName} on the
+ * stored task definition — it skips any lambda-style task with a WARN log.
+ * loom-agent's triggers are pure lambdas (prompt captured in closure).</li>
+ * <li>flex-schedule's restore path cannot handle {@code ONE_SHOT} tasks
+ * (its {@code scheduleByType} switch has no {@code ONE_SHOT} arm).</li>
+ * <li>The schema is now loom-agent-owned ({@code loom_scheduled_task} with prompt
+ * columns) so the repository reads {@link LoomScheduleTriggerRecord} not
+ * {@code TaskDefinition}.</li>
  * </ul>
  *
  * <p>The listener runs on {@link ApplicationReadyEvent} (after the Spring context
  * is fully wired but before user traffic flows). For each persisted row it:
  * <ol>
- *   <li>Calls {@link TaskLimits#isExpired(String, java.time.Instant)} to enforce
- *       the 72h {@code max-lifetime} ceiling — expired rows are deleted
- *       (not re-registered).</li>
- *   <li>Rebuilds a {@link TaskBuilder} chain via flex-schedule's
- *       {@code FlexScheduledTaskService.task(name).{cron|fixedDelay|fixedRate|oneShot}(...)}
- *       and threads the original {@code createdAt} through
- *       {@link TaskBuilder#createdAt(java.time.Instant)} so the lifetime math
- *       continues across restarts.</li>
- *   <li>Replays paused state via {@code flexService.pause(name)}.</li>
+ * <li>Calls {@link TaskLimits#isExpired(String, java.time.Instant)} to enforce
+ * the 72h {@code max-lifetime} ceiling — expired rows are deleted
+ * (not re-registered).</li>
+ * <li>Rebuilds a {@link TaskBuilder} chain via flex-schedule's
+ * {@code FlexScheduledTaskService.task(name).{cron|fixedDelay|fixedRate|oneShot}(...)}
+ * and threads the original {@code createdAt} through
+ * {@link TaskBuilder#createdAt(java.time.Instant)} so the lifetime math
+ * continues across restarts.</li>
+ * <li>Replays paused state via {@code flexService.pause(name)}.</li>
  * </ol>
  * Per-task failures are swallowed with a WARN so one bad row doesn't block the
  * rest from being restored.
@@ -59,7 +59,9 @@ public class ScheduleRestoreListener {
     private final TaskLimits taskLimits;
     private final ILoomScheduleExecutionRepository executionRepo;
     private final org.springframework.jdbc.core.JdbcTemplate userJdbcTemplate;
-    /** Per-task execution history cap (newest N kept). Default 1000. */
+    /**
+     * Per-task execution history cap (newest N kept). Default 1000.
+     */
     private final int maxExecutionsPerTask;
 
     public ScheduleRestoreListener(FlexScheduledTaskService flexService,
@@ -87,12 +89,30 @@ public class ScheduleRestoreListener {
         this.userJdbcTemplate = userJdbcTemplate;
     }
 
-    /** Backward-compatible constructor for callers that haven't wired the execution repo yet. */
+    /**
+     * Backward-compatible constructor for callers that haven't wired the execution repo yet.
+     */
     public ScheduleRestoreListener(FlexScheduledTaskService flexService,
                                    ILoomScheduleTriggerRepository repo,
                                    ISubTaskExecutor subTaskExecutor,
                                    TaskLimits taskLimits) {
         this(flexService, repo, subTaskExecutor, taskLimits, null, 1000, null);
+    }
+
+    private static void applySchedule(TaskBuilder b, LoomScheduleTriggerRecord r) {
+        switch (r.scheduleType()) {
+            case LoomScheduleTriggerRecord.TYPE_CRON -> b.cron(r.cronExpression());
+            case LoomScheduleTriggerRecord.TYPE_FIXED_DELAY -> b.fixedDelay(secondsOrZero(r.intervalSeconds()),
+                    secondsOrZero(r.initialDelaySeconds()));
+            case LoomScheduleTriggerRecord.TYPE_FIXED_RATE -> b.fixedRate(secondsOrZero(r.intervalSeconds()),
+                    secondsOrZero(r.initialDelaySeconds()));
+            case LoomScheduleTriggerRecord.TYPE_ONE_SHOT -> b.oneShot(secondsOrZero(r.oneShotDelaySeconds()));
+            default -> throw new IllegalArgumentException("Unknown schedule type: " + r.scheduleType());
+        }
+    }
+
+    private static Duration secondsOrZero(Long seconds) {
+        return Duration.ofSeconds(seconds == null ? 0L : seconds);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -105,7 +125,7 @@ public class ScheduleRestoreListener {
         int droppedOrphan = 0;
         int failed = 0;
 
-        java.util.Set<String> knownUsernames = loadKnownUsernames();   // null = no filter
+        java.util.Set<String> knownUsernames = loadKnownUsernames(); // null = no filter
         for (LoomScheduleTriggerRecord r : records) {
             // Orphan check skipped entirely when there is no JdbcTemplate wired
             // (legacy / test-only constructor). Returning an empty Set would
@@ -143,7 +163,7 @@ public class ScheduleRestoreListener {
                     log.info("Skipping restore of one_shot [{}] — already fired " +
                                     "(execution rows present in loom_schedule_execution)",
                             r.taskName());
-                    restored++;   // the row was "restored" in the sense that H2 still has it
+                    restored++; // the row was "restored" in the sense that H2 still has it
                     continue;
                 }
 
@@ -185,26 +205,6 @@ public class ScheduleRestoreListener {
         Duration expectedWindow = Duration.ofSeconds(delay).plus(Duration.ofMinutes(1));
         Duration age = Duration.between(r.createdAt(), Instant.now());
         return age.compareTo(expectedWindow) > 0;
-    }
-
-    private static void applySchedule(TaskBuilder b, LoomScheduleTriggerRecord r) {
-        switch (r.scheduleType()) {
-            case LoomScheduleTriggerRecord.TYPE_CRON -> b.cron(r.cronExpression());
-            case LoomScheduleTriggerRecord.TYPE_FIXED_DELAY ->
-                    b.fixedDelay(secondsOrZero(r.intervalSeconds()),
-                            secondsOrZero(r.initialDelaySeconds()));
-            case LoomScheduleTriggerRecord.TYPE_FIXED_RATE ->
-                    b.fixedRate(secondsOrZero(r.intervalSeconds()),
-                            secondsOrZero(r.initialDelaySeconds()));
-            case LoomScheduleTriggerRecord.TYPE_ONE_SHOT ->
-                    b.oneShot(secondsOrZero(r.oneShotDelaySeconds()));
-            default ->
-                    throw new IllegalArgumentException("Unknown schedule type: " + r.scheduleType());
-        }
-    }
-
-    private static Duration secondsOrZero(Long seconds) {
-        return Duration.ofSeconds(seconds == null ? 0L : seconds);
     }
 
     private void runAsSubTask(LoomScheduleTriggerRecord r) {
@@ -274,14 +274,14 @@ public class ScheduleRestoreListener {
      * under whichever account the next restart sees).
      *
      * @return the set of known usernames, or {@code null} if no {@link JdbcTemplate}
-     *         was wired (signaling "no source of truth — skip the orphan check
-     *         entirely"). An empty set returned from a live query still triggers
-     *         the filter (every row counts as orphan), which is the correct
-     *         semantics when the underlying query succeeded with no rows.
+     * was wired (signaling "no source of truth — skip the orphan check
+     * entirely"). An empty set returned from a live query still triggers
+     * the filter (every row counts as orphan), which is the correct
+     * semantics when the underlying query succeeded with no rows.
      */
     private java.util.Set<String> loadKnownUsernames() {
         if (userJdbcTemplate == null) {
-            return null;   // sentinel: caller skips the orphan check entirely
+            return null; // sentinel: caller skips the orphan check entirely
         }
         try {
             return new java.util.HashSet<>(userJdbcTemplate.queryForList(
@@ -289,7 +289,7 @@ public class ScheduleRestoreListener {
         } catch (Exception e) {
             log.warn("loadKnownUsernames failed; will fall back to no orphan filter: {}",
                     e.getMessage());
-            return null;   // query failed → opt out rather than nuke everything
+            return null; // query failed → opt out rather than nuke everything
         }
     }
 

@@ -21,9 +21,6 @@ import java.util.concurrent.CopyOnWriteArraySet;
 public class SseEmitterRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(SseEmitterRegistry.class);
-
-    public record Entry(SseEmitter emitter, Disposable disposable, long startMs, Runnable onStop) {}
-
     // username -> (conversationId -> Entry)
     private final Map<String, Map<String, Entry>> store = new ConcurrentHashMap<>();
 
@@ -41,6 +38,7 @@ public class SseEmitterRegistry {
 
     /**
      * 主动停止某个会话的流。
+     *
      * @return true=成功停止；false=没有活跃流
      */
     public boolean stop(String username, String conversationId) {
@@ -48,7 +46,11 @@ public class SseEmitterRegistry {
         if (e == null) return false;
         // 触发 onStop 回调（用于记录已产生的 token，避免停止后丢数据）
         if (e.onStop() != null) {
-            try { e.onStop().run(); } catch (Exception ex) { log.warn("onStop 异常：{}", ex.getMessage()); }
+            try {
+                e.onStop().run();
+            } catch (Exception ex) {
+                log.warn("onStop 异常：{}", ex.getMessage());
+            }
         }
         try {
             if (e.disposable() != null && !e.disposable().isDisposed()) {
@@ -67,12 +69,16 @@ public class SseEmitterRegistry {
         return true;
     }
 
-    /** 流正常完成 / 超时 / 出错时由 SseController 自动调用 */
+    /**
+     * 流正常完成 / 超时 / 出错时由 SseController 自动调用
+     */
     public void autoCleanup(String username, String conversationId) {
         remove(username, conversationId);
     }
 
-    /** 用户登出时停掉该用户全部活跃流 */
+    /**
+     * 用户登出时停掉该用户全部活跃流
+     */
     public int cleanup(String username) {
         Map<String, Entry> byConv = store.remove(username);
         if (byConv == null) return 0;
@@ -84,12 +90,15 @@ public class SseEmitterRegistry {
                 }
                 kv.getValue().emitter().complete();
                 n++;
-            } catch (Exception ignore) {}
+            } catch (Exception ignore) {
+            }
         }
         return n;
     }
 
-    /** 调试用：当前活跃流（按用户） */
+    /**
+     * 调试用：当前活跃流（按用户）
+     */
     public Map<String, Set<String>> activeSnapshot() {
         Map<String, Set<String>> snap = new ConcurrentHashMap<>();
         store.forEach((user, byConv) -> {
@@ -111,5 +120,8 @@ public class SseEmitterRegistry {
         Entry e = byConv.remove(conversationId);
         if (byConv.isEmpty()) store.remove(username);
         return e;
+    }
+
+    public record Entry(SseEmitter emitter, Disposable disposable, long startMs, Runnable onStop) {
     }
 }

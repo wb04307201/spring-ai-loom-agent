@@ -37,6 +37,8 @@ public interface IScheduleTool extends IEmbedTool {
             @ToolParam(description = "返回多少条,默认 20") Integer limit,
             ToolContext toolContext);
 
-    /** Used internally by the BFF (not exposed as a tool). */
+    /**
+     * Used internally by the BFF (not exposed as a tool).
+     */
     String listSchedulesRaw(String username);
 }

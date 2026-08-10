@@ -12,7 +12,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -32,6 +31,25 @@ class ScheduleRestoreListenerTest {
     private org.springframework.jdbc.core.JdbcTemplate userJdbcTemplate;
     private TaskLimits limits72h;
     private ScheduleRestoreListener listener;
+
+    private static LoomScheduleTriggerRecord record(String taskName,
+                                                    String scheduleType,
+                                                    Instant createdAt,
+                                                    boolean paused) {
+        return new LoomScheduleTriggerRecord(
+                taskName,
+                scheduleType,
+                "cron".equals(scheduleType) ? "0 * * * * *" : null,
+                ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? 600L : null,
+                null,
+                "one_shot".equals(scheduleType) ? 10L : null,
+                "say hi from " + taskName,
+                "alice",
+                "conv-1",
+                paused,
+                createdAt,
+                createdAt);
+    }
 
     @BeforeEach
     void setUp() {
@@ -55,25 +73,6 @@ class ScheduleRestoreListenerTest {
                 .thenReturn(List.of("alice", "bob"));
 
         listener = new ScheduleRestoreListener(flexService, repo, subTaskExecutor, limits72h, null, 1000, userJdbcTemplate);
-    }
-
-    private static LoomScheduleTriggerRecord record(String taskName,
-                                                    String scheduleType,
-                                                    Instant createdAt,
-                                                    boolean paused) {
-        return new LoomScheduleTriggerRecord(
-                taskName,
-                scheduleType,
-                "cron".equals(scheduleType) ? "0 * * * * *" : null,
-                ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? 600L : null,
-                null,
-                "one_shot".equals(scheduleType) ? 10L : null,
-                "say hi from " + taskName,
-                "alice",
-                "conv-1",
-                paused,
-                createdAt,
-                createdAt);
     }
 
     @Test

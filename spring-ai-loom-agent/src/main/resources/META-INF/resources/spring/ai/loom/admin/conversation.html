@@ -1,49 +1,85 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>会话详情 - 灵梭管理控制台</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/spring/ai/loom/style.css">
-    <link rel="stylesheet" href="console.css">
+ <title>会话详情 - 灵梭管理控制台</title>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <link rel="stylesheet" href="/spring/ai/loom/style.css">
+ <link rel="stylesheet" href="console.css">
 </head>
 <body>
 <div class="admin-container">
-    <header class="admin-header">
-        <div class="admin-header-left">
-            <h1 id="conv-title">会话详情</h1>
-            <span class="admin-subtitle" id="conv-meta">-</span>
-        </div>
-        <div class="admin-header-right">
-            <span id="admin-username" class="admin-username"></span>
-            <a id="back-link" href="console.html" class="header-link">← 返回控制台</a>
-        </div>
-    </header>
+ <header class="admin-header">
+ <div class="admin-header-left">
+ <h1 id="conv-title">会话详情</h1>
+ <span class="admin-subtitle" id="conv-meta">-</span>
+ </div>
+ <div class="admin-header-right">
+ <span id="admin-username" class="admin-username"></span>
+ <a id="prev-conv-link" class="header-link" title="上一个会话" style="display: none;">◀</a>
+ <a id="next-conv-link" class="header-link" title="下一个会话" style="display: none;">▶</a>
+ <a id="back-link" href="console.html" class="header-link">← 返回控制台</a>
+ </div>
+ </header>
 
-    <main class="admin-main">
-        <div class="stats-card">
-            <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">会话用量统计</h3>
-            <div id="conv-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
-                <div class="usage-stat"><div class="usage-stat-label">总 Token</div><div class="usage-stat-value" id="stat-total">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">调用次数</div><div class="usage-stat-value" id="stat-calls">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">平均输入</div><div class="usage-stat-value" id="stat-avg-prompt">-</div></div>
-                <div class="usage-stat"><div class="usage-stat-label">平均输出</div><div class="usage-stat-value" id="stat-avg-completion">-</div></div>
-            </div>
-        </div>
+ <main class="admin-main">
+ <!-- 布局：元数据 + 调用统计合并到一个紧凑 row，默认折叠节省空间 -->
+ <div id="meta-card" class="stats-card" style="padding: 12px 16px;">
+ <details id="meta-details">
+ <summary style="cursor: pointer; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); user-select: none;">
+ <span id="conv-title" style="font-size: 14px; color: var(--text-primary); font-weight: 500;">会话详情</span>
+ <span style="font-size: 12px;">·</span>
+ <span id="conv-meta" style="font-size: 12px;">-</span>
+ <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);">▾ 展开元数据</span>
+ </summary>
+ <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color, #e2e8f0); display: grid; grid-template-columns: 2fr 3fr; gap: 24px;">
+ <div id="meta-content" style="font-size: 13px; line-height: 1.7;">加载中...</div>
+ <div>
+ <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">调用统计</div>
+ <div id="conv-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+ <div class="usage-stat"><div class="usage-stat-label">总 Token</div><div class="usage-stat-value" id="stat-total">-</div></div>
+ <div class="usage-stat"><div class="usage-stat-label">调用次数</div><div class="usage-stat-value" id="stat-calls">-</div></div>
+ <div class="usage-stat"><div class="usage-stat-label">工具调用</div><div class="usage-stat-value" id="stat-tools">-</div></div>
+ <div class="usage-stat"><div class="usage-stat-label">子任务</div><div class="usage-stat-value" id="stat-subtasks">-</div></div>
+ <div class="usage-stat"><div class="usage-stat-label">定时任务</div><div class="usage-stat-value" id="stat-schedules">-</div></div>
+ <div class="usage-stat"><div class="usage-stat-label">错误</div><div class="usage-stat-value" id="stat-errors" style="color: var(--error-color, #ef4444);">-</div></div>
+ </div>
+ </div>
+ </div>
+ </details>
+ </div>
 
-        <div class="admin-toolbar">
-            <button id="refresh-btn" class="secondary-btn">刷新</button>
-        </div>
+ <div class="admin-toolbar" style="position: sticky; top: 60px; z-index: 10; background: var(--bg, #f8fafc); padding: 12px 0; border-bottom: 1px solid var(--border-color, #e2e8f0);">
+ <div class="conv-filters">
+ <label class="conv-filter-label"><input type="checkbox" data-type="USER" checked> 用户</label>
+ <label class="conv-filter-label"><input type="checkbox" data-type="ASSISTANT" checked> 助手</label>
+ <label class="conv-filter-label"><input type="checkbox" data-type="TOOL_CALL" checked> 工具调用</label>
+ <label class="conv-filter-label"><input type="checkbox" data-type="TOOL_RESULT" checked> 工具结果</label>
+ <label class="conv-filter-label"><input type="checkbox" data-type="SUBTASK" checked> 子任务</label>
+ <label class="conv-filter-label"><input type="checkbox" data-type="SCHEDULE_FIRE" checked> 定时触发</label>
+ <label class="conv-filter-label" title="系统提示词（动态拼装，含工具/技能/知识库）"><input type="checkbox" data-type="SYSTEM" checked> 系统</label>
+ <input type="search" id="flow-search" class="conv-search" placeholder="搜索内容...">
+ <button id="expand-all-btn" class="secondary-btn" title="展开所有折叠区">全展开</button>
+ <button id="collapse-all-btn" class="secondary-btn" title="折叠所有 details">全折叠</button>
+ <button id="refresh-btn" class="secondary-btn">刷新</button>
+ </div>
+ </div>
 
-        <div id="turns-container" class="table-container">
-            <div class="loading-indicator">加载中...</div>
-        </div>
-    </main>
+ <!-- 事件流区放大 — 默认 75vh，让用户无需全屏就能看完大部分事件 -->
+ <div id="flow-container" class="flow-container" style="max-height: 75vh;">
+ <div class="loading-indicator">加载中...</div>
+ </div>
+
+ <div id="flow-pager" style="text-align: center; padding: 16px; display: none;">
+ <button id="load-more-btn" class="secondary-btn">加载更多</button>
+ </div>
+ </main>
 </div>
 
 <div id="toast-notification" class="toast"></div>
 
+<script src="/marked@17.0.1/lib/marked.umd.js"></script>
+<script type="module" src="../markdown-renderer.js"></script>
 <script src="conversation.js"></script>
 </body>
 </html>
-

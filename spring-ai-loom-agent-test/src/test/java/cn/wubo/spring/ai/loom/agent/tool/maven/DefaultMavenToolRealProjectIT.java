@@ -1,7 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.tool.maven;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties.MavenProperty;
-import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
@@ -16,8 +15,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * 端到端集成测试：在用户实际的 .local/file/username/sql-forge-demo/sql-forge-demo 项目上
  * 调用 mavenBuild，验证：
  * <ol>
- *   <li>不配置 mavenHome 也能成功调用 Maven（依赖自动探测）</li>
- *   <li>输出中不再出现 "Error configuring command line"（找不到 mvn 的旧症状）</li>
+ * <li>不配置 mavenHome 也能成功调用 Maven（依赖自动探测）</li>
+ * <li>输出中不再出现 "Error configuring command line"（找不到 mvn 的旧症状）</li>
  * </ol>
  * 注：目标项目本身的 Java 代码可能不通过编译，但那是项目问题，不是工具问题——
  * 本测试只验证工具能正确执行 Maven 进程。
@@ -49,8 +48,8 @@ class DefaultMavenToolRealProjectIT {
                 "C:\\developer\\IdeaProjects\\spring-ai-loom-agent\\.local\\file");
 
         String result = tool.mavenBuild(
-                null,                                 // pomPath
-                "sql-forge-demo/sql-forge-demo",     // workingDir
+                null, // pomPath
+                "sql-forge-demo/sql-forge-demo", // workingDir
                 null, null, ctx("username"));
 
         // 关键断言：不能出现 "Error configuring command line"

@@ -8,16 +8,17 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
 public class DefaultGitTool implements IGitTool {
 
+    static final String WORKING_DIR_KEY = "gitWorkingDir";
     private static final String BASE_PATH = ".local/file";
     private static final String GIT_SUBDIR = "git";
-    static final String WORKING_DIR_KEY = "gitWorkingDir";
-
     private final GitOperations gitOps;
     private final String fileBasePath;
 
@@ -570,14 +571,14 @@ public class DefaultGitTool implements IGitTool {
             int count = 0;
             try {
                 for (org.eclipse.jgit.revwalk.RevCommit c : git.log().setMaxCount(5).call()) {
-                    sb.append("  ").append(c.abbreviate(7).name())
+                    sb.append(" ").append(c.abbreviate(7).name())
                             .append(" ").append(c.getShortMessage()).append("\n");
                     count++;
                 }
             } catch (org.eclipse.jgit.api.errors.NoHeadException e) {
                 // 空仓库没有任何提交，跳过 log
             }
-            if (count == 0) sb.append("  (无提交)\n");
+            if (count == 0) sb.append(" (无提交)\n");
 
             java.util.List<org.eclipse.jgit.lib.Ref> tags = git.tagList().call();
             sb.append("\n标签：");

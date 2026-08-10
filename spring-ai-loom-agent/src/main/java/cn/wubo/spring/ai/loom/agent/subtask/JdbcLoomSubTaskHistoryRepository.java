@@ -14,27 +14,25 @@ import java.util.Set;
  * <p>
  * Persists {@link SubTaskRegistry.SubTaskRecord} rows across application
  * restarts. Schema is also declared as a Flyway migration
- * ({@code V2.0__subtask_and_schedule.sql} — table {@code loom_subtask_history}); this class additionally calls
+ * ({@code __subtask_and_schedule.sql} — table {@code loom_subtask_history}); this class additionally calls
  * {@link #ensureSchema()} defensively so the table is created even when
  * Flyway is bypassed (e.g. integration tests with bare H2 URLs).
  * </p>
  */
 public class JdbcLoomSubTaskHistoryRepository implements ILoomSubTaskHistoryRepository {
 
-    private static final Logger log = LoggerFactory.getLogger(JdbcLoomSubTaskHistoryRepository.class);
-
     public static final String TABLE_NAME = "loom_subtask_history";
-
+    private static final Logger log = LoggerFactory.getLogger(JdbcLoomSubTaskHistoryRepository.class);
     private static final String DDL = "CREATE TABLE IF NOT EXISTS " + TABLE_NAME + " ("
-            + " subtask_id      VARCHAR(64)  PRIMARY KEY,"
-            + " username        VARCHAR(64)  NOT NULL,"
-            + " conversation_id VARCHAR(64)  NOT NULL,"
-            + " prompt          CLOB         NOT NULL,"
-            + " status          VARCHAR(16)  NOT NULL,"
-            + " started_at      BIGINT       NOT NULL,"
-            + " finished_at     BIGINT       NOT NULL,"
-            + " error_message   CLOB,"
-            + " result_text     CLOB"
+            + " subtask_id VARCHAR(64) PRIMARY KEY,"
+            + " username VARCHAR(64) NOT NULL,"
+            + " conversation_id VARCHAR(64) NOT NULL,"
+            + " prompt CLOB NOT NULL,"
+            + " status VARCHAR(16) NOT NULL,"
+            + " started_at BIGINT NOT NULL,"
+            + " finished_at BIGINT NOT NULL,"
+            + " error_message CLOB,"
+            + " result_text CLOB"
             + ")";
 
     private static final String DDL_INDEX_USER_CONV =
@@ -62,6 +60,20 @@ public class JdbcLoomSubTaskHistoryRepository implements ILoomSubTaskHistoryRepo
 
     public JdbcLoomSubTaskHistoryRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    private static SubTaskRegistry.SubTaskRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new SubTaskRegistry.SubTaskRecord(
+                rs.getString("subtask_id"),
+                rs.getString("username"),
+                rs.getString("conversation_id"),
+                rs.getString("prompt"),
+                cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.valueOf(rs.getString("status")),
+                rs.getLong("started_at"),
+                rs.getLong("finished_at"),
+                rs.getString("error_message"),
+                rs.getString("result_text"),
+                null); // future 不持久化 —— 纯运行期对象
     }
 
     @Override
@@ -115,7 +127,7 @@ public class JdbcLoomSubTaskHistoryRepository implements ILoomSubTaskHistoryRepo
     public Set<String> findAllUsernames() {
         Set<String> out = new HashSet<>();
         jdbc.query("SELECT DISTINCT username FROM " + TABLE_NAME,
-                (rs, rowNum) -> rs.getString(1))
+                        (rs, rowNum) -> rs.getString(1))
                 .forEach(out::add);
         return out;
     }
@@ -141,19 +153,5 @@ public class JdbcLoomSubTaskHistoryRepository implements ILoomSubTaskHistoryRepo
                 "DELETE FROM " + TABLE_NAME + " WHERE username = ? AND subtask_id = ?",
                 username, subTaskId);
         return n > 0;
-    }
-
-    private static SubTaskRegistry.SubTaskRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new SubTaskRegistry.SubTaskRecord(
-                rs.getString("subtask_id"),
-                rs.getString("username"),
-                rs.getString("conversation_id"),
-                rs.getString("prompt"),
-                cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.valueOf(rs.getString("status")),
-                rs.getLong("started_at"),
-                rs.getLong("finished_at"),
-                rs.getString("error_message"),
-                rs.getString("result_text"),
-                null);   // future 不持久化 —— 纯运行期对象
     }
 }

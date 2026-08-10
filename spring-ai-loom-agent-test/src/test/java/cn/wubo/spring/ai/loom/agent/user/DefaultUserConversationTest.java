@@ -31,14 +31,14 @@ class DefaultUserConversationTest {
         jdbc = new JdbcTemplate(ds);
         jdbc.execute("""
                 create table user_conversation (
-                    username varchar(64) not null,
-                    conversation_id varchar(64) not null,
-                    title varchar(255),
-                    deleted_at timestamp null,
-                    content_cleaned boolean not null default false,
-                    created_at timestamp not null default current_timestamp,
-                    updated_at timestamp not null default current_timestamp,
-                    primary key (username, conversation_id)
+                username varchar(64) not null,
+                conversation_id varchar(64) not null,
+                title varchar(255),
+                deleted_at timestamp null,
+                content_cleaned boolean not null default false,
+                created_at timestamp not null default current_timestamp,
+                updated_at timestamp not null default current_timestamp,
+                primary key (username, conversation_id)
                 )
                 """);
         conversations = new DefaultUserConversation(jdbc, mock(ChatMemory.class), mock(Cache.class));

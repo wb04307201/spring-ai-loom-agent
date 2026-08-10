@@ -39,7 +39,9 @@ public class DefaultScheduleTool implements IScheduleTool {
     private final ISubTaskExecutor subTaskExecutor;
     private final ILoomScheduleTriggerRepository loomScheduleTriggerRepository;
     private final ILoomScheduleExecutionRepository loomScheduleExecutionRepository;
-    /** Per-task execution history cap. Mirrors ScheduleExecutionProperties default. */
+    /**
+     * Per-task execution history cap. Mirrors ScheduleExecutionProperties default.
+     */
     private final int maxExecutionsPerTask;
 
     public DefaultScheduleTool(FlexScheduledTaskService flexService,
@@ -54,7 +56,9 @@ public class DefaultScheduleTool implements IScheduleTool {
         this.maxExecutionsPerTask = Math.max(10, maxExecutionsPerTask);
     }
 
-    /** Backward-compatible constructor for callers that haven't wired the execution repo yet. */
+    /**
+     * Backward-compatible constructor for callers that haven't wired the execution repo yet.
+     */
     public DefaultScheduleTool(FlexScheduledTaskService flexService,
                                ISubTaskExecutor subTaskExecutor,
                                ILoomScheduleTriggerRepository loomScheduleTriggerRepository) {
@@ -63,6 +67,65 @@ public class DefaultScheduleTool implements IScheduleTool {
 
     static String fullName(String username, String conversationId, String name) {
         return "loom-sched-" + username + "-" + conversationId + "-" + name;
+    }
+
+    /**
+     * Null-safe ToolContext string reader. Returns "" when the context is missing
+     * or the value isn't a String, so callers can treat absent keys uniformly.
+     */
+    private static String readContextString(ToolContext toolContext, String key) {
+        if (toolContext == null || toolContext.getContext() == null) return "";
+        Object v = toolContext.getContext().get(key);
+        return (v instanceof String s) ? s : "";
+    }
+
+    private static long parseLongOrZero(String expression) {
+        try {
+            return Long.parseLong(expression);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    /**
+     * Lenient seconds parser for the LLM-driven {@code expression} argument.
+     * Accepts plain integers ("10"), seconds suffix ("10s", "10S", "10secs"),
+     * Chinese seconds ("10秒", "10 秒"), and minutes ("1m", "5min", "5 分钟")
+     * converted to seconds. Anything else returns {@code -1} so the caller can
+     * surface a friendly `[定时失败] expression 格式不对` instead of NFE.
+     */
+    private static long parseSeconds(String expression) {
+        if (expression == null) return -1L;
+        String s = expression.trim().toLowerCase()
+                .replace(" ", "")
+                .replace("秒钟", "s") // Chinese compound "秒钟" handled first
+                .replace("秒", "s")
+                .replace("secs", "s")
+                .replace("sec", "s")
+                // Chinese time units → shorthand. Order matters: longest first
+                // so "分钟" matches before "分" and "分钟" before "秒" already
+                // happened above.
+                .replace("分钟", "m")
+                .replace("分", "m")
+                .replace("minutes", "m")
+                .replace("minute", "m")
+                .replace("mins", "m")
+                .replace("min", "m");
+        // "10m" / "5min" → minutes
+        if (s.endsWith("m")) {
+            String num = s.substring(0, s.length() - 1);
+            try {
+                return Long.parseLong(num) * 60;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        // "10s" or "10" → seconds
+        if (s.endsWith("s")) s = s.substring(0, s.length() - 1);
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 
     @Override
@@ -98,7 +161,9 @@ public class DefaultScheduleTool implements IScheduleTool {
                 case "one_shot" -> flexService.task(full)
                         .oneShot(Duration.ofSeconds(parseSeconds(expression)))
                         .register(() -> runAsSubTask(full, username, convId, prompt));
-                default -> { return "[定时失败] 不支持的类型: " + scheduleType; }
+                default -> {
+                    return "[定时失败] 不支持的类型: " + scheduleType;
+                }
             }
             persistAfterRegister(full, name, scheduleType, expression, prompt, username, convId);
             return "[定时已创建] " + name + " (" + scheduleType + ": " + expression + ")";
@@ -132,7 +197,7 @@ public class DefaultScheduleTool implements IScheduleTool {
                 scheduleType,
                 "cron".equals(scheduleType) ? expression : null,
                 ("fixed_delay".equals(scheduleType) || "fixed_rate".equals(scheduleType)) ? nowSec : null,
-                null,   // initialDelaySeconds (preserved for future extension)
+                null, // initialDelaySeconds (preserved for future extension)
                 "one_shot".equals(scheduleType) ? nowSec : null,
                 prompt,
                 username,
@@ -150,62 +215,6 @@ public class DefaultScheduleTool implements IScheduleTool {
                 log.warn("注册回滚 cancel 也失败: full={}", full, cancelErr);
             }
             throw e;
-        }
-    }
-
-    /**
-     * Null-safe ToolContext string reader. Returns "" when the context is missing
-     * or the value isn't a String, so callers can treat absent keys uniformly.
-     */
-    private static String readContextString(ToolContext toolContext, String key) {
-        if (toolContext == null || toolContext.getContext() == null) return "";
-        Object v = toolContext.getContext().get(key);
-        return (v instanceof String s) ? s : "";
-    }
-
-    private static long parseLongOrZero(String expression) {
-        try {
-            return Long.parseLong(expression);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
-    }
-
-    /**
-     * Lenient seconds parser for the LLM-driven {@code expression} argument.
-     * Accepts plain integers ("10"), seconds suffix ("10s", "10S", "10secs"),
-     * Chinese seconds ("10秒", "10 秒"), and minutes ("1m", "5min", "5 分钟")
-     * converted to seconds. Anything else returns {@code -1} so the caller can
-     * surface a friendly `[定时失败] expression 格式不对` instead of NFE.
-     */
-    private static long parseSeconds(String expression) {
-        if (expression == null) return -1L;
-        String s = expression.trim().toLowerCase()
-                .replace(" ", "")
-                .replace("秒钟", "s")    // Chinese compound "秒钟" handled first
-                .replace("秒", "s")
-                .replace("secs", "s")
-                .replace("sec", "s")
-                // Chinese time units → shorthand. Order matters: longest first
-                // so "分钟" matches before "分" and "分钟" before "秒" already
-                // happened above.
-                .replace("分钟", "m")
-                .replace("分", "m")
-                .replace("minutes", "m")
-                .replace("minute", "m")
-                .replace("mins", "m")
-                .replace("min", "m");
-        // "10m" / "5min" → minutes
-        if (s.endsWith("m")) {
-            String num = s.substring(0, s.length() - 1);
-            try { return Long.parseLong(num) * 60; } catch (NumberFormatException ignored) {}
-        }
-        // "10s" or "10" → seconds
-        if (s.endsWith("s")) s = s.substring(0, s.length() - 1);
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return -1L;
         }
     }
 
@@ -252,7 +261,7 @@ public class DefaultScheduleTool implements IScheduleTool {
      * LLM-tool / createSchedule path — every fire, success or failure.
      */
     private void recordExecution(String taskName, Instant fireTime, long durationMs,
-                                  boolean success, String errorMessage) {
+                                 boolean success, String errorMessage) {
         if (loomScheduleExecutionRepository == null) return;
         try {
             loomScheduleExecutionRepository.save(new LoomScheduleExecutionRecord(

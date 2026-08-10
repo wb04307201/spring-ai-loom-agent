@@ -11,7 +11,10 @@ import org.springframework.ai.chat.model.ToolContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +55,19 @@ class DefaultFileToolTest {
     private String username;
     private LoomAgentProperties.FileToolProperty cfg;
 
+    private static ToolContext ctx(String username) {
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("username", username);
+        return new ToolContext(ctx);
+    }
+
+    private static ToolContext ctxWithBaseUrl(String username, String baseUrl) {
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("username", username);
+        ctx.put("baseUrl", baseUrl);
+        return new ToolContext(ctx);
+    }
+
     @BeforeEach
     void setUp() throws IOException {
         fileService = mock(IFile.class);
@@ -88,19 +104,6 @@ class DefaultFileToolTest {
                 }
             });
         }
-    }
-
-    private static ToolContext ctx(String username) {
-        Map<String, Object> ctx = new HashMap<>();
-        ctx.put("username", username);
-        return new ToolContext(ctx);
-    }
-
-    private static ToolContext ctxWithBaseUrl(String username, String baseUrl) {
-        Map<String, Object> ctx = new HashMap<>();
-        ctx.put("username", username);
-        ctx.put("baseUrl", baseUrl);
-        return new ToolContext(ctx);
     }
 
     // ==================== 读写 ====================

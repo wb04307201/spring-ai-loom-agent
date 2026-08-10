@@ -27,6 +27,16 @@ public class DefaultSubTaskTool implements ISubTaskTool {
         this.registry = registry;
     }
 
+    /**
+     * Reads a string value from {@code ToolContext.getContext()}, returning the
+     * supplied fallback if the context is null, missing, or non-String.
+     */
+    private static String readContextString(ToolContext toolContext, String key) {
+        if (toolContext == null || toolContext.getContext() == null) return "";
+        Object value = toolContext.getContext().get(key);
+        return (value instanceof String s) ? s : "";
+    }
+
     @Tool(description = "把一段任务委派给一个'子模型'去执行。子任务拥有与主对话相同的"
             + "工具访问(文件/MCP/Skill/时间等),但不能再次启动子任务或创建定时器。"
             + "主对话会同步等待子任务完成,然后拿到最终文本。")
@@ -69,7 +79,7 @@ public class DefaultSubTaskTool implements ISubTaskTool {
             // leaving the active record stuck.
             result = (raw != null) ? raw
                     : SubTaskResult.failed(req, 0L, System.currentTimeMillis(),
-                            "Executor 返回 null 结果");
+                    "Executor 返回 null 结果");
         } catch (Exception e) {
             log.error("子任务异常: id={}", subTaskId, e);
             result = SubTaskResult.failed(req, 0L, System.currentTimeMillis(),
@@ -177,20 +187,10 @@ public class DefaultSubTaskTool implements ISubTaskTool {
         return sb.toString();
     }
 
-    /**
-     * Reads a string value from {@code ToolContext.getContext()}, returning the
-     * supplied fallback if the context is null, missing, or non-String.
-     */
-    private static String readContextString(ToolContext toolContext, String key) {
-        if (toolContext == null || toolContext.getContext() == null) return "";
-        Object value = toolContext.getContext().get(key);
-        return (value instanceof String s) ? s : "";
-    }
-
     private String formatForMainConversation(SubTaskResult r) {
         return switch (r.status()) {
             case COMPLETED -> "[子任务已完成 conv=%s] %s".formatted(r.conversationId(), r.text());
-            case FAILED    -> "[子任务失败 conv=%s] %s".formatted(r.conversationId(), r.errorMessage());
+            case FAILED -> "[子任务失败 conv=%s] %s".formatted(r.conversationId(), r.errorMessage());
             case CANCELLED -> "[子任务已取消 conv=%s] 用户手动取消".formatted(r.conversationId());
             default -> "[子任务状态异常] " + r.status();
         };

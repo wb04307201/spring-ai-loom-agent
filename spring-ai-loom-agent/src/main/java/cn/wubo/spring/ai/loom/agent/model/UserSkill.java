@@ -15,7 +15,6 @@ public record UserSkill(
         String content,
         String source,
         Long marketSkillId,
-        String marketVersion,
         boolean defaultLoaded,
         boolean locked,
         LocalDateTime createdAt,

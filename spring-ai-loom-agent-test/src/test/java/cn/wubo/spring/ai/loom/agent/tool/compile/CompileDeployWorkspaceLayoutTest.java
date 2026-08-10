@@ -70,7 +70,7 @@ class CompileDeployWorkspaceLayoutTest {
         assertThat(cnResult.toString().length()).isEqualTo(3);
         // Empty / null collapse to the safe default.
         assertThat(sanitize.invoke(null, "")).isEqualTo("anonymous");
-        assertThat(sanitize.invoke(null, "   ")).isEqualTo("anonymous");
+        assertThat(sanitize.invoke(null, " ")).isEqualTo("anonymous");
         assertThat(sanitize.invoke(null, (Object) null)).isEqualTo("anonymous");
     }
 }

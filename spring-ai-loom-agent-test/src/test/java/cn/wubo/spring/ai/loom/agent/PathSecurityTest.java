@@ -21,16 +21,6 @@ class PathSecurityTest {
     private DefaultGitTool tool;
     private Map<String, Object> context;
 
-    @BeforeEach
-    void setUp() {
-        LoomAgentProperties props = new LoomAgentProperties();
-        props.setFileBasePath(".local/file");
-        props.setGitUsername("testuser");
-        tool = new DefaultGitTool(props);
-        context = new HashMap<>();
-        context.put("username", "testuser");
-    }
-
     private static org.springframework.ai.chat.model.ToolContext tc(Map<String, Object> ctx) {
         return new org.springframework.ai.chat.model.ToolContext(ctx);
     }
@@ -50,6 +40,16 @@ class PathSecurityTest {
         } catch (Exception e) {
             throw new AssertionError("Unexpected exception: " + e, e);
         }
+    }
+
+    @BeforeEach
+    void setUp() {
+        LoomAgentProperties props = new LoomAgentProperties();
+        props.setFileBasePath(".local/file");
+        props.setGitUsername("testuser");
+        tool = new DefaultGitTool(props);
+        context = new HashMap<>();
+        context.put("username", "testuser");
     }
 
     /**

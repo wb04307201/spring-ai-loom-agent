@@ -10,16 +10,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link PathSecurityUtils} 单元测试
  * <p>
  * 覆盖三类越权：
  * <ol>
- *   <li>.. 路径穿越</li>
- *   <li>symlink 越界（需要 OS 支持 symlink；Windows 默认需要 SeCreateSymbolicLinkPrivilege）</li>
- *   <li>大小写不敏感文件系统的 size-bypass（Windows/macOS）</li>
+ * <li>.. 路径穿越</li>
+ * <li>symlink 越界（需要 OS 支持 symlink；Windows 默认需要 SeCreateSymbolicLinkPrivilege）</li>
+ * <li>大小写不敏感文件系统的 size-bypass（Windows/macOS）</li>
  * </ol>
  */
 @DisplayName("PathSecurityUtils 单元测试")
@@ -44,6 +45,7 @@ class PathSecurityUtilsTest {
                     Files.delete(file);
                     return java.nio.file.FileVisitResult.CONTINUE;
                 }
+
                 @Override
                 public java.nio.file.FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
                     Files.delete(dir);

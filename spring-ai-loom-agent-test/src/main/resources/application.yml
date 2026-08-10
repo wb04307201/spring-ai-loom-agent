@@ -34,17 +34,21 @@ spring:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY}
       chat:
-        enabled: false  # 禁用 DashScope ChatModel，只用 Anthropic
+#        enabled: false  # 禁用 DashScope ChatModel，只用 Anthropic
+        options:
+          model: qwen3.8-max
+          multi_model: true
+          enable_thinking: true
       embedding:
         options:
           model: text-embedding-v4
-    anthropic:
-      api-key: ${NEW_API_KEY}
-      base-url: http://123.56.128.32:3000
-      chat:
-        options:
-          model: qwen3.7-plus
-    #    ollama:
+#    anthropic:
+#      api-key: ${NEW_API_KEY}
+#      base-url: http://123.56.128.32:3000
+#      chat:
+#        options:
+#          model: qwen3.7-plus
+#    ollama:
 #      chat:
 #        options:
 #          model: qwen3

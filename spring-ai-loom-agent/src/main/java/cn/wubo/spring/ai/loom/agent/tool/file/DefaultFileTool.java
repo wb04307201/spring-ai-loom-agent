@@ -25,10 +25,10 @@ import java.util.UUID;
  * <p>
  * 核心文件操作委托给 {@link FileOperations}，本类负责：
  * <ul>
- *   <li>从 ToolContext 获取 username</li>
- *   <li>拼接 basePath = fileBasePath + username</li>
- *   <li>预览/下载链接生成（依赖 IFile 数据库操作）</li>
- *   <li>删除后清理 file_info 表中的临时记录</li>
+ * <li>从 ToolContext 获取 username</li>
+ * <li>拼接 basePath = fileBasePath + username</li>
+ * <li>预览/下载链接生成（依赖 IFile 数据库操作）</li>
+ * <li>删除后清理 file_info 表中的临时记录</li>
  * </ul>
  */
 public class DefaultFileTool implements IFileTool {

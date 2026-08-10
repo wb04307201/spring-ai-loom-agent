@@ -27,8 +27,8 @@ class ScheduleExecutionCleanupTest {
     void setUp() {
         repo = mock(ILoomScheduleExecutionRepository.class);
         ScheduleExecutionProperties props = new ScheduleExecutionProperties();
-        props.setRetention(Duration.ofDays(30));     // explicit so we know cutoff
-        props.setCleanupCron("0 0 3 * * *");          // 03:00 every day — not exercised here
+        props.setRetention(Duration.ofDays(30)); // explicit so we know cutoff
+        props.setCleanupCron("0 0 3 * * *"); // 03:00 every day — not exercised here
         cleanup = new ScheduleExecutionCleanup(repo, props);
     }
 
@@ -41,7 +41,7 @@ class ScheduleExecutionCleanupTest {
         Instant afterCall = Instant.now();
 
         // Capture and validate the cutoff is in the expected window:
-        //   [beforeCall - retention, afterCall - retention]
+        // [beforeCall - retention, afterCall - retention]
         ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
         verify(repo).deleteOlderThan(cutoff.capture());
         Instant observed = cutoff.getValue();

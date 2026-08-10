@@ -18,7 +18,9 @@ public class LoomAgentRuntimeException extends RuntimeException {
         this.statusCode = statusCode;
     }
 
-    /** Optional explicit HTTP status code associated with this exception. */
+    /**
+     * Optional explicit HTTP status code associated with this exception.
+     */
     public Integer getStatusCode() {
         return statusCode;
     }

@@ -1,4 +1,24 @@
-/* admin console 专属样式（其他复用 style.css） */
+/* admin console 专属样式（其他复用 style.css）
+ *
+ * 模态宽度约定：
+ *   .modal-sm   440px  — 确认对话框
+ *   .modal-md   480px  — 简单表单（1-2 字段）
+ *   .modal-lg   720px  — 列表 / 多字段
+ *   .modal-xl   800px  — 详情编辑
+ *
+ * 按钮约定：
+ *   .primary-btn    — 蓝色填充（主操作：保存 / 创建 / 通过）
+ *   .secondary-btn  — 灰底白边（次操作：刷新 / 取消 / 编辑）
+ *   .delete-btn / .danger-btn — 红边框白底（删除 / 拒绝）
+ *   .danger-solid   — 红底白字（确认对话框的「确定」红底按钮）
+ *   .btn-sm         — 表格行内按钮（4-12px padding / 12px font-size）
+ *
+ * 表格约定：
+ *   .user-table     — 所有 admin 列表页统一表
+ *
+ * 提示横幅：
+ *   .info-banner    — 蓝色说明性 banner
+ */
 
 * { box-sizing: border-box; }
 
@@ -7,6 +27,31 @@ body {
     background: var(--bg-secondary, #f8fafc);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
+
+/* ===== 通用：信息横幅 ===== */
+.info-banner {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e40af;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
+/* ===== 通用：按钮小尺寸（表格行内） ===== */
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+/* ===== 通用：危险动作实心按钮（确认对话框的「确定」红底） ===== */
+.danger-solid {
+    background: var(--error-color, #ef4444);
+    border-color: var(--error-color, #ef4444);
+}
+.danger-solid:hover { background: #dc2626; border-color: #dc2626; }
 
 /* ===== 布局：5 个列表页（带侧边栏）+ 2 个详情页（满宽）===== */
 
@@ -193,20 +238,31 @@ body {
     background: var(--bg-primary, #fff);
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-    overflow: hidden;
+    overflow: auto;  /* V5.4：横/纵都滚动而不是撑爆 */
+    max-height: 70vh;  /* V5.4：限制高度 + 内部滚动，长列表不撑页面 */
 }
 
 table.user-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
+    table-layout: auto;  /* 表格列宽根据内容自适应 */
+    min-width: 600px;  /* 防止小屏被压太扁触发横向滚动 */
 }
 
 .user-table th, .user-table td {
-    padding: 12px 16px;
+    padding: 6px 12px;  /* V5.4 12 → 6 紧凑：长列表一屏多看几行 */
     text-align: left;
     border-bottom: 1px solid var(--border-color, #e2e8f0);
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;  /* 14 → 13 略小 */
 }
+
+.user-table td:nth-child(2) { max-width: 400px; }  /* preview 列放宽点 */
+.user-table td:nth-child(1) a { font-family: ui-monospace, monospace; }  /* 会话 ID 等宽字体 */
 
 .user-table th {
     background: #f8fafc;
@@ -239,17 +295,30 @@ table.user-table {
 }
 
 .delete-btn {
-    padding: 4px 12px;
+    padding: 8px 16px;
     background: transparent;
     color: var(--error-color, #ef4444);
     border: 1px solid var(--error-color, #ef4444);
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: 6px;
+    font-size: 13px;
     cursor: pointer;
     transition: all 0.15s;
 }
 
 .delete-btn:hover { background: var(--error-color, #ef4444); color: white; }
+
+/* 知识库市场等场景用的 .danger-btn 尺寸与 .secondary-btn 保持一致（仅颜色不同） */
+.danger-btn {
+    padding: 8px 16px;
+    background: transparent;
+    color: var(--error-color, #ef4444);
+    border: 1px solid var(--error-color, #ef4444);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.danger-btn:hover { background: var(--error-color, #ef4444); color: white; }
 
 .user-link {
     color: var(--primary-color, #6366f1);
@@ -340,6 +409,8 @@ table.user-table {
     align-items: center;
     gap: 12px;
     font-size: 12px;
+    text-decoration: none;  /* V5.4：bar-row 包了 <a>，去掉下划线 */
+    color: inherit;
 }
 
 .bar-label {
@@ -528,3 +599,173 @@ table.user-table {
 .toast.error { border-left: 4px solid var(--error-color, #ef4444); }
 
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+
+/* ===== V4.0：会话全量对话流（conversation.html） ===== */
+
+.conv-meta-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.conv-meta-table th,
+.conv-meta-table td {
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+.conv-meta-table th {
+    width: 120px;
+    color: var(--text-muted, #94a3b8);
+    font-weight: 500;
+}
+
+.conv-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.conv-filter-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+    cursor: pointer;
+}
+.conv-search {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 4px;
+    font-size: 13px;
+    width: 200px;
+    background: var(--bg-primary, #fff);
+}
+
+.flow-container {
+    margin-top: 12px;
+    background: var(--bg-primary, #fff);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    padding: 12px 8px;
+    max-height: 80vh;  /* V5.4 70 → 80vh 多 10% 可视 */
+    overflow-y: auto;
+}
+
+/* V5.4 紧凑模式：彻底改块布局，去掉 icon/time/type 列，content 占满宽
+   - grid → block，content 单列铺开
+   - V5.4 P6 移除"紧凑"和"全屏"按钮（元数据/统计已默认折叠进 details，
+   - 事件流区默认 75vh，无需"全屏"再隐藏 meta） */
+
+/* V5.4 P7：轮次分隔标记（"─── 第 N 轮 ───"） */
+.flow-round-divider {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted, #64748b);
+    padding: 12px 0 6px 0;
+    margin: 6px 0 2px 0;
+    border-top: 1px dashed var(--border-color, #e2e8f0);
+    letter-spacing: 0.05em;
+    user-select: none;
+}
+
+/* V5.4 P7：SCHEDULE_FIRE 紫色（区别于 SUBTASK 的橙色） */
+.flow-event-SCHEDULE_FIRE { border-left: 3px solid #a855f7; padding-left: 5px; }
+.flow-event-SCHEDULE_FIRE .flow-type { background: #f3e8ff; color: #6b21a8; }
+
+.flow-event {
+    display: grid;
+    grid-template-columns: 28px 120px 70px 1fr;
+    gap: 8px;
+    padding: 8px 6px;  /* V5.4 紧凑 12 → 8 */
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+    align-items: start;
+    font-size: 13px;
+}
+.flow-event:last-child { border-bottom: none; }
+.flow-event:hover { background: #f8fafc; }
+
+.flow-icon { font-size: 16px; line-height: 1.4; text-align: center; }
+.flow-time { color: var(--text-muted, #94a3b8); font-size: 12px; font-family: ui-monospace, monospace; padding-top: 2px; }
+.flow-type {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-muted, #64748b);
+    text-align: center;
+    align-self: start;
+    font-family: ui-monospace, monospace;
+}
+.flow-body { min-width: 0; }
+.flow-content {
+    color: var(--text-primary, #1e293b);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-bottom: 4px;
+}
+.flow-event-name { color: var(--text-primary, #1e293b); font-weight: 500; margin-bottom: 2px; }
+.flow-meta { color: var(--text-muted, #94a3b8); font-size: 11px; font-family: ui-monospace, monospace; margin-top: 2px; }
+.flow-thinking, .flow-args, .flow-result, .flow-prompt, .flow-error {
+    margin-top: 6px;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 4px;
+    padding: 6px 10px;
+    background: var(--bg-secondary, #f8fafc);
+    font-size: 12px;
+}
+.flow-thinking summary, .flow-args summary, .flow-result summary, .flow-prompt summary, .flow-error summary {
+    cursor: pointer;
+    color: var(--text-muted, #94a3b8);
+    font-weight: 500;
+}
+.flow-thinking pre, .flow-args pre, .flow-result pre, .flow-prompt pre, .flow-error pre {
+    margin: 6px 0 0 0;
+    padding: 8px;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 3px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: ui-monospace, monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* 类型着色：背景色块 + 左边框 */
+.flow-event-USER { border-left: 3px solid #94a3b8; padding-left: 5px; }
+.flow-event-ASSISTANT { border-left: 3px solid #3b82f6; padding-left: 5px; }
+.flow-event-ASSISTANT .flow-type { background: #dbeafe; color: #1e40af; }
+.flow-event-TOOL_CALL { border-left: 3px solid #8b5cf6; padding-left: 5px; }
+.flow-event-TOOL_CALL .flow-type { background: #ede9fe; color: #5b21b6; }
+
+/* V5.4：搜索关键词高亮 + Markdown 渲染样式 */
+.flow-search-hit { background: #fef08a; color: #92400e; padding: 0 2px; border-radius: 2px; }
+.flow-markdown { line-height: 1.6; }
+.flow-markdown h1, .flow-markdown h2, .flow-markdown h3 { margin: 0.5em 0 0.3em; font-weight: 600; }
+.flow-markdown h1 { font-size: 1.3em; }
+.flow-markdown h2 { font-size: 1.15em; }
+.flow-markdown h3 { font-size: 1em; }
+.flow-markdown p { margin: 0.4em 0; }
+.flow-markdown ul, .flow-markdown ol { margin: 0.4em 0; padding-left: 1.5em; }
+.flow-markdown li { margin: 0.15em 0; }
+.flow-markdown code { background: #f1f5f9; color: #db2777; padding: 1px 4px; border-radius: 3px; font-size: 0.92em; }
+.flow-markdown pre { background: #1e293b; color: #e2e8f0; padding: 8px 12px; border-radius: 4px; overflow-x: auto; margin: 0.5em 0; }
+.flow-markdown pre code { background: transparent; color: inherit; padding: 0; }
+.flow-markdown blockquote { border-left: 3px solid #cbd5e1; padding-left: 12px; color: #64748b; margin: 0.5em 0; }
+.flow-markdown table { border-collapse: collapse; margin: 0.5em 0; }
+.flow-markdown th, .flow-markdown td { border: 1px solid var(--border-color, #e2e8f0); padding: 4px 8px; }
+.flow-event-TOOL_RESULT { border-left: 3px solid #10b981; padding-left: 5px; }
+.flow-event-TOOL_RESULT .flow-type { background: #d1fae5; color: #065f46; }
+.flow-event-SUBTASK { border-left: 3px solid #f59e0b; padding-left: 5px; }
+.flow-event-SUBTASK .flow-type { background: #fef3c7; color: #92400e; }
+.flow-event-SCHEDULE { border-left: 3px solid #eab308; padding-left: 5px; }
+.flow-event-SCHEDULE .flow-type { background: #fef9c3; color: #854d0e; }
+/* V5.4 P3：SYSTEM 事件 — 系统提示词，紫色调区分 */
+.flow-event-SYSTEM { border-left: 3px solid #6366f1; padding-left: 5px; background: #f5f3ff; border-radius: 4px; }
+.flow-event-SYSTEM .flow-type { background: #e0e7ff; color: #3730a3; }
+.flow-event-SYSTEM .flow-system { margin-top: 4px; }
+.flow-event-SYSTEM .flow-system summary { cursor: pointer; color: var(--primary, #6366f1); font-weight: 500; padding: 4px 0; }

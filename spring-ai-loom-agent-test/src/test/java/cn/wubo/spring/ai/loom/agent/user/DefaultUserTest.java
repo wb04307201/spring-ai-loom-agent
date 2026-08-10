@@ -37,11 +37,11 @@ class DefaultUserTest {
         jdbc = new JdbcTemplate(ds);
         jdbc.execute("""
                 create table user_info (
-                    id bigint auto_increment primary key,
-                    username varchar(64) not null unique,
-                    nickname varchar(64) not null,
-                    password varchar(255) not null,
-                    type varchar(20) not null
+                id bigint auto_increment primary key,
+                username varchar(64) not null unique,
+                nickname varchar(64) not null,
+                password varchar(255) not null,
+                type varchar(20) not null
                 )
                 """);
         Cache cache = new ConcurrentMapCache("sessions");

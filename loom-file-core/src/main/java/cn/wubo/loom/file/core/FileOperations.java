@@ -20,46 +20,17 @@ import java.util.stream.Stream;
  * <p>
  * 关键约束（通过 {@link Config} 配置）：
  * <ul>
- *   <li>读 / 写 / 编辑受 {@code maxFileSize} 限制</li>
- *   <li>媒体文件受 {@code maxMediaSize} 限制</li>
- *   <li>递归遍历受 {@code maxWalkDepth} / {@code maxWalkEntries} / {@code excludedDirs} 限制</li>
- *   <li>{@code searchFiles} 受 {@code maxSearchResults} 限制</li>
- *   <li>{@code delete} 需要显式传入 {@code deleteConfirmToken}</li>
- *   <li>路径解析 + symlink 防御统一委托给 {@link PathSecurityUtils}</li>
+ * <li>读 / 写 / 编辑受 {@code maxFileSize} 限制</li>
+ * <li>媒体文件受 {@code maxMediaSize} 限制</li>
+ * <li>递归遍历受 {@code maxWalkDepth} / {@code maxWalkEntries} / {@code excludedDirs} 限制</li>
+ * <li>{@code searchFiles} 受 {@code maxSearchResults} 限制</li>
+ * <li>{@code delete} 需要显式传入 {@code deleteConfirmToken}</li>
+ * <li>路径解析 + symlink 防御统一委托给 {@link PathSecurityUtils}</li>
  * </ul>
  */
 public class FileOperations {
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-    /**
-     * 配置类，定义文件操作的各种限制。
-     */
-    public record Config(
-            long maxFileSize,
-            long maxMediaSize,
-            int maxWalkDepth,
-            int maxWalkEntries,
-            int maxSearchResults,
-            Set<String> excludedDirs,
-            String deleteConfirmToken
-    ) {
-        /**
-         * 默认配置。
-         */
-        public static Config defaults() {
-            return new Config(
-                    10 * 1024 * 1024,      // 10 MB
-                    50 * 1024 * 1024,      // 50 MB
-                    5,                     // maxWalkDepth
-                    1000,                  // maxWalkEntries
-                    100,                   // maxSearchResults
-                    Set.of(".git", "node_modules", ".idea", "target", ".vscode"),
-                    "I_CONFIRM_DELETE"
-            );
-        }
-    }
-
     private final Config cfg;
 
     public FileOperations(Config cfg) {
@@ -70,7 +41,73 @@ public class FileOperations {
         this(Config.defaults());
     }
 
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                case '\b':
+                    sb.append("\\b");
+                    break;
+                case '\f':
+                    sb.append("\\f");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
+    }
+
     // ==================== Read operations ====================
+
+    private static String formatSize(long size) {
+        if (size < 1024) return size + " B";
+        if (size < 1024 * 1024) return String.format("%.1f KB", size / 1024.0);
+        if (size < 1024 * 1024 * 1024) return String.format("%.1f MB", size / (1024.0 * 1024));
+        return String.format("%.1f GB", size / (1024.0 * 1024 * 1024));
+    }
+
+    private static String formatInstant(Instant instant) {
+        return instant.atZone(ZoneId.systemDefault()).format(DTF);
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    // ==================== Write / Edit operations ====================
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) != -1) {
+            count++;
+            idx += needle.length();
+        }
+        return count;
+    }
 
     /**
      * 读取文本文件。
@@ -115,6 +152,8 @@ public class FileOperations {
         }
     }
 
+    // ==================== Directory operations ====================
+
     /**
      * 读取媒体文件（图片/音频），返回 base64 编码。
      *
@@ -151,6 +190,8 @@ public class FileOperations {
             return "读取媒体文件失败：" + e.getMessage();
         }
     }
+
+    // ==================== Move operation ====================
 
     /**
      * 批量读取多个文件。
@@ -200,7 +241,7 @@ public class FileOperations {
         return sb.toString();
     }
 
-    // ==================== Write / Edit operations ====================
+    // ==================== Search ====================
 
     /**
      * 写入文件（覆盖或新建）。
@@ -247,6 +288,8 @@ public class FileOperations {
             return "写入文件失败：" + e.getMessage();
         }
     }
+
+    // ==================== List directories ====================
 
     /**
      * 编辑文件（基于文本替换）。
@@ -337,8 +380,6 @@ public class FileOperations {
         }
     }
 
-    // ==================== Directory operations ====================
-
     /**
      * 创建目录。
      *
@@ -366,8 +407,6 @@ public class FileOperations {
             return "创建目录失败：" + e.getMessage();
         }
     }
-
-    // ==================== Move operation ====================
 
     /**
      * 移动或重命名文件。
@@ -406,8 +445,6 @@ public class FileOperations {
             return "移动文件失败：" + e.getMessage();
         }
     }
-
-    // ==================== Search ====================
 
     /**
      * 搜索文件。
@@ -483,8 +520,6 @@ public class FileOperations {
         }
     }
 
-    // ==================== List directories ====================
-
     /**
      * 获取基础目录的绝对路径。
      *
@@ -504,6 +539,8 @@ public class FileOperations {
                 "例如：readText 的 path 参数 'notes/todo.txt' 实际读取 '" + example + "'。\n" +
                 "⚠️ 必须使用上面返回的精确绝对路径，不要用字符串拼接 / 路径替换重新构造。";
     }
+
+    // ==================== Delete ====================
 
     /**
      * 列出目录内容。
@@ -542,6 +579,8 @@ public class FileOperations {
         }
     }
 
+    // ==================== Path resolution helpers ====================
+
     /**
      * 列出目录内容及大小。
      *
@@ -570,7 +609,7 @@ public class FileOperations {
                 for (Path item : items) {
                     String name = item.getFileName().toString();
                     if (Files.isDirectory(item)) {
-                        sb.append("[DIR]  ").append(name).append("\n");
+                        sb.append("[DIR] ").append(name).append("\n");
                     } else {
                         long size = Files.size(item);
                         sb.append("[FILE] ").append(name).append(" (").append(formatSize(size)).append(")\n");
@@ -666,14 +705,14 @@ public class FileOperations {
         }
     }
 
-    // ==================== Delete ====================
+    // ==================== Display helpers ====================
 
     /**
      * 删除文件或目录（递归）。
      *
-     * @param basePath      基础目录
-     * @param path          相对路径
-     * @param confirmToken  确认令牌
+     * @param basePath     基础目录
+     * @param path         相对路径
+     * @param confirmToken 确认令牌
      * @return 操作结果
      */
     public String delete(Path basePath, String path, String confirmToken) {
@@ -718,8 +757,6 @@ public class FileOperations {
         }
     }
 
-    // ==================== Path resolution helpers ====================
-
     /**
      * 用于读 / 删 / 查：路径必须存在，调用 PathSecurityUtils 做 symlink 跟链。
      */
@@ -752,8 +789,6 @@ public class FileOperations {
         return basePath.resolve(normalized).toAbsolutePath().normalize();
     }
 
-    // ==================== Display helpers ====================
-
     /**
      * 递归列目录。返回被截断的条目数。
      */
@@ -775,10 +810,10 @@ public class FileOperations {
                     continue;
                 }
                 if (Files.isDirectory(item)) {
-                    sb.append(indent).append("[DIR]  ").append(name).append("\n");
+                    sb.append(indent).append("[DIR] ").append(name).append("\n");
                     counters[0]++;
                     if (depth > 1) {
-                        truncated += listDirRecursive(item, indent + "  ", depth - 1, sb, counters);
+                        truncated += listDirRecursive(item, indent + " ", depth - 1, sb, counters);
                     }
                 } else {
                     long size = Files.size(item);
@@ -837,8 +872,8 @@ public class FileOperations {
 
     private String toJson(Map<String, Object> map, int indent) {
         StringBuilder sb = new StringBuilder();
-        String pad = "  ".repeat(indent);
-        String childPad = "  ".repeat(indent + 1);
+        String pad = " ".repeat(indent);
+        String childPad = " ".repeat(indent + 1);
         sb.append("{\n");
         int i = 0;
         for (var entry : map.entrySet()) {
@@ -867,8 +902,8 @@ public class FileOperations {
 
     private String toJsonList(List<?> list, int indent) {
         StringBuilder sb = new StringBuilder();
-        String pad = "  ".repeat(indent);
-        String childPad = "  ".repeat(indent + 1);
+        String pad = " ".repeat(indent);
+        String childPad = " ".repeat(indent + 1);
         sb.append("[\n");
         for (int i = 0; i < list.size(); i++) {
             sb.append(childPad);
@@ -891,53 +926,31 @@ public class FileOperations {
         return sb.toString();
     }
 
-    private static String escapeJson(String s) {
-        if (s == null) return "";
-        StringBuilder sb = new StringBuilder(s.length() + 8);
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"': sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\n': sb.append("\\n"); break;
-                case '\r': sb.append("\\r"); break;
-                case '\t': sb.append("\\t"); break;
-                case '\b': sb.append("\\b"); break;
-                case '\f': sb.append("\\f"); break;
-                default:
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-            }
+    /**
+     * 配置类，定义文件操作的各种限制。
+     */
+    public record Config(
+            long maxFileSize,
+            long maxMediaSize,
+            int maxWalkDepth,
+            int maxWalkEntries,
+            int maxSearchResults,
+            Set<String> excludedDirs,
+            String deleteConfirmToken
+    ) {
+        /**
+         * 默认配置。
+         */
+        public static Config defaults() {
+            return new Config(
+                    10 * 1024 * 1024, // 10 MB
+                    50 * 1024 * 1024, // 50 MB
+                    5, // maxWalkDepth
+                    1000, // maxWalkEntries
+                    100, // maxSearchResults
+                    Set.of(".git", "node_modules", ".idea", "target", ".vscode"),
+                    "I_CONFIRM_DELETE"
+            );
         }
-        return sb.toString();
-    }
-
-    private static String formatSize(long size) {
-        if (size < 1024) return size + " B";
-        if (size < 1024 * 1024) return String.format("%.1f KB", size / 1024.0);
-        if (size < 1024 * 1024 * 1024) return String.format("%.1f MB", size / (1024.0 * 1024));
-        return String.format("%.1f GB", size / (1024.0 * 1024 * 1024));
-    }
-
-    private static String formatInstant(Instant instant) {
-        return instant.atZone(ZoneId.systemDefault()).format(DTF);
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
-    }
-
-    private static int countOccurrences(String haystack, String needle) {
-        int count = 0;
-        int idx = 0;
-        while ((idx = haystack.indexOf(needle, idx)) != -1) {
-            count++;
-            idx += needle.length();
-        }
-        return count;
     }
 }

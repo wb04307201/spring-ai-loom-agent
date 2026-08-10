@@ -10,17 +10,17 @@
 
 ```json
 {
-  "mcpServers": {
-    "loom-compile-mcp": {
-      "command": "jbang",
-      "args": [
-        "io.github.wb04307201:loom-compile-mcp:1.0-SNAPSHOT",
-        "--loom.compile.mcp.basePath=/workspace",
-        "--loom.compile.mcp.mavenHome=/opt/maven",
-        "--loom.compile.mcp.mavenTimeoutMs=600000"
-      ]
-    }
-  }
+ "mcpServers": {
+ "loom-compile-mcp": {
+ "command": "jbang",
+ "args": [
+ "io.github.wb04307201:loom-compile-mcp:1.0-SNAPSHOT",
+ "--loom.compile.mcp.basePath=/workspace",
+ "--loom.compile.mcp.mavenHome=/opt/maven",
+ "--loom.compile.mcp.mavenTimeoutMs=600000"
+ ]
+ }
+ }
 }
 ```
 
@@ -100,11 +100,11 @@ java -jar target/loom-compile-mcp-1.0-SNAPSHOT.jar
 
 ```json
 {
-  "gitUrl": "https://github.com/example/spring-boot-app.git",
-  "port": 8080,
-  "containerPort": 8080,
-  "buildTool": "maven",
-  "baseImage": "java17"
+ "gitUrl": "https://github.com/example/spring-boot-app.git",
+ "port": 8080,
+ "containerPort": 8080,
+ "buildTool": "maven",
+ "baseImage": "java17"
 }
 ```
 

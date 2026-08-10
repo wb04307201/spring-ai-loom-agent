@@ -18,16 +18,16 @@ import java.util.Map;
  * <p>
  * 行为契约：
  * <ul>
- *   <li>在用户文件目录下创建唯一工作区（{@code compile-deploy-<uuid>}），
- *       隔离多次调用互不污染；</li>
- *   <li>JGit 克隆采用 try-with-resources 立即关闭 pack 句柄，规避
- *       Windows 上 {@code .git/objects/pack} 文件锁；</li>
- *   <li>maven 与 docker 均通过 {@link ProcessBuilder} 启子进程、注册守护线程
- *       消费输出，超时后整棵树强杀（taskkill /F /T），避免孤儿进程；</li>
- *   <li>容器启动后做 HTTP 健康检查（{@code GET /}），未在
- *       {@code maxWaitMs} 内就绪则视为失败但容器保留供排障；</li>
- *   <li>返回结构化 {@link CompileAndDeployResult}，LLM 可直接渲染为 Markdown
- *       并提取 {@code accessUrl} 放入 {@code <a>} 标签。</li>
+ * <li>在用户文件目录下创建唯一工作区（{@code compile-deploy-<uuid>}），
+ * 隔离多次调用互不污染；</li>
+ * <li>JGit 克隆采用 try-with-resources 立即关闭 pack 句柄，规避
+ * Windows 上 {@code .git/objects/pack} 文件锁；</li>
+ * <li>maven 与 docker 均通过 {@link ProcessBuilder} 启子进程、注册守护线程
+ * 消费输出，超时后整棵树强杀（taskkill /F /T），避免孤儿进程；</li>
+ * <li>容器启动后做 HTTP 健康检查（{@code GET /}），未在
+ * {@code maxWaitMs} 内就绪则视为失败但容器保留供排障；</li>
+ * <li>返回结构化 {@link CompileAndDeployResult}，LLM 可直接渲染为 Markdown
+ * 并提取 {@code accessUrl} 放入 {@code <a>} 标签。</li>
  * </ul>
  * <p>
  * <b>为什么参数是 {@code Map} 而不是多个 {@code @ToolParam}？</b>
@@ -48,29 +48,29 @@ public interface ICompileAndDeployTool extends IEmbedTool {
      * 业务参数（port / containerPort / subDir / baseImage / runCommand / healthPath）
      * 一律从对话给到 AI，不在 yml 中配置。
      *
-     * @param params       工具入参 Map，支持以下键（大小写不敏感）：
-     *                     <ul>
-     *                       <li>{@code gitUrl}        — Git 仓库 URL（<b>必填</b>）</li>
-     *                       <li>{@code gitUsername}   — Git 用户名（公开仓库可省略）</li>
-     *                       <li>{@code gitPassword}   — Git 密码或 token（公开仓库可省略）</li>
-     *                       <li>{@code branch}        — 克隆分支（可选，默认为远程 HEAD）</li>
-     *                       <li>{@code port}          — 宿主机对外端口（<b>必填，无 yml 兜底</b>）</li>
-     *                       <li>{@code containerPort} — 容器内应用监听端口（<b>必填，无 yml 兜底</b>）</li>
-     *                       <li>{@code subDir}        — 多模块仓库子目录（可选）；缺省时多模块可能选错</li>
-     *                       <li>{@code imageName}     — Docker 镜像名（可选，工具自动生成）</li>
-     *                       <li>{@code containerName} — Docker 容器名（可选，工具自动生成）</li>
-     *                       <li>{@code healthPath}    — 健康检查路径（可选，默认 {@code /}）</li>
-     *                       <li>{@code buildTool}     — 构建栈（可选）：{@code maven} / {@code npm} / {@code npm-frontend} / {@code pip}。
-     *                                                  缺省时按 marker 文件自动探测（{@code pom.xml→maven}、{@code package.json→npm}、
-     *                                                  {@code requirements.txt / pyproject.toml→pip}）。多模块仓同时有多个
-     *                                                  marker 时必须显式指定</li>
-     *                       <li>{@code baseImage}     — 基础镜像（可选）；支持模板别名
-     *                                                  {@code java17/java21/nginx/python3/node20/node20-serve}，
-     *                                                  或完整镜像名如 {@code openjdk:17-slim}。缺省按 buildTool 自动选
-     *                                                  （maven→java17、npm→node20、npm-frontend→node20-serve、pip→python3）</li>
-     *                       <li>{@code runCommand}    — 容器启动命令（可选）；缺省按 baseImage 模板自动生成</li>
-     *                     </ul>
-     * @param toolContext  Spring AI 工具上下文（注入 username）
+     * @param params      工具入参 Map，支持以下键（大小写不敏感）：
+     *                    <ul>
+     *                    <li>{@code gitUrl} — Git 仓库 URL（<b>必填</b>）</li>
+     *                    <li>{@code gitUsername} — Git 用户名（公开仓库可省略）</li>
+     *                    <li>{@code gitPassword} — Git 密码或 token（公开仓库可省略）</li>
+     *                    <li>{@code branch} — 克隆分支（可选，默认为远程 HEAD）</li>
+     *                    <li>{@code port} — 宿主机对外端口（<b>必填，无 yml 兜底</b>）</li>
+     *                    <li>{@code containerPort} — 容器内应用监听端口（<b>必填，无 yml 兜底</b>）</li>
+     *                    <li>{@code subDir} — 多模块仓库子目录（可选）；缺省时多模块可能选错</li>
+     *                    <li>{@code imageName} — Docker 镜像名（可选，工具自动生成）</li>
+     *                    <li>{@code containerName} — Docker 容器名（可选，工具自动生成）</li>
+     *                    <li>{@code healthPath} — 健康检查路径（可选，默认 {@code /}）</li>
+     *                    <li>{@code buildTool} — 构建栈（可选）：{@code maven} / {@code npm} / {@code npm-frontend} / {@code pip}。
+     *                    缺省时按 marker 文件自动探测（{@code pom.xml→maven}、{@code package.json→npm}、
+     *                    {@code requirements.txt / pyproject.toml→pip}）。多模块仓同时有多个
+     *                    marker 时必须显式指定</li>
+     *                    <li>{@code baseImage} — 基础镜像（可选）；支持模板别名
+     *                    {@code java17/java21/nginx/python3/node20/node20-serve}，
+     *                    或完整镜像名如 {@code openjdk:17-slim}。缺省按 buildTool 自动选
+     *                    （maven→java17、npm→node20、npm-frontend→node20-serve、pip→python3）</li>
+     *                    <li>{@code runCommand} — 容器启动命令（可选）；缺省按 baseImage 模板自动生成</li>
+     *                    </ul>
+     * @param toolContext Spring AI 工具上下文（注入 username）
      * @return 编译部署结果
      */
     @Tool(description = "克隆 Git 仓库、按 buildTool 打包（maven/npm/pip）、构建 Docker 镜像并启动容器，返回访问 URL。"

@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.36
+> **Version**: 1.1.37
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -16,8 +16,10 @@
 - [6. Skill Management](#6-skill-management)
 - [7. MCP Tools](#7-mcp-tools)
 - [8. Terminal Management](#8-terminal-management)
-- [9. Data Models](#9-data-models)
-- [10. Configuration Properties](#10-configuration-properties)
+- [9. Sub-task & Schedule APIs](#9-sub-task--schedule-apis)
+- [10. Admin APIs](#10-admin-apis)
+- [11. Data Models](#11-data-models)
+- [12. Configuration Properties](#12-configuration-properties)
 
 ---
 
@@ -33,10 +35,10 @@ POST /spring/ai/loom/user/isAutoLogin
 
 **Response**: `boolean`
 
-| Value     | Description               |
+| Value | Description |
 |-----------|---------------------------|
-| `true`    | Auto-login is enabled     |
-| `false`   | Auto-login is not enabled |
+| `true` | Auto-login is enabled |
+| `false` | Auto-login is not enabled |
 
 ---
 
@@ -48,26 +50,26 @@ POST /spring/ai/loom/user/login
 
 **Request Body**:
 
-| Field      | Type   | Required | Description   |
+| Field | Type | Required | Description |
 |------------|--------|----------|---------------|
-| `username` | string | Yes      | Username      |
-| `verified` | string | No       | Verification info |
+| `username` | string | Yes | Username |
+| `verified` | string | No | Verification info |
 
 **Example**:
 
 ```json
 {
-  "username": "testuser",
-  "verified": ""
+ "username": "testuser",
+ "verified": ""
 }
 ```
 
 **Response** (`UserResponseRecord`):
 
-| Field      | Type   | Description     |
+| Field | Type | Description |
 |------------|--------|-----------------|
-| `token`    | string | Session token (also set as HttpOnly cookie) |
-| `nickname` | string | User nickname   |
+| `token` | string | Session token (also set as HttpOnly cookie) |
+| `nickname` | string | User nickname |
 
 **Response Headers**:
 - `Set-Cookie: loom-agent-session=<token>; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax`
@@ -76,8 +78,8 @@ POST /spring/ai/loom/user/login
 
 ```json
 {
-  "token": "567fb50c-b293-403b-a903-f6b7b597c318",
-  "nickname": "用户"
+ "token": "567fb50c-b293-403b-a903-f6b7b597c318",
+ "nickname": "用户"
 }
 ```
 
@@ -109,19 +111,19 @@ GET /spring/ai/loom/conversation
 
 **Response**: `ConversationRecord[]`
 
-| Field            | Type   | Description        |
+| Field | Type | Description |
 |------------------|--------|--------------------|
-| `conversationId` | string | Conversation ID    |
-| `title`          | string | Conversation title |
+| `conversationId` | string | Conversation ID |
+| `title` | string | Conversation title |
 
 **Example**:
 
 ```json
 [
-  {
-    "conversationId": "conv-001",
-    "title": "First Conversation"
-  }
+ {
+ "conversationId": "conv-001",
+ "title": "First Conversation"
+ }
 ]
 ```
 
@@ -135,7 +137,7 @@ GET /spring/ai/loom/conversation/{conversationId}
 
 **Path Parameters**:
 
-| Parameter        | Type   | Description     |
+| Parameter | Type | Description |
 |------------------|--------|-----------------|
 | `conversationId` | string | Conversation ID |
 
@@ -151,7 +153,7 @@ DELETE /spring/ai/loom/conversation/{conversationId}
 
 **Path Parameters**:
 
-| Parameter        | Type   | Description     |
+| Parameter | Type | Description |
 |------------------|--------|-----------------|
 | `conversationId` | string | Conversation ID |
 
@@ -171,23 +173,23 @@ Accept: text/event-stream
 
 **Request Body** (`ChatRequestRecord`):
 
-| Field            | Type     | Required | Description                                      |
+| Field | Type | Required | Description |
 |------------------|----------|----------|--------------------------------------------------|
-| `message`        | string   | Yes      | User message content                             |
-| `conversationId` | string   | No       | Conversation ID. A new session is created if omitted. |
-| `mcps`           | string[] | No       | List of MCP tool names to enable                 |
-| `knowledgeId`    | string   | No       | Knowledge base ID for RAG retrieval              |
-| `fileIds`        | string[] | No       | List of associated file IDs (supports multiple files) |
+| `message` | string | Yes | User message content |
+| `conversationId` | string | No | Conversation ID. A new session is created if omitted. |
+| `mcps` | string[] | No | List of MCP tool names to enable |
+| `knowledgeId` | string | No | Knowledge base ID for RAG retrieval |
+| `fileIds` | string[] | No | List of associated file IDs (supports multiple files) |
 
 **Example**:
 
 ```json
 {
-  "message": "Please summarize this document",
-  "conversationId": "conv-001",
-  "knowledgeId": "kb-001",
-  "mcps": [],
-  "fileIds": ["file-abc123", "file-def456"]
+ "message": "Please summarize this document",
+ "conversationId": "conv-001",
+ "knowledgeId": "kb-001",
+ "mcps": [],
+ "fileIds": ["file-abc123", "file-def456"]
 }
 ```
 
@@ -195,9 +197,9 @@ Accept: text/event-stream
 
 Each event returns a `ChatResponseRecord`:
 
-| Field              | Type   | Description                    |
+| Field | Type | Description |
 |--------------------|--------|--------------------------------|
-| `content`          | string | AI response text fragment      |
+| `content` | string | AI response text fragment |
 | `reasoningContent` | string | Reasoning/thinking trace (optional) |
 
 **SSE Event Example**:
@@ -225,23 +227,23 @@ Content-Type: multipart/form-data
 
 **Form Fields**:
 
-| Field  | Type | Required | Description       |
+| Field | Type | Required | Description |
 |--------|------|----------|-------------------|
-| `file` | file | Yes      | File to upload    |
+| `file` | file | Yes | File to upload |
 
 **Response**:
 
-| Field    | Type   | Description                              |
+| Field | Type | Description |
 |----------|--------|------------------------------------------|
-| `fileId` | string | File ID returned after upload            |
-| `status` | string | Upload status, `"success"` on success    |
+| `fileId` | string | File ID returned after upload |
+| `status` | string | Upload status, `"success"` on success |
 
 **Example**:
 
 ```json
 {
-  "fileId": "file-abc123",
-  "status": "success"
+ "fileId": "file-abc123",
+ "status": "success"
 }
 ```
 
@@ -256,33 +258,33 @@ GET /spring/ai/loom/file/tree
 
 **Response**: Directory tree JSON (recursive structure).
 
-| Field      | Type   | Description                          |
+| Field | Type | Description |
 |------------|--------|--------------------------------------|
-| `name`     | string | File or directory name               |
-| `type`     | string | `"file"` or `"directory"`            |
-| `size`     | number | File size in bytes (files only)      |
-| `children` | array  | Child items (directories only)       |
+| `name` | string | File or directory name |
+| `type` | string | `"file"` or `"directory"` |
+| `size` | number | File size in bytes (files only) |
+| `children` | array | Child items (directories only) |
 
 **Example**:
 
 ```json
 {
-  "name": ".",
-  "type": "directory",
-  "children": [
-    {
-      "name": "report.pdf",
-      "type": "file",
-      "size": 102400
-    },
-    {
-      "name": "docs",
-      "type": "directory",
-      "children": [
-        { "name": "guide.md", "type": "file", "size": 4096 }
-      ]
-    }
-  ]
+ "name": ".",
+ "type": "directory",
+ "children": [
+ {
+ "name": "report.pdf",
+ "type": "file",
+ "size": 102400
+ },
+ {
+ "name": "docs",
+ "type": "directory",
+ "children": [
+ { "name": "guide.md", "type": "file", "size": 4096 }
+ ]
+ }
+ ]
 }
 ```
 
@@ -296,9 +298,9 @@ GET /spring/ai/loom/file/by-path/view?path=report.pdf
 
 **Query Parameters**:
 
-| Parameter | Type   | Required | Description                                          |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|------------------------------------------------------|
-| `path`    | string | Yes      | File path relative to user's file directory          |
+| `path` | string | Yes | File path relative to user's file directory |
 
 **Response**: `307 Temporary Redirect` → `/file/view/{fileId}` (WOPI file viewer).
 
@@ -314,9 +316,9 @@ GET /spring/ai/loom/file/by-path/download?path=report.pdf
 
 **Query Parameters**:
 
-| Parameter | Type   | Required | Description                                          |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|------------------------------------------------------|
-| `path`    | string | Yes      | File path relative to user's file directory          |
+| `path` | string | Yes | File path relative to user's file directory |
 
 **Response**: `307 Temporary Redirect` → `/wopi/files/{fileId}/contents`.
 
@@ -330,9 +332,9 @@ GET /spring/ai/loom/file/{id}/download
 
 **Path Parameters**:
 
-| Parameter | Type   | Description |
+| Parameter | Type | Description |
 |-----------|--------|-------------|
-| `id`      | string | File ID     |
+| `id` | string | File ID |
 
 **Response**: File binary stream, `Content-Disposition` header includes original filename.
 
@@ -358,21 +360,21 @@ GET /spring/ai/loom/knowledge
 
 **Response**: `KnowledgeRecord[]`
 
-| Field      | Type   | Description            |
+| Field | Type | Description |
 |------------|--------|------------------------|
-| `id`       | string | Knowledge base ID      |
-| `username` | string | Creator username       |
-| `name`     | string | Knowledge base name    |
+| `id` | string | Knowledge base ID |
+| `username` | string | Creator username |
+| `name` | string | Knowledge base name |
 
 **Example**:
 
 ```json
 [
-  {
-    "id": "kb-001",
-    "username": "admin",
-    "name": "Product Docs"
-  }
+ {
+ "id": "kb-001",
+ "username": "admin",
+ "name": "Product Docs"
+ }
 ]
 ```
 
@@ -387,15 +389,15 @@ Content-Type: application/json
 
 **Request Body** (`KnowledgeRecord`):
 
-| Field  | Type   | Required | Description         |
+| Field | Type | Required | Description |
 |--------|--------|----------|---------------------|
-| `name` | string | Yes      | Knowledge base name |
+| `name` | string | Yes | Knowledge base name |
 
 **Example**:
 
 ```json
 {
-  "name": "Product Docs"
+ "name": "Product Docs"
 }
 ```
 
@@ -411,7 +413,7 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}
 
 **Path Parameters**:
 
-| Parameter     | Type   | Description       |
+| Parameter | Type | Description |
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
 
@@ -430,22 +432,22 @@ Content-Type: multipart/form-data
 
 **Path Parameters**:
 
-| Parameter     | Type   | Description       |
+| Parameter | Type | Description |
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
 
 **Form Fields**:
 
-| Field  | Type | Required | Description       |
+| Field | Type | Required | Description |
 |--------|------|----------|-------------------|
-| `file` | file | Yes      | File to upload    |
+| `file` | file | Yes | File to upload |
 
 **Response**:
 
 ```json
 {
-  "fileId": "file-xyz789",
-  "status": "success"
+ "fileId": "file-xyz789",
+ "status": "success"
 }
 ```
 
@@ -459,7 +461,7 @@ GET /spring/ai/loom/knowledge/{knowledgeId}/file
 
 **Path Parameters**:
 
-| Parameter     | Type   | Description       |
+| Parameter | Type | Description |
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
 
@@ -475,10 +477,10 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 **Path Parameters**:
 
-| Parameter     | Type   | Description       |
+| Parameter | Type | Description |
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
-| `fileId`      | string | File ID           |
+| `fileId` | string | File ID |
 
 **Response**: `number` — Number of deleted records.
 
@@ -486,7 +488,7 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ### 5.8 Knowledge Market
 
-> Knowledge market enables sharing knowledge bases across users. Workflow: submit → PENDING → admin approve → APPROVED → other users can subscribe.
+> Knowledge market enables sharing knowledge bases across users. no approval flow — submit goes directly to APPROVED.
 
 #### 5.8.1 Browse Approved Market Knowledge Bases
 
@@ -496,22 +498,22 @@ GET /spring/ai/loom/api/knowledge-market?page=1&size=20
 
 **Query Parameters**:
 
-| Parameter | Type   | Required | Description                |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|----------------------------|
-| `page`    | int    | No       | Page number (default 1)    |
-| `size`    | int    | No       | Items per page (default 20)|
+| `page` | int | No | Page number (default 1) |
+| `size` | int | No | Items per page (default 20)|
 
 **Response**: `MarketKnowledgeRecord[]` — Approved market knowledge bases.
 
-| Field          | Type   | Description                    |
+| Field | Type | Description |
 |----------------|--------|--------------------------------|
-| `id`           | string | Market knowledge ID            |
-| `username`     | string | Original author username       |
-| `name`         | string | Knowledge base name            |
-| `description`  | string | Knowledge base description     |
-| `status`       | string | `APPROVED`                     |
-| `submittedAt`  | string | Submission timestamp           |
-| `reviewedAt`   | string | Review timestamp               |
+| `id` | string | Market knowledge ID |
+| `username` | string | Original author username |
+| `name` | string | Knowledge base name |
+| `description` | string | Knowledge base description |
+| `status` | string | `APPROVED` |
+| `submittedAt` | string | Submission timestamp |
+| `reviewedAt` | string | Review timestamp |
 
 ---
 
@@ -523,9 +525,9 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
 
 **Path Parameters**:
 
-| Parameter | Type   | Description             |
+| Parameter | Type | Description |
 |-----------|--------|-------------------------|
-| `marketId`| string | Market knowledge ID     |
+| `marketId`| string | Market knowledge ID |
 
 **Response**: `{"success": true}` on success. Creates a subscription in `loom_user_knowledge` with `source=MARKET_PULLED`.
 
@@ -539,13 +541,13 @@ POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
 
 **Path Parameters**:
 
-| Parameter     | Type   | Description       |
+| Parameter | Type | Description |
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
 
-**Response**: `MarketKnowledgeRecord` — The created market entry with `status=PENDING`.
+**Response**: `MarketKnowledgeRecord` — The created market entry with `status='APPROVED'` (no approval flow).
 
-**Constraints**: `(username, name)` must be unique. Duplicate submissions return 409.
+**Behavior**: If `(username, name)` already exists → UPSERT (updates description; no new row). Otherwise → INSERT a new row directly APPROVED.
 
 ---
 
@@ -557,29 +559,31 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **Path Parameters**:
 
-| Parameter  | Type   | Description         |
+| Parameter | Type | Description |
 |------------|--------|---------------------|
 | `marketId` | string | Market knowledge ID |
 
-**Response**: `{"success": true}` on success. Only the original submitter can withdraw.
+**Response**: `{"success": true}` on success.
+
+****: Unified DELETE endpoint for both author withdraw and admin takedown. Internal permission check decides path:
+- **Author**: `DELETE FROM loom_market_knowledge WHERE id=? AND username=?` (only deletes own)
+- **Admin**: `DELETE FROM loom_market_knowledge WHERE id=?` (cascades to all references)
+
+**Cascading cleanup**: Auto-deletes `loom_user_knowledge` (subscriber rows) + `loom_role_knowledge` (role grants).
+
+** removed endpoints**:
+- `_removed_ /api/knowledge-market/{marketId}/approve` — no approval flow
+- `_removed_ /api/knowledge-market/{marketId}/reject` — no approval flow
+
+**New admin endpoints ()**:
+- `GET /admin/market-knowledge` — list all market knowledge bases (all APPROVED)
+- `DELETE /admin/market-knowledge/{marketId}` — admin takedown (cascade cleanup)
 
 ---
 
-#### 5.8.5 Admin Approve Market Submission
+#### 5.8.5 Admin Approve Market Submission (removed)
 
-```
-POST /spring/ai/loom/api/knowledge-market/{marketId}/approve
-```
-
-**Path Parameters**:
-
-| Parameter  | Type   | Description         |
-|------------|--------|---------------------|
-| `marketId` | string | Market knowledge ID |
-
-**Response**: `MarketKnowledgeRecord` — Updated record with `status=APPROVED`.
-
-**Permission**: Admin only. Returns 403 for non-admin users.
+> removed — no approval flow needed.
 
 ---
 
@@ -589,15 +593,7 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/approve
 POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
 ```
 
-**Path Parameters**:
-
-| Parameter  | Type   | Description         |
-|------------|--------|---------------------|
-| `marketId` | string | Market knowledge ID |
-
-**Response**: `MarketKnowledgeRecord` — Updated record with `status=REJECTED`.
-
-**Permission**: Admin only. Returns 403 for non-admin users.
+> removed — use unified `DELETE /api/knowledge-market/{marketId}` instead.
 
 ---
 
@@ -617,19 +613,18 @@ GET /spring/ai/loom/api/knowledge-market/my-pulled
 GET /spring/ai/loom/api/knowledge-market/my-submitted
 ```
 
-**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (all statuses: PENDING / APPROVED / REJECTED).
+**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (all are APPROVED).
 
 ---
 
 ## 6. Skill Management
 
-> All skills live in the database (tables `market_skill` / `user_skill` / `role_skill`). The yml `skills[]` block is no longer read — it was replaced by 6 system-seeded `market_skill` rows plus an admin-controlled market workflow.
+> All skills live in the database (tables `market_skill` / `user_skill` / `role_skill`). The yml `skills[]` block is no longer read — it was replaced by 6 system-seeded `user_skill` rows plus an admin-controlled market workflow.
 >
 > Three sources show up in the `source` field of `user_skill`:
 > - `USER_CREATED` — created by the user via API or chat UI; **fully editable** (name/desc/content/default_loaded)
-> - `MARKET_PULLED` — pulled from the approved market; **editable desc / default_loaded only** (content is locked to the market snapshot; re-pull to update)
+> - `MARKET_PULLED` — pulled from the approved market; **default_loaded toggle only** (name / content / desc locked to the market snapshot; re-pull to update, or use `POST /skill/{name}/duplicate` to copy as a new USER_CREATED skill and edit that)
 > - `ROLE_GRANTED` — auto-injected from a role authorization; **read-only** (locked=true; cannot edit or delete)
-> - `MARKET_VIEW` — admin-only union view that bundles all `APPROVED` market skills + admin's own `PENDING`; shown with a `市` badge in the chat UI; not actually written to `user_skill`
 >
 > Every list/get call auto-syncs `role_skill` → `user_skill` for the current user, so a freshly authorized skill is visible immediately on next list.
 
@@ -643,17 +638,15 @@ GET /spring/ai/loom/skill
 
 **Response**: `SkillRecord[]` (the LLM-facing view)
 
-| Field         | Type    | Description                                                                                                |
+| Field | Type | Description |
 |---------------|---------|------------------------------------------------------------------------------------------------------------|
-| `name`        | string  | Skill name                                                                                                 |
-| `description` | string  | Skill description                                                                                          |
-| `load`        | boolean | Whether the LLM preloads this skill into the system prompt                                                  |
-| `content`     | string  | Skill content (resolved: if stored as `classpath:xxx`, the resource is read at this point)                 |
-| `source`      | string  | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` / (admin only) `MARKET_VIEW`                              |
+| `name` | string | Skill name |
+| `description` | string | Skill description |
+| `load` | boolean | Whether the LLM preloads this skill into the system prompt |
+| `content` | string | Skill content (resolved: if stored as `classpath:xxx`, the resource is read at this point) |
+| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` (admin no longer gets a `MARKET_VIEW` union; the market Tab is the only place to browse APPROVED market entries) |
 
-For admins, this list also includes the `MARKET_VIEW` union (all approved + own PENDING).
-
----
+For admins, this list shows only their own `user_skill` entries (the same view as for any other user). Browse the approved market via the `GET /market-skills` endpoint.
 
 ### 6.2 Create / Overwrite a Skill (USER_CREATED)
 
@@ -664,12 +657,12 @@ Content-Type: application/json
 
 **Request Body** (`SkillRecord`):
 
-| Field         | Type    | Required | Description                                                                              |
+| Field | Type | Required | Description |
 |---------------|---------|----------|------------------------------------------------------------------------------------------|
-| `name`        | string  | Yes      | Skill name                                                                               |
-| `description` | string  | No       | Skill description                                                                        |
-| `load`        | boolean | No       | Whether the LLM preloads this skill; defaults to `true`                                  |
-| `content`     | string  | Yes      | Skill content / prompt template (supports `classpath:` prefix which is resolved on read) |
+| `name` | string | Yes | Skill name |
+| `description` | string | No | Skill description |
+| `load` | boolean | No | Whether the LLM preloads this skill; defaults to `true` |
+| `content` | string | Yes | Skill content / prompt template (supports `classpath:` prefix which is resolved on read) |
 
 > `{param}` placeholders inside `content` are LLM-interpreted at runtime, not declared as structured form fields. MCP tool references inside `content` use `@tool_name` and resolve to the role-authorized MCPs.
 
@@ -677,10 +670,10 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "email_writer",
-  "description": "Professional email writing assistant",
-  "load": true,
-  "content": "You are an email assistant. The recipient is {recipient}..."
+ "name": "email_writer",
+ "description": "Professional email writing assistant",
+ "load": true,
+ "content": "You are an email assistant. The recipient is {recipient}..."
 }
 ```
 
@@ -699,9 +692,9 @@ For `MARKET_PULLED` and `USER_CREATED` skills — change `description` and/or `d
 
 **Request Body** (`UserSkillPatchRequest`):
 
-| Field           | Type    | Description                                       |
+| Field | Type | Description |
 |-----------------|---------|---------------------------------------------------|
-| `description`   | string  | New description (omit to leave unchanged)         |
+| `description` | string | New description (omit to leave unchanged) |
 | `defaultLoaded` | boolean | New default-loaded flag (omit to leave unchanged) |
 
 ---
@@ -714,9 +707,9 @@ GET /spring/ai/loom/skill/{name}
 
 **Path Parameters**:
 
-| Parameter | Type   | Description |
+| Parameter | Type | Description |
 |-----------|--------|-------------|
-| `name`    | string | Skill name  |
+| `name` | string | Skill name |
 
 **Response**: `SkillRecord`. For admins, falls back to the market view if no local copy exists.
 
@@ -748,7 +741,7 @@ Re-runs the `role_skill` → `user_skill` sync for the current user. Mostly for 
 GET /spring/ai/loom/market-skills
 ```
 
-Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name, version DESC`. Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `version`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
+Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name` ( removed the `version` field — no `version DESC` ordering any more). Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
 
 ---
 
@@ -782,18 +775,19 @@ POST /spring/ai/loom/user/market-skills
 Content-Type: application/json
 ```
 
-Submits a new `market_skill` row with `status=PENDING` and `author=currentUser`.
+Submits a new `market_skill` row with `status=APPROVED` and `author=currentUser` (no approval flow — submit is instant).
 
 **Request Body** (`MarketSkillSubmitRequest`):
 
-| Field        | Type   | Required | Description                                        |
+| Field | Type | Required | Description |
 |--------------|--------|----------|----------------------------------------------------|
-| `name`       | string | Yes      | Skill name                                         |
-| `description`| string | No       | Description                                        |
-| `content`    | string | Yes      | Prompt template                                    |
-| `version`    | string | Yes      | SemVer-ish version string                          |
+| `name` | string | Yes | Skill name |
+| `description`| string | No | Description |
+| `content` | string | Yes | Prompt template |
 
-Constraint: `(author, name, version)` must be unique. Pending duplicates require re-submitting under a new version.
+removed the `version` field — the `(author, name)` pair is the unique constraint.
+
+Behavior: If `(author, name)` already exists in `market_skill`, the existing row is **UPSERTed** (content/desc replaced; status reset to APPROVED). Otherwise INSERT a new row with `status=APPROVED` (no approval flow). The author's `user_skill.market_skill_id` is rebound to the new market_skill row so that subsequent `save` propagates to all pullers.
 
 ---
 
@@ -801,25 +795,24 @@ Constraint: `(author, name, version)` must be unique. Pending duplicates require
 
 > Admin-only. Auth-gated by `auth.adminPathPatterns` and double-checked in the handler.
 
-| Method | Path                                              | Description                                       |
+| Method | Path | Description |
 |--------|---------------------------------------------------|---------------------------------------------------|
-| GET    | `/spring/ai/loom/admin/market-skills`             | List **all** (PENDING/APPROVED/REJECTED)        |
-| GET    | `/spring/ai/loom/admin/market-skills/pending`     | List only `PENDING`                              |
-| POST   | `/spring/ai/loom/admin/market-skills`             | Create directly with `status=APPROVED` (skip review). Body: `MarketSkillUpsertRequest` |
-| PUT    | `/spring/ai/loom/admin/market-skills/{id}`        | Edit any field of any market skill                |
-| DELETE | `/spring/ai/loom/admin/market-skills/{id}`        | Cascade-deletes from `user_skill` and `role_skill` |
-| POST   | `/spring/ai/loom/admin/market-skills/{id}/approve`| Approve a PENDING submission                     |
-| POST   | `/spring/ai/loom/admin/market-skills/{id}/reject` | Reject a PENDING submission. Body: `{comment}`    |
+| GET | `/spring/ai/loom/admin/market-skills` | List **all** ( 起所有都是 APPROVED，无审批流) |
+| POST | `/spring/ai/loom/admin/market-skills` | Create directly with `status=APPROVED`. Body: `MarketSkillUpsertRequest` |
+| PUT | `/spring/ai/loom/admin/market-skills/{id}` | Edit any field of any market skill |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | Cascade-deletes from `user_skill` and `role_skill`（：这就是"下架"，拉取者失去该 skill） |
+| _removed_ | `/admin/market-skills/pending` | ：去掉（无审批流，没有 PENDING 状态） |
+| _removed_ | `/admin/market-skills/{id}/approve` | ：去掉（提交即上架） |
+| _removed_ | `/admin/market-skills/{id}/reject` | ：去掉（需要下架请用 DELETE） |
 
 `MarketSkillUpsertRequest`:
 
-| Field      | Type   | Required | Description                                          |
+| Field | Type | Required | Description |
 |------------|--------|----------|------------------------------------------------------|
-| `name`     | string | Yes      | Skill name                                           |
-| `description`| string| No       | Description                                          |
-| `content`  | string | Yes      | Prompt template                                      |
-| `version`  | string | Yes      | Version string                                       |
-| `status`   | string | No       | Defaults to `APPROVED` if omitted                     |
+| `name` | string | Yes | Skill name |
+| `description`| string| No | Description |
+| `content` | string | Yes | Prompt template |
+| `status` | string | No | Defaults to `APPROVED` if omitted (admin no longer creates new skills — this endpoint is preserved for backward compatibility only) |
 
 ---
 
@@ -836,10 +829,10 @@ PUT /spring/ai/loom/admin/roles/{code}/skills
 
 ```json
 {
-  "items": [
-    {"marketSkillId": 1, "defaultLoaded": true},
-    {"marketSkillId": 5, "defaultLoaded": false}
-  ]
+ "items": [
+ {"marketSkillId": 1, "defaultLoaded": true},
+ {"marketSkillId": 5, "defaultLoaded": false}
+ ]
 }
 ```
 
@@ -857,47 +850,120 @@ GET /spring/ai/chat/loom/mcp
 
 **Response**: `McpRecord[]`
 
-| Field             | Type         | Description                                      |
+| Field | Type | Description |
 |-------------------|--------------|--------------------------------------------------|
-| `name`            | string       | MCP server name                                  |
-| `title`           | string       | MCP server title (display label)                 |
-| `version`         | string       | MCP version                                      |
-| `description`     | string       | MCP description                                  |
-| `defaultSelected` | boolean      | Whether selected by default                      |
-| `tools`           | ToolRecord[] | Tool list                                        |
+| `name` | string | MCP server name |
+| `title` | string | MCP server title (display label) |
+| `version` | string | MCP version |
+| `description` | string | MCP description |
+| `defaultSelected` | boolean | Whether selected by default |
+| `tools` | ToolRecord[] | Tool list |
 
 **ToolRecord**:
 
-| Field         | Type   | Description     |
+| Field | Type | Description |
 |---------------|--------|-----------------|
-| `name`        | string | Tool name       |
+| `name` | string | Tool name |
 | `description` | string | Tool description |
 
 **Example**:
 
 ```json
 [
-  {
-    "name": "weather-mcp",
-    "title": "Weather",
-    "version": "1.1.36",
-    "description": "Provides real-time weather query service",
-    "defaultSelected": true,
-    "tools": [
-      {
-        "name": "getWeather",
-        "description": "Query current weather for a specified city"
-      }
-    ]
-  }
+ {
+ "name": "weather-mcp",
+ "title": "Weather",
+ "version": "1.1.37",
+ "description": "Provides real-time weather query service",
+ "defaultSelected": true,
+ "tools": [
+ {
+ "name": "getWeather",
+ "description": "Query current weather for a specified city"
+ }
+ ]
+ }
 ]
 ```
 
 ---
 
-## 8. Terminal Management
+## 8. Skill Tools (LLM-callable)
 
-### 8.1 Start Process
+The `@Tool` methods registered by `ISkillTool` for the LLM. These are **separate from** the admin REST APIs in `## 6. Skill Management` (which serve the admin console UI).
+
+### 8.1 `listSkills` — list available skills
+
+```
+@Tool: listSkills
+```
+
+List the current user's accessible skills (progressive-disclosure style). Default returns all (cap 200); filterable by `keyword` and `source`.
+
+| Parameter | Type | Required | Description |
+|------------|----------|----------|--------------------------------------------------------------------------------------------------------------|
+| `keyword` | string | No | Substring filter (case-insensitive) matched against `name` and `description` |
+| `source` | string | No | Filter by skill source: `USER_CREATED` / `ROLE_GRANTED` / `MARKET_PULLED` |
+| `maxCount` | integer | No | Max records returned; default `200` |
+
+**Returns**: A text table listing the matching skills (name + source + description), plus a truncation notice when the result is smaller than the user's total accessible skills.
+
+### 8.2 `getSkill` — fetch one skill's content
+
+```
+@Tool: getSkill
+```
+
+| Parameter | Type | Required | Description |
+|-----------|--------|----------|-------------------|
+| `name` | string | Yes | The skill's name |
+
+**Returns**: Text with `技能名`, `技能描述`, and full `技能内容`. Throws if the user has no access to the skill.
+
+### 10.3 `createOrUpdateSkill` — create or update a user-owned skill
+
+```
+@Tool: createOrUpdateSkill
+```
+
+| Parameter | Type | Required | Description |
+|---------------|--------|----------|---------------------------------------------------------------------------------------------------|
+| `name` | string | Yes | Skill name; trimmed; max length 128 |
+| `description` | string | No | Skill description |
+| `content` | string | Yes | Skill prompt content (non-empty) |
+
+**Behavior**:
+- If the user already owns a skill with this name, content/description are overwritten.
+- `ROLE_GRANTED` / `MARKET_PULLED` skills are **locked** and will return 403.
+- Returns "已创建技能 X" or "已更新技能 X".
+
+---
+
+## 9. Knowledge Tools (LLM-callable)
+
+The `@Tool` methods registered by `IKnowledgeTool` for tool-based RAG retrieval. The list of enabled knowledge bases is auto-injected into the system prompt under the `【知识库】` section — the LLM does not need a list tool to discover them.
+
+### 11.1 `searchKnowledge` — vector search a knowledge base
+
+```
+@Tool: searchKnowledge
+```
+
+| Parameter | Type | Required | Description |
+|----------------|---------|----------|----------------------------------------------------------------------------------------------------------|
+| `knowledgeId` | string | Yes | Target knowledge base ID |
+| `query` | string | Yes | Search query (semantic similarity) |
+| `topK` | integer | No | Max chunks to return; defaults to `rag.topK` (config) |
+
+**Returns**: Top-k chunks with similarity score and text content. Empty result returns "未检索到相关文档片段". Access check: only own / subscribed / role-granted KBs are searchable; otherwise returns "没有权限访问该知识库".
+
+**Similarity threshold**: Configured via `rag.similarityThreshold` (default 0.50). Chunks below the threshold are filtered out before being returned.
+
+---
+
+## 10. Terminal Management
+
+### 10.1 Start Process
 
 ```
 @Tool: startProcess
@@ -905,16 +971,16 @@ GET /spring/ai/chat/loom/mcp
 
 Start a terminal process or REPL session. Supports two modes: **Shell mode** (one-shot command like `ls`, `cat`) and **REPL mode** (long-running interactive session like `python`, `node`). REPL mode uses PTY (pseudo-terminal) when available for full terminal interaction.
 
-| Parameter    | Type    | Required | Description                                                                                     |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|-------------------------------------------------------------------------------------------------|
-| `command`    | string  | Yes      | Command to execute. Shell mode: any shell command. REPL mode: interpreter (e.g. `python`, `node`) |
-| `workingDir` | string  | No       | Working directory (default: `.local/file/{username}/`)                                          |
-| `repl`       | boolean | No       | Whether REPL mode. `true` = long interactive session; `false`/omitted = one-shot command        |
-| `timeout`    | long    | No       | Wait timeout in milliseconds (default 30000ms)                                                   |
+| `command` | string | Yes | Command to execute. Shell mode: any shell command. REPL mode: interpreter (e.g. `python`, `node`) |
+| `workingDir` | string | No | Working directory (default: `.local/file/{username}/`) |
+| `repl` | boolean | No | Whether REPL mode. `true` = long interactive session; `false`/omitted = one-shot command |
+| `timeout` | long | No | Wait timeout in milliseconds (default 30000ms) |
 
 ---
 
-### 8.2 Interact with Process
+### 10.2 Interact with Process
 
 ```
 @Tool: interactWithProcess
@@ -922,15 +988,15 @@ Start a terminal process or REPL session. Supports two modes: **Shell mode** (on
 
 Send input to a running REPL session and wait for response.
 
-| Parameter    | Type    | Required | Description                                  |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|----------------------------------------------|
-| `sessionId`  | string  | Yes      | Session ID (returned by `startProcess`)      |
-| `input`      | string  | Yes      | Input to send (newline auto-appended)        |
-| `timeout`    | long    | No       | Response wait timeout in ms (default 10000)  |
+| `sessionId` | string | Yes | Session ID (returned by `startProcess`) |
+| `input` | string | Yes | Input to send (newline auto-appended) |
+| `timeout` | long | No | Response wait timeout in ms (default 10000) |
 
 ---
 
-### 8.3 Read Process Output
+### 10.3 Read Process Output
 
 ```
 @Tool: readProcessOutput
@@ -938,16 +1004,16 @@ Send input to a running REPL session and wait for response.
 
 Read output from a running process. Supports three modes: `new` (unread content since last read, default), `tail` (last N lines), `absolute` (from character position N).
 
-| Parameter    | Type    | Required | Description                                                                |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|----------------------------------------------------------------------------|
-| `sessionId`  | string  | Yes      | Session ID                                                                 |
-| `mode`       | string  | No       | Read mode: `new` / `tail` / `absolute`                                     |
-| `position`   | int     | No       | Absolute character position (only when `mode=absolute`)                    |
-| `lines`      | int     | No       | Number of lines (only when `mode=tail`, default 50)                        |
+| `sessionId` | string | Yes | Session ID |
+| `mode` | string | No | Read mode: `new` / `tail` / `absolute` |
+| `position` | int | No | Absolute character position (only when `mode=absolute`) |
+| `lines` | int | No | Number of lines (only when `mode=tail`, default 50) |
 
 ---
 
-### 8.4 Force Terminate
+### 10.4 Force Terminate
 
 ```
 @Tool: forceTerminate
@@ -955,13 +1021,13 @@ Read output from a running process. Supports three modes: `new` (unread content 
 
 Force-terminate a managed terminal session.
 
-| Parameter    | Type    | Required | Description    |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|----------------|
-| `sessionId`  | string  | Yes      | Session ID     |
+| `sessionId` | string | Yes | Session ID |
 
 ---
 
-### 8.5 List Sessions
+### 10.5 List Sessions
 
 ```
 @Tool: listSessions
@@ -971,7 +1037,7 @@ List all active terminal sessions for the current user.
 
 ---
 
-### 8.6 Get Process Info
+### 10.6 Get Process Info
 
 ```
 @Tool: getProcessInfo
@@ -979,13 +1045,13 @@ List all active terminal sessions for the current user.
 
 Get detailed info for a single session, including full output, process state, working directory, PTY mode, etc.
 
-| Parameter    | Type    | Required | Description    |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|----------------|
-| `sessionId`  | string  | Yes      | Session ID     |
+| `sessionId` | string | Yes | Session ID |
 
 ---
 
-### 8.7 Send Signal
+### 10.7 Send Signal
 
 ```
 @Tool: sendSignal
@@ -993,14 +1059,14 @@ Get detailed info for a single session, including full output, process state, wo
 
 Send a control signal to a terminal session. PTY mode supports: `interrupt` (Ctrl+C), `eof` (Ctrl+D), `quit` (Ctrl+\\). Non-PTY mode only supports `interrupt` via `destroy`.
 
-| Parameter    | Type    | Required | Description                                              |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|----------------------------------------------------------|
-| `sessionId`  | string  | Yes      | Session ID                                               |
-| `signal`     | string  | Yes      | Signal type: `interrupt` / `eof` / `quit`                |
+| `sessionId` | string | Yes | Session ID |
+| `signal` | string | Yes | Signal type: `interrupt` / `eof` / `quit` |
 
 ---
 
-### 8.8 List System Processes
+### 10.8 List System Processes
 
 ```
 @Tool: listProcesses
@@ -1008,14 +1074,14 @@ Send a control signal to a terminal session. PTY mode supports: `interrupt` (Ctr
 
 List all running OS processes (like `ps` or Task Manager). Supports pagination.
 
-| Parameter     | Type   | Required | Description                              |
+| Parameter | Type | Required | Description |
 |---------------|--------|----------|------------------------------------------|
-| `maxResults`  | int    | No       | Max results per page (default 50, max 200) |
-| `page`        | int    | No       | Page number, 0-based (default 0)          |
+| `maxResults` | int | No | Max results per page (default 50, max 200) |
+| `page` | int | No | Page number, 0-based (default 0) |
 
 ---
 
-### 8.9 Kill Process
+### 10.9 Kill Process
 
 ```
 @Tool: killProcess
@@ -1023,24 +1089,165 @@ List all running OS processes (like `ps` or Task Manager). Supports pagination.
 
 Force-terminate a system process by PID.
 
-| Parameter | Type    | Required | Description                                      |
+| Parameter | Type | Required | Description |
 |-----------|---------|----------|--------------------------------------------------|
-| `pid`     | long    | Yes      | Process ID                                       |
-| `force`   | boolean | No       | Whether to use forceful termination (default true) |
+| `pid` | long | Yes | Process ID |
+| `force` | boolean | No | Whether to use forceful termination (default true) |
 
 ---
 
-## 9. Data Models
+## 11. Sub-task & Schedule APIs
+
+Sub-tasks are per-conversation (`loom-subtask-{user}-{conv}-{taskId}`); schedules are per-conversation (`loom-sched-{user}-{conv}-{name}`) and persist to the loom-agent-owned `loom_scheduled_task` table (migration). The `flex.schedule.limits` constraints are **10m min-interval / 72h max-lifetime / strict mode** by default in the test app.
+
+### 11.1 List Sub-task Limits
+
+```http
+GET /spring/ai/loom/subtask/limits
+```
+
+**Response**: `{ "maxConcurrent": int, "maxHistory": int }`
+
+### 11.2 List Active Sub-tasks
+
+```http
+GET /spring/ai/loom/subtask/list/active?conversationId=...
+```
+
+### 11.3 List Sub-task History
+
+```http
+GET /spring/ai/loom/subtask/list/history?conversationId=...&limit=...
+```
+
+### 11.4 Kill a Sub-task
+
+```http
+POST /spring/ai/loom/subtask/kill/{id}
+```
+
+**Permission**: Owner only. Cross-conversation kill returns 403.
+
+### 11.5 Delete a Sub-task History Entry
+
+```http
+DELETE /spring/ai/loom/subtask/history/{id}
+```
+
+### 11.6 List Schedule Limits
+
+```http
+GET /spring/ai/loom/schedule/limits
+```
+
+**Response**: `{ "minInterval": "PT10M", "maxLifetime": "PT72H", "mode": "strict" }` (ISO 8601 durations)
+
+### 11.7 List All Schedules
+
+```http
+GET /spring/ai/loom/schedule/list
+```
+
+**Response**: `TaskInfo[]` — all schedules visible to the current user.
+
+### 11.8 Cancel a Schedule
+
+```http
+POST /spring/ai/loom/schedule/cancel
+Content-Type: application/json
+
+{ "name": "loom-sched-alice-conv-1-防干眼提醒" }
+```
+
+**Note**: The body field is **`name`**, not `taskName`. The value is the FULL namespaced name (returned by `list`). Returns 403 for non-owner or non-existent task. Also deletes the corresponding `loom_scheduled_task` row so the `ScheduleRestoreListener` doesn't resurrect it on restart.
+
+### 11.9 Cancel All Schedules for a Conversation
+
+```http
+POST /spring/ai/loom/schedule/by-conversation/{conversationId}/cancel-all
+```
+
+### 11.10 Get Schedule Execution History
+
+```http
+GET /spring/ai/loom/schedule/history/{name}
+```
+
+**Permission**: Owner only (returns 403 for non-owner).
+
+### 11.11 Get Schedule History for a Conversation
+
+```http
+GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
+```
+
+---
+
+## 12. Admin APIs
+
+All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-admin access returns 403 (`{"message": "无权限"}`). The admin pages under `admin/*.html` are the canonical UI for these endpoints.
+
+### 10.1 User Management
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/users` | List all users |
+| POST | `/admin/users` | Create user (body: `CreateUserRequest` — username, nickname, password, type). Returns 400 if name taken |
+| DELETE | `/admin/users/{username}` | Delete user; refuses to delete self |
+| GET | `/admin/users/{username}/conversations` | List a user's conversations (admin view) |
+| GET | `/admin/users/{username}/roles` | Get user's roles |
+| PUT | `/admin/users/{username}/roles` | Replace user's roles (body: array of role codes) |
+
+### 10.2 Conversation Management (admin)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/conversations/{conversationId}/turns` | List every turn with token usage |
+| GET | `/admin/conversations/{conversationId}/messages` | List raw `ChatMessage`s |
+| POST | `/admin/conversations/clean-batch` | Hard-delete soft-deleted conversations in batch |
+
+### 10.3 Token Usage Statistics
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
+
+### 10.4 Role / MCP / Skill / Knowledge Management
+
+All under `/admin/...` and already documented in:
+
+- [§ 5 Knowledge Base Management](#5-knowledge-base-management) — `admin/knowledge*`, `/api/knowledge-market*`
+- [§ 6 Skill Management](#6-skill-management) — `admin/market-skills*`, `/admin/roles/{code}/skills`
+- [§ 7 MCP Tools](#7-mcp-tools) — `admin/mcps*`, `admin/mcp-tools*`
+- See `docs/knowledge-market.md` for the Knowledge Market flow.
+
+### 10.5 Admin UI Pages (`admin/*.html`)
+
+| Page | Purpose |
+| --- | --- |
+| `admin/console.html` (→ user.html) | User list + role assignment + batch content cleanup |
+| `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
+| `admin/skills-market.html` | Approve / reject / directly CRUD Skill |
+| `admin/knowledge-market.html` | Approve / reject / directly CRUD Knowledge |
+| `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
+| `admin/conversation.html` | Drill into any user's conversation turns (admin only) |
+| `admin/stats.html` | Monthly Token usage (year + month filter) |
+
+All admin pages share a fixed left sidebar (see README "Admin Console" section). `D2` () fixed the previously dead `admin/knowledge-market.html` page (the JS file was missing).
+
+---
+
+## 13. Data Models
 
 ### ChatRequestRecord
 
 ```json
 {
-  "message": "string",
-  "conversationId": "string",
-  "mcps": ["string"],
-  "knowledgeId": "string",
-  "fileIds": ["string"]
+ "message": "string",
+ "conversationId": "string",
+ "mcps": ["string"],
+ "knowledgeId": "string",
+ "fileIds": ["string"]
 }
 ```
 
@@ -1048,8 +1255,8 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "content": "string",
-  "reasoningContent": "string"
+ "content": "string",
+ "reasoningContent": "string"
 }
 ```
 
@@ -1057,8 +1264,8 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "conversationId": "string",
-  "title": "string"
+ "conversationId": "string",
+ "title": "string"
 }
 ```
 
@@ -1066,8 +1273,8 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "username": "string",
-  "verified": "string"
+ "username": "string",
+ "verified": "string"
 }
 ```
 
@@ -1075,8 +1282,8 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "token": "string",
-  "nickname": "string"
+ "token": "string",
+ "nickname": "string"
 }
 ```
 
@@ -1086,14 +1293,14 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "id": "string",
-  "knowledgeId": "string",
-  "fileName": "string",
-  "size": 0,
-  "uploadTime": "2026-05-10T10:30:00",
-  "path": "string",
-  "usage": "conversation",
-  "mimeType": "application/pdf"
+ "id": "string",
+ "knowledgeId": "string",
+ "fileName": "string",
+ "size": 0,
+ "uploadTime": "2026-05-10T10:30:00",
+ "path": "string",
+ "usage": "conversation",
+ "mimeType": "application/pdf"
 }
 ```
 
@@ -1101,9 +1308,9 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "id": "string",
-  "username": "string",
-  "name": "string"
+ "id": "string",
+ "username": "string",
+ "name": "string"
 }
 ```
 
@@ -1111,17 +1318,17 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "name": "string",
-  "title": "string",
-  "version": "string",
-  "description": "string",
-  "defaultSelected": true,
-  "tools": [
-    {
-      "name": "string",
-      "description": "string"
-    }
-  ]
+ "name": "string",
+ "title": "string",
+ "version": "string",
+ "description": "string",
+ "defaultSelected": true,
+ "tools": [
+ {
+ "name": "string",
+ "description": "string"
+ }
+ ]
 }
 ```
 
@@ -1129,48 +1336,48 @@ Force-terminate a system process by PID.
 
 ```json
 {
-  "name": "string",
-  "description": "string",
-  "load": true,
-  "content": "string",
-  "source": "USER_CREATED | MARKET_PULLED | ROLE_GRANTED | MARKET_VIEW"
+ "name": "string",
+ "description": "string",
+ "load": true,
+ "content": "string",
+ "source": "USER_CREATED | MARKET_PULLED | ROLE_GRANTED"
 }
 ```
 
-> The response shape is the same as the PUT request body (`name` / `description` / `load` / `content`), plus a `source` field set by the server to indicate where the skill was loaded from. `source` is one of `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED` / `MARKET_VIEW`.
+> The response shape is the same as the PUT request body (`name` / `description` / `load` / `content`), plus a `source` field set by the server to indicate where the skill was loaded from. `source` is one of `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`.
 
 ---
 
-## 10. Configuration Properties
+## 14. Configuration Properties
 
 All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
 ### 10.1 Basic Configuration
 
-| Property                                  | Type    | Default                 | Description                        |
+| Property | Type | Default | Description |
 |-------------------------------------------|---------|-------------------------|------------------------------------|
-| `spring.ai.loom.agent.defaultSystem`      | string  | Skill discovery prompt  | Default system prompt              |
-| `spring.ai.loom.agent.init`               | boolean | `true`                  | Whether to initialize the ChatClient |
+| `spring.ai.loom.agent.defaultSystem` | string | Skill discovery prompt | Default system prompt |
+| `spring.ai.loom.agent.init` | boolean | `true` | Whether to initialize the ChatClient |
 
 ### 10.2 RAG Configuration
 
-| Property                                                  | Type    | Default | Description                                    |
+| Property | Type | Default | Description |
 |-----------------------------------------------------------|---------|---------|------------------------------------------------|
-| `spring.ai.loom.agent.rag.similarityThreshold`            | double  | `0.0`   | Vector retrieval similarity threshold          |
-| `spring.ai.loom.agent.rag.topK`                           | int     | `4`     | Number of top results to retrieve              |
+| `spring.ai.loom.agent.rag.similarityThreshold` | double | `0.0` | Vector retrieval similarity threshold |
+| `spring.ai.loom.agent.rag.topK` | int | `4` | Number of top results to retrieve |
 
 ### 10.3 MCP Configuration
 
 `spring.ai.loom.agent.mcps` is an array. Each entry contains:
 
-| Property                | Type    | Description                          |
+| Property | Type | Description |
 |-------------------------|---------|--------------------------------------|
-| `name`                  | string  | MCP server name                      |
-| `title`                 | string  | Display label                        |
-| `description`           | string  | Description info                     |
-| `defaultSelected`       | boolean | Whether selected by default          |
-| `tools[].name`          | string  | Tool name                            |
-| `tools[].description`   | string  | Tool description                     |
+| `name` | string | MCP server name |
+| `title` | string | Display label |
+| `description` | string | Description info |
+| `defaultSelected` | boolean | Whether selected by default |
+| `tools[].name` | string | Tool name |
+| `tools[].description` | string | Tool description |
 
 ### 10.4 Skill Configuration (no longer read from yml)
 
@@ -1178,29 +1385,29 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 ### 10.5 JVector Configuration
 
-| Property                                        | Type   | Default                | Description                  |
+| Property | Type | Default | Description |
 |-------------------------------------------------|--------|------------------------|------------------------------|
-| `spring.ai.loom.agent.jvector.indexPath`          | string | `.local/jvector-index` | Vector index storage path    |
-| `spring.ai.loom.agent.jvector.m`                  | int    | `16`                   | HNSW graph parameter M       |
-| `spring.ai.loom.agent.jvector.efConstruction`    | int    | `100`                  | ef parameter at build time   |
-| `spring.ai.loom.agent.jvector.efSearch`          | int    | `10`                   | ef parameter at search time  |
+| `spring.ai.loom.agent.jvector.indexPath` | string | `.local/jvector-index` | Vector index storage path |
+| `spring.ai.loom.agent.jvector.m` | int | `16` | HNSW graph parameter M |
+| `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | ef parameter at build time |
+| `spring.ai.loom.agent.jvector.efSearch` | int | `10` | ef parameter at search time |
 
 ### 10.6 Authentication Configuration
 
-| Property                              | Type    | Default                | Description                                          |
+| Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.auth.enabled`   | boolean | `true`                 | Authentication master switch                         |
-| `spring.ai.loom.agent.auth.pathPatterns` | string[] | `["/spring/ai/loom/**"]` | Paths requiring authentication (Ant-style patterns)  |
+| `spring.ai.loom.agent.auth.enabled` | boolean | `true` | Authentication master switch |
+| `spring.ai.loom.agent.auth.pathPatterns` | string[] | `["/spring/ai/loom/**"]` | Paths requiring authentication (Ant-style patterns) |
 | `spring.ai.loom.agent.auth.excludePathPatterns` | string[] | (see below) | Paths excluded from authentication |
-| `spring.ai.loom.agent.auth.cookie.name` | string  | `loom-agent-session`   | Session cookie name                                  |
-| `spring.ai.loom.agent.auth.cookie.maxAge` | int    | `86400`                | Cookie max age in seconds (24 hours)                 |
+| `spring.ai.loom.agent.auth.cookie.name` | string | `loom-agent-session` | Session cookie name |
+| `spring.ai.loom.agent.auth.cookie.maxAge` | int | `86400` | Cookie max age in seconds (24 hours) |
 
 ### 10.7 File Storage Configuration
 
-| Property                              | Type    | Default                | Description                                          |
+| Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.fileBasePath`   | string  | `.local/file`          | Root directory for uploaded files                    |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge`    | Root directory for knowledge base files              |
+| `spring.ai.loom.agent.fileBasePath` | string | `.local/file` | Root directory for uploaded files |
+| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge` | Root directory for knowledge base files |
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -1208,23 +1415,23 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with a set of default safety/resource limits tailored for LLM tool-call scenarios.
 
-| Property                                          | Type     | Default                                                                                                | Description                                                                                                                                                                                                                                                                              |
+| Property | Type | Default | Description |
 |---------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.file.enabled`               | boolean  | `true`                                                                                                 | Whether to enable the file tool                                                                                                                                                                                                                                                          |
-| `spring.ai.loom.agent.file.maxFileSize`           | long     | `5242880` (5 MB)                                                                                       | Per-call upper bound on file read/write size (bytes). Exceeding this is rejected outright, **to avoid OOM and LLM context overflow**.                                                                                                                                                   |
-| `spring.ai.loom.agent.file.maxMediaSize`          | long     | `1048576` (1 MB)                                                                                       | Upper bound on media files (images / audio). Base64-encoded size ≈ 4/3 of the original, so the limit is stricter than for text.                                                                                                                                                          |
-| `spring.ai.loom.agent.file.maxWalkDepth`          | int      | `5`                                                                                                    | Upper bound on depth for `directoryTree` / recursive listing / search.                                                                                                                                                                                                                   |
-| `spring.ai.loom.agent.file.maxWalkEntries`        | int      | `1000`                                                                                                 | Upper bound on entries returned per `listDirectory` / `directoryTree` call.                                                                                                                                                                                                              |
-| `spring.ai.loom.agent.file.maxSearchResults`      | int      | `500`                                                                                                 | Upper bound on `searchFiles` hit count.                                                                                                                                                                                                                                                  |
-| `spring.ai.loom.agent.file.deleteConfirmToken`    | string   | `I_CONFIRM_DELETE`                                                                                     | The `deleteFileOrDirectory` tool requires this exact string as an explicit argument before it executes (**guards against accidental LLM deletions**). Can be replaced with a shorter token (e.g. `YES`) to save tokens.                                                                     |
-| `spring.ai.loom.agent.file.excludedDirs`          | string[] | `[".git", "node_modules", "target", "build", "dist", ".idea", ".vscode", ".gradle", "out", "bin"]`     | Directory names skipped during traversal (exact match, not glob). Keeps `directoryTree` / `searchFiles` from dumping tens of thousands of `target/classes/*.class` entries on a Spring Boot project.                                                                                  |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | Whether to enable the file tool |
+| `spring.ai.loom.agent.file.maxFileSize` | long | `5242880` (5 MB) | Per-call upper bound on file read/write size (bytes). Exceeding this is rejected outright, **to avoid OOM and LLM context overflow**. |
+| `spring.ai.loom.agent.file.maxMediaSize` | long | `1048576` (1 MB) | Upper bound on media files (images / audio). Base64-encoded size ≈ 4/3 of the original, so the limit is stricter than for text. |
+| `spring.ai.loom.agent.file.maxWalkDepth` | int | `5` | Upper bound on depth for `directoryTree` / recursive listing / search. |
+| `spring.ai.loom.agent.file.maxWalkEntries` | int | `1000` | Upper bound on entries returned per `listDirectory` / `directoryTree` call. |
+| `spring.ai.loom.agent.file.maxSearchResults` | int | `500` | Upper bound on `searchFiles` hit count. |
+| `spring.ai.loom.agent.file.deleteConfirmToken` | string | `I_CONFIRM_DELETE` | The `deleteFileOrDirectory` tool requires this exact string as an explicit argument before it executes (**guards against accidental LLM deletions**). Can be replaced with a shorter token (e.g. `YES`) to save tokens. |
+| `spring.ai.loom.agent.file.excludedDirs` | string[] | `[".git", "node_modules", "target", "build", "dist", ".idea", ".vscode", ".gradle", "out", "bin"]` | Directory names skipped during traversal (exact match, not glob). Keeps `directoryTree` / `searchFiles` from dumping tens of thousands of `target/classes/*.class` entries on a Spring Boot project. |
 
 **Safety mechanisms**:
 
 - All path resolution is delegated to `PathSecurityUtils.assertInsideUserDir(resolved, userDir, mustExist)`, which uniformly handles:
-  - `..` traversal (a single `Path.normalize` defeats it)
-  - **Symlink escape** (`Path.toRealPath` follows the chain) — even if the user drops a symlink inside `userDir` pointing at `C:\Windows`, the tool will not read through it
-  - Size-bypass on case-insensitive filesystems (Windows / macOS)
+ - `..` traversal (a single `Path.normalize` defeats it)
+ - **Symlink escape** (`Path.toRealPath` follows the chain) — even if the user drops a symlink inside `userDir` pointing at `C:\Windows`, the tool will not read through it
+ - Size-bypass on case-insensitive filesystems (Windows / macOS)
 - Atomic writes: `writeFile` / `editFile` write to a `.tmp` file and then `Files.move(ATOMIC_MOVE)` it into place, so a mid-write power loss won't corrupt the target. Falls back to non-atomic replacement across volumes.
 - `editFile` uniqueness check: if `oldText` matches more than once in the file the call is rejected, forcing the LLM to provide more precise surrounding context.
 
@@ -1232,24 +1439,24 @@ The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with
 
 `ICompileAndDeployTool` performs the full deployment pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. Supports Maven, Node.js (backend and static-frontend → nginx), and Python projects. All settings live under `spring.ai.loom.agent.compile.*`.
 
-| Property                                          | Type     | Default                          | Description                                                                                                  |
+| Property | Type | Default | Description |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled`            | boolean  | `true`                           | Whether to register the end-to-end deploy tool (default enabled)                                            |
-| `spring.ai.loom.agent.compile.mavenHome`          | string   | auto-discover                    | Optional Maven install dir; falls back to `maven.mavenHome` and PATH                                         |
-| `spring.ai.loom.agent.compile.dockerCmd`          | string   | `docker`                         | Optional override for the docker CLI binary                                                                  |
-| `spring.ai.loom.agent.compile.imageTemplates`     | map      | (6 pre-set templates)            | Pre-set base-image templates keyed by alias; see below                                                       |
-| `spring.ai.loom.agent.compile.extraRunArgs`       | string[] | `[]`                             | Extra `docker run` args injected between `--name` and the image name                                         |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | Whether to register the end-to-end deploy tool (default enabled) |
+| `spring.ai.loom.agent.compile.mavenHome` | string | auto-discover | Optional Maven install dir; falls back to `maven.mavenHome` and PATH |
+| `spring.ai.loom.agent.compile.dockerCmd` | string | `docker` | Optional override for the docker CLI binary |
+| `spring.ai.loom.agent.compile.imageTemplates` | map | (6 pre-set templates) | Pre-set base-image templates keyed by alias; see below |
+| `spring.ai.loom.agent.compile.extraRunArgs` | string[] | `[]` | Extra `docker run` args injected between `--name` and the image name |
 
 **Base-image templates** (built-in):
 
-| Alias      | Image                                    | Default ENTRYPOINT                          |
+| Alias | Image | Default ENTRYPOINT |
 |------------|------------------------------------------|---------------------------------------------|
-| `java17`   | `eclipse-temurin:17-jre-alpine`          | `["java","-jar","app.jar"]`                 |
-| `java21`   | `eclipse-temurin:21-jre-alpine`          | `["java","-jar","app.jar"]`                 |
-| `nginx`    | `nginx:1.27-alpine`                      | `["nginx","-g","daemon off;"]`              |
-| `python3`  | `python:3.12-slim`                       | `["python","app.py"]`                       |
-| `node20`   | `node:20-alpine`                         | `["node","dist/index.js"]`                   |
-| `node20-serve` | `nginx:1.27-alpine`                  | `["nginx","-g","daemon off;"]`              |
+| `java17` | `eclipse-temurin:17-jre-alpine` | `["java","-jar","app.jar"]` |
+| `java21` | `eclipse-temurin:21-jre-alpine` | `["java","-jar","app.jar"]` |
+| `nginx` | `nginx:1.27-alpine` | `["nginx","-g","daemon off;"]` |
+| `python3` | `python:3.12-slim` | `["python","app.py"]` |
+| `node20` | `node:20-alpine` | `["node","dist/index.js"]` |
+| `node20-serve` | `nginx:1.27-alpine` | `["nginx","-g","daemon off;"]` |
 
 Tool-call parameters (Map, case-insensitive, all optional except `gitUrl`, `port`, and `containerPort`):
 
@@ -1269,29 +1476,29 @@ Example yml overriding the default templates:
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        compile:
-          image-templates:
-            java17:
-              image: eclipse-temurin:17-jre-alpine
-              command: [java, -jar, app.jar]
-            nginx:
-              image: nginx:1.27-alpine
-              command: [nginx, -g, "daemon off;"]
+ ai:
+ loom:
+ agent:
+ compile:
+ image-templates:
+ java17:
+ image: eclipse-temurin:17-jre-alpine
+ command: [java, -jar, app.jar]
+ nginx:
+ image: nginx:1.27-alpine
+ command: [nginx, -g, "daemon off;"]
 ```
 
 Example tool invocation:
 
 ```json
 {
-  "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
-  "port": 8081,
-  "containerPort": 8080,
-  "subDir": "sql-forge-web",
-  "baseImage": "java17",
-  "healthPath": "sql-forge-demo"
+ "gitUrl": "https://gitee.com/wb04307201/sql-forge-demo.git",
+ "port": 8081,
+ "containerPort": 8080,
+ "subDir": "sql-forge-web",
+ "baseImage": "java17",
+ "healthPath": "sql-forge-demo"
 }
 ```
 
@@ -1299,66 +1506,66 @@ Example tool invocation:
 
 `IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. **Disabled by default** — opt in with `git.enabled=true`.
 
-| Property                              | Type    | Default                | Description                                          |
+| Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.git.enabled`    | boolean | `false`                | Whether to register the Git tool (default false; set to true to enable) |
-| `spring.ai.loom.agent.git.username`   | string  | —                      | Git username for remote authentication               |
-| `spring.ai.loom.agent.git.token`      | string  | —                      | Git token / password for remote authentication       |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Whether to register the Git tool (default false; set to true to enable) |
+| `spring.ai.loom.agent.git.username` | string | — | Git username for remote authentication |
+| `spring.ai.loom.agent.git.token` | string | — | Git token / password for remote authentication |
 
 Example:
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        git:
-          enabled: true   # default false; set to true to enable
-          username: your-username
-          token: your-token
+ ai:
+ loom:
+ agent:
+ git:
+ enabled: true # default false; set to true to enable
+ username: your-username
+ token: your-token
 ```
 
 ### 10.10 Maven Build Configuration
 
-| Property                                          | Type     | Default    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Property | Type | Default | Description |
 |---------------------------------------------------|----------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled`              | boolean  | `false`    | Whether to register the Maven tool (**opt-in**) — compile/package for deployment scenarios is handled by `ICompileAndDeployTool`                                                                                                                                                                                                                                                                                                                                                                              |
-| `spring.ai.loom.agent.maven.mavenHome`            | string   | —          | Maven install directory. **When empty, the tool auto-discovers**: it tries the `MAVEN_HOME` / `M2_HOME` environment variables first, then scans common Windows paths (e.g. `C:\developer\apache-maven-*`, `C:\Program Files\Apache Maven`). Auto-discovery does **not** rely on the system `PATH`, so a broken or shadowing `mvn` wrapper (e.g. a global npm `mvn`) won't cause `maven-invoker` to throw `Error configuring command line`.                                                                    |
-| `spring.ai.loom.agent.maven.localRepository`      | string   | —          | Local repository path (uses the default path when empty)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `spring.ai.loom.agent.maven.maxOutputLines`       | int      | `200`      | Maximum output lines (truncated when exceeded)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `spring.ai.loom.agent.maven.defaultTimeoutMs`     | long     | `300000`   | Default execution timeout in milliseconds (5 minutes)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Whether to register the Maven tool (**opt-in**) — compile/package for deployment scenarios is handled by `ICompileAndDeployTool` |
+| `spring.ai.loom.agent.maven.mavenHome` | string | — | Maven install directory. **When empty, the tool auto-discovers**: it tries the `MAVEN_HOME` / `M2_HOME` environment variables first, then scans common Windows paths (e.g. `C:\developer\apache-maven-*`, `C:\Program Files\Apache Maven`). Auto-discovery does **not** rely on the system `PATH`, so a broken or shadowing `mvn` wrapper (e.g. a global npm `mvn`) won't cause `maven-invoker` to throw `Error configuring command line`. |
+| `spring.ai.loom.agent.maven.localRepository` | string | — | Local repository path (uses the default path when empty) |
+| `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | Maximum output lines (truncated when exceeded) |
+| `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | Default execution timeout in milliseconds (5 minutes) |
 
 > All Maven tool operations are scoped to `{fileBasePath}/{username}/`; paths outside that range are rejected.
 >
 > **Troubleshooting tip — `MavenInvocationException: Error configuring command line`**: this means `maven-invoker` could not find a usable `mvn` / `mvn.cmd`. The tool startup log prints the resolved `mavenHome` together with a diagnostic hint listing every path it searched, the environment variables it looked at, and how to fix it. The most common cause is a broken or shadowing `mvn` on `PATH` (e.g. a global npm `mvn` wrapper); in that case, explicitly set `spring.ai.loom.agent.maven.mavenHome` in `application.yml` to point at the real Maven install directory to bypass it.
 >
-> **Troubleshooting tip — "file is locked" errors when deleting the project directory on Windows**: in older versions this was caused by `maven-invoker 3.3.0` / `plexus-utils 3.3.0` because (a) the JVM shutdown hook they register on the exception/cancel path never releases the held `Process` reference, and (b) `Invoker.execute()` does not expose the child-process handle, so it cannot propagate cancel/timeout down to the mvn child process. The result: a cancelled or timed-out Maven call would leave the mvn child running and continuing to hold mmap handles on `target/classes` and `~/.m2/repository/*.jar`, locking those files on Windows. **The new version no longer uses `Invoker.execute()` to run the process** — it forks mvn directly with `ProcessBuilder`, does a clean timeout via `Process.waitFor(timeout, unit)`, then calls `Process.destroyForcibly()` and explicitly closes the streams on timeout. **No JVM shutdown hook is registered any more, so the mvn child is always killed on timeout/cancel.** If you still see locks after upgrading, it is most likely an orphan mvn process left behind by a previous JVM — find it with `tasklist /FI "IMAGENAME eq cmd.exe"` and `taskkill /F /PID <pid>` it.
+> **Troubleshooting tip — "file is locked" errors when deleting the project directory on Windows**: in older versions this was caused by `maven-invoker 3.3.0` / `plexus-utils 3.3.0` because (a) the JVM shutdown hook they register on the exception/cancel path never releases the held `Process` reference, and (b) `Invoker.execute` does not expose the child-process handle, so it cannot propagate cancel/timeout down to the mvn child process. The result: a cancelled or timed-out Maven call would leave the mvn child running and continuing to hold mmap handles on `target/classes` and `~/.m2/repository/*.jar`, locking those files on Windows. **The new version no longer uses `Invoker.execute` to run the process** — it forks mvn directly with `ProcessBuilder`, does a clean timeout via `Process.waitFor(timeout, unit)`, then calls `Process.destroyForcibly` and explicitly closes the streams on timeout. **No JVM shutdown hook is registered any more, so the mvn child is always killed on timeout/cancel.** If you still see locks after upgrading, it is most likely an orphan mvn process left behind by a previous JVM — find it with `tasklist /FI "IMAGENAME eq cmd.exe"` and `taskkill /F /PID <pid>` it.
 
 ### 10.11 Tool Group Switches
 
 All built-in tool groups are **enabled by default** (`matchIfMissing=true`). Set any of the following properties to `false` in yml to turn off the corresponding tool group.
 
-| Property                                | Type     | Default | Description                                                                                                                                                                       |
+| Property | Type | Default | Description |
 |-----------------------------------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.time.enabled`     | boolean  | `true`  | Time tool (`ITimeTool` — get current time, convert between timezones)                                                                                                            |
-| `spring.ai.loom.agent.file.enabled`     | boolean  | `true`  | File tool (`IFileTool` — 16 path-based read/write/edit/search/delete operations)                                                                                                 |
-| `spring.ai.loom.agent.skill.enabled`    | boolean  | `true`  | Skill tool (`ISkillTool` — list skills, get skill details)                                                                                                                       |
-| `spring.ai.loom.agent.git.enabled`      | boolean  | `false` | Git tool (`IGitTool` — 28 git operations). **Opt-in** — end-to-end deployment goes through `ICompileAndDeployTool`.                                                              |
-| `spring.ai.loom.agent.maven.enabled`    | boolean  | `false` | Maven tool (also requires `maven-invoker` on the classpath). **Opt-in** — compile/package for deployment scenarios goes through `ICompileAndDeployTool`.                        |
-| `spring.ai.loom.agent.git.username`     | string   | —       | HTTP(S) Git auth username (clone/pull/push)                                                                                                                                      |
-| `spring.ai.loom.agent.git.token`        | string   | —       | HTTP(S) Git auth token / password                                                                                                                                                |
-| `spring.ai.loom.agent.gitUsername`      | string   | —       | **Legacy** top-level alias, equivalent to `git.username`                                                                                                                         |
-| `spring.ai.loom.agent.gitToken`         | string   | —       | **Legacy** top-level alias, equivalent to `git.token`                                                                                                                            |
+| `spring.ai.loom.agent.time.enabled` | boolean | `true` | Time tool (`ITimeTool` — get current time, convert between timezones) |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | File tool (`IFileTool` — 16 path-based read/write/edit/search/delete operations) |
+| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | Skill tool (`ISkillTool` — list skills, get skill details) |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Git tool (`IGitTool` — 28 git operations). **Opt-in** — end-to-end deployment goes through `ICompileAndDeployTool`. |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Maven tool (also requires `maven-invoker` on the classpath). **Opt-in** — compile/package for deployment scenarios goes through `ICompileAndDeployTool`. |
+| `spring.ai.loom.agent.git.username` | string | — | HTTP(S) Git auth username (clone/pull/push) |
+| `spring.ai.loom.agent.git.token` | string | — | HTTP(S) Git auth token / password |
+| `spring.ai.loom.agent.gitUsername` | string | — | **Legacy** top-level alias, equivalent to `git.username` |
+| `spring.ai.loom.agent.gitToken` | string | — | **Legacy** top-level alias, equivalent to `git.token` |
 
 **Example — enable the Git tool**:
 
 ```yaml
 spring:
-  ai:
-    loom:
-      agent:
-        git:
-          enabled: true   # default false; set to true to enable
+ ai:
+ loom:
+ agent:
+ git:
+ enabled: true # default false; set to true to enable
 ```
 
 > Even when a tool group is turned off, you can still re-enable it by providing your own `@Bean IGitTool` / `@Bean IMavenTool` — `@ConditionalOnMissingBean` always takes precedence over the auto-configured bean.
@@ -1367,37 +1574,37 @@ spring:
 
 ## Appendix: Endpoint Summary
 
-| #  | Method   | Path                                                    | Description                          |
+| # | Method | Path | Description |
 |----|----------|---------------------------------------------------------|--------------------------------------|
-| 1  | `POST`   | `/spring/ai/loom/user/isAutoLogin`                      | Check auto-login status              |
-| 2  | `POST`   | `/spring/ai/loom/user/login`                            | User login (sets session cookie)     |
-| 2a | `POST`   | `/spring/ai/loom/user/logout`                           | User logout (invalidates session)    |
-| 3  | `GET`    | `/spring/ai/loom/conversation`                          | List conversations                   |
-| 4  | `GET`    | `/spring/ai/loom/conversation/{id}`                     | Get conversation history             |
-| 5  | `DELETE` | `/spring/ai/loom/conversation/{id}`                     | Delete conversation                  |
-| 6  | `POST`   | `/spring/ai/loom/stream`                                | SSE streaming chat                   |
-| 7  | `POST`   | `/spring/ai/loom/file/upload`                           | Upload file                          |
-| 8  | `GET`    | `/spring/ai/loom/file` or `/spring/ai/loom/file/tree` | List file tree (directory tree JSON) |
-| 8a | `GET`    | `/spring/ai/loom/file/by-path/view`                     | View file by path (redirects)        |
-| 8b | `GET`    | `/spring/ai/loom/file/by-path/download`                 | Download file by path (redirects)    |
-| 8c | `GET`    | `/spring/ai/loom/file/{id}/download`                    | Download file by ID (binary stream)  |
-| 9  | `GET`    | `/spring/ai/loom/knowledge/checkKnowledgeUpload`        | Check knowledge base status          |
-| 10 | `GET`    | `/spring/ai/loom/knowledge`                             | List knowledge bases                 |
-| 11 | `PUT`    | `/spring/ai/loom/knowledge`                             | Create knowledge base                |
-| 12 | `DELETE` | `/spring/ai/loom/knowledge/{id}`                        | Delete knowledge base (cascade)      |
-| 13 | `POST`   | `/spring/ai/loom/knowledge/{id}/upload`                 | Upload file to knowledge base        |
-| 14 | `GET`    | `/spring/ai/loom/knowledge/{id}/file`                   | List files in knowledge base         |
-| 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}`         | Delete file from knowledge base      |
-| 15a| `GET`    | `/spring/ai/loom/api/knowledge-market`                  | Browse approved market knowledge (paginated) |
-| 15b| `POST`   | `/spring/ai/loom/api/knowledge-market/{marketId}/pull`  | Subscribe to market knowledge        |
-| 15c| `POST`   | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit`    | Submit knowledge to market           |
-| 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}`       | Withdraw market submission           |
-| 15e| `POST`   | `/spring/ai/loom/api/knowledge-market/{marketId}/approve`| Admin approve market submission       |
-| 15f| `POST`   | `/spring/ai/loom/api/knowledge-market/{marketId}/reject`| Admin reject market submission       |
-| 15g| `GET`    | `/spring/ai/loom/api/knowledge-market/my-pulled`        | List my subscribed market knowledge  |
-| 15h| `GET`    | `/spring/ai/loom/api/knowledge-market/my-submitted`     | List my market submissions           |
-| 16 | `GET`    | `/spring/ai/chat/loom/mcp`                              | Get MCP servers and tools            |
-| 17 | `GET`    | `/spring/ai/loom/skill`                                 | List all skills                      |
-| 18 | `PUT`    | `/spring/ai/loom/skill`                                 | Create or update a skill             |
-| 19 | `GET`    | `/spring/ai/loom/skill/{name}`                          | Get skill details                    |
-| 20 | `DELETE` | `/spring/ai/loom/skill/{name}`                          | Delete a skill                       |
+| 1 | `POST` | `/spring/ai/loom/user/isAutoLogin` | Check auto-login status |
+| 2 | `POST` | `/spring/ai/loom/user/login` | User login (sets session cookie) |
+| 2a | `POST` | `/spring/ai/loom/user/logout` | User logout (invalidates session) |
+| 3 | `GET` | `/spring/ai/loom/conversation` | List conversations |
+| 4 | `GET` | `/spring/ai/loom/conversation/{id}` | Get conversation history |
+| 5 | `DELETE` | `/spring/ai/loom/conversation/{id}` | Delete conversation |
+| 6 | `POST` | `/spring/ai/loom/stream` | SSE streaming chat |
+| 7 | `POST` | `/spring/ai/loom/file/upload` | Upload file |
+| 8 | `GET` | `/spring/ai/loom/file` or `/spring/ai/loom/file/tree` | List file tree (directory tree JSON) |
+| 8a | `GET` | `/spring/ai/loom/file/by-path/view` | View file by path (redirects) |
+| 8b | `GET` | `/spring/ai/loom/file/by-path/download` | Download file by path (redirects) |
+| 8c | `GET` | `/spring/ai/loom/file/{id}/download` | Download file by ID (binary stream) |
+| 9 | `GET` | `/spring/ai/loom/knowledge/checkKnowledgeUpload` | Check knowledge base status |
+| 10 | `GET` | `/spring/ai/loom/knowledge` | List knowledge bases |
+| 11 | `PUT` | `/spring/ai/loom/knowledge` | Create knowledge base |
+| 12 | `DELETE` | `/spring/ai/loom/knowledge/{id}` | Delete knowledge base (cascade) |
+| 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | Upload file to knowledge base |
+| 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | List files in knowledge base |
+| 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | Delete file from knowledge base |
+| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | Browse approved market knowledge (paginated) |
+| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | Subscribe to market knowledge |
+| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | Submit knowledge to market |
+| 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}` | Withdraw market submission |
+| 15e| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/approve`| Admin approve market submission |
+| 15f| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/reject`| Admin reject market submission |
+| 15g| `GET` | `/spring/ai/loom/api/knowledge-market/my-pulled` | List my subscribed market knowledge |
+| 15h| `GET` | `/spring/ai/loom/api/knowledge-market/my-submitted` | List my market submissions |
+| 16 | `GET` | `/spring/ai/chat/loom/mcp` | Get MCP servers and tools |
+| 17 | `GET` | `/spring/ai/loom/skill` | List all skills |
+| 18 | `PUT` | `/spring/ai/loom/skill` | Create or update a skill |
+| 19 | `GET` | `/spring/ai/loom/skill/{name}` | Get skill details |
+| 20 | `DELETE` | `/spring/ai/loom/skill/{name}` | Delete a skill |

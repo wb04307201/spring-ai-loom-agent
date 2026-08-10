@@ -1,11 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.schedule;
 
-import cn.wubo.flex.schedule.core.DefaultFlexScheduledTaskService;
-import cn.wubo.flex.schedule.core.ExecutionRecord;
-import cn.wubo.flex.schedule.core.FlexScheduledTaskRegistrar;
-import cn.wubo.flex.schedule.core.FlexScheduledTaskService;
-import cn.wubo.flex.schedule.core.InMemoryExecutionHistory;
-import cn.wubo.flex.schedule.core.TaskLimits;
+import cn.wubo.flex.schedule.core.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -22,14 +17,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * End-to-end test for the new flex-schedule 1.2.2 APIs that loom-agent relies
  * on after the upgrade:
  * <ul>
- *   <li>{@link cn.wubo.flex.schedule.core.TaskBuilder#createdAt(Instant)} &mdash;
- *       stamps the logical creation time on the dispatcher entry so the
- *       max-lifetime math continues across restarts.</li>
- *   <li>{@link cn.wubo.flex.schedule.core.FlexScheduledTaskService#setCreatedAt(String, Instant)} &mdash;
- *       the underlying entry-mutation API called by TaskBuilder.</li>
- *   <li>{@link InMemoryExecutionHistory} &mdash; the auto-wired default
- *       {@link cn.wubo.flex.schedule.core.ExecutionHistory} bean, which
- *       replaced the silent {@code NOOP} in 1.2.2.</li>
+ * <li>{@link cn.wubo.flex.schedule.core.TaskBuilder#createdAt(Instant)} &mdash;
+ * stamps the logical creation time on the dispatcher entry so the
+ * max-lifetime math continues across restarts.</li>
+ * <li>{@link cn.wubo.flex.schedule.core.FlexScheduledTaskService#setCreatedAt(String, Instant)} &mdash;
+ * the underlying entry-mutation API called by TaskBuilder.</li>
+ * <li>{@link InMemoryExecutionHistory} &mdash; the auto-wired default
+ * {@link cn.wubo.flex.schedule.core.ExecutionHistory} bean, which
+ * replaced the silent {@code NOOP} in 1.2.2.</li>
  * </ul>
  *
  * <p>The test stands up a real {@link FlexScheduledTaskRegistrar} + service
@@ -96,7 +91,8 @@ class FlexScheduleCreatedAtChainTest {
 
     @Test
     void setCreatedAt_afterRegistration_appliesToExistingEntry() {
-        service.task("late-bound").cron("0 * * * * *").register(() -> { });
+        service.task("late-bound").cron("0 * * * * *").register(() -> {
+        });
         Instant override = Instant.now().minus(Duration.ofMinutes(7));
         service.setCreatedAt("late-bound", override);
 
@@ -127,8 +123,8 @@ class FlexScheduleCreatedAtChainTest {
         Instant wayOld = Instant.now().minus(Duration.ofDays(365));
         CountDownLatch latch = new CountDownLatch(1);
         service.task("ancient-task")
-                .cron("* * * * * *")                  // every second
-                .createdAt(wayOld)                     // far past max-lifetime
+                .cron("* * * * * *") // every second
+                .createdAt(wayOld) // far past max-lifetime
                 .register(latch::countDown);
 
         assertThat(latch.await(3, TimeUnit.SECONDS)).isTrue();
@@ -151,7 +147,8 @@ class FlexScheduleCreatedAtChainTest {
         limitedService.task("caps-task")
                 .cron("0 * * * * *")
                 .createdAt(wayOld)
-                .register(() -> { });
+                .register(() -> {
+                });
 
         assertThat(limitedService.exists("caps-task")).isTrue();
     }
@@ -160,8 +157,9 @@ class FlexScheduleCreatedAtChainTest {
     void taskBuilderBuilder_throwsWhenNoScheduleConfigured() {
         // register() with no cron/fixedDelay/fixedRate/oneShot is a contract error.
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                service.task("bad-task").register(() -> { })
-        ).isInstanceOf(IllegalStateException.class)
+                        service.task("bad-task").register(() -> {
+                        })
+                ).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No scheduling type configured");
     }
 
@@ -169,7 +167,8 @@ class FlexScheduleCreatedAtChainTest {
     void tearDown() {
         try {
             registrar.destroy();
-        } catch (Exception ignored) { }
+        } catch (Exception ignored) {
+        }
         scheduler.shutdown();
     }
 }

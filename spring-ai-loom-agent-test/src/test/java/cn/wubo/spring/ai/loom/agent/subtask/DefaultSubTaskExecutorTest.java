@@ -17,10 +17,9 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.eq;
 
 class DefaultSubTaskExecutorTest {
 
@@ -150,6 +149,6 @@ class DefaultSubTaskExecutorTest {
 
         submitter.join(2000);
         assertThat(cancelledOk).isTrue();
-        assertThat(workerInterrupted.getCount()).isZero();   // worker was interrupted inside spec.call()
+        assertThat(workerInterrupted.getCount()).isZero(); // worker was interrupted inside spec.call()
     }
 }

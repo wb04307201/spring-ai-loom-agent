@@ -38,18 +38,20 @@ import static org.mockito.Mockito.*;
  */
 class LoomAgentScheduleRouterCancelRegressionTest {
 
-    @AfterEach
-    void clearCaller() {
-        UserContextHolder.clear();
-    }
-
-    /** Minimal owned schedule row for the BUG-13 ownership guard. */
+    /**
+     * Minimal owned schedule row for the BUG-13 ownership guard.
+     */
     private static LoomScheduleTriggerRecord ownedRow(String taskName, String username) {
         return new LoomScheduleTriggerRecord(
                 taskName, LoomScheduleTriggerRecord.TYPE_FIXED_DELAY,
                 null, 600L, null, null, "p",
                 username, "conv-1", false,
                 Instant.EPOCH, Instant.EPOCH);
+    }
+
+    @AfterEach
+    void clearCaller() {
+        UserContextHolder.clear();
     }
 
     @Test

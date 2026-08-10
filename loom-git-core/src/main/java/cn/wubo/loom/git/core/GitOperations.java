@@ -2,8 +2,6 @@ package cn.wubo.loom.git.core;
 
 import cn.wubo.loom.file.core.PathSecurityUtils;
 import org.eclipse.jgit.api.*;
-import org.eclipse.jgit.api.CreateBranchCommand.SetupUpstreamMode;
-import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.blame.BlameResult;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
@@ -15,20 +13,18 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.transport.*;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.EmptyTreeIterator;
-import org.eclipse.jgit.treewalk.TreeWalk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Pure-Java Git operations based on JGit.
@@ -290,15 +286,16 @@ public class GitOperations {
                 if (grepPattern != null && !grepPattern.matcher(c.getShortMessage()).find()) continue;
                 filtered.add(c);
             }
-            if (filtered.isEmpty()) return "无提交记录" + (grepPattern != null || author != null ? "（可能由于过滤条件，请放宽筛选）" : "");
+            if (filtered.isEmpty())
+                return "无提交记录" + (grepPattern != null || author != null ? "（可能由于过滤条件，请放宽筛选）" : "");
             for (RevCommit c : filtered) {
                 if (Boolean.TRUE.equals(oneline)) {
                     sb.append(c.abbreviate(7).name()).append(" ").append(c.getShortMessage()).append("\n");
                 } else {
                     sb.append("commit ").append(c.name()).append("\n");
                     sb.append("Author: ").append(c.getAuthorIdent().getName()).append(" <").append(c.getAuthorIdent().getEmailAddress()).append(">\n");
-                    sb.append("Date:   ").append(formatEpoch(c.getCommitTime())).append("\n\n");
-                    sb.append("    ").append(c.getFullMessage().replaceAll("(?m)^", "    ")).append("\n\n");
+                    sb.append("Date: ").append(formatEpoch(c.getCommitTime())).append("\n\n");
+                    sb.append(" ").append(c.getFullMessage().replaceAll("(?m)^", " ")).append("\n\n");
                 }
             }
             return sb.toString();
@@ -324,7 +321,7 @@ public class GitOperations {
                     if (limit != null && limit > 0) refs = refs.subList(0, Math.min(limit, refs.size()));
                     for (Ref ref : refs) {
                         String name = ref.getName().replace("refs/heads/", "").replace("refs/remotes/", "");
-                        sb.append(name.equals(current) ? "* " : "  ").append(name).append("\n");
+                        sb.append(name.equals(current) ? "* " : " ").append(name).append("\n");
                     }
                     yield sb.length() == 0 ? "无分支" : sb.toString();
                 }
@@ -383,8 +380,10 @@ public class GitOperations {
             PullResult result = cmd.call();
             String strategy = Boolean.TRUE.equals(rebase) ? "rebase" : "merge";
             StringBuilder sb = new StringBuilder("pull 完成\n策略：").append(strategy).append("\n");
-            if (result.getMergeResult() != null) sb.append("Merge: ").append(result.getMergeResult().getMergeStatus()).append("\n");
-            if (result.getRebaseResult() != null) sb.append("Rebase: ").append(result.getRebaseResult().getStatus()).append("\n");
+            if (result.getMergeResult() != null)
+                sb.append("Merge: ").append(result.getMergeResult().getMergeStatus()).append("\n");
+            if (result.getRebaseResult() != null)
+                sb.append("Rebase: ").append(result.getRebaseResult().getStatus()).append("\n");
             if (result.getFetchResult() != null) sb.append("Fetch: ").append(result.getFetchResult().getMessages());
             return sb.toString();
         } catch (Exception e) {
@@ -424,7 +423,7 @@ public class GitOperations {
             for (PushResult r : results) {
                 if (r.getMessages() != null && !r.getMessages().isBlank()) sb.append(r.getMessages());
                 for (RemoteRefUpdate update : r.getRemoteUpdates()) {
-                    sb.append("  ").append(update.getStatus()).append(" ").append(update.getRemoteName()).append("\n");
+                    sb.append(" ").append(update.getStatus()).append(" ").append(update.getRemoteName()).append("\n");
                 }
             }
             return sb.toString();
@@ -446,7 +445,7 @@ public class GitOperations {
             StringBuilder sb = new StringBuilder("fetch 完成\n");
             if (!result.getMessages().isBlank()) sb.append(result.getMessages());
             for (TrackingRefUpdate update : result.getTrackingRefUpdates()) {
-                sb.append("  ").append(update.getResult()).append(" ").append(update.getRemoteName())
+                sb.append(" ").append(update.getResult()).append(" ").append(update.getRemoteName())
                         .append(" -> ").append(update.getLocalName()).append("\n");
             }
             return sb.toString();
@@ -567,7 +566,8 @@ public class GitOperations {
                     if (stashRef != null && !stashRef.isBlank()) applyCmd.setStashRef(stashRef);
                     applyCmd.call();
                     StashDropCommand dropCmd = git.stashDrop();
-                    if (stashRef != null && stashRef.matches("stash@\\{\\d+}")) dropCmd.setStashRef(Integer.parseInt(stashRef.replaceAll("\\D", "")));
+                    if (stashRef != null && stashRef.matches("stash@\\{\\d+}"))
+                        dropCmd.setStashRef(Integer.parseInt(stashRef.replaceAll("\\D", "")));
                     dropCmd.call();
                     yield "已 pop stash" + (stashRef != null ? ": " + stashRef : "");
                 }
@@ -579,7 +579,8 @@ public class GitOperations {
                 }
                 case "drop" -> {
                     StashDropCommand cmd = git.stashDrop();
-                    if (stashRef != null && stashRef.matches("stash@\\{\\d+}")) cmd.setStashRef(Integer.parseInt(stashRef.replaceAll("\\D", "")));
+                    if (stashRef != null && stashRef.matches("stash@\\{\\d+}"))
+                        cmd.setStashRef(Integer.parseInt(stashRef.replaceAll("\\D", "")));
                     cmd.call();
                     yield "已 drop stash" + (stashRef != null ? ": " + stashRef : "");
                 }
@@ -739,8 +740,8 @@ public class GitOperations {
                 sb.append("commit ").append(commit.name()).append("\n");
                 sb.append("Author: ").append(commit.getAuthorIdent().getName())
                         .append(" <").append(commit.getAuthorIdent().getEmailAddress()).append(">\n");
-                sb.append("Date:   ").append(formatEpoch(commit.getCommitTime())).append("\n\n");
-                sb.append("    ").append(commit.getFullMessage()).append("\n\n");
+                sb.append("Date: ").append(formatEpoch(commit.getCommitTime())).append("\n\n");
+                sb.append(" ").append(commit.getFullMessage()).append("\n\n");
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 DiffFormatter formatter = new DiffFormatter(out);
                 formatter.setRepository(git.getRepository());
@@ -799,7 +800,7 @@ public class GitOperations {
             Set<String> cleaned = cmd.call();
             if (cleaned.isEmpty()) return "无需清理的文件";
             StringBuilder sb = new StringBuilder(isDryRun ? "预览将被清理的文件（dry-run）：\n" : "已清理：\n");
-            for (String f : cleaned) sb.append("  ").append(f).append("\n");
+            for (String f : cleaned) sb.append(" ").append(f).append("\n");
             return sb.toString();
         } catch (Exception e) {
             return "git clean 失败：" + e.getMessage();
@@ -956,18 +957,21 @@ public class GitOperations {
 
             sb.append("## Commits\n");
             Map<String, List<String>> categorized = new LinkedHashMap<>();
-            for (String key : List.of("features", "fixes", "breaking", "docs", "refactor", "other")) categorized.put(key, new ArrayList<>());
+            for (String key : List.of("features", "fixes", "breaking", "docs", "refactor", "other"))
+                categorized.put(key, new ArrayList<>());
             for (RevCommit c : commits) {
                 String msg = c.getShortMessage().toLowerCase();
                 String line = c.abbreviate(7).name() + " " + c.getAuthorIdent().getName() + " " + c.getShortMessage();
                 if (msg.startsWith("feat") || msg.startsWith("feature")) categorized.get("features").add(line);
                 else if (msg.startsWith("fix")) categorized.get("fixes").add(line);
-                else if (msg.startsWith("break") || msg.contains("breaking change")) categorized.get("breaking").add(line);
+                else if (msg.startsWith("break") || msg.contains("breaking change"))
+                    categorized.get("breaking").add(line);
                 else if (msg.startsWith("doc")) categorized.get("docs").add(line);
                 else if (msg.startsWith("refactor")) categorized.get("refactor").add(line);
                 else categorized.get("other").add(line);
             }
-            if (reviewTypes == null || reviewTypes.isEmpty()) reviewTypes = List.of("features", "fixes", "breaking", "docs", "refactor", "other");
+            if (reviewTypes == null || reviewTypes.isEmpty())
+                reviewTypes = List.of("features", "fixes", "breaking", "docs", "refactor", "other");
             for (String type : reviewTypes) {
                 List<String> items = categorized.getOrDefault(type, List.of());
                 if (!items.isEmpty()) {
@@ -978,7 +982,7 @@ public class GitOperations {
             sb.append("\n## Tags\n");
             if (tagMap.isEmpty()) sb.append("(none)\n");
             else for (var entry : tagMap.entrySet())
-                sb.append("- ").append(entry.getValue()).append(" (").append(entry.getKey().substring(0, 7)).append(")\n");
+                sb.append("- ").append(entry.getValue()).append(" (").append(entry.getKey(), 0, 7).append(")\n");
             return sb.toString();
         } catch (Exception e) {
             return "changelog analyze 失败：" + e.getMessage();
@@ -1001,7 +1005,8 @@ public class GitOperations {
             sb.append("- [ ] PR/MR created (if applicable)\n");
             sb.append("- [ ] Changelog updated (if applicable)\n");
             sb.append("- [ ] Documentation updated (if applicable)\n");
-            if (createTag == null || createTag) sb.append("- [ ] Annotated tag created at project convention (e.g. v<version>)\n");
+            if (createTag == null || createTag)
+                sb.append("- [ ] Annotated tag created at project convention (e.g. v<version>)\n");
             sb.append("\n## Commit & Release Steps\n");
             sb.append("1. git status — verify working tree is clean\n");
             sb.append("2. git log — verify commit history is clean\n");
@@ -1068,14 +1073,14 @@ public class GitOperations {
             int count = 0;
             try {
                 for (RevCommit c : git.log().setMaxCount(5).call()) {
-                    sb.append("  ").append(c.abbreviate(7).name())
+                    sb.append(" ").append(c.abbreviate(7).name())
                             .append(" ").append(c.getShortMessage()).append("\n");
                     count++;
                 }
             } catch (org.eclipse.jgit.api.errors.NoHeadException e) {
                 // empty repo
             }
-            if (count == 0) sb.append("  (无提交)\n");
+            if (count == 0) sb.append(" (无提交)\n");
 
             List<Ref> tags = git.tagList().call();
             sb.append("\n标签：");
@@ -1121,7 +1126,7 @@ public class GitOperations {
         if (items != null && !items.isEmpty()) {
             sb.append(label).append("：\n");
             for (String item : items) {
-                sb.append("  ").append(item).append("\n");
+                sb.append(" ").append(item).append("\n");
             }
         }
     }

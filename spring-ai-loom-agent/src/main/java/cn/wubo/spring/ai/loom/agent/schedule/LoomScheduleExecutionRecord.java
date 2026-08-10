@@ -16,13 +16,13 @@ import java.time.Instant;
  * index supports "show me the last N fires of this task" queries efficiently.</p>
  */
 public record LoomScheduleExecutionRecord(
-        Long executionId,        // null until inserted (IDENTITY column)
+        Long executionId, // null until inserted (IDENTITY column)
         String taskName,
         Instant fireTime,
         long durationMs,
         boolean success,
-        String errorMessage,     // null when success=true
-        String firedBy           // 'SCHEDULER' / 'MANUAL'
+        String errorMessage, // null when success=true
+        String firedBy // 'SCHEDULER' / 'MANUAL'
 ) {
     public static final String FIRED_BY_SCHEDULER = "SCHEDULER";
     public static final String FIRED_BY_MANUAL = "MANUAL";

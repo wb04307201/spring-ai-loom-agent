@@ -22,12 +22,6 @@ public class LoomCompileMcpProperties {
     private List<String> extraRunArgs = new ArrayList<>();
     private Map<String, ImageTemplate> imageTemplates = defaultImageTemplates();
 
-    @Data
-    public static class ImageTemplate {
-        private String image;
-        private List<String> command;
-    }
-
     private static Map<String, ImageTemplate> defaultImageTemplates() {
         Map<String, ImageTemplate> m = new HashMap<>();
         m.put("java17", template("eclipse-temurin:17-jre", List.of("java", "-jar")));
@@ -44,5 +38,11 @@ public class LoomCompileMcpProperties {
         t.setImage(image);
         t.setCommand(command);
         return t;
+    }
+
+    @Data
+    public static class ImageTemplate {
+        private String image;
+        private List<String> command;
     }
 }

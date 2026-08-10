@@ -22,7 +22,6 @@ import cn.wubo.spring.ai.loom.agent.mcp.SyncMcp;
 import cn.wubo.spring.ai.loom.agent.model.*;
 import cn.wubo.spring.ai.loom.agent.skill.DefaultSkillStorage;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
-import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import cn.wubo.spring.ai.loom.agent.tool.compile.DefaultCompileAndDeployTool;
 import cn.wubo.spring.ai.loom.agent.tool.compile.ICompileAndDeployTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.DefaultFileTool;
@@ -57,7 +56,6 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
@@ -67,7 +65,6 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.boot.autoconfigure.condition.*;
-import org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.cache.Cache;
 import org.springframework.cache.caffeine.CaffeineCache;
@@ -77,15 +74,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.RouterFunctions;
@@ -174,10 +166,230 @@ public class LoomAgentConfiguration {
 
     // ==================== Infrastructure ====================
 
+    /**
+     * 删除会话时的资源清理：先杀掉该会话名下所有在飞子任务，再取消该会话名下所有定时任务，
+     * 最后由调用方软删 user_conversation 映射。
+     * <p>
+     * 三个依赖都可缺省(subtask/schedule 功能可被关闭)，缺省时对应清理跳过。
+     *
+     * @return {@code [subtasksKilled, schedulesCancelled, scheduleRowsDeleted]}
+     */
+    static int[] cleanupConversationResources(
+            String conversationId,
+            String username,
+            cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
+            cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+            cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
+        // 1. Stop active sub-tasks (cancels the running workers via the cancel hook).
+        int subtasksKilled = registry != null ? registry.killAllByConversation(conversationId) : 0;
+        // 2. Cancel every flex-schedule task bound to this conversation in the runtime.
+        int schedulesCancelled = 0;
+        if (flexService != null && username != null && conversationId != null) {
+            String prefix = "loom-sched-" + username + "-" + conversationId + "-";
+            for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
+                if (info.taskName().startsWith(prefix)) {
+                    flexService.cancel(info.taskName());
+                    schedulesCancelled++;
+                }
+            }
+        }
+        // 3. Drop the schedule declarations from H2 (loom_scheduled_task).
+        int scheduleRowsDeleted = (loomScheduleTriggerRepository != null && username != null && conversationId != null)
+                ? loomScheduleTriggerRepository.deleteAllForConversation(username, conversationId)
+                : 0;
+        // 4. Drop the schedule execution-event audit trail from H2 (loom_schedule_execution).
+        int scheduleExecRowsDeleted = (loomScheduleExecutionRepository != null && username != null && conversationId != null)
+                ? loomScheduleExecutionRepository.deleteByUserAndConversation(username, conversationId)
+                : 0;
+        // 5. Drop the sub-task H2 history (loom_subtask_history) and clear the
+        // in-memory deque for this conversation so the API no longer serves
+        // ghost records from the dying conversation.
+        int subTaskHistoryRowsDeleted = (loomSubTaskHistoryRepository != null && username != null && conversationId != null)
+                ? loomSubTaskHistoryRepository.deleteAllByConversation(username, conversationId)
+                : 0;
+        int subTaskDequeCleared = (registry != null && username != null && conversationId != null)
+                ? registry.removeAllByConversation(username, conversationId)
+                : 0;
+        return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted,
+                scheduleExecRowsDeleted, subTaskHistoryRowsDeleted, subTaskDequeCleared};
+    }
+
+    // ==================== Chat ====================
+
+    /**
+     * Verifies ownership before exposing the in-memory execution history for a
+     * namespaced schedule. Missing rows and foreign rows deliberately share the
+     * same false result so the endpoint does not disclose task existence.
+     */
+    public static boolean handleScheduleHistoryOwnership(
+            String fullName,
+            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository repo,
+            org.slf4j.Logger log) {
+        if (fullName == null) return false;
+        String caller = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+        try {
+            var record = repo.findByName(fullName);
+            if (record.isEmpty() || caller == null || !caller.equals(record.get().username())) {
+                log.warn("拒绝跨用户读取定时历史: caller={}, target={}", caller, fullName);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            log.warn("读取定时历史权限校验失败: name={}, err={}", fullName, e.getMessage());
+            return false;
+        }
+    }
+
+    // ==================== RAG (all beans conditional on VectorStore) ====================
+
+    /**
+     * Dual-write cancel handler for the REST {@code POST /spring/ai/loom/schedule/cancel}
+     * route. Cancels the in-memory task AND deletes the corresponding
+     * {@code loom_scheduled_task} row so the {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener}
+     * doesn't resurrect it on the next restart. Package-private + static so the
+     * {@code loomAgentScheduleRouterCancelRegressionTest} can drive it without
+     * needing the full Spring Web reactive test apparatus.
+     *
+     * <p>Failure of the repository delete is logged at WARN (and swallowed) so
+     * the user-facing cancel still reports success — the only state that
+     * matters for end users is that the live task is gone; a stuck persistent
+     * row can be cleaned up by an ops tool.</p>
+     *
+     * @return {@code true} if the cancel ran end-to-end; {@code false} if name is null.
+     */
+    public static boolean handleScheduleCancel(String fullName,
+                                               cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                                               cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository repo,
+                                               org.slf4j.Logger log) {
+        if (fullName == null) {
+            return false;
+        }
+        // BUG-13: cross-user schedule cancel. Before letting flex-schedule
+        // fire the cancellation, verify the row is owned by the calling
+        // user (resolved from the AuthenticationFilter-then-set
+        // UserContextHolder). Without this any logged-in user could cancel
+        // someone else's task by guessing the namespaced name. The lookup is
+        // by PK so no enumeration is exposed; the response is identical
+        // regardless of "not found" vs "owned by someone else".
+        String caller = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+        try {
+            var rec = repo.findByName(fullName);
+            if (rec.isEmpty() || caller == null || !caller.equals(rec.get().username())) {
+                log.warn("拒绝跨用户取消 REST 调用: caller={}, target={}, owner={}",
+                        caller, fullName,
+                        rec.map(cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord::username).orElse("<none>"));
+                return false;
+            }
+        } catch (Exception e) {
+            log.warn("schedule cancel 跨用户检查失败: name={}, err={}", fullName, e.getMessage());
+            return false;
+        }
+        flexService.cancel(fullName);
+        try {
+            repo.delete(fullName);
+        } catch (Exception e) {
+            log.warn("取消定时任务时删除持久化行失败: name={}", fullName, e);
+        }
+        return true;
+    }
+
+    /**
+     * Formats a schedule limit {@link java.time.Duration} into the compact form
+     * the UI hint shows ("5s" / "10m" / "72h" / "1d"). Returns {@code null} for a
+     * null / zero / negative duration so the endpoint can omit an unset limit.
+     */
+    static String formatScheduleDuration(java.time.Duration d) {
+        if (d == null || d.isZero() || d.isNegative()) {
+            return null;
+        }
+        long s = d.getSeconds();
+        if (s % 86400 == 0) return (s / 86400) + "d";
+        if (s % 3600 == 0) return (s / 3600) + "h";
+        if (s % 60 == 0) return (s / 60) + "m";
+        return s + "s";
+    }
+
+    // ==================== MCP ====================
+
+    static ServerResponse runtimeErrorResponse(
+            cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex,
+            int fallbackStatus) {
+        int status = ex.getStatusCode() != null ? ex.getStatusCode() : fallbackStatus;
+        return ServerResponse.status(status).body(java.util.Map.of(
+                "message", ex.getMessage() == null ? "请求失败" : ex.getMessage()));
+    }
+
+    // ==================== Embed Tools ====================
+
+    /**
+     * 选下载响应的 Content-Type：
+     * - 优先用 FileRecord.mimeType（writeFile 时 Tika 探测过，比较准）
+     * - 缺失时按扩展名兜底（覆盖 .md / .txt / .json 等常见类型，markdown 给 text/markdown 让浏览器内联渲染）
+     * - 都没有就 octet-stream
+     */
+    private static MediaType resolveContentType(FileRecord fileRecord) {
+        if (fileRecord.mimeType() != null && !fileRecord.mimeType().isBlank()) {
+            return MediaType.parseMediaType(fileRecord.mimeType());
+        }
+        String name = fileRecord.fileName() == null ? "" : fileRecord.fileName().toLowerCase();
+        if (name.endsWith(".md") || name.endsWith(".markdown"))
+            return MediaType.parseMediaType("text/markdown;charset=UTF-8");
+        if (name.endsWith(".txt")) return MediaType.parseMediaType("text/plain;charset=UTF-8");
+        if (name.endsWith(".json")) return MediaType.parseMediaType("application/json;charset=UTF-8");
+        if (name.endsWith(".html") || name.endsWith(".htm")) return MediaType.parseMediaType("text/html;charset=UTF-8");
+        if (name.endsWith(".csv")) return MediaType.parseMediaType("text/csv;charset=UTF-8");
+        if (name.endsWith(".pdf")) return MediaType.APPLICATION_PDF;
+        if (name.endsWith(".png")) return MediaType.IMAGE_PNG;
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
+        if (name.endsWith(".gif")) return MediaType.IMAGE_GIF;
+        if (name.endsWith(".svg")) return MediaType.parseMediaType("image/svg+xml");
+        return MediaType.APPLICATION_OCTET_STREAM;
+    }
+
+    // ==================== Sub-task ====================
+
+    /**
+     * 拼 Content-Disposition 头，处理中文文件名。
+     * 输出形式：
+     * <ul>
+     * <li>全 ASCII：{@code attachment; filename="report.md"}</li>
+     * <li>含非 ASCII：{@code attachment; filename="report.md"; filename*=UTF-8''%E5%95%86%E5%93%81...md}
+     * ——RFC 5987 双键，filename 是把非 ASCII 字符替换成 _ 后的 ASCII 兜底</li>
+     * </ul>
+     * 不做这层编码时，浏览器只能拿到原始 UTF-8 字节序列，文件名会乱码或变成 UUID。
+     */
+    private static String buildContentDisposition(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            return "attachment";
+        }
+        // 1. ASCII 兜底：把非 ASCII / 不可打印字符替换成 _
+        String asciiFallback = fileName.replaceAll("[^\\x20-\\x7E]", "_").replaceAll("\"", "_");
+        if (asciiFallback.isEmpty()) {
+            asciiFallback = "download";
+        }
+        // 2. 全 ASCII 时单键即可
+        if (fileName.chars().allMatch(c -> c >= 0x20 && c <= 0x7E)) {
+            return "attachment; filename=\"" + asciiFallback + "\"";
+        }
+        // 3. 含中文等非 ASCII 时双键：ASCII 兜底 + RFC 5987 urlencoded
+        String encoded = java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''" + encoded;
+    }
+
+    // ==================== Schedule ====================
+
     @Configuration
     static class InfrastructureConfiguration {
 
         private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(InfrastructureConfiguration.class);
+
+        @Bean
+        public static BeanFactoryPostProcessor fileViewDefaultsBeanFactoryPostProcessor(org.springframework.core.env.ConfigurableEnvironment environment) {
+            return new FileViewDefaultsBeanFactoryPostProcessor(environment);
+        }
 
         /**
          * 放宽 Spring AI 内部 {@code JsonParser} 使用的 ObjectMapper，
@@ -231,21 +443,16 @@ public class LoomAgentConfiguration {
             return properties;
         }
 
-        @Bean
-        public static BeanFactoryPostProcessor fileViewDefaultsBeanFactoryPostProcessor(org.springframework.core.env.ConfigurableEnvironment environment) {
-            return new FileViewDefaultsBeanFactoryPostProcessor(environment);
-        }
-
         /**
-         * 库的 SQL 用 V1.0 版本号（与业务的 V1.1 区分），走 Spring Boot 默认 Flyway 实例
+         * 库的 SQL 用 版本号（与业务的 区分），走 Spring Boot 默认 Flyway 实例
          * （classpath:db/migration + flyway_schema_history）。这样库和业务模块都在 db/migration，
          * 业务模块开发者按 Flyway 默认规则写 SQL 即可。
-         * 版本号字典序：V1.0 < V1.1，库 SQL 先建表 + admin，业务的 V1.1 后 seed mcp / skill。
+         * 版本号字典序：< ，库 SQL 先建表 + admin，业务的 后 seed mcp / skill。
          */
         @Bean
         public org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer libraryFlywayCustomizer() {
             return configuration -> {
-                // baseline-on-migrate 让空 schema 也能跑（V1.0 库 + V1.1 业务都能跑）
+                // baseline-on-migrate 让空 schema 也能跑（库 + 业务都能跑）
                 configuration.baselineOnMigrate(true);
                 configuration.baselineVersion("0");
             };
@@ -257,7 +464,7 @@ public class LoomAgentConfiguration {
         }
     }
 
-    // ==================== Chat ====================
+    // ==================== Storage ====================
 
     @Configuration
     static class ChatConfiguration {
@@ -265,11 +472,11 @@ public class LoomAgentConfiguration {
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
         public ChatClient chatClient(ChatModel chatModel,
-                                     @Qualifier("messageChatMemoryAdvisor") MessageChatMemoryAdvisor messageChatMemoryAdvisor,
+                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor,
                                      LoomAgentProperties properties) {
             ChatClient.Builder builder = ChatClient.builder(chatModel);
             if (properties.getDefaultSystem() != null) builder.defaultSystem(properties.getDefaultSystem());
-            builder.defaultAdvisors(messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
+            builder.defaultAdvisors((org.springframework.ai.chat.client.advisor.api.Advisor) messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
                     new SimpleLoggerAdvisor() // logger advisor
             );
             return builder.build();
@@ -286,8 +493,11 @@ public class LoomAgentConfiguration {
          * 子任务每次都被 fail,history 永远为空。
          */
         @Bean
-        public MessageChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
-            return MessageChatMemoryAdvisor.builder(chatMemory).build();
+        // 返回自定义 LastChunkMessageChatMemoryAdvisor（只在流式最后一个 chunk
+        // 触发 chatMemory.add），替代 Spring AI 默认 MessageChatMemoryAdvisor（每个 chunk 都写
+        // → chat_memory TOOL 消息多次重复）。
+        public org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor(JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.memory.LastChunkMessageChatMemoryAdvisor(jdbcTemplate, 0);
         }
 
         @ConditionalOnMissingBean(IChat.class)
@@ -295,17 +505,26 @@ public class LoomAgentConfiguration {
         public IChat chat(@Qualifier("chatClient") ChatClient chatClient, IMcp mcp,
                           // @Lazy on the tools list breaks a 3-hop circular dep:
                           // chat -> List<IEmbedTool> (eagerly resolves defaultSubTaskTool)
-                          //   -> defaultSubTaskExecutor
-                          //     -> loomSubTaskChatClient
-                          //       -> List<IEmbedTool> (would re-enter)
+                          // -> defaultSubTaskExecutor
+                          // -> loomSubTaskChatClient
+                          // -> List<IEmbedTool> (would re-enter)
                           // With @Lazy, the list is materialised on first access (inside
                           // DefaultChat.stream()) after every bean is fully constructed.
                           @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
                           IUserConversation userConversation, IFile file,
                           ISkillStorage skillStorage, IKnowledge knowledge,
-                          LoomAgentProperties properties) {
+                          LoomAgentProperties properties,
+                          cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
-                    skillStorage, knowledge, properties);
+                    skillStorage, knowledge, properties, toolCallLogRepository);
+        }
+
+        // ============== ：loom_tool_call_log 仓储 ==============
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository.class)
+        public cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository defaultToolCallLogRepository(
+                org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.tool.JdbcToolCallLogRepository(jdbcTemplate);
         }
 
         @Slf4j
@@ -316,54 +535,37 @@ public class LoomAgentConfiguration {
         public static class SseController {
 
             private final IChat chat;
-            private final cn.wubo.spring.ai.loom.agent.token.ITokenUsage tokenUsage;
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
+            private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
+            // tool_call_log 唯一写入入口是 LoggingToolCallback — SseController 不再写
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
             public SseEmitter stream(@RequestBody ChatRequestRecord chatRecord, HttpServletRequest request) {
                 SseEmitter emitter = new SseEmitter(0L);
 
                 String username = UserContextHolder.getCurrentUser();
-                final long startMs = System.currentTimeMillis();
                 final String conversationId = chatRecord.conversationId();
-                // DashScope 流式每个 chunk 都带累计 usage（最后 chunk 是最终值）。
-                // 用 holder 记录最后一次，stream 结束时统一入库（避免一条对话记 N 行）。
-                final int[] finalPrompt = {0};
-                final int[] finalCompletion = {0};
-                final int[] finalTotal = {0};
-                final String[] finalModel = {null};
-                final boolean[] hasUsage = {false};
-                final java.util.concurrent.atomic.AtomicBoolean usageRecorded =
-                        new java.util.concurrent.atomic.AtomicBoolean(false);
 
-                // 注册到 registry：disposable 暂存 wrapper；onStop 回调用于在停止时记录累积 usage
+                // 注册到 registry：disposable 暂存 wrapper
                 final java.util.concurrent.atomic.AtomicReference<reactor.core.Disposable> subRef = new java.util.concurrent.atomic.AtomicReference<>();
                 final java.util.concurrent.atomic.AtomicBoolean disposeRequested =
                         new java.util.concurrent.atomic.AtomicBoolean(false);
                 emitterRegistry.register(username, conversationId, emitter,
                         new reactor.core.Disposable() {
-                            @Override public void dispose() {
+                            @Override
+                            public void dispose() {
                                 disposeRequested.set(true);
                                 reactor.core.Disposable d = subRef.get();
                                 if (d != null && !d.isDisposed()) d.dispose();
                             }
-                            @Override public boolean isDisposed() {
+
+                            @Override
+                            public boolean isDisposed() {
                                 reactor.core.Disposable d = subRef.get();
                                 return disposeRequested.get() || d == null || d.isDisposed();
                             }
                         },
-                        () -> {
-                            // 用户主动 stop 时触发：把已经累积的 usage 入库（避免丢数据）
-                            if (hasUsage[0] && usageRecorded.compareAndSet(false, true)) {
-                                try {
-                                    tokenUsage.record(
-                                            conversationId, username, "ASSISTANT",
-                                            finalPrompt[0], finalCompletion[0], finalTotal[0],
-                                            finalModel[0],
-                                            (int) (System.currentTimeMillis() - startMs));
-                                } catch (Exception ignore) { /* 重复记录不阻塞 */ }
-                            }
-                        });
+                        () -> { /* 用户主动 stop 时不再落库（：usage 实时从 chat_memory 聚合） */ });
 
                 // 注册 lifecycle 自动清理
                 emitter.onTimeout(() -> {
@@ -380,64 +582,77 @@ public class LoomAgentConfiguration {
                     emitterRegistry.autoCleanup(username, conversationId);
                 });
                 CompletableFuture.runAsync(() -> {
+                    // ：让 ToolCallLogObservationHandler 拿到 conversationId / username
+                    // 写入 Map（**不** clear() — sub-task 在主 chat 完成后跑，可能在
+                    // clear 之后才调 tool。下一个 chat 会覆盖 LATEST，不会内存泄漏）
+                    cn.wubo.spring.ai.loom.agent.tool.ToolCallContextHolder.set(conversationId, username);
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
+
+                        // ：累积 DashScope enable_thinking 模式下的 reasoningContent
+                        // Spring AI DashScope 实测是 incremental（每条 chunk 是当前为止的
+                        // 增量片段），所以得 append 不是覆盖。content 文本也是增量同理。
+                        final StringBuilder reasoningAccum = new StringBuilder();
 
                         reactor.core.Disposable subscription = chatResponseFlux
                                 .filter(chatResponse -> chatResponse.getResult() != null)
                                 .subscribe(chatResponse -> {
-                            try {
-                                String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
-                                emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
-                                // 累计 usage：每个 chunk 都返累计值，只保留最后
-                                try {
-                                    var respMeta = chatResponse.getMetadata();
-                                    if (respMeta != null && respMeta.getUsage() != null) {
-                                        var usage = respMeta.getUsage();
-                                        Integer pt = usage.getPromptTokens();
-                                        Integer ct = usage.getCompletionTokens();
-                                        Integer tt = usage.getTotalTokens();
-                                        if (tt != null && tt > 0) {
-                                            if (pt != null) finalPrompt[0] = pt;
-                                            if (ct != null) finalCompletion[0] = ct;
-                                            finalTotal[0] = tt;
-                                            finalModel[0] = respMeta.getModel();
-                                            hasUsage[0] = true;
+                                    log.info(" stream NEXT: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
+                                    try {
+                                        String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
+                                        if (reasoningContent != null && !reasoningContent.isBlank()) {
+                                            reasoningAccum.append(reasoningContent);
+                                        }
+                                        emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
+                                        // ：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_usage
+                                        // (假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
+                                        var chatMeta = chatResponse.getMetadata();
+                                        if (chatMeta != null && chatMeta.getUsage() != null) {
+                                            var u = chatMeta.getUsage();
+                                            chatUsageService.record(
+                                                    conversationId, username,
+                                                    u.getPromptTokens(), u.getCompletionTokens(), u.getTotalTokens());
+                                        }
+                                        // tool_call_log 唯一入口是 LoggingToolCallback.call()。
+                                        // 之前 SseController 在 stream chunk 里提前抓 chatResponse.getResult().getOutput().getToolCalls()
+                                        // 也写一行（result=null），加上 DashScope 流式 chunk 重复 emit 同一 tool_call_id，
+                                        // 导致 1 次真实工具调用 → 4-8 行重复 log。删除这段，只保留 callback 入口。
+                                    } catch (IOException e) {
+                                        emitter.completeWithError(e);
+                                    }
+                                }, err -> {
+                                    log.warn(" stream ERROR: conv={} err={}", conversationId, err.getMessage());
+                                    emitter.completeWithError(err);
+                                }, () -> {
+                                    log.info(" stream COMPLETE: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
+                                    // ：流完整结束时把 AI 思考落库
+                                    String r = reasoningAccum.toString();
+                                    if (!r.isBlank()) {
+                                        try {
+                                            chatUsageService.saveReasoning(conversationId, r);
+                                            log.info(" saveReasoning OK: conv={} len={}", conversationId, r.length());
+                                        } catch (Exception e) {
+                                            log.warn("saveReasoning 失败: {}", e.getMessage());
                                         }
                                     }
-                                } catch (Exception ignore) {
-                                    // 抓 usage 失败不阻塞流
-                                }
-                            } catch (IOException e) {
-                                emitter.completeWithError(e);
-                            }
-                        }, emitter::completeWithError, () -> {
-                            // 流结束：把累计的 usage 一次性入库
-                            if (hasUsage[0] && usageRecorded.compareAndSet(false, true)) {
-                                try {
-                                    tokenUsage.record(
-                                            conversationId, username, "ASSISTANT",
-                                            finalPrompt[0], finalCompletion[0], finalTotal[0],
-                                            finalModel[0],
-                                            (int) (System.currentTimeMillis() - startMs));
-                                } catch (Exception e) {
-                                    log.debug("记录 token usage 失败：{}", e.getMessage());
-                                }
-                            }
-                            emitterRegistry.autoCleanup(username, conversationId);
-                            emitter.complete();
-                        });
+                                    emitterRegistry.autoCleanup(username, conversationId);
+                                    emitter.complete();
+                                });
                         subRef.set(subscription);
                         if (disposeRequested.get()) subscription.dispose();
                     } catch (Exception e) {
                         emitter.completeWithError(e);
+                    } finally {
+                        // ：不 clear — 让 sub-task 的 tool call（runAsync 异步）也能读到
                     }
                 });
 
                 return emitter;
             }
 
-            /** 主动停止某个会话的 AI 流（前端"停止"按钮调用） */
+            /**
+             * 主动停止某个会话的 AI 流（前端"停止"按钮调用）
+             */
             @PostMapping(value = "/spring/ai/loom/stream/{conversationId}/stop")
             public java.util.Map<String, Object> stopStream(@PathVariable("conversationId") String conversationId) {
                 String username = UserContextHolder.getCurrentUser();
@@ -445,7 +660,9 @@ public class LoomAgentConfiguration {
                 return java.util.Map.of("stopped", stopped, "conversationId", conversationId);
             }
 
-            /** 调试用：当前用户的活跃流 */
+            /**
+             * 调试用：当前用户的活跃流
+             */
             @GetMapping("/spring/ai/loom/stream/active")
             public java.util.Map<String, Object> activeStreams() {
                 String username = UserContextHolder.getCurrentUser();
@@ -457,7 +674,7 @@ public class LoomAgentConfiguration {
         }
     }
 
-    // ==================== RAG (all beans conditional on VectorStore) ====================
+    // ==================== Web ====================
 
     @Configuration
     @Conditional(AnyEmbeddingProviderCondition.class)
@@ -521,15 +738,13 @@ public class LoomAgentConfiguration {
         }
     }
 
-    // ==================== MCP ====================
-
     @Configuration
     static class McpConfiguration {
 
         @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.rbac.IRoleService.class)
         @Bean
         public cn.wubo.spring.ai.loom.agent.rbac.IRoleService defaultRoleService(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
-                                                                               cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin) {
+                                                                                 cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin) {
             return new cn.wubo.spring.ai.loom.agent.rbac.DefaultRoleService(jdbcTemplate, mcpServerAdmin);
         }
 
@@ -543,8 +758,8 @@ public class LoomAgentConfiguration {
         @ConditionalOnProperty(name = "spring.ai.mcp.client.stdio", havingValue = "ASYNC")
         @Bean
         public IMcp aSyncMcp(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
-                              List<McpAsyncClient> mcpAsyncClients,
-                              cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService) {
+                             List<McpAsyncClient> mcpAsyncClients,
+                             cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService) {
             return new ASyncMcp(jdbcTemplate, mcpAsyncClients, roleService);
         }
 
@@ -556,8 +771,6 @@ public class LoomAgentConfiguration {
             return new SyncMcp(jdbcTemplate, mcpSyncClients, roleService);
         }
     }
-
-    // ==================== Embed Tools ====================
 
     @Configuration
     public static class ToolConfiguration {
@@ -613,8 +826,6 @@ public class LoomAgentConfiguration {
             return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag());
         }
     }
-
-    // ==================== Sub-task ====================
 
     /**
      * 子任务基础设施：构造过滤版 ChatClient（排除 ISubTaskTool / IScheduleTool 防 LLM 自递归）、
@@ -715,7 +926,7 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
                 @Qualifier("chatClient") ChatClient chatClient,
-                @Qualifier("messageChatMemoryAdvisor") MessageChatMemoryAdvisor memoryAdvisor,
+                @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
                 cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
                 // Lazy lookup: the executor ALSO passes a cancel hook back to
@@ -822,8 +1033,6 @@ public class LoomAgentConfiguration {
         }
     }
 
-    // ==================== Schedule ====================
-
     /**
      * 定时任务配置：注册 {@link cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool} 及其 BFF 路由。
      * <p>
@@ -842,6 +1051,20 @@ public class LoomAgentConfiguration {
     @Slf4j
     public static class ScheduleConfiguration {
 
+        private static String formatSchedule(cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord r) {
+            return switch (r.scheduleType()) {
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_CRON ->
+                        "cron=" + (r.cronExpression() == null ? "?" : r.cronExpression());
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_FIXED_DELAY ->
+                        "fixed_delay=" + (r.intervalSeconds() == null ? "?" : r.intervalSeconds() + "s");
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_FIXED_RATE ->
+                        "fixed_rate=" + (r.intervalSeconds() == null ? "?" : r.intervalSeconds() + "s");
+                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_ONE_SHOT ->
+                        "one_shot_delay=" + (r.oneShotDelaySeconds() == null ? "?" : r.oneShotDelaySeconds() + "s");
+                default -> r.scheduleType();
+            };
+        }
+
         @Bean
         @ConditionalOnMissingBean(ExecutionHistory.class)
         public ExecutionHistory loomFlexExecutionHistory() {
@@ -851,7 +1074,7 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.schedule.LoomFlexExecutionHistoryRegistrar
         loomFlexExecutionHistoryRegistrar(FlexScheduledTaskRegistrar registrar,
-                                           ExecutionHistory executionHistory) {
+                                          ExecutionHistory executionHistory) {
             return new cn.wubo.spring.ai.loom.agent.schedule.LoomFlexExecutionHistoryRegistrar(
                     registrar, executionHistory);
         }
@@ -1033,12 +1256,12 @@ public class LoomAgentConfiguration {
                         loomScheduleExecutionRepository.findByTaskName(name, execProps.getMaxPerTask()));
             });
             // Per-conversation schedule history.
-            //   - source-of-truth for "what schedules exist for this conversation" is
-            //     loom_scheduled_task (H2). This covers BOTH still-registered tasks
-            //     (visible in flex-schedule runtime) AND one_shots that already fired
-            //     and were auto-removed from flex-schedule's runtime.
-            //   - execution events come from loom_schedule_execution (H2), which
-            //     survives restarts and is not auto-trimmed on one_shot completion.
+            // - source-of-truth for "what schedules exist for this conversation" is
+            // loom_scheduled_task (H2). This covers BOTH still-registered tasks
+            // (visible in flex-schedule runtime) AND one_shots that already fired
+            // and were auto-removed from flex-schedule's runtime.
+            // - execution events come from loom_schedule_execution (H2), which
+            // survives restarts and is not auto-trimmed on one_shot completion.
             // The previous implementation walked flexService.listTasks() only, which
             // silently dropped fired one_shots — fixed here.
             builder.GET("spring/ai/loom/schedule/history/by-conversation/{conversationId}",
@@ -1085,23 +1308,7 @@ public class LoomAgentConfiguration {
                     });
             return builder.build();
         }
-
-        private static String formatSchedule(cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord r) {
-            return switch (r.scheduleType()) {
-                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_CRON ->
-                        "cron=" + (r.cronExpression() == null ? "?" : r.cronExpression());
-                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_FIXED_DELAY ->
-                        "fixed_delay=" + (r.intervalSeconds() == null ? "?" : r.intervalSeconds() + "s");
-                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_FIXED_RATE ->
-                        "fixed_rate=" + (r.intervalSeconds() == null ? "?" : r.intervalSeconds() + "s");
-                case cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord.TYPE_ONE_SHOT ->
-                        "one_shot_delay=" + (r.oneShotDelaySeconds() == null ? "?" : r.oneShotDelaySeconds() + "s");
-                default -> r.scheduleType();
-            };
-        }
     }
-
-    // ==================== Storage ====================
 
     @Configuration
     static class StorageConfiguration {
@@ -1129,17 +1336,16 @@ public class LoomAgentConfiguration {
             return new DefaultUserConversation(jdbcTemplate, chatMemory, sessionCache);
         }
 
-        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.token.ITokenUsage.class)
-        @Bean
-        public cn.wubo.spring.ai.loom.agent.token.ITokenUsage defaultTokenUsage(JdbcTemplate jdbcTemplate) {
-            return new cn.wubo.spring.ai.loom.agent.token.DefaultTokenUsage(jdbcTemplate);
-        }
+        // ：旧 ITokenUsage / DefaultTokenUsage 删除。token 统计改由 ChatUsageService
+        // 从 chat_memory 实时聚合，不需要额外的依赖 tokenUsage 的 Bean。
+        // @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.token.ITokenUsage.class) — 删除
+        // public cn.wubo.spring.ai.loom.agent.token.ITokenUsage defaultTokenUsage(JdbcTemplate jdbcTemplate) — 删除
 
         @ConditionalOnMissingBean(ISkillStorage.class)
         @Bean
         public ISkillStorage defaultSkillStorage(JdbcTemplate jdbcTemplate, ResourceLoader resourceLoader,
-                                                  cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin roleAdmin,
-                                                  IUser user) {
+                                                 cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin roleAdmin,
+                                                 IUser user) {
             return new DefaultSkillStorage(jdbcTemplate, resourceLoader, roleAdmin, user);
         }
 
@@ -1217,160 +1423,127 @@ public class LoomAgentConfiguration {
         }
     }
 
-    // ==================== Web ====================
-
-    /**
-     * 删除会话时的资源清理：先杀掉该会话名下所有在飞子任务，再取消该会话名下所有定时任务，
-     * 最后由调用方软删 user_conversation 映射。
-     * <p>
-     * 三个依赖都可缺省(subtask/schedule 功能可被关闭)，缺省时对应清理跳过。
-     *
-     * @return {@code [subtasksKilled, schedulesCancelled, scheduleRowsDeleted]}
-     */
-    static int[] cleanupConversationResources(
-            String conversationId,
-            String username,
-            cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry registry,
-            cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
-            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
-            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
-            cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
-        // 1. Stop active sub-tasks (cancels the running workers via the cancel hook).
-        int subtasksKilled = registry != null ? registry.killAllByConversation(conversationId) : 0;
-        // 2. Cancel every flex-schedule task bound to this conversation in the runtime.
-        int schedulesCancelled = 0;
-        if (flexService != null && username != null && conversationId != null) {
-            String prefix = "loom-sched-" + username + "-" + conversationId + "-";
-            for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
-                if (info.taskName().startsWith(prefix)) {
-                    flexService.cancel(info.taskName());
-                    schedulesCancelled++;
-                }
-            }
-        }
-        // 3. Drop the schedule declarations from H2 (loom_scheduled_task).
-        int scheduleRowsDeleted = (loomScheduleTriggerRepository != null && username != null && conversationId != null)
-                ? loomScheduleTriggerRepository.deleteAllForConversation(username, conversationId)
-                : 0;
-        // 4. Drop the schedule execution-event audit trail from H2 (loom_schedule_execution).
-        int scheduleExecRowsDeleted = (loomScheduleExecutionRepository != null && username != null && conversationId != null)
-                ? loomScheduleExecutionRepository.deleteByUserAndConversation(username, conversationId)
-                : 0;
-        // 5. Drop the sub-task H2 history (loom_subtask_history) and clear the
-        //    in-memory deque for this conversation so the API no longer serves
-        //    ghost records from the dying conversation.
-        int subTaskHistoryRowsDeleted = (loomSubTaskHistoryRepository != null && username != null && conversationId != null)
-                ? loomSubTaskHistoryRepository.deleteAllByConversation(username, conversationId)
-                : 0;
-        int subTaskDequeCleared = (registry != null && username != null && conversationId != null)
-                ? registry.removeAllByConversation(username, conversationId)
-                : 0;
-        return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted,
-                scheduleExecRowsDeleted, subTaskHistoryRowsDeleted, subTaskDequeCleared};
-    }
-
-    /**
-     * Verifies ownership before exposing the in-memory execution history for a
-     * namespaced schedule. Missing rows and foreign rows deliberately share the
-     * same false result so the endpoint does not disclose task existence.
-     */
-    public static boolean handleScheduleHistoryOwnership(
-            String fullName,
-            cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository repo,
-            org.slf4j.Logger log) {
-        if (fullName == null) return false;
-        String caller = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
-        try {
-            var record = repo.findByName(fullName);
-            if (record.isEmpty() || caller == null || !caller.equals(record.get().username())) {
-                log.warn("拒绝跨用户读取定时历史: caller={}, target={}", caller, fullName);
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            log.warn("读取定时历史权限校验失败: name={}, err={}", fullName, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Dual-write cancel handler for the REST {@code POST /spring/ai/loom/schedule/cancel}
-     * route. Cancels the in-memory task AND deletes the corresponding
-     * {@code loom_scheduled_task} row so the {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleRestoreListener}
-     * doesn't resurrect it on the next restart. Package-private + static so the
-     * {@code loomAgentScheduleRouterCancelRegressionTest} can drive it without
-     * needing the full Spring Web reactive test apparatus.
-     *
-     * <p>Failure of the repository delete is logged at WARN (and swallowed) so
-     * the user-facing cancel still reports success — the only state that
-     * matters for end users is that the live task is gone; a stuck persistent
-     * row can be cleaned up by an ops tool.</p>
-     *
-     * @return {@code true} if the cancel ran end-to-end; {@code false} if name is null.
-     */
-    public static boolean handleScheduleCancel(String fullName,
-                                         cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
-                                         cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository repo,
-                                         org.slf4j.Logger log) {
-        if (fullName == null) {
-            return false;
-        }
-        // BUG-13: cross-user schedule cancel. Before letting flex-schedule
-        // fire the cancellation, verify the row is owned by the calling
-        // user (resolved from the AuthenticationFilter-then-set
-        // UserContextHolder). Without this any logged-in user could cancel
-        // someone else's task by guessing the namespaced name. The lookup is
-        // by PK so no enumeration is exposed; the response is identical
-        // regardless of "not found" vs "owned by someone else".
-        String caller = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
-        try {
-            var rec = repo.findByName(fullName);
-            if (rec.isEmpty() || caller == null || !caller.equals(rec.get().username())) {
-                log.warn("拒绝跨用户取消 REST 调用: caller={}, target={}, owner={}",
-                        caller, fullName,
-                        rec.map(cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord::username).orElse("<none>"));
-                return false;
-            }
-        } catch (Exception e) {
-            log.warn("schedule cancel 跨用户检查失败: name={}, err={}", fullName, e.getMessage());
-            return false;
-        }
-        flexService.cancel(fullName);
-        try {
-            repo.delete(fullName);
-        } catch (Exception e) {
-            log.warn("取消定时任务时删除持久化行失败: name={}", fullName, e);
-        }
-        return true;
-    }
-
-    /**
-     * Formats a schedule limit {@link java.time.Duration} into the compact form
-     * the UI hint shows ("5s" / "10m" / "72h" / "1d"). Returns {@code null} for a
-     * null / zero / negative duration so the endpoint can omit an unset limit.
-     */
-    static String formatScheduleDuration(java.time.Duration d) {
-        if (d == null || d.isZero() || d.isNegative()) {
-            return null;
-        }
-        long s = d.getSeconds();
-        if (s % 86400 == 0) return (s / 86400) + "d";
-        if (s % 3600 == 0) return (s / 3600) + "h";
-        if (s % 60 == 0) return (s / 60) + "m";
-        return s + "s";
-    }
-
-    static ServerResponse runtimeErrorResponse(
-            cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex,
-            int fallbackStatus) {
-        int status = ex.getStatusCode() != null ? ex.getStatusCode() : fallbackStatus;
-        return ServerResponse.status(status).body(java.util.Map.of(
-                "message", ex.getMessage() == null ? "请求失败" : ex.getMessage()));
-    }
-
     @Configuration
     @Slf4j
     static class WebConfiguration {
+
+        /**
+         * Aggregated, low-cost snapshot of a conversation's automation footprint
+         * for the chat-header side panel. Returns counts only (no record lists);
+         * the actual records still come from /schedule/history/by-conversation
+         * and /subtask/list/history?conversationId=.
+         */
+        static java.util.Map<String, Object> buildConversationState(
+                String conversationId,
+                String username,
+                cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
+                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
+                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry,
+                cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
+            java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
+            if (username == null || conversationId == null) {
+                state.put("activeSchedules", 0);
+                state.put("executionsLast7d", 0);
+                state.put("executionsFailedLast7d", 0);
+                state.put("activeSubTasks", 0);
+                state.put("subTaskHistoryLast7d", 0);
+                state.put("subTaskFailedLast7d", 0);
+                state.put("hasIssues", false);
+                return state;
+            }
+            String prefix = "loom-sched-" + username + "-" + conversationId + "-";
+
+            // 1. Active schedules = configs registered for this conv AND still
+            // visible in flex-schedule runtime.
+            java.util.Set<String> liveNames = new java.util.HashSet<>();
+            if (flexService != null) {
+                for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
+                    if (info.taskName().startsWith(prefix)) liveNames.add(info.taskName());
+                }
+            }
+            state.put("activeSchedules", liveNames.size());
+
+            // 2. Executions last 7d / failed last 7d
+            long now = System.currentTimeMillis();
+            long cutoffMs = now - 7L * 24 * 3600 * 1000;
+            Instant cutoff = Instant.ofEpochMilli(cutoffMs);
+            int execLast7d = 0;
+            int execFailedLast7d = 0;
+            if (loomScheduleExecutionRepository != null && loomScheduleTriggerRepository != null) {
+                java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord> configs =
+                        loomScheduleTriggerRepository.findByUserAndConv(username, conversationId);
+                for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord cfg : configs) {
+                    java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord> rows =
+                            loomScheduleExecutionRepository.findByTaskName(cfg.taskName(), 200);
+                    for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord r : rows) {
+                        if (r.fireTime().toEpochMilli() < cutoffMs) continue;
+                        execLast7d++;
+                        if (!r.success()) execFailedLast7d++;
+                    }
+                }
+            }
+            state.put("executionsLast7d", execLast7d);
+            state.put("executionsFailedLast7d", execFailedLast7d);
+
+            // 3. Active sub-tasks (currently RUNNING in this conv).
+            int activeSubTasks = 0;
+            if (subTaskRegistry != null) {
+                for (cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord rec : subTaskRegistry.listActive(username)) {
+                    if (conversationId.equals(rec.conversationId())) activeSubTasks++;
+                }
+            }
+            state.put("activeSubTasks", activeSubTasks);
+
+            // 4. Sub-task history last 7d / failed last 7d (cheap SQL aggregation).
+            int subTaskLast7d = 0;
+            int subTaskFailedLast7d = 0;
+            if (loomSubTaskHistoryRepository != null) {
+                java.util.List<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord> rows =
+                        loomSubTaskHistoryRepository.findByUsernameAndConversation(username, conversationId, 200);
+                for (cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord rec : rows) {
+                    if (rec.finishedAt() < cutoffMs) continue;
+                    subTaskLast7d++;
+                    if (rec.status() == cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.FAILED
+                            || rec.status() == cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.CANCELLED) {
+                        subTaskFailedLast7d++;
+                    }
+                }
+            }
+            state.put("subTaskHistoryLast7d", subTaskLast7d);
+            state.put("subTaskFailedLast7d", subTaskFailedLast7d);
+
+            // 5. Aggregate "issues" flag — anything the user might want to act on.
+            state.put("hasIssues", activeSubTasks > 0 || execFailedLast7d > 0 || subTaskFailedLast7d > 0);
+            return state;
+        }
+
+        private static String extractTokenFromCookies(
+                org.springframework.web.servlet.function.ServerRequest request, String cookieName) {
+            Cookie[] cookies = request.servletRequest().getCookies();
+            if (cookies != null) {
+                for (Cookie cookie : cookies) {
+                    if (cookieName.equals(cookie.getName())) {
+                        return cookie.getValue();
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static Cookie createSessionCookie(
+                String token, LoomAgentProperties.AuthProperty.CookieProperty cookieProp) {
+            Cookie cookie = new Cookie(cookieProp.getName(), token);
+            cookie.setPath(cookieProp.getPath());
+            cookie.setMaxAge(cookieProp.getMaxAge());
+            cookie.setHttpOnly(true);
+            cookie.setSecure(cookieProp.isSecure());
+            if (cookieProp.getDomain() != null && !cookieProp.getDomain().isEmpty()) {
+                cookie.setDomain(cookieProp.getDomain());
+            }
+            cookie.setAttribute("SameSite", cookieProp.getSameSite());
+            return cookie;
+        }
 
         @Bean
         public Cache sessionCache(LoomAgentProperties properties) {
@@ -1393,11 +1566,12 @@ public class LoomAgentConfiguration {
 
         @Bean("loomAgentBaseRouter")
         public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties,
-                                                                 IUserConversation userConversation,
-                                                                 cn.wubo.spring.ai.loom.agent.token.ITokenUsage tokenUsage,
-                                                                 cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService,
-                                                                 cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin,
-                                                                 JdbcTemplate jdbcTemplate) {
+                                                                  IUserConversation userConversation,
+                                                                  cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
+                                                                  cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService conversationFlowService,
+                                                                  cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService,
+                                                                  cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin,
+                                                                  JdbcTemplate jdbcTemplate) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom", request -> ServerResponse.temporaryRedirect(URI.create("/spring/ai/loom/index.html")).build());
 
@@ -1495,9 +1669,15 @@ public class LoomAgentConfiguration {
             });
 
             // 当前用户角色允许的 mcp 的工具列表
-            builder.GET("/spring/ai/loom/mcps/{name}/tools", request -> {
+            // 用 query string 接收 name：path variable 在 mcp name 含 "/" 时
+            // （如 "spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch"）
+            // Tomcat 会把 URL 编码后的 %2F 还原成 "/" 当路径分隔符，导致 404。
+            builder.GET("/spring/ai/loom/mcps/tools", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                String mcpName = request.pathVariable("name");
+                String mcpName = request.param("name").orElse(null);
+                if (mcpName == null || mcpName.isEmpty()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "name 参数必填"));
+                }
                 boolean allowed = roleService.getVisibleMcpsForUser(username).stream()
                         .anyMatch(m -> m.name().equals(mcpName));
                 if (!allowed) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
@@ -1543,13 +1723,10 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().body(userConversation.adminListByUsername(username));
             });
 
-            // 管理员：列出会话每 turn 的 token + 内容
-            builder.GET("spring/ai/loom/admin/conversations/{conversationId}/turns", request -> {
-                String conversationId = request.pathVariable("conversationId");
-                return ServerResponse.ok().body(tokenUsage.byConversation(conversationId));
-            });
+            // 管理员：列出会话每 turn 的 token + 内容（移除，用 /flow 替代）
+            // builder.GET("spring/ai/loom/admin/conversations/{conversationId}/turns", ...) — 删除
 
-            // 管理员：全局月度统计（按用户聚合）
+            // 管理员：全局月度统计（按用户聚合，从 chat_memory 实时聚合，替代旧 token_usage）
             builder.GET("spring/ai/loom/admin/stats/tokens/monthly", request -> {
                 int year = java.time.LocalDate.now().getYear();
                 int month = java.time.LocalDate.now().getMonthValue();
@@ -1563,27 +1740,35 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body(java.util.Map.of(
                             "error", "year/month 必须是数字: year=" + y + ", month=" + m));
                 }
-                return ServerResponse.ok().body(tokenUsage.monthlyByUser(year, month));
+                return ServerResponse.ok().body(chatUsageService.monthlyByUser(year, month));
             });
 
-            // 管理员：批量清理已软删的会话消息
-            builder.POST("spring/ai/loom/admin/conversations/clean-batch", request -> {
-                CleanBatchRequest body = request.body(CleanBatchRequest.class);
-                if (body == null || body.items() == null) {
-                    return ServerResponse.badRequest().body(java.util.Map.of("error", "items 不能为空"));
-                }
-                int ok = 0, fail = 0;
-                java.util.List<String> errors = new java.util.ArrayList<>();
-                for (CleanBatchRequest.CleanItem item : body.items()) {
+            // 管理员：批量清理（移除 — 控制台不再支持删除；如需直接连 DB 操作）
+            // builder.POST("spring/ai/loom/admin/conversations/clean-batch", ...) — 删除
+
+            // ===== ：全量对话流（单个会话时间线） =====
+            builder.GET("spring/ai/loom/admin/conversations/{conversationId}/flow", request -> {
+                String conversationId = request.pathVariable("conversationId");
+                String username = request.param("username").orElse(null);
+                int page = request.param("page").map(s -> {
                     try {
-                        userConversation.cleanContentForUserConv(item.username(), item.conversationId());
-                        ok++;
-                    } catch (Exception e) {
-                        fail++;
-                        errors.add(item.username() + "/" + item.conversationId() + ": " + e.getMessage());
+                        return Integer.parseInt(s);
+                    } catch (NumberFormatException e) {
+                        return 0;
                     }
-                }
-                return ServerResponse.ok().body(java.util.Map.of("ok", ok, "fail", fail, "errors", errors));
+                }).orElse(0);
+                int size = request.param("size").map(s -> {
+                    try {
+                        return Integer.parseInt(s);
+                    } catch (NumberFormatException e) {
+                        return 50;
+                    }
+                }).orElse(50);
+                java.util.Set<String> types = request.param("types")
+                        .map(s -> java.util.Set.of(s.split(",")))
+                        .orElse(java.util.Set.of());
+                return ServerResponse.ok().body(
+                        conversationFlowService.flow(conversationId, username, page, size, types));
             });
 
             // ===== 角色管理 =====
@@ -1699,13 +1884,10 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().body(true);
             });
 
-            // 当前用户：本月 token 用量
+            // 当前用户：本月 token 用量（：从 loom_chat_token_usage 聚合 prompt/completion/total 全部真实值）
             builder.GET("/spring/ai/loom/user/tokens/current-month", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (username == null) {
-                    return ServerResponse.ok().body(new cn.wubo.spring.ai.loom.agent.model.CurrentMonthTokenStat("", 0, 0, 0, 0, 0));
-                }
-                return ServerResponse.ok().body(tokenUsage.currentMonthForUser(username));
+                return ServerResponse.ok().body(chatUsageService.currentMonthForUser(username));
             });
 
             return builder.build();
@@ -1748,10 +1930,12 @@ public class LoomAgentConfiguration {
                 String conversationId = request.pathVariable("conversationId");
                 boolean owned = targetUser != null
                         && userConversation.adminListByUsername(targetUser).stream()
-                                .anyMatch(view -> conversationId.equals(view.conversationId()));
+                        .anyMatch(view -> conversationId.equals(view.conversationId()));
                 if (!owned) {
                     return ServerResponse.notFound().build();
                 }
+                // ：保留此端点供 /flow fallback 使用（admin 自家查 chat_memory 仍然合法）。
+                // 前端 /flow 端点已统一处理，不直接调本端点。
                 return ServerResponse.ok().body(
                         chatMemoryRepository.findByConversationId(conversationId));
             });
@@ -1807,97 +1991,6 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
-        /**
-         * Aggregated, low-cost snapshot of a conversation's automation footprint
-         * for the chat-header side panel. Returns counts only (no record lists);
-         * the actual records still come from /schedule/history/by-conversation
-         * and /subtask/list/history?conversationId=.
-         */
-        static java.util.Map<String, Object> buildConversationState(
-                String conversationId,
-                String username,
-                cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
-                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
-                cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
-                cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry subTaskRegistry,
-                cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
-            java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
-            if (username == null || conversationId == null) {
-                state.put("activeSchedules", 0);
-                state.put("executionsLast7d", 0);
-                state.put("executionsFailedLast7d", 0);
-                state.put("activeSubTasks", 0);
-                state.put("subTaskHistoryLast7d", 0);
-                state.put("subTaskFailedLast7d", 0);
-                state.put("hasIssues", false);
-                return state;
-            }
-            String prefix = "loom-sched-" + username + "-" + conversationId + "-";
-
-            // 1. Active schedules = configs registered for this conv AND still
-            //    visible in flex-schedule runtime.
-            java.util.Set<String> liveNames = new java.util.HashSet<>();
-            if (flexService != null) {
-                for (cn.wubo.flex.schedule.core.TaskInfo info : flexService.listTasks()) {
-                    if (info.taskName().startsWith(prefix)) liveNames.add(info.taskName());
-                }
-            }
-            state.put("activeSchedules", liveNames.size());
-
-            // 2. Executions last 7d / failed last 7d
-            long now = System.currentTimeMillis();
-            long cutoffMs = now - 7L * 24 * 3600 * 1000;
-            Instant cutoff = Instant.ofEpochMilli(cutoffMs);
-            int execLast7d = 0;
-            int execFailedLast7d = 0;
-            if (loomScheduleExecutionRepository != null && loomScheduleTriggerRepository != null) {
-                java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord> configs =
-                        loomScheduleTriggerRepository.findByUserAndConv(username, conversationId);
-                for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleTriggerRecord cfg : configs) {
-                    java.util.List<cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord> rows =
-                            loomScheduleExecutionRepository.findByTaskName(cfg.taskName(), 200);
-                    for (cn.wubo.spring.ai.loom.agent.schedule.LoomScheduleExecutionRecord r : rows) {
-                        if (r.fireTime().toEpochMilli() < cutoffMs) continue;
-                        execLast7d++;
-                        if (!r.success()) execFailedLast7d++;
-                    }
-                }
-            }
-            state.put("executionsLast7d", execLast7d);
-            state.put("executionsFailedLast7d", execFailedLast7d);
-
-            // 3. Active sub-tasks (currently RUNNING in this conv).
-            int activeSubTasks = 0;
-            if (subTaskRegistry != null) {
-                for (cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord rec : subTaskRegistry.listActive(username)) {
-                    if (conversationId.equals(rec.conversationId())) activeSubTasks++;
-                }
-            }
-            state.put("activeSubTasks", activeSubTasks);
-
-            // 4. Sub-task history last 7d / failed last 7d (cheap SQL aggregation).
-            int subTaskLast7d = 0;
-            int subTaskFailedLast7d = 0;
-            if (loomSubTaskHistoryRepository != null) {
-                java.util.List<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord> rows =
-                        loomSubTaskHistoryRepository.findByUsernameAndConversation(username, conversationId, 200);
-                for (cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry.SubTaskRecord rec : rows) {
-                    if (rec.finishedAt() < cutoffMs) continue;
-                    subTaskLast7d++;
-                    if (rec.status() == cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.FAILED
-                            || rec.status() == cn.wubo.spring.ai.loom.agent.model.SubTaskStatus.CANCELLED) {
-                        subTaskFailedLast7d++;
-                    }
-                }
-            }
-            state.put("subTaskHistoryLast7d", subTaskLast7d);
-            state.put("subTaskFailedLast7d", subTaskFailedLast7d);
-
-            // 5. Aggregate "issues" flag — anything the user might want to act on.
-            state.put("hasIssues", activeSubTasks > 0 || execFailedLast7d > 0 || subTaskFailedLast7d > 0);
-            return state;
-        }
-
         @Bean("loomAgentMcpRouter")
         public RouterFunction<ServerResponse> loomAgentMcpRouter(IMcp mcp) {
             RouterFunctions.Builder builder = RouterFunctions.route();
@@ -1946,6 +2039,49 @@ public class LoomAgentConfiguration {
                             java.util.Map.of("error", ex.getMessage() == null ? "Skill 不存在或无权限" : ex.getMessage()));
                 }
             });
+
+            // 创建 / 更新（前端「导入 skill」与 chat 工具共用）
+            // 返回 {status: "created"|"updated", name, description} 让前端区分新建 / 覆盖
+            builder.POST("spring/ai/loom/skill/upsert", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                cn.wubo.spring.ai.loom.agent.model.UpsertSkillRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.UpsertSkillRequest.class);
+                if (body == null) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                String name = body.name() == null ? null : body.name().trim();
+                String description = body.description() == null ? "" : body.description();
+                String content = body.content();
+                if (name == null || name.isEmpty()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "name 必填"));
+                }
+                if (name.length() > 128) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "name 长度超过 128"));
+                }
+                if (content == null || content.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "content 必填"));
+                }
+                // 锁检查：ROLE_GRANTED / MARKET_PULLED 不能改 —— skillStorage.save 内部会校验并抛 403
+                boolean existed = false;
+                try {
+                    skillStorage.get(name, username);
+                    existed = true;
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ignore) {
+                    // 不存在时 service 抛 message-only 异常，吞掉
+                }
+                try {
+                    skillStorage.save(new cn.wubo.spring.ai.loom.agent.model.SkillRecord(
+                            name, description, true, content, "USER_CREATED"), username);
+                    return ServerResponse.ok().body(java.util.Map.of(
+                            "status", existed ? "updated" : "created",
+                            "name", name,
+                            "description", description));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
             builder.DELETE("spring/ai/loom/skill/{name}", request -> {
                 String name = request.pathVariable("name");
                 String username = UserContextHolder.getCurrentUser();
@@ -1981,10 +2117,33 @@ public class LoomAgentConfiguration {
                 skillStorage.sync(username);
                 return ServerResponse.ok().body(true);
             });
+            // 复制 Skill（USER_CREATED / MARKET_PULLED → 新 USER_CREATED）
+            // body: { "name": "<新名字>" } —— 可空；空则用「<源名>_副本」
+            builder.POST("spring/ai/loom/skill/{name}/duplicate", request -> {
+                String sourceName = request.pathVariable("name");
+                String username = UserContextHolder.getCurrentUser();
+                java.util.Map<String, Object> body;
+                try {
+                    body = request.body(java.util.Map.class);
+                } catch (Exception ex) {
+                    body = java.util.Map.of();
+                }
+                String newName = body == null ? null : (String) body.get("name");
+                try {
+                    String actual = skillStorage.duplicate(sourceName, newName, username);
+                    return ServerResponse.ok().body(java.util.Map.of("name", actual));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
             return builder.build();
         }
 
-        /** Skill 市场（公共浏览 + 用户拉取 + 用户提交） */
+        /**
+         * Skill 市场（公共浏览 + 用户拉取 + 用户提交）
+         */
         @Bean("loomAgentSkillMarketRouter")
         public RouterFunction<ServerResponse> loomAgentSkillMarketRouter(
                 cn.wubo.spring.ai.loom.agent.skill.ISkillMarketService marketService,
@@ -2076,7 +2235,9 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
-        /** Skill 市场管理（仅 admin） */
+        /**
+         * Skill 市场管理（仅 admin）
+         */
         @Bean("loomAgentSkillMarketAdminRouter")
         public RouterFunction<ServerResponse> loomAgentSkillMarketAdminRouter(
                 cn.wubo.spring.ai.loom.agent.skill.ISkillMarketService marketService,
@@ -2085,19 +2246,16 @@ public class LoomAgentConfiguration {
             // 列出所有（含 PENDING/REJECTED）
             builder.GET("spring/ai/loom/admin/market-skills", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 return ServerResponse.ok().body(marketService.listAllForAdmin());
             });
-            // 列出 PENDING
-            builder.GET("spring/ai/loom/admin/market-skills/pending", request -> {
-                String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                return ServerResponse.ok().body(marketService.listPending());
-            });
+            // 去掉 listPending 路由（无审批流，没有 PENDING 状态）
             // admin 直接新增（绕过审批）
             builder.POST("spring/ai/loom/admin/market-skills", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest.class);
                 if (body == null) {
@@ -2118,7 +2276,8 @@ public class LoomAgentConfiguration {
             // admin 改任意 Skill
             builder.PUT("spring/ai/loom/admin/market-skills/{id}", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 // id 必须是数字——非数字走 400 而不是 500；service 抛 "Skill 不存在" → 404
                 Long id;
                 try {
@@ -2139,7 +2298,8 @@ public class LoomAgentConfiguration {
             // admin 删
             builder.DELETE("spring/ai/loom/admin/market-skills/{id}", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 Long id;
                 try {
                     id = Long.parseLong(request.pathVariable("id"));
@@ -2155,51 +2315,13 @@ public class LoomAgentConfiguration {
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 }
             });
-            // 审批
-            builder.POST("spring/ai/loom/admin/market-skills/{id}/approve", request -> {
-                String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                Long id;
-                try {
-                    id = Long.parseLong(request.pathVariable("id"));
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + request.pathVariable("id")));
-                }
-                cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest body =
-                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest.class);
-                String comment = body == null ? null : body.comment();
-                try {
-                    return ServerResponse.ok().body(marketService.approve(username, id, comment));
-                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
-                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
-                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
-                }
-            });
-            builder.POST("spring/ai/loom/admin/market-skills/{id}/reject", request -> {
-                String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                Long id;
-                try {
-                    id = Long.parseLong(request.pathVariable("id"));
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + request.pathVariable("id")));
-                }
-                cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest body =
-                        request.body(cn.wubo.spring.ai.loom.agent.model.MarketSkillReviewRequest.class);
-                String comment = body == null ? null : body.comment();
-                try {
-                    return ServerResponse.ok().body(marketService.reject(username, id, comment));
-                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
-                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
-                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
-                }
-            });
+            // 去掉审批流（approve/reject）。admin 下架走 adminDelete（级联清理 user_skill + role_skill）
             return builder.build();
         }
 
-        /** 角色授权 Skill（仅 admin） */
+        /**
+         * 角色授权 Skill（仅 admin）
+         */
         @Bean("loomAgentSkillRoleAdminRouter")
         public RouterFunction<ServerResponse> loomAgentSkillRoleAdminRouter(
                 cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin roleAdmin,
@@ -2207,13 +2329,15 @@ public class LoomAgentConfiguration {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/admin/roles/{code}/skills", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 String code = request.pathVariable("code");
                 return ServerResponse.ok().body(roleAdmin.getRoleSkills(code));
             });
             builder.PUT("spring/ai/loom/admin/roles/{code}/skills", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 String code = request.pathVariable("code");
                 cn.wubo.spring.ai.loom.agent.model.SetRoleSkillsRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleSkillsRequest.class);
@@ -2223,7 +2347,9 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
-        /** 角色授权知识库（仅 admin） */
+        /**
+         * 角色授权知识库（仅 admin）
+         */
         @Bean("loomAgentKnowledgeRoleAdminRouter")
         public RouterFunction<ServerResponse> loomAgentKnowledgeRoleAdminRouter(
                 cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeRoleAdmin knowledgeRoleAdmin,
@@ -2231,13 +2357,15 @@ public class LoomAgentConfiguration {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/admin/roles/{code}/knowledge", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 String code = request.pathVariable("code");
                 return ServerResponse.ok().body(knowledgeRoleAdmin.getRoleKnowledges(code));
             });
             builder.PUT("spring/ai/loom/admin/roles/{code}/knowledge", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username)) return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
                 String code = request.pathVariable("code");
                 cn.wubo.spring.ai.loom.agent.model.SetRoleKnowledgeRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleKnowledgeRequest.class);
@@ -2349,7 +2477,9 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
-        /** 构建用户文件目录树 JSON */
+        /**
+         * 构建用户文件目录树 JSON
+         */
         @SuppressWarnings("unchecked")
         private java.util.Map<String, Object> buildFileTree(String fileBasePath, String username) {
             java.util.Map<String, Object> node = new java.util.LinkedHashMap<>();
@@ -2398,7 +2528,9 @@ public class LoomAgentConfiguration {
             return children;
         }
 
-        /** 根据路径获取或创建 fileId，用于预览/下载桥接 */
+        /**
+         * 根据路径获取或创建 fileId，用于预览/下载桥接
+         */
         private String getOrCreateFileId(String fileBasePath, String path, String username, IFile file) {
             try {
                 Path baseDir = Paths.get(fileBasePath, username);
@@ -2436,7 +2568,6 @@ public class LoomAgentConfiguration {
                 return null;
             }
         }
-
 
         @ConditionalOnBean(VectorStore.class)
         @Bean("loomAgentKnowledgeRouter")
@@ -2593,7 +2724,7 @@ public class LoomAgentConfiguration {
                 }
             });
 
-            // 撤回我的市场提交
+            // 撤回/删除我的市场提交（统一 DELETE 端点；内部判断作者或 admin）
             builder.DELETE("/spring/ai/loom/api/knowledge-market/{marketId}", request -> {
                 String marketId = request.pathVariable("marketId");
                 try {
@@ -2606,29 +2737,9 @@ public class LoomAgentConfiguration {
                 }
             });
 
-            // 管理员审批市场提交
-            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/approve", request -> {
-                String marketId = request.pathVariable("marketId");
-                try {
-                    var result = marketService.approve(marketId);
-                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
-                } catch (Exception e) {
-                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
-                            .body(java.util.Map.of("message", e.getMessage()));
-                }
-            });
-
-            // 管理员拒绝市场提交
-            builder.POST("/spring/ai/loom/api/knowledge-market/{marketId}/reject", request -> {
-                String marketId = request.pathVariable("marketId");
-                try {
-                    var result = marketService.reject(marketId);
-                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(result);
-                } catch (Exception e) {
-                    return ServerResponse.badRequest().contentType(MediaType.APPLICATION_JSON)
-                            .body(java.util.Map.of("message", e.getMessage()));
-                }
-            });
+            // 去掉 approve/reject 端点（无审批流）
+            // _removed_ /api/knowledge-market/{marketId}/approve
+            // _removed_ /api/knowledge-market/{marketId}/reject
 
             // 获取我订阅的知识库列表
             builder.GET("/spring/ai/loom/api/knowledge-market/my-pulled", request -> {
@@ -2651,6 +2762,35 @@ public class LoomAgentConfiguration {
          * 文件下载/预览路由：为知识库文件提供 attachment 下载和 inline 预览端点。
          * 通过 IFileDownload 透明处理数据库存储和磁盘存储两种模式。
          */
+        @Bean("loomAgentKnowledgeMarketAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentKnowledgeMarketAdminRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.IKnowledgeMarketService marketService,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            // admin：列出所有市场知识库
+            builder.GET("spring/ai/loom/admin/market-knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                return ServerResponse.ok().body(marketService.listAllForAdmin());
+            });
+            // admin：删除市场知识库（级联清理 user_knowledge + role_knowledge）
+            builder.DELETE("spring/ai/loom/admin/market-knowledge/{marketId}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
+                String marketId = request.pathVariable("marketId");
+                try {
+                    marketService.withdraw(marketId);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            return builder.build();
+        }
+
         @Bean("loomAgentFileDownloadRouter")
         public RouterFunction<ServerResponse> loomAgentFileDownloadRouter(
                 cn.wubo.spring.ai.loom.agent.file.IFileDownload fileDownload) {
@@ -2709,85 +2849,5 @@ public class LoomAgentConfiguration {
         public cn.wubo.file.view.auth.IAuth loomAgentFileViewAuth(IUser user, LoomAgentProperties properties) {
             return new cn.wubo.spring.ai.loom.agent.file.view.LoomAgentAuth(user, properties.getAuth().getCookie().getName());
         }
-
-        private static String extractTokenFromCookies(
-                org.springframework.web.servlet.function.ServerRequest request, String cookieName) {
-            Cookie[] cookies = request.servletRequest().getCookies();
-            if (cookies != null) {
-                for (Cookie cookie : cookies) {
-                    if (cookieName.equals(cookie.getName())) {
-                        return cookie.getValue();
-                    }
-                }
-            }
-            return null;
-        }
-
-        private static Cookie createSessionCookie(
-                String token, LoomAgentProperties.AuthProperty.CookieProperty cookieProp) {
-            Cookie cookie = new Cookie(cookieProp.getName(), token);
-            cookie.setPath(cookieProp.getPath());
-            cookie.setMaxAge(cookieProp.getMaxAge());
-            cookie.setHttpOnly(true);
-            cookie.setSecure(cookieProp.isSecure());
-            if (cookieProp.getDomain() != null && !cookieProp.getDomain().isEmpty()) {
-                cookie.setDomain(cookieProp.getDomain());
-            }
-            cookie.setAttribute("SameSite", cookieProp.getSameSite());
-            return cookie;
-        }
-    }
-
-    /**
-     * 选下载响应的 Content-Type：
-     * - 优先用 FileRecord.mimeType（writeFile 时 Tika 探测过，比较准）
-     * - 缺失时按扩展名兜底（覆盖 .md / .txt / .json 等常见类型，markdown 给 text/markdown 让浏览器内联渲染）
-     * - 都没有就 octet-stream
-     */
-    private static MediaType resolveContentType(FileRecord fileRecord) {
-        if (fileRecord.mimeType() != null && !fileRecord.mimeType().isBlank()) {
-            return MediaType.parseMediaType(fileRecord.mimeType());
-        }
-        String name = fileRecord.fileName() == null ? "" : fileRecord.fileName().toLowerCase();
-        if (name.endsWith(".md") || name.endsWith(".markdown")) return MediaType.parseMediaType("text/markdown;charset=UTF-8");
-        if (name.endsWith(".txt")) return MediaType.parseMediaType("text/plain;charset=UTF-8");
-        if (name.endsWith(".json")) return MediaType.parseMediaType("application/json;charset=UTF-8");
-        if (name.endsWith(".html") || name.endsWith(".htm")) return MediaType.parseMediaType("text/html;charset=UTF-8");
-        if (name.endsWith(".csv")) return MediaType.parseMediaType("text/csv;charset=UTF-8");
-        if (name.endsWith(".pdf")) return MediaType.APPLICATION_PDF;
-        if (name.endsWith(".png")) return MediaType.IMAGE_PNG;
-        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
-        if (name.endsWith(".gif")) return MediaType.IMAGE_GIF;
-        if (name.endsWith(".svg")) return MediaType.parseMediaType("image/svg+xml");
-        return MediaType.APPLICATION_OCTET_STREAM;
-    }
-
-    /**
-     * 拼 Content-Disposition 头，处理中文文件名。
-     * 输出形式：
-     * <ul>
-     *   <li>全 ASCII：{@code attachment; filename="report.md"}</li>
-     *   <li>含非 ASCII：{@code attachment; filename="report.md"; filename*=UTF-8''%E5%95%86%E5%93%81...md}
-     *       ——RFC 5987 双键，filename 是把非 ASCII 字符替换成 _ 后的 ASCII 兜底</li>
-     * </ul>
-     * 不做这层编码时，浏览器只能拿到原始 UTF-8 字节序列，文件名会乱码或变成 UUID。
-     */
-    private static String buildContentDisposition(String fileName) {
-        if (fileName == null || fileName.isEmpty()) {
-            return "attachment";
-        }
-        // 1. ASCII 兜底：把非 ASCII / 不可打印字符替换成 _
-        String asciiFallback = fileName.replaceAll("[^\\x20-\\x7E]", "_").replaceAll("\"", "_");
-        if (asciiFallback.isEmpty()) {
-            asciiFallback = "download";
-        }
-        // 2. 全 ASCII 时单键即可
-        if (fileName.chars().allMatch(c -> c >= 0x20 && c <= 0x7E)) {
-            return "attachment; filename=\"" + asciiFallback + "\"";
-        }
-        // 3. 含中文等非 ASCII 时双键：ASCII 兜底 + RFC 5987 urlencoded
-        String encoded = java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8)
-                .replace("+", "%20");
-        return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''" + encoded;
     }
 }

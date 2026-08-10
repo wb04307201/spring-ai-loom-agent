@@ -1,9 +1,9 @@
 package cn.wubo.spring.ai.loom.agent.autoconfigure;
 
 import cn.wubo.spring.ai.loom.agent.LoomAgentConfiguration;
+import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
-import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.tool.file.IFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.IGitTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
@@ -26,24 +26,6 @@ import static org.mockito.Mockito.mock;
  */
 @DisplayName("LoomAgentConfiguration Tool 默认加载验证")
 class LoomAgentToolAutoConfigTest {
-
-    @Configuration
-    static class TestConfig {
-        @Bean
-        LoomAgentProperties loomAgentProperties() {
-            return new LoomAgentProperties();
-        }
-
-        @Bean
-        IFile iFile() {
-            return mock(IFile.class);
-        }
-
-        @Bean
-        ISkillStorage iSkillStorage() {
-            return mock(ISkillStorage.class);
-        }
-    }
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.ToolConfiguration.class);
@@ -105,5 +87,23 @@ class LoomAgentToolAutoConfigTest {
     void skillDisabledByConfig() {
         runner.withPropertyValues("spring.ai.loom.agent.skill.enabled=false")
                 .run(ctx -> assertThat(ctx).doesNotHaveBean(ISkillTool.class));
+    }
+
+    @Configuration
+    static class TestConfig {
+        @Bean
+        LoomAgentProperties loomAgentProperties() {
+            return new LoomAgentProperties();
+        }
+
+        @Bean
+        IFile iFile() {
+            return mock(IFile.class);
+        }
+
+        @Bean
+        ISkillStorage iSkillStorage() {
+            return mock(ISkillStorage.class);
+        }
     }
 }

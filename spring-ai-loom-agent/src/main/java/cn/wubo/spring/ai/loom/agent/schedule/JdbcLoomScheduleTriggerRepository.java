@@ -17,30 +17,28 @@ import java.util.Optional;
  * <p>
  * Persists {@link LoomScheduleTriggerRecord} rows across application restarts.
  * Schema is also declared in the Flyway migration
- * ({@code V2.0__subtask_and_schedule.sql} — table {@code loom_scheduled_task}); this class additionally calls
+ * ({@code __subtask_and_schedule.sql} — table {@code loom_scheduled_task}); this class additionally calls
  * {@link #ensureSchema()} defensively so the table is created even when Flyway
  * is bypassed (e.g. integration tests with bare H2 URLs).
  * </p>
  */
 public class JdbcLoomScheduleTriggerRepository implements ILoomScheduleTriggerRepository {
 
-    private static final Logger log = LoggerFactory.getLogger(JdbcLoomScheduleTriggerRepository.class);
-
     public static final String TABLE_NAME = "loom_scheduled_task";
-
+    private static final Logger log = LoggerFactory.getLogger(JdbcLoomScheduleTriggerRepository.class);
     private static final String DDL = "CREATE TABLE IF NOT EXISTS " + TABLE_NAME + " ("
-            + " task_name             VARCHAR(255) PRIMARY KEY,"
-            + " schedule_type         VARCHAR(20)  NOT NULL,"
-            + " cron_expression       VARCHAR(100),"
-            + " interval_seconds      BIGINT,"
+            + " task_name VARCHAR(255) PRIMARY KEY,"
+            + " schedule_type VARCHAR(20) NOT NULL,"
+            + " cron_expression VARCHAR(100),"
+            + " interval_seconds BIGINT,"
             + " initial_delay_seconds BIGINT,"
             + " one_shot_delay_seconds BIGINT,"
-            + " prompt                CLOB NOT NULL,"
-            + " username              VARCHAR(64) NOT NULL,"
-            + " conversation_id       VARCHAR(64) NOT NULL,"
-            + " paused                BOOLEAN NOT NULL DEFAULT FALSE,"
-            + " created_at            TIMESTAMP(9) WITH TIME ZONE NOT NULL,"
-            + " updated_at            TIMESTAMP(9) WITH TIME ZONE NOT NULL"
+            + " prompt CLOB NOT NULL,"
+            + " username VARCHAR(64) NOT NULL,"
+            + " conversation_id VARCHAR(64) NOT NULL,"
+            + " paused BOOLEAN NOT NULL DEFAULT FALSE,"
+            + " created_at TIMESTAMP(9) WITH TIME ZONE NOT NULL,"
+            + " updated_at TIMESTAMP(9) WITH TIME ZONE NOT NULL"
             + ")";
 
     private static final String DDL_INDEX_USER_CONV =
@@ -68,9 +66,27 @@ public class JdbcLoomScheduleTriggerRepository implements ILoomScheduleTriggerRe
         this.jdbc = jdbc;
     }
 
+    private static LoomScheduleTriggerRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Instant createdAt = rs.getTimestamp("created_at").toInstant();
+        Instant updatedAt = rs.getTimestamp("updated_at").toInstant();
+        return new LoomScheduleTriggerRecord(
+                rs.getString("task_name"),
+                rs.getString("schedule_type"),
+                rs.getString("cron_expression"),
+                (Long) rs.getObject("interval_seconds"),
+                (Long) rs.getObject("initial_delay_seconds"),
+                (Long) rs.getObject("one_shot_delay_seconds"),
+                rs.getString("prompt"),
+                rs.getString("username"),
+                rs.getString("conversation_id"),
+                rs.getBoolean("paused"),
+                createdAt,
+                updatedAt);
+    }
+
     /**
      * Creates the persistence table and indexes if absent. Safe to invoke multiple
-     * times — the Flyway migration (V2.0) is the canonical schema source in production; this is
+     * times — the Flyway migration () is the canonical schema source in production; this is
      * a defensive belt-and-suspenders for non-Flyway callers.
      */
     public void ensureSchema() {
@@ -115,11 +131,11 @@ public class JdbcLoomScheduleTriggerRepository implements ILoomScheduleTriggerRe
     @Override
     public List<LoomScheduleTriggerRecord> findAll() {
         return jdbc.query(
-                "SELECT task_name, schedule_type, cron_expression, interval_seconds,"
-                        + " initial_delay_seconds, one_shot_delay_seconds, prompt,"
-                        + " username, conversation_id, paused, created_at, updated_at"
-                        + " FROM " + TABLE_NAME + " ORDER BY task_name",
-                (rs, rowNum) -> mapRow(rs))
+                        "SELECT task_name, schedule_type, cron_expression, interval_seconds,"
+                                + " initial_delay_seconds, one_shot_delay_seconds, prompt,"
+                                + " username, conversation_id, paused, created_at, updated_at"
+                                + " FROM " + TABLE_NAME + " ORDER BY task_name",
+                        (rs, rowNum) -> mapRow(rs))
                 .stream()
                 .sorted(Comparator.comparing(LoomScheduleTriggerRecord::taskName))
                 .toList();
@@ -128,14 +144,14 @@ public class JdbcLoomScheduleTriggerRepository implements ILoomScheduleTriggerRe
     @Override
     public List<LoomScheduleTriggerRecord> findByUserAndConv(String username, String conversationId) {
         return jdbc.query(
-                "SELECT task_name, schedule_type, cron_expression, interval_seconds,"
-                        + " initial_delay_seconds, one_shot_delay_seconds, prompt,"
-                        + " username, conversation_id, paused, created_at, updated_at"
-                        + " FROM " + TABLE_NAME
-                        + " WHERE username = ? AND conversation_id = ?"
-                        + " ORDER BY task_name",
-                (rs, rowNum) -> mapRow(rs),
-                username, conversationId)
+                        "SELECT task_name, schedule_type, cron_expression, interval_seconds,"
+                                + " initial_delay_seconds, one_shot_delay_seconds, prompt,"
+                                + " username, conversation_id, paused, created_at, updated_at"
+                                + " FROM " + TABLE_NAME
+                                + " WHERE username = ? AND conversation_id = ?"
+                                + " ORDER BY task_name",
+                        (rs, rowNum) -> mapRow(rs),
+                        username, conversationId)
                 .stream()
                 .sorted(Comparator.comparing(LoomScheduleTriggerRecord::taskName))
                 .toList();
@@ -165,23 +181,5 @@ public class JdbcLoomScheduleTriggerRepository implements ILoomScheduleTriggerRe
                 "SELECT COUNT(*) FROM " + TABLE_NAME + " WHERE task_name = ?",
                 Integer.class, taskName);
         return n != null && n > 0;
-    }
-
-    private static LoomScheduleTriggerRecord mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
-        Instant createdAt = rs.getTimestamp("created_at").toInstant();
-        Instant updatedAt = rs.getTimestamp("updated_at").toInstant();
-        return new LoomScheduleTriggerRecord(
-                rs.getString("task_name"),
-                rs.getString("schedule_type"),
-                rs.getString("cron_expression"),
-                (Long) rs.getObject("interval_seconds"),
-                (Long) rs.getObject("initial_delay_seconds"),
-                (Long) rs.getObject("one_shot_delay_seconds"),
-                rs.getString("prompt"),
-                rs.getString("username"),
-                rs.getString("conversation_id"),
-                rs.getBoolean("paused"),
-                createdAt,
-                updatedAt);
     }
 }

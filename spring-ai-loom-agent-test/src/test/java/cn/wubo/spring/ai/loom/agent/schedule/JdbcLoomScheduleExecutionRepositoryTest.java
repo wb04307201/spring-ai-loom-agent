@@ -25,6 +25,12 @@ class JdbcLoomScheduleExecutionRepositoryTest {
 
     private JdbcLoomScheduleExecutionRepository repository;
 
+    private static LoomScheduleExecutionRecord fire(String taskName, Instant when, boolean success) {
+        return new LoomScheduleExecutionRecord(
+                null, taskName, when, 42L, success,
+                success ? null : "boom", LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER);
+    }
+
     @BeforeEach
     void setUp() {
         DriverManagerDataSource ds = new DriverManagerDataSource();
@@ -35,12 +41,6 @@ class JdbcLoomScheduleExecutionRepositoryTest {
         JdbcTemplate jdbc = new JdbcTemplate(ds);
         repository = new JdbcLoomScheduleExecutionRepository(jdbc);
         repository.ensureSchema();
-    }
-
-    private static LoomScheduleExecutionRecord fire(String taskName, Instant when, boolean success) {
-        return new LoomScheduleExecutionRecord(
-                null, taskName, when, 42L, success,
-                success ? null : "boom", LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER);
     }
 
     @Test

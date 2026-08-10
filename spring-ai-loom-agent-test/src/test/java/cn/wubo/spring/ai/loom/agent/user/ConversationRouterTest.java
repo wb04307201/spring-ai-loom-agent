@@ -4,7 +4,6 @@ import cn.wubo.spring.ai.loom.agent.model.AdminConversationView;
 import cn.wubo.spring.ai.loom.agent.model.ConversationRecord;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
-import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
@@ -22,6 +21,70 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class ConversationRouterTest {
+
+    private static RouterFunction<ServerResponse> router(IUserConversation conversations) {
+        return router(conversations, mock(JdbcChatMemoryRepository.class));
+    }
+
+    private static RouterFunction<ServerResponse> router(IUserConversation conversations,
+                                                         JdbcChatMemoryRepository memory) {
+        LoomAgentConfiguration.WebConfiguration configuration = new LoomAgentConfiguration.WebConfiguration();
+        return configuration.loomAgentConversationRouter(
+                memory,
+                conversations,
+                emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> ObjectProvider<T> emptyProvider() {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
+    }
+
+    private static MockHttpServletRequest buildServletRequest(String method, String path, String query) {
+        String pathOnly = path;
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, pathOnly);
+        servletRequest.setRequestURI(pathOnly);
+        servletRequest.setServletPath(pathOnly);
+        servletRequest.setPathInfo(pathOnly);
+        if (query != null) {
+            servletRequest.setQueryString(query);
+            for (String pair : query.split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq > 0) {
+                    servletRequest.addParameter(pair.substring(0, eq), pair.substring(eq + 1));
+                }
+            }
+        }
+        servletRequest.setContentType("application/json");
+        return servletRequest;
+    }
+
+    private static ServerResponse route(RouterFunction<ServerResponse> router,
+                                        String method,
+                                        String path,
+                                        String body) throws Exception {
+        String[] pathParts = path.split("\\?", 2);
+        String pathOnly = pathParts[0];
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, pathOnly);
+        servletRequest.setRequestURI(pathOnly);
+        servletRequest.setServletPath(pathOnly);
+        servletRequest.setPathInfo(pathOnly);
+        if (pathParts.length > 1) servletRequest.setQueryString(pathParts[1]);
+        servletRequest.setContentType("application/json");
+        servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
+        ServerRequest request = ServerRequest.create(
+                servletRequest, java.util.List.of(new MappingJackson2HttpMessageConverter()));
+        return router.route(request).orElseThrow().handle(request);
+    }
+
+    private static Object readBody(ServerResponse response) {
+        // The PATCH 403 path uses .body(Map) which produces an EntityResponse whose
+        // entity() exposes the body directly. We don't need to round-trip through
+        // HttpMessageConverters to verify the body shape.
+        return ((org.springframework.web.servlet.function.EntityResponse<?>) response).entity();
+    }
 
     @AfterEach
     void clearUser() {
@@ -105,7 +168,7 @@ class ConversationRouterTest {
         IUserConversation conversations = mock(IUserConversation.class);
         JdbcChatMemoryRepository memory = mock(JdbcChatMemoryRepository.class);
         when(conversations.adminListByUsername("bob")).thenReturn(java.util.List.of(
-                new AdminConversationView("bob-conv", "bob", "Bob", "preview", null, null, false)));
+                new AdminConversationView("bob-conv", "bob", "Bob", "preview", null, null, null, false, 0L, 0L, 0L, 0L, 0L, 0L)));
         when(memory.findByConversationId("bob-conv")).thenReturn(java.util.List.of());
         RouterFunction<ServerResponse> router = router(conversations, memory);
 
@@ -130,68 +193,5 @@ class ConversationRouterTest {
         ServerResponse response = router.route(request).orElseThrow().handle(request);
 
         assertThat(response.statusCode().value()).isEqualTo(404);
-    }
-
-    private static RouterFunction<ServerResponse> router(IUserConversation conversations) {
-        return router(conversations, mock(JdbcChatMemoryRepository.class));
-    }
-
-    private static RouterFunction<ServerResponse> router(IUserConversation conversations,
-                                                         JdbcChatMemoryRepository memory) {
-        LoomAgentConfiguration.WebConfiguration configuration = new LoomAgentConfiguration.WebConfiguration();
-        return configuration.loomAgentConversationRouter(
-                memory,
-                conversations,
-                emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider());
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> ObjectProvider<T> emptyProvider() {
-        ObjectProvider<T> provider = mock(ObjectProvider.class);
-        when(provider.getIfAvailable()).thenReturn(null);
-        return provider;
-    }
-
-    private static MockHttpServletRequest buildServletRequest(String method, String path, String query) {
-        String pathOnly = path;
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, pathOnly);
-        servletRequest.setRequestURI(pathOnly);
-        servletRequest.setServletPath(pathOnly);
-        servletRequest.setPathInfo(pathOnly);
-        if (query != null) {
-            servletRequest.setQueryString(query);
-            for (String pair : query.split("&")) {
-                int eq = pair.indexOf('=');
-                if (eq > 0) {
-                    servletRequest.addParameter(pair.substring(0, eq), pair.substring(eq + 1));
-                }
-            }
-        }
-        servletRequest.setContentType("application/json");
-        return servletRequest;
-    }
-
-    private static ServerResponse route(RouterFunction<ServerResponse> router,
-                                        String method,
-                                        String path,
-                                        String body) throws Exception {
-        String[] pathParts = path.split("\\?", 2);
-        String pathOnly = pathParts[0];
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, pathOnly);
-        servletRequest.setRequestURI(pathOnly);
-        servletRequest.setServletPath(pathOnly);
-        servletRequest.setPathInfo(pathOnly);
-        if (pathParts.length > 1) servletRequest.setQueryString(pathParts[1]);
-        servletRequest.setContentType("application/json");
-        servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
-        ServerRequest request = ServerRequest.create(
-                servletRequest, java.util.List.of(new MappingJackson2HttpMessageConverter()));
-        return router.route(request).orElseThrow().handle(request);
-    }
-    private static Object readBody(ServerResponse response) {
-        // The PATCH 403 path uses .body(Map) which produces an EntityResponse whose
-        // entity() exposes the body directly. We don't need to round-trip through
-        // HttpMessageConverters to verify the body shape.
-        return ((org.springframework.web.servlet.function.EntityResponse<?>) response).entity();
     }
 }

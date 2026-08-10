@@ -46,10 +46,18 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
             int sort = 0;
             for (RoleKnowledgeItem it : items) {
                 if (it == null || it.marketKnowledgeId() == null || it.marketKnowledgeId().isBlank()) continue;
-                boolean def = it.defaultEnabled() == null ? false : it.defaultEnabled();
+                boolean def = it.defaultEnabled() != null && it.defaultEnabled();
                 jdbcTemplate.update(
                         "INSERT INTO loom_role_knowledge (role_code, market_knowledge_id, sort_order, default_enabled) VALUES (?, ?, ?, ?)",
                         roleCode, it.marketKnowledgeId(), sort++, def);
+            }
+        }
+        // 自动 sync 所有拥有该角色的用户（修复"授权后用户必须手动 sync"问题）
+        List<String> usersWithRole = jdbcTemplate.queryForList(
+                "SELECT username FROM user_role WHERE role_code = ?", String.class, roleCode);
+        if (usersWithRole != null) {
+            for (String username : usersWithRole) {
+                syncUserKnowledge(username);
             }
         }
     }

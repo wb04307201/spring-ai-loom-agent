@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 知识库市场完整流程集成测试。
- *
+ * <p>
  * 使用内嵌 H2 + 真实 JdbcTemplate 的集成测试（不依赖 Spring Boot auto-config），
  * 验证完整的知识库市场流程：
  * 1. 用户 A 创建知识库
@@ -36,18 +36,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class KnowledgeMarketIntegrationTest {
 
+    private static final String USER_A = "testuserA";
+    private static final String USER_B = "testuserB";
+    private static final String ADMIN_USER = "testadmin";
+    private static final String TEST_ROLE = "TEST_ROLE_KB";
+    private static final String KB_NAME = "测试市场知识库";
     private JdbcTemplate jdbcTemplate;
     private IKnowledge knowledge;
     private IKnowledgeMarketService marketService;
     private IKnowledgeRoleAdmin roleAdmin;
     private IUser user;
     private Cache sessionCache;
-
-    private static final String USER_A = "testuserA";
-    private static final String USER_B = "testuserB";
-    private static final String ADMIN_USER = "testadmin";
-    private static final String TEST_ROLE = "TEST_ROLE_KB";
-    private static final String KB_NAME = "测试市场知识库";
 
     @BeforeEach
     void setUp() {
@@ -61,7 +60,7 @@ class KnowledgeMarketIntegrationTest {
 
         sessionCache = new ConcurrentMapCache("sessions");
 
-        // Create schema manually (mimics V1.0 + V3.0 migrations)
+        // Create schema manually (mimics + migrations)
         initSchema();
 
         // Create services
@@ -98,74 +97,74 @@ class KnowledgeMarketIntegrationTest {
     private void initSchema() {
         jdbcTemplate.execute("""
                 CREATE TABLE knowledge (
-                    id VARCHAR(64) PRIMARY KEY,
-                    username VARCHAR(64) NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    CONSTRAINT uk_username_name UNIQUE (username, name)
+                id VARCHAR(64) PRIMARY KEY,
+                username VARCHAR(64) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                CONSTRAINT uk_username_name UNIQUE (username, name)
                 )
                 """);
 
         jdbcTemplate.execute("""
                 CREATE TABLE user_info (
-                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    username VARCHAR(64) NOT NULL UNIQUE,
-                    nickname VARCHAR(64) NOT NULL,
-                    password VARCHAR(255) NOT NULL,
-                    type VARCHAR(20) NOT NULL CHECK (type IN ('ADMIN', 'USER'))
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(64) NOT NULL UNIQUE,
+                nickname VARCHAR(64) NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                type VARCHAR(20) NOT NULL CHECK (type IN ('ADMIN', 'USER'))
                 )
                 """);
 
         jdbcTemplate.execute("""
                 CREATE TABLE user_role (
-                    username VARCHAR(64) NOT NULL,
-                    role_code VARCHAR(32) NOT NULL,
-                    PRIMARY KEY (username, role_code)
+                username VARCHAR(64) NOT NULL,
+                role_code VARCHAR(32) NOT NULL,
+                PRIMARY KEY (username, role_code)
                 )
                 """);
 
         jdbcTemplate.execute("""
                 CREATE TABLE role (
-                    code VARCHAR(32) PRIMARY KEY,
-                    name VARCHAR(64) NOT NULL,
-                    is_system BOOLEAN NOT NULL DEFAULT FALSE,
-                    description TEXT,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                code VARCHAR(32) PRIMARY KEY,
+                name VARCHAR(64) NOT NULL,
+                is_system BOOLEAN NOT NULL DEFAULT FALSE,
+                description TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
 
         jdbcTemplate.execute("""
                 CREATE TABLE loom_market_knowledge (
-                    id VARCHAR(36) PRIMARY KEY,
-                    username VARCHAR(64) NOT NULL,
-                    name VARCHAR(200) NOT NULL,
-                    description TEXT,
-                    status VARCHAR(20) NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
-                    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    reviewed_at TIMESTAMP,
-                    reviewed_by VARCHAR(64),
-                    review_comment TEXT,
-                    UNIQUE(username, name)
+                id VARCHAR(36) PRIMARY KEY,
+                username VARCHAR(64) NOT NULL,
+                name VARCHAR(200) NOT NULL,
+                description TEXT,
+                status VARCHAR(20) NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                reviewed_by VARCHAR(64),
+                review_comment TEXT,
+                UNIQUE(username, name)
                 )
                 """);
 
         jdbcTemplate.execute("""
                 CREATE TABLE loom_user_knowledge (
-                    username VARCHAR(64) NOT NULL,
-                    market_knowledge_id VARCHAR(36) NOT NULL,
-                    source VARCHAR(20) NOT NULL CHECK (source IN ('USER_CREATED', 'MARKET_PULLED', 'ROLE_GRANTED')),
-                    locked BOOLEAN DEFAULT FALSE,
-                    PRIMARY KEY (username, market_knowledge_id)
+                username VARCHAR(64) NOT NULL,
+                market_knowledge_id VARCHAR(36) NOT NULL,
+                source VARCHAR(20) NOT NULL CHECK (source IN ('USER_CREATED', 'MARKET_PULLED', 'ROLE_GRANTED')),
+                locked BOOLEAN DEFAULT FALSE,
+                PRIMARY KEY (username, market_knowledge_id)
                 )
                 """);
 
         jdbcTemplate.execute("""
                 CREATE TABLE loom_role_knowledge (
-                    role_code VARCHAR(50) NOT NULL,
-                    market_knowledge_id VARCHAR(36) NOT NULL,
-                    default_enabled BOOLEAN DEFAULT FALSE,
-                    sort_order INT DEFAULT 0,
-                    PRIMARY KEY (role_code, market_knowledge_id)
+                role_code VARCHAR(50) NOT NULL,
+                market_knowledge_id VARCHAR(36) NOT NULL,
+                default_enabled BOOLEAN DEFAULT FALSE,
+                sort_order INT DEFAULT 0,
+                PRIMARY KEY (role_code, market_knowledge_id)
                 )
                 """);
     }
@@ -183,18 +182,12 @@ class KnowledgeMarketIntegrationTest {
         String kbId = kb.id();
         UserContextHolder.clear();
 
-        // Step 2: User A submits to market
+        // Step 2: User A submits to market (直接 APPROVED，无审批流)
         UserContextHolder.setCurrentUser(USER_A);
         MarketKnowledgeRecord submitted = marketService.submit(kbId);
-        assertThat(submitted.status()).isEqualTo(MarketKnowledgeRecord.STATUS_PENDING);
+        assertThat(submitted.status()).isEqualTo(MarketKnowledgeRecord.STATUS_APPROVED);
         assertThat(submitted.username()).isEqualTo(USER_A);
-        UserContextHolder.clear();
-
-        // Step 3: Admin approves
-        UserContextHolder.setCurrentUser(ADMIN_USER);
-        MarketKnowledgeRecord approved = marketService.approve(submitted.id());
-        assertThat(approved.status()).isEqualTo(MarketKnowledgeRecord.STATUS_APPROVED);
-        assertThat(approved.reviewedBy()).isEqualTo(ADMIN_USER);
+        assertThat(submitted.reviewedBy()).isEqualTo(USER_A);
         UserContextHolder.clear();
 
         // Step 4: Admin assigns knowledge base to role
@@ -233,12 +226,7 @@ class KnowledgeMarketIntegrationTest {
         marketService.submit(kb.id());
         UserContextHolder.clear();
 
-        UserContextHolder.setCurrentUser(ADMIN_USER);
-        List<MarketKnowledgeRecord> pending = marketService.listPending();
-        assertThat(pending).hasSize(1);
-        marketService.approve(pending.get(0).id());
-        UserContextHolder.clear();
-
+        // 用户提交直接 APPROVED，无需审批流
         List<MarketKnowledgeRecord> approvedList = marketService.listApproved(1, 20);
         assertThat(approvedList).anySatisfy(mk ->
                 assertThat(mk.name()).isEqualTo(KB_NAME));
@@ -249,15 +237,11 @@ class KnowledgeMarketIntegrationTest {
     void testPullMarketKnowledge() {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于拉取测试");
-        marketService.submit(kb.id());
+        // 提交直接 APPROVED，无需审批流
+        MarketKnowledgeRecord submitted = marketService.submit(kb.id());
         UserContextHolder.clear();
 
-        UserContextHolder.setCurrentUser(ADMIN_USER);
-        List<MarketKnowledgeRecord> pending = marketService.listPending();
-        marketService.approve(pending.get(0).id());
-        UserContextHolder.clear();
-
-        String marketId = marketService.listApproved(1, 1).get(0).id();
+        String marketId = submitted.id();
         marketService.pull(USER_B, marketId);
 
         List<KnowledgeRecord> accessibleKbs = knowledge.listAccessible(USER_B);
@@ -278,55 +262,38 @@ class KnowledgeMarketIntegrationTest {
         marketService.withdraw(submitted.id());
         UserContextHolder.clear();
 
-        UserContextHolder.setCurrentUser(ADMIN_USER);
-        List<MarketKnowledgeRecord> pending = marketService.listPending();
-        assertThat(pending).noneMatch(mk -> mk.id().equals(submitted.id()));
-        UserContextHolder.clear();
+        // 无 PENDING 状态，验证列表里确实没了
+        List<MarketKnowledgeRecord> allAfter = marketService.listApproved(1, 100);
+        assertThat(allAfter).noneMatch(mk -> mk.id().equals(submitted.id()));
     }
 
     @Test
-    @DisplayName("重复提交防护：同名知识库不能重复提交")
+    @DisplayName("重复提交防护：同名知识库不允许再次创建市场行（应 UPSERT 而非 INSERT 新行）")
     void testDuplicateSubmitPrevention() {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于重复提交测试");
-        marketService.submit(kb.id());
+        MarketKnowledgeRecord first = marketService.submit(kb.id());
 
-        assertThatThrownBy(() -> marketService.submit(kb.id()))
-                .isInstanceOf(LoomAgentRuntimeException.class)
-                .hasMessageContaining("已存在同名知识库提交");
+        // 第二次 submit 同 name 应 UPSERT（id 保持不变），不再抛异常
+        MarketKnowledgeRecord second = marketService.submit(kb.id());
+
+        assertThat(second.id()).isEqualTo(first.id());
         UserContextHolder.clear();
     }
 
     @Test
-    @DisplayName("管理员审批：非管理员不能审批")
-    void testApproveRequiresAdmin() {
-        UserContextHolder.setCurrentUser(USER_A);
-        KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于审批权限测试");
-        MarketKnowledgeRecord submitted = marketService.submit(kb.id());
-        UserContextHolder.clear();
-
-        // Non-admin should fail
-        UserContextHolder.setCurrentUser(USER_A);
-        assertThatThrownBy(() -> marketService.approve(submitted.id()))
-                .isInstanceOf(LoomAgentRuntimeException.class)
-                .hasMessageContaining("需要管理员权限");
-        UserContextHolder.clear();
-    }
-
-    @Test
-    @DisplayName("管理员删除：可以删除市场知识库")
+    @DisplayName("管理员删除：可以下架（删除）任何用户提交的知识库")
     void testAdminDeleteMarketKnowledge() {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于删除测试");
-        marketService.submit(kb.id());
+        MarketKnowledgeRecord submitted = marketService.submit(kb.id());
         UserContextHolder.clear();
 
         UserContextHolder.setCurrentUser(ADMIN_USER);
-        List<MarketKnowledgeRecord> pending = marketService.listPending();
-        String marketId = pending.get(0).id();
-        marketService.delete(marketId);
+        // admin DELETE 也通过 withdraw 端点（统一 DELETE）
+        marketService.withdraw(submitted.id());
 
-        assertThatThrownBy(() -> marketService.getById(marketId))
+        assertThatThrownBy(() -> marketService.getById(submitted.id()))
                 .isInstanceOf(LoomAgentRuntimeException.class)
                 .hasMessageContaining("市场知识库不存在");
         UserContextHolder.clear();

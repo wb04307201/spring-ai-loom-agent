@@ -8,7 +8,7 @@ import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.tool.ToolCallbackProvider;
 
@@ -25,31 +25,31 @@ import java.util.concurrent.Future;
  * <p>
  * Behavior:
  * <ul>
- *   <li>Submits the call to a dedicated {@link ExecutorService} bean
- *       {@code loomSubTaskExecutor} so the call is interruptible and bounded.</li>
- *   <li>Uses the main {@link ChatClient} bean (re-used, not a separate filtered
- *       ChatClient — see SubTaskConfiguration for the rationale) with
- *       {@link ChatClient.ChatClientRequestSpec#call()} — synchronous, runs the
- *       full Spring AI tool-call loop to final response.</li>
- *   <li>On interrupt: cancels the future, returns {@link SubTaskStatus#CANCELLED}.</li>
- *   <li>On exception: returns {@link SubTaskStatus#FAILED} with the message.</li>
- *   <li>Writes intermediate ChatMemory entries under
- *       {@code "{conversationId}--sub--{subTaskId}"} so the main conversation
- *       can later see what the sub-task produced.</li>
- *   <li>Tracks each in-flight sub-task in a {@link ConcurrentHashMap} so external
- *       callers (e.g. {@link SubTaskRegistry#kill(String)} via a registered cancel
- *       hook) can interrupt the worker thread via {@link Future#cancel(boolean)}.</li>
- *   <li>Per-call filters the {@link IEmbedTool} list passed in via constructor
- *       to drop {@code ISubTaskTool}/{@code IScheduleTool} (recursion guard).
- *       Lazy {@code @Lazy} resolution of the list breaks the bean-graph cycle that
- *       would otherwise appear when both this executor and {@code defaultSubTaskTool}
- *       are part of {@code List<IEmbedTool>} auto-collection.</li>
- *   <li>Propagates the full tool set available to the user: {@link IMcp} callbacks
- *       for every MCP server the user can see, plus the filtered {@code embedTools}
- *       list.</li>
- *   <li>Propagates {@code username} + {@code parentConversationId} into the spec's
- *       toolContext so nested tool calls inside the sub-task see the same identity
- *       values the main chat uses.</li>
+ * <li>Submits the call to a dedicated {@link ExecutorService} bean
+ * {@code loomSubTaskExecutor} so the call is interruptible and bounded.</li>
+ * <li>Uses the main {@link ChatClient} bean (re-used, not a separate filtered
+ * ChatClient — see SubTaskConfiguration for the rationale) with
+ * {@link ChatClient.ChatClientRequestSpec#call()} — synchronous, runs the
+ * full Spring AI tool-call loop to final response.</li>
+ * <li>On interrupt: cancels the future, returns {@link SubTaskStatus#CANCELLED}.</li>
+ * <li>On exception: returns {@link SubTaskStatus#FAILED} with the message.</li>
+ * <li>Writes intermediate ChatMemory entries under
+ * {@code "{conversationId}--sub--{subTaskId}"} so the main conversation
+ * can later see what the sub-task produced.</li>
+ * <li>Tracks each in-flight sub-task in a {@link ConcurrentHashMap} so external
+ * callers (e.g. {@link SubTaskRegistry#kill(String)} via a registered cancel
+ * hook) can interrupt the worker thread via {@link Future#cancel(boolean)}.</li>
+ * <li>Per-call filters the {@link IEmbedTool} list passed in via constructor
+ * to drop {@code ISubTaskTool}/{@code IScheduleTool} (recursion guard).
+ * Lazy {@code @Lazy} resolution of the list breaks the bean-graph cycle that
+ * would otherwise appear when both this executor and {@code defaultSubTaskTool}
+ * are part of {@code List<IEmbedTool>} auto-collection.</li>
+ * <li>Propagates the full tool set available to the user: {@link IMcp} callbacks
+ * for every MCP server the user can see, plus the filtered {@code embedTools}
+ * list.</li>
+ * <li>Propagates {@code username} + {@code parentConversationId} into the spec's
+ * toolContext so nested tool calls inside the sub-task see the same identity
+ * values the main chat uses.</li>
  * </ul>
  */
 public class DefaultSubTaskExecutor implements ISubTaskExecutor {
@@ -57,17 +57,19 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private static final Logger log = LoggerFactory.getLogger(DefaultSubTaskExecutor.class);
 
     private final ChatClient chatClient;
-    private final MessageChatMemoryAdvisor memoryAdvisor;
+    private final org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor;
     private final ExecutorService executor;
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
     private final SubTaskRegistry subTaskRegistry;
 
-    /** Active in-flight sub-task futures, keyed by {@code req.subTaskId()}. Cleared in the worker's finally block. */
+    /**
+     * Active in-flight sub-task futures, keyed by {@code req.subTaskId()}. Cleared in the worker's finally block.
+     */
     private final ConcurrentHashMap<String, Future<?>> activeFutures = new ConcurrentHashMap<>();
 
     public DefaultSubTaskExecutor(ChatClient chatClient,
-                                  MessageChatMemoryAdvisor memoryAdvisor,
+                                  BaseChatMemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
                                   IMcp mcp,
                                   List<IEmbedTool> embedTools,
@@ -78,6 +80,22 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         this.mcp = mcp;
         this.embedTools = embedTools;
         this.subTaskRegistry = subTaskRegistry;
+    }
+
+    /**
+     * The executor contract says {@code req.subTaskId()} is non-null, but in
+     * practice callers have been known to forget. Preserve the old behaviour
+     * of silently synthesizing an id rather than NPE-ing — the registry
+     * accepts the synthetic id just fine.
+     */
+    private static String safeSubId(String s) {
+        return (s == null || s.isBlank()) ? java.util.UUID.randomUUID().toString() : s;
+    }
+
+    private static String rootCauseMessage(Throwable t) {
+        Throwable r = t;
+        while (r.getCause() != null && r.getCause() != r) r = r.getCause();
+        return r.getClass().getSimpleName() + ": " + r.getMessage();
     }
 
     @Override
@@ -150,16 +168,6 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         }
     }
 
-    /**
-     * The executor contract says {@code req.subTaskId()} is non-null, but in
-     * practice callers have been known to forget. Preserve the old behaviour
-     * of silently synthesizing an id rather than NPE-ing — the registry
-     * accepts the synthetic id just fine.
-     */
-    private static String safeSubId(String s) {
-        return (s == null || s.isBlank()) ? java.util.UUID.randomUUID().toString() : s;
-    }
-
     @Override
     public boolean cancel(String subTaskId) {
         Future<?> future = activeFutures.remove(subTaskId);
@@ -223,11 +231,5 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
             }
             throw new RuntimeException(e);
         }
-    }
-
-    private static String rootCauseMessage(Throwable t) {
-        Throwable r = t;
-        while (r.getCause() != null && r.getCause() != r) r = r.getCause();
-        return r.getClass().getSimpleName() + ": " + r.getMessage();
     }
 }

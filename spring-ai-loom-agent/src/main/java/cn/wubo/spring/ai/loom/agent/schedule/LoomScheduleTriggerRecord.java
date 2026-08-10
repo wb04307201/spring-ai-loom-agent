@@ -30,7 +30,9 @@ public record LoomScheduleTriggerRecord(
         Instant createdAt,
         Instant updatedAt
 ) {
-    /** Task types this record can carry. Matches the values flex-schedule's TaskBuilder dispatches on. */
+    /**
+     * Task types this record can carry. Matches the values flex-schedule's TaskBuilder dispatches on.
+     */
     public static final String TYPE_CRON = "cron";
     public static final String TYPE_FIXED_DELAY = "fixed_delay";
     public static final String TYPE_FIXED_RATE = "fixed_rate";

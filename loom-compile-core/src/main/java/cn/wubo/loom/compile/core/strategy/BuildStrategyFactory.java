@@ -12,25 +12,26 @@ import java.util.Map;
 public final class BuildStrategyFactory {
 
     private static final Map<String, BuildStrategy> BY_ALIAS = Map.of(
-            "maven",         new MavenBuildStrategy(),
-            "mvn",           new MavenBuildStrategy(),
-            "npm",           new NpmBackendBuildStrategy(),
-            "node",          new NpmBackendBuildStrategy(),
-            "npm-frontend",  new NpmFrontendBuildStrategy(),
+            "maven", new MavenBuildStrategy(),
+            "mvn", new MavenBuildStrategy(),
+            "npm", new NpmBackendBuildStrategy(),
+            "node", new NpmBackendBuildStrategy(),
+            "npm-frontend", new NpmFrontendBuildStrategy(),
             "node-frontend", new NpmFrontendBuildStrategy(),
-            "frontend",      new NpmFrontendBuildStrategy(),
-            "pip",           new PythonBuildStrategy(),
-            "python",        new PythonBuildStrategy()
+            "frontend", new NpmFrontendBuildStrategy(),
+            "pip", new PythonBuildStrategy(),
+            "python", new PythonBuildStrategy()
     );
 
     private static final List<MarkerEntry> AUTO_DETECT = List.of(
-            new MarkerEntry("pom.xml",         new MavenBuildStrategy()),
-            new MarkerEntry("package.json",    new NpmBackendBuildStrategy()),
+            new MarkerEntry("pom.xml", new MavenBuildStrategy()),
+            new MarkerEntry("package.json", new NpmBackendBuildStrategy()),
             new MarkerEntry("requirements.txt", new PythonBuildStrategy()),
-            new MarkerEntry("pyproject.toml",  new PythonBuildStrategy())
+            new MarkerEntry("pyproject.toml", new PythonBuildStrategy())
     );
 
-    private BuildStrategyFactory() {}
+    private BuildStrategyFactory() {
+    }
 
     public static BuildStrategy forBuildTool(String tool) {
         if (tool == null || tool.isBlank()) return null;
@@ -54,5 +55,6 @@ public final class BuildStrategyFactory {
                         + ". Specify buildTool explicitly (maven / npm / npm-frontend / pip)");
     }
 
-    private record MarkerEntry(String marker, BuildStrategy strategy) {}
+    private record MarkerEntry(String marker, BuildStrategy strategy) {
+    }
 }

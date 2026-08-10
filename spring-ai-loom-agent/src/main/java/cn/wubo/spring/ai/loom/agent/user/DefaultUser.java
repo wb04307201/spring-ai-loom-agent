@@ -17,7 +17,9 @@ public class DefaultUser implements IUser {
 
     private static final String TYPE_ADMIN = "ADMIN";
     private static final String TYPE_USER = "USER";
-    /** Defensive input caps for createUser — see the comment in createUser. */
+    /**
+     * Defensive input caps for createUser — see the comment in createUser.
+     */
     private static final int MAX_USERNAME = 64;
     private static final int MAX_NICKNAME = 64;
     private static final int MAX_PASSWORD = 128;

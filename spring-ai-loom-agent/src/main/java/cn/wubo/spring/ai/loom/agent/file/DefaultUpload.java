@@ -156,7 +156,7 @@ public class DefaultUpload implements IUpload {
                     fileName,
                     content.length,
                     LocalDateTime.now(),
-                    location,       // 数据库实现 = fileId；磁盘实现 = 磁盘路径
+                    location, // 数据库实现 = fileId；磁盘实现 = 磁盘路径
                     "knowledge",
                     resolvedMimeType);
             file.insert(fileRecord, username);

@@ -17,6 +17,15 @@ import java.util.List;
  */
 public record MavenBuildStrategy() implements BuildStrategy {
 
+    private static File pickJarFromTarget(Path target) {
+        File dir = target.toFile();
+        File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar") && !name.endsWith(".original.jar")
+                && !name.endsWith("-sources.jar") && !name.endsWith("-javadoc.jar"));
+        if (jars == null || jars.length == 0) return null;
+        Arrays.sort(jars, Comparator.comparingLong(File::length).reversed());
+        return jars[0];
+    }
+
     @Override
     public List<String> markerFiles() {
         return List.of("pom.xml");
@@ -58,14 +67,5 @@ public record MavenBuildStrategy() implements BuildStrategy {
     public Path findArtifact(Path targetDir) {
         File jar = pickJarFromTarget(targetDir);
         return jar != null ? jar.toPath() : null;
-    }
-
-    private static File pickJarFromTarget(Path target) {
-        File dir = target.toFile();
-        File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar") && !name.endsWith(".original.jar")
-                && !name.endsWith("-sources.jar") && !name.endsWith("-javadoc.jar"));
-        if (jars == null || jars.length == 0) return null;
-        Arrays.sort(jars, Comparator.comparingLong(File::length).reversed());
-        return jars[0];
     }
 }

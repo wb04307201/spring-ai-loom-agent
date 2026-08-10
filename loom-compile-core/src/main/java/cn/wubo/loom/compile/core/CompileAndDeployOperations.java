@@ -1,10 +1,6 @@
 package cn.wubo.loom.compile.core;
 
-import cn.wubo.loom.compile.core.strategy.BuildStrategy;
-import cn.wubo.loom.compile.core.strategy.BuildStrategyFactory;
-import cn.wubo.loom.compile.core.strategy.MavenBuildStrategy;
-import cn.wubo.loom.compile.core.strategy.NpmBackendBuildStrategy;
-import cn.wubo.loom.compile.core.strategy.NpmFrontendBuildStrategy;
+import cn.wubo.loom.compile.core.strategy.*;
 import cn.wubo.loom.process.core.ProcessUtils;
 import cn.wubo.loom.process.core.ProcessUtils.ExecOutcome;
 import com.fasterxml.jackson.core.JsonParser;
@@ -23,13 +19,7 @@ import java.net.URI;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * Compile and deploy core operations: clone + build + Docker build + container run + health check.
@@ -55,6 +45,241 @@ public class CompileAndDeployOperations {
     }
 
     // ==================== Main Entry ====================
+
+    /**
+     * Strip characters that are illegal / awkward in directory names on common
+     * filesystems: anything outside {@code [A-Za-z0-9._-]} becomes {@code _}.
+     * Empty username collapses to {@code anonymous} so the directory name is
+     * never empty.
+     */
+    private static String sanitizeForDirName(String username) {
+        if (username == null || username.isBlank()) return "anonymous";
+        StringBuilder sb = new StringBuilder(username.length());
+        for (int i = 0; i < username.length(); i++) {
+            char c = username.charAt(i);
+            sb.append((Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == '.') ? c : '_');
+        }
+        String sanitized = sb.toString();
+        return sanitized.isEmpty() ? "anonymous" : sanitized;
+    }
+
+    private static boolean isPlausibleBranch(String branch, String repoName) {
+        if (branch == null || branch.isBlank()) return false;
+        String b = branch.trim();
+        if (b.equalsIgnoreCase(repoName)) return false;
+        if (b.contains("/") || b.contains("\\")) return false;
+        if (b.endsWith(".git")) return false;
+        return b.matches("[A-Za-z0-9_./-]+");
+    }
+
+    // ==================== Step Implementations ====================
+
+    private static String formatNames(List<Path> paths) {
+        List<String> names = new ArrayList<>();
+        for (Path p : paths) {
+            names.add(p.getFileName().toString());
+        }
+        return names.toString();
+    }
+
+    private static List<Path> listChildDirs(Path parent) {
+        List<Path> out = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(parent)) {
+            for (Path c : stream) {
+                if (Files.isDirectory(c) && !c.getFileName().toString().startsWith(".")
+                        && !c.getFileName().toString().equals("target")
+                        && !c.getFileName().toString().equals("node_modules")) {
+                    out.add(c);
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        out.sort(Comparator.comparing(p -> p.getFileName().toString()));
+        return out;
+    }
+
+    public static List<String> buildDockerRunCommand(String imageName, String containerName, int port,
+                                                     int containerPort, List<String> extraRunArgs) {
+        List<String> runArgs = new ArrayList<>();
+        runArgs.add("run");
+        runArgs.add("-d");
+        runArgs.add("-p");
+        runArgs.add(port + ":" + containerPort);
+        runArgs.add("--name");
+        runArgs.add(containerName);
+        if (extraRunArgs != null && !extraRunArgs.isEmpty()) {
+            runArgs.addAll(extraRunArgs);
+        }
+        runArgs.add(imageName);
+        return runArgs;
+    }
+
+    private static String resolveDockerCmd() {
+        String configured = System.getenv("DOCKER_CMD");
+        if (configured != null && !configured.isBlank()) return configured;
+        return "docker";
+    }
+
+    public static List<String> wrapForWindows(String exe, List<String> args) {
+        if (ProcessUtils.isWindows() && (exe.toLowerCase().endsWith(".cmd") || exe.toLowerCase().endsWith(".bat"))) {
+            List<String> cmd = new ArrayList<>();
+            cmd.add("cmd.exe");
+            cmd.add("/c");
+            cmd.add(exe);
+            cmd.addAll(args);
+            return cmd;
+        }
+        List<String> cmd = new ArrayList<>();
+        cmd.add(exe);
+        cmd.addAll(args);
+        return cmd;
+    }
+
+    private static String deriveRepoName(String gitUrl) {
+        String name = gitUrl;
+        while (name.endsWith("/") || name.endsWith("\\")) {
+            name = name.substring(0, name.length() - 1);
+        }
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (slash >= 0) name = name.substring(slash + 1);
+        if (name.endsWith(".git")) name = name.substring(0, name.length() - 4);
+        if (name.isBlank()) name = "repo";
+        return name;
+    }
+
+    public static String buildAccessUrl(int port, String healthPath) {
+        String path = (healthPath == null || healthPath.isEmpty()) ? "/" : healthPath;
+        String suffix = path.startsWith("/") ? path : "/" + path;
+        return "http://localhost:" + port + suffix;
+    }
+
+    private static void deleteRecursively(Path dir) {
+        if (!Files.exists(dir)) return;
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                }
+            });
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    public static String toJsonArray(List<String> parts) {
+        if (parts == null || parts.isEmpty()) {
+            throw new IllegalArgumentException("ResolvedImage.command must not be empty");
+        }
+        try {
+            return LENIENT_MAPPER.writeValueAsString(parts);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize ENTRYPOINT to JSON: " + e.getMessage(), e);
+        }
+    }
+
+    // ==================== Docker ====================
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> flatten(Map<String, Object> params) {
+        if (params == null || params.isEmpty()) return Map.of();
+        for (Map.Entry<String, Object> e : params.entrySet()) {
+            if (e.getValue() instanceof Map<?, ?> inner) {
+                Map<String, Object> candidate = (Map<String, Object>) inner;
+                if (candidate.keySet().stream().anyMatch(k -> k.toLowerCase(Locale.ROOT)
+                        .matches("giturl|username|password|port|branch"))) {
+                    return candidate;
+                }
+            }
+        }
+        for (Object v : params.values()) {
+            if (v instanceof String s && s.trim().startsWith("{")) {
+                try {
+                    JsonParser p = LENIENT_MAPPER.getFactory().createParser(s);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> parsed = LENIENT_MAPPER.readValue(p, Map.class);
+                    if (parsed != null && !parsed.isEmpty()) return parsed;
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return params;
+    }
+
+    private static String str(Map<String, Object> m, String... keys) {
+        if (m == null) return null;
+        for (String k : keys) {
+            for (Map.Entry<String, Object> e : m.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
+                    Object v = e.getValue();
+                    if (v == null) return null;
+                    String s = v.toString().trim();
+                    if (!s.isEmpty() && !"null".equalsIgnoreCase(s)) return s;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Integer intOrNull(Map<String, Object> m, String... keys) {
+        if (m == null) return null;
+        for (String k : keys) {
+            for (Map.Entry<String, Object> e : m.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
+                    Object v = e.getValue();
+                    if (v == null) continue;
+                    if (v instanceof Number n) return n.intValue();
+                    try {
+                        return Integer.parseInt(v.toString().trim());
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> listStr(Map<String, Object> m, String... keys) {
+        if (m == null) return null;
+        for (String k : keys) {
+            for (Map.Entry<String, Object> e : m.entrySet()) {
+                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
+                    Object v = e.getValue();
+                    if (v == null) return null;
+                    if (v instanceof List<?> list) {
+                        List<String> out = new ArrayList<>();
+                        for (Object item : list) {
+                            if (item != null) out.add(item.toString());
+                        }
+                        return out.isEmpty() ? null : out;
+                    }
+                    if (v instanceof String s && !s.isBlank()) {
+                        return Arrays.asList(s.split("\\s*,\\s*"));
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static CredentialsProvider buildCredentialsProvider(String username, String password) {
+        if ((username == null || username.isBlank()) && (password == null || password.isBlank())) {
+            return null;
+        }
+        return new UsernamePasswordCredentialsProvider(
+                username == null ? "" : username,
+                password == null ? "" : password);
+    }
+
+    // ==================== Helpers ====================
 
     public CompileAndDeployResult compileAndDeploy(Path workspaceBasePath, String user, Map<String, Object> params) {
         List<String> steps = new ArrayList<>();
@@ -89,10 +314,10 @@ public class CompileAndDeployOperations {
         int effectivePort = port;
         int effectiveContainerPort = containerPort;
         // Workspace name encodes the username and a short timestamp so:
-        //   1) ops can identify the owning user just by `ls` (defense-in-depth
-        //      against the user dir being shared);
-        //   2) ops can age workspaces by name when deciding what to prune;
-        //   3) the random UUID suffix keeps concurrent invocations collision-free.
+        // 1) ops can identify the owning user just by `ls` (defense-in-depth
+        // against the user dir being shared);
+        // 2) ops can age workspaces by name when deciding what to prune;
+        // 3) the random UUID suffix keeps concurrent invocations collision-free.
         // Format: compile-deploy-<username>-<yyyyMMddHHmmss>-<uuid8>
         String workspaceName = "compile-deploy-"
                 + sanitizeForDirName(user)
@@ -248,25 +473,6 @@ public class CompileAndDeployOperations {
         }
     }
 
-    /**
-     * Strip characters that are illegal / awkward in directory names on common
-     * filesystems: anything outside {@code [A-Za-z0-9._-]} becomes {@code _}.
-     * Empty username collapses to {@code anonymous} so the directory name is
-     * never empty.
-     */
-    private static String sanitizeForDirName(String username) {
-        if (username == null || username.isBlank()) return "anonymous";
-        StringBuilder sb = new StringBuilder(username.length());
-        for (int i = 0; i < username.length(); i++) {
-            char c = username.charAt(i);
-            sb.append((Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == '.') ? c : '_');
-        }
-        String sanitized = sb.toString();
-        return sanitized.isEmpty() ? "anonymous" : sanitized;
-    }
-
-    // ==================== Step Implementations ====================
-
     private boolean cloneRepo(String gitUrl, Path projectDir, String branch,
                               String username, String password) {
         try {
@@ -296,15 +502,6 @@ public class CompileAndDeployOperations {
             log.error("git clone failed. url={}, target={}", gitUrl, projectDir, e);
             return false;
         }
-    }
-
-    private static boolean isPlausibleBranch(String branch, String repoName) {
-        if (branch == null || branch.isBlank()) return false;
-        String b = branch.trim();
-        if (b.equalsIgnoreCase(repoName)) return false;
-        if (b.contains("/") || b.contains("\\")) return false;
-        if (b.endsWith(".git")) return false;
-        return b.matches("[A-Za-z0-9_./-]+");
     }
 
     private String buildArtifact(BuildStrategy strategy, Path effectiveDir) {
@@ -390,6 +587,8 @@ public class CompileAndDeployOperations {
         return out.output();
     }
 
+    // ==================== Image Resolution ====================
+
     private Path[] resolveMavenTarget(Path projectDir) {
         Path rootPom = projectDir.resolve("pom.xml");
         if (Files.isRegularFile(rootPom)) {
@@ -451,31 +650,7 @@ public class CompileAndDeployOperations {
                         + ". Please specify subDir parameter.");
     }
 
-    private static String formatNames(List<Path> paths) {
-        List<String> names = new ArrayList<>();
-        for (Path p : paths) {
-            names.add(p.getFileName().toString());
-        }
-        return names.toString();
-    }
-
-    private static List<Path> listChildDirs(Path parent) {
-        List<Path> out = new ArrayList<>();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(parent)) {
-            for (Path c : stream) {
-                if (Files.isDirectory(c) && !c.getFileName().toString().startsWith(".")
-                        && !c.getFileName().toString().equals("target")
-                        && !c.getFileName().toString().equals("node_modules")) {
-                    out.add(c);
-                }
-            }
-        } catch (IOException ignored) {
-        }
-        out.sort(Comparator.comparing(p -> p.getFileName().toString()));
-        return out;
-    }
-
-    // ==================== Docker ====================
+    // ==================== JSON Serialization ====================
 
     private String dockerBuild(Path projectDir, String imageName, ResolvedImage resolved) {
         String docker = resolveDockerCmd();
@@ -498,9 +673,7 @@ public class CompileAndDeployOperations {
         return imageName;
     }
 
-    public static class DockerBuildException extends RuntimeException {
-        public DockerBuildException(String message) { super(message); }
-    }
+    // ==================== Param Parsing ====================
 
     private String dockerRun(String imageName, String containerName, int port, int containerPort) {
         String docker = resolveDockerCmd();
@@ -520,22 +693,6 @@ public class CompileAndDeployOperations {
             return null;
         }
         return containerName;
-    }
-
-    public static List<String> buildDockerRunCommand(String imageName, String containerName, int port,
-                                              int containerPort, List<String> extraRunArgs) {
-        List<String> runArgs = new ArrayList<>();
-        runArgs.add("run");
-        runArgs.add("-d");
-        runArgs.add("-p");
-        runArgs.add(port + ":" + containerPort);
-        runArgs.add("--name");
-        runArgs.add(containerName);
-        if (extraRunArgs != null && !extraRunArgs.isEmpty()) {
-            runArgs.addAll(extraRunArgs);
-        }
-        runArgs.add(imageName);
-        return runArgs;
     }
 
     private boolean waitForHealthy(int port, String healthPath) {
@@ -567,72 +724,6 @@ public class CompileAndDeployOperations {
         }
         return false;
     }
-
-    // ==================== Helpers ====================
-
-    private static String resolveDockerCmd() {
-        String configured = System.getenv("DOCKER_CMD");
-        if (configured != null && !configured.isBlank()) return configured;
-        return "docker";
-    }
-
-    public static List<String> wrapForWindows(String exe, List<String> args) {
-        if (ProcessUtils.isWindows() && (exe.toLowerCase().endsWith(".cmd") || exe.toLowerCase().endsWith(".bat"))) {
-            List<String> cmd = new ArrayList<>();
-            cmd.add("cmd.exe");
-            cmd.add("/c");
-            cmd.add(exe);
-            cmd.addAll(args);
-            return cmd;
-        }
-        List<String> cmd = new ArrayList<>();
-        cmd.add(exe);
-        cmd.addAll(args);
-        return cmd;
-    }
-
-    private static String deriveRepoName(String gitUrl) {
-        String name = gitUrl;
-        while (name.endsWith("/") || name.endsWith("\\")) {
-            name = name.substring(0, name.length() - 1);
-        }
-        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
-        if (slash >= 0) name = name.substring(slash + 1);
-        if (name.endsWith(".git")) name = name.substring(0, name.length() - 4);
-        if (name.isBlank()) name = "repo";
-        return name;
-    }
-
-    public static String buildAccessUrl(int port, String healthPath) {
-        String path = (healthPath == null || healthPath.isEmpty()) ? "/" : healthPath;
-        String suffix = path.startsWith("/") ? path : "/" + path;
-        return "http://localhost:" + port + suffix;
-    }
-
-    private static void deleteRecursively(Path dir) {
-        if (!Files.exists(dir)) return;
-        try (var stream = Files.walk(dir)) {
-            stream.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try {
-                    Files.deleteIfExists(p);
-                } catch (IOException ignored) {
-                }
-            });
-        } catch (IOException ignored) {
-        }
-    }
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    // ==================== Image Resolution ====================
-
-    public record ResolvedImage(String alias, String image, List<String> command) {}
 
     ResolvedImage resolveBaseImage(String paramBuildTool, String paramBaseImage, List<String> paramRunCommand) {
         Map<String, ImageTemplate> templates = config.imageTemplates();
@@ -683,110 +774,12 @@ public class CompileAndDeployOperations {
         return new ResolvedImage(alias, image, command);
     }
 
-    // ==================== JSON Serialization ====================
-
-    public static String toJsonArray(List<String> parts) {
-        if (parts == null || parts.isEmpty()) {
-            throw new IllegalArgumentException("ResolvedImage.command must not be empty");
-        }
-        try {
-            return LENIENT_MAPPER.writeValueAsString(parts);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new IllegalStateException("Failed to serialize ENTRYPOINT to JSON: " + e.getMessage(), e);
+    public static class DockerBuildException extends RuntimeException {
+        public DockerBuildException(String message) {
+            super(message);
         }
     }
 
-    // ==================== Param Parsing ====================
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> flatten(Map<String, Object> params) {
-        if (params == null || params.isEmpty()) return Map.of();
-        for (Map.Entry<String, Object> e : params.entrySet()) {
-            if (e.getValue() instanceof Map<?, ?> inner) {
-                Map<String, Object> candidate = (Map<String, Object>) inner;
-                if (candidate.keySet().stream().anyMatch(k -> k.toString().toLowerCase(Locale.ROOT)
-                        .matches("giturl|username|password|port|branch"))) {
-                    return candidate;
-                }
-            }
-        }
-        for (Object v : params.values()) {
-            if (v instanceof String s && s.trim().startsWith("{")) {
-                try {
-                    JsonParser p = LENIENT_MAPPER.getFactory().createParser(s);
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> parsed = LENIENT_MAPPER.readValue(p, Map.class);
-                    if (parsed != null && !parsed.isEmpty()) return parsed;
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-        return params;
-    }
-
-    private static String str(Map<String, Object> m, String... keys) {
-        if (m == null) return null;
-        for (String k : keys) {
-            for (Map.Entry<String, Object> e : m.entrySet()) {
-                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
-                    Object v = e.getValue();
-                    if (v == null) return null;
-                    String s = v.toString().trim();
-                    if (!s.isEmpty() && !"null".equalsIgnoreCase(s)) return s;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static Integer intOrNull(Map<String, Object> m, String... keys) {
-        if (m == null) return null;
-        for (String k : keys) {
-            for (Map.Entry<String, Object> e : m.entrySet()) {
-                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
-                    Object v = e.getValue();
-                    if (v == null) continue;
-                    if (v instanceof Number n) return n.intValue();
-                    try {
-                        return Integer.parseInt(v.toString().trim());
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<String> listStr(Map<String, Object> m, String... keys) {
-        if (m == null) return null;
-        for (String k : keys) {
-            for (Map.Entry<String, Object> e : m.entrySet()) {
-                if (e.getKey() != null && e.getKey().equalsIgnoreCase(k)) {
-                    Object v = e.getValue();
-                    if (v == null) return null;
-                    if (v instanceof List<?> list) {
-                        List<String> out = new ArrayList<>();
-                        for (Object item : list) {
-                            if (item != null) out.add(item.toString());
-                        }
-                        return out.isEmpty() ? null : out;
-                    }
-                    if (v instanceof String s && !s.isBlank()) {
-                        return Arrays.asList(s.split("\\s*,\\s*"));
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private static CredentialsProvider buildCredentialsProvider(String username, String password) {
-        if ((username == null || username.isBlank()) && (password == null || password.isBlank())) {
-            return null;
-        }
-        return new UsernamePasswordCredentialsProvider(
-                username == null ? "" : username,
-                password == null ? "" : password);
+    public record ResolvedImage(String alias, String image, List<String> command) {
     }
 }

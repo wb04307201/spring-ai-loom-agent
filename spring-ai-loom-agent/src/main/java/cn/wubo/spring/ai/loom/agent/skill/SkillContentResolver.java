@@ -14,7 +14,8 @@ import java.nio.charset.StandardCharsets;
  */
 public final class SkillContentResolver {
 
-    private SkillContentResolver() {}
+    private SkillContentResolver() {
+    }
 
     public static String resolve(String raw, ResourceLoader resourceLoader) {
         if (raw == null) return "";

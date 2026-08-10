@@ -4,8 +4,8 @@ package cn.wubo.spring.ai.loom.agent.model;
  * Outcome of a sub-task execution. Returned synchronously by
  * {@code ISubTaskExecutor.execute}.
  *
- * @param text            Final response text when status == COMPLETED; empty otherwise.
- * @param errorMessage    Populated when status == FAILED.
+ * @param text         Final response text when status == COMPLETED; empty otherwise.
+ * @param errorMessage Populated when status == FAILED.
  */
 public record SubTaskResult(
         String subTaskId,

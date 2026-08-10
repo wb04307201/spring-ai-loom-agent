@@ -5,21 +5,26 @@ import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import cn.wubo.spring.ai.loom.agent.model.UserSkill;
 import cn.wubo.spring.ai.loom.agent.model.UserSkillPatchRequest;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 基于 user_skill 表 + 角色授权自动同步 + admin 特权视图（市场 union）。
- * 旧 yml 嵌入的 skill 完全废弃（已 seed 进 market_skill）。
+ * 基于 user_skill 表 + 角色授权自动同步。
+ * 旧 admin 特权视图（market_skill APPROVED union）已移除—— admin 也只看到自己 user_skill，
+ * 与普通用户行为完全一致。skill 数据一律从 user_skill 出，没有"市场 union"虚拟视图。
+ * 旧 yml 嵌入的 skill 完全废弃（demo 数据改 seed 到默认 admin 的 user_skill，详见 __init_app_data.sql）。
  */
 @Component
 public class DefaultSkillStorage implements ISkillStorage {
+
+    private static final Logger log = LoggerFactory.getLogger(DefaultSkillStorage.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final ResourceLoader resourceLoader;
@@ -42,16 +47,8 @@ public class DefaultSkillStorage implements ISkillStorage {
     public List<SkillRecord> list(String username) {
         // 1) 同步角色授权的 Skill（不会重复插入；locked=true）
         sync(username);
-        // 2) 取 user_skill
-        List<SkillRecord> out = new ArrayList<>(queryUserSkills(username));
-        // 3) admin 特权视图：合并市场 APPROVED + 自己 PENDING
-        if (user.isAdmin(username)) {
-            for (SkillRecord m : queryAdminUnionView(username)) {
-                boolean dup = out.stream().anyMatch(s -> s.name().equals(m.name()));
-                if (!dup) out.add(m);
-            }
-        }
-        return out;
+        // 2) 取 user_skill —— admin 也只看到自己 user_skill，与普通用户行为一致
+        return new ArrayList<>(queryUserSkills(username));
     }
 
     @Override
@@ -61,19 +58,7 @@ public class DefaultSkillStorage implements ISkillStorage {
         for (SkillRecord s : userSkills) {
             if (s.name().equals(name)) return s;
         }
-        // admin fallback：市场里查
-        if (user.isAdmin(username)) {
-            for (SkillRecord s : queryAdminUnionView(username)) {
-                if (s.name().equals(name)) return s;
-            }
-        }
         throw new LoomAgentRuntimeException("Skill 不存在或无权限: " + name);
-    }
-
-    @Override
-    public List<SkillRecord> listForAdminUnionView(String username) {
-        if (!user.isAdmin(username)) return List.of();
-        return queryAdminUnionView(username);
     }
 
     /* ===================== CRUD ===================== */
@@ -86,16 +71,40 @@ public class DefaultSkillStorage implements ISkillStorage {
         if (skill.content() == null) {
             throw new LoomAgentRuntimeException("content 不能为空");
         }
-        // 已存在就 update（同 name），否则 insert；locked 的不让改
+        // 已存在就 update（同 name），否则 insert；locked 的不让改；MARKET_PULLED 内容锁定
         UserSkill existing = findUserSkill(username, skill.name());
         if (existing != null) {
             if (existing.locked()) {
                 throw new LoomAgentRuntimeException("该 Skill 已被角色授权锁定，不能修改");
             }
-            return jdbcTemplate.update(
+            // MARKET_PULLED 内容锁定——只能通过 duplicate() 复制为新 USER_CREATED skill 才能改
+            if ("MARKET_PULLED".equals(existing.source())) {
+                throw new LoomAgentRuntimeException(403,
+                        "该技能从市场拉取，名称和内容不可直接修改。请先复制为我的技能后再修改。");
+            }
+            int updated = jdbcTemplate.update(
                     "UPDATE user_skill SET description = ?, content = ?, default_loaded = ?, " +
                             "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     skill.description(), skill.content(), skill.load(), existing.id());
+
+            // +：作者 USER_CREATED 且关联了 market_skill → 反向同步 + 推送给所有 MARKET_PULLED 拉取者
+            if (existing.marketSkillId() != null) {
+                // 1) 反向同步到 market_skill（仅 APPROVED/PENDING 才允许直接改；REJECTED 不动）
+                int marketUpdated = jdbcTemplate.update(
+                        "UPDATE market_skill SET description = ?, content = ? " +
+                                "WHERE id = ? AND status IN ('APPROVED', 'PENDING') AND author = ?",
+                        skill.description(), skill.content(), existing.marketSkillId(), username);
+                if (marketUpdated > 0) {
+                    // 2) 推送给所有 MARKET_PULLED 拉取者
+                    int pulled = jdbcTemplate.update(
+                            "UPDATE user_skill SET description = ?, content = ?, updated_at = CURRENT_TIMESTAMP " +
+                                    "WHERE market_skill_id = ? AND source = 'MARKET_PULLED'",
+                            skill.description(), skill.content(), existing.marketSkillId());
+                    log.info("作者 save 推送: user={}, skill={}, market_skill_id={}, 推送 MARKET_PULLED 行数={}",
+                            username, skill.name(), existing.marketSkillId(), pulled);
+                }
+            }
+            return updated;
         }
         return jdbcTemplate.update(
                 "INSERT INTO user_skill (username, name, description, content, source, default_loaded, locked) " +
@@ -112,6 +121,12 @@ public class DefaultSkillStorage implements ISkillStorage {
         if (existing.locked()) {
             throw new LoomAgentRuntimeException("该 Skill 已被角色授权锁定，不能删除");
         }
+        // USER_CREATED 且已共享到市场 → 必须先撤回（下架）才能删
+        // 否则 market_skill 残留，author.user_skill.market_skill_id 引用断裂
+        if ("USER_CREATED".equals(existing.source()) && existing.marketSkillId() != null) {
+            throw new LoomAgentRuntimeException(403,
+                    "该技能已共享到市场，请先撤回共享（下架）后再删除。撤回入口：「我的发布」Tab。");
+        }
         return jdbcTemplate.update("DELETE FROM user_skill WHERE id = ?", existing.id());
     }
 
@@ -124,11 +139,62 @@ public class DefaultSkillStorage implements ISkillStorage {
         if (existing.locked()) {
             throw new LoomAgentRuntimeException("该 Skill 已被角色授权锁定，不能修改");
         }
+        // MARKET_PULLED 字段锁定更严——只允许 default_loaded，禁止改 desc
+        // （name / content 走 save() 已统一拦截；patch 仅用于 toggle）
+        if ("MARKET_PULLED".equals(existing.source())) {
+            if (req.description() != null && !req.description().equals(existing.description())) {
+                throw new LoomAgentRuntimeException(403,
+                        "该技能从市场获取，描述不可修改。如需自定义描述，请先复制为我的技能后再修改。");
+            }
+            // desc 不变；仅 defaultLoaded 可能改
+            boolean def = req.defaultLoaded() == null ? existing.defaultLoaded() : req.defaultLoaded();
+            return jdbcTemplate.update(
+                    "UPDATE user_skill SET default_loaded = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    def, existing.id());
+        }
+        // USER_CREATED：desc + default_loaded 都允许
         String desc = req.description() == null ? existing.description() : req.description();
         boolean def = req.defaultLoaded() == null ? existing.defaultLoaded() : req.defaultLoaded();
         return jdbcTemplate.update(
                 "UPDATE user_skill SET description = ?, default_loaded = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 desc, def, existing.id());
+    }
+
+    @Override
+    public String duplicate(String sourceName, String newName, String username) {
+        UserSkill src = findUserSkill(username, sourceName);
+        if (src == null) {
+            throw new LoomAgentRuntimeException("Skill 不存在: " + sourceName);
+        }
+        if (src.locked()) {
+            // ROLE_GRANTED 角色授权不允许复制
+            throw new LoomAgentRuntimeException(403,
+                    "角色授权的 Skill 不允许复制（请直接使用，无需修改）");
+        }
+        // newName 可空：空时用「<sourceName>_副本」
+        String base = (newName == null || newName.isBlank()) ? (sourceName + "_副本") : newName.trim();
+        if (base.length() > 128) {
+            throw new LoomAgentRuntimeException(400, "name 长度超过 128");
+        }
+        // 重名处理：依次尝试 base, base_2, base_3 ...
+        String candidate = base;
+        int seq = 2;
+        while (findUserSkill(username, candidate) != null) {
+            candidate = base + "_" + seq;
+            seq++;
+            if (seq > 999) {
+                throw new LoomAgentRuntimeException(500,
+                        "复制失败：name 序号超过 999（" + base + "）");
+            }
+        }
+        // INSERT 新 USER_CREATED 行：default_loaded 继承源，locked=FALSE
+        jdbcTemplate.update(
+                "INSERT INTO user_skill (username, name, description, content, source, default_loaded, locked) " +
+                        "VALUES (?, ?, ?, ?, 'USER_CREATED', ?, FALSE)",
+                username, candidate, src.description(),
+                SkillContentResolver.resolve(src.content(), resourceLoader),
+                src.defaultLoaded());
+        return candidate;
     }
 
     /* ===================== 同步（角色授权 → user_skill） ===================== */
@@ -178,15 +244,15 @@ public class DefaultSkillStorage implements ISkillStorage {
             if (existing != null) {
                 jdbcTemplate.update(
                         "UPDATE user_skill SET source = 'ROLE_GRANTED', market_skill_id = ?, " +
-                                "market_version = ?, content = ?, description = ?, " +
+                                "content = ?, description = ?, " +
                                 "default_loaded = ?, locked = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        mid, version, content, desc, def, existing.id());
+                        mid, content, desc, def, existing.id());
             } else {
                 jdbcTemplate.update(
                         "INSERT INTO user_skill (username, name, description, content, source, market_skill_id, " +
-                                "market_version, default_loaded, locked) " +
-                                "VALUES (?, ?, ?, ?, 'ROLE_GRANTED', ?, ?, ?, TRUE)",
-                        username, name, desc, content, mid, version, def);
+                                "default_loaded, locked) " +
+                                "VALUES (?, ?, ?, ?, 'ROLE_GRANTED', ?, ?, TRUE)",
+                        username, name, desc, content, mid, def);
             }
         }
     }
@@ -222,26 +288,6 @@ public class DefaultSkillStorage implements ISkillStorage {
         return out;
     }
 
-    /**
-     * admin union view：所有 APPROVED + 自己的 PENDING（不写 user_skill）。
-     * 名称冲突 user_skill 优先（已在 list() 里做去重）。
-     */
-    private List<SkillRecord> queryAdminUnionView(String username) {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT name, description, content, version, status FROM market_skill " +
-                        "WHERE status = 'APPROVED' OR (status = 'PENDING' AND author = ?) " +
-                        "ORDER BY name",
-                username);
-        List<SkillRecord> out = new ArrayList<>(rows.size());
-        for (Map<String, Object> r : rows) {
-            String name = (String) r.get("name");
-            String desc = (String) r.get("description");
-            String content = SkillContentResolver.resolve((String) r.get("content"), resourceLoader);
-            out.add(new SkillRecord(name, desc, true, content, "MARKET_VIEW"));
-        }
-        return out;
-    }
-
     private UserSkill mapUserSkill(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new UserSkill(
                 rs.getLong("id"),
@@ -251,7 +297,6 @@ public class DefaultSkillStorage implements ISkillStorage {
                 rs.getString("content"),
                 rs.getString("source"),
                 (Long) rs.getObject("market_skill_id"),
-                rs.getString("market_version"),
                 rs.getBoolean("default_loaded"),
                 rs.getBoolean("locked"),
                 rs.getTimestamp("created_at").toLocalDateTime(),

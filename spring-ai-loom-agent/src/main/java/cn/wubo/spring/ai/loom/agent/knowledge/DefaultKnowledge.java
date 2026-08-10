@@ -8,11 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 public class DefaultKnowledge implements IKnowledge {
 
@@ -27,7 +23,8 @@ public class DefaultKnowledge implements IKnowledge {
                 rs.getString("id"),
                 rs.getString("username"),
                 rs.getString("name"),
-                rs.getString("description")
+                rs.getString("description"),
+                "USER_CREATED" // knowledge 表都是 USER_CREATED
         );
     }
 
@@ -67,7 +64,8 @@ public class DefaultKnowledge implements IKnowledge {
                 UUID.randomUUID().toString(),
                 username,
                 name,
-                description
+                description,
+                "USER_CREATED"
         );
         try {
             jdbcTemplate.update(
@@ -110,7 +108,7 @@ public class DefaultKnowledge implements IKnowledge {
             if (rows == 0) {
                 throw new LoomAgentRuntimeException(404, "知识库不存在：" + id);
             }
-            return new KnowledgeRecord(id, username, name, description);
+            return new KnowledgeRecord(id, username, name, description, "USER_CREATED");
         } catch (DuplicateKeyException e) {
             throw new LoomAgentRuntimeException(409, "知识库名称重复：" + name);
         }
@@ -140,7 +138,7 @@ public class DefaultKnowledge implements IKnowledge {
 
         // 2) Market-pulled knowledge bases (from loom_user_knowledge JOIN loom_market_knowledge)
         List<KnowledgeRecord> pulled = jdbcTemplate.query(
-                "SELECT mk.id, mk.username, mk.name, mk.description FROM loom_market_knowledge mk " +
+                "SELECT mk.id, mk.username, mk.name, mk.description, uk.source FROM loom_market_knowledge mk " +
                         "JOIN loom_user_knowledge uk ON mk.id = uk.market_knowledge_id " +
                         "WHERE uk.username = ? AND uk.source = 'MARKET_PULLED'",
                 this::mapMarketToKnowledgeRecord, username);
@@ -153,7 +151,7 @@ public class DefaultKnowledge implements IKnowledge {
 
         // 3) Role-granted knowledge bases
         List<KnowledgeRecord> roleGranted = jdbcTemplate.query(
-                "SELECT mk.id, mk.username, mk.name, mk.description FROM loom_market_knowledge mk " +
+                "SELECT mk.id, mk.username, mk.name, mk.description, uk.source FROM loom_market_knowledge mk " +
                         "JOIN loom_user_knowledge uk ON mk.id = uk.market_knowledge_id " +
                         "WHERE uk.username = ? AND uk.source = 'ROLE_GRANTED'",
                 this::mapMarketToKnowledgeRecord, username);
@@ -184,7 +182,8 @@ public class DefaultKnowledge implements IKnowledge {
                 rs.getString("id"),
                 rs.getString("username"),
                 rs.getString("name"),
-                rs.getString("description")
+                rs.getString("description"),
+                rs.getString("source")
         );
     }
 }

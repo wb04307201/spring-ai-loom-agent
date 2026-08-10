@@ -10,17 +10,14 @@ import org.springframework.ai.chat.model.ToolContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * DefaultGitTool 单元测试
@@ -70,13 +67,19 @@ class DefaultGitToolTest {
                     Files.walkFileTree(tmpRoot, new SimpleFileVisitor<Path>() {
                         @Override
                         public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                            try { Files.delete(file); } catch (IOException ignored) { }
+                            try {
+                                Files.delete(file);
+                            } catch (IOException ignored) {
+                            }
                             return FileVisitResult.CONTINUE;
                         }
 
                         @Override
                         public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                            try { Files.delete(dir); } catch (IOException ignored) { }
+                            try {
+                                Files.delete(dir);
+                            } catch (IOException ignored) {
+                            }
                             return FileVisitResult.CONTINUE;
                         }
                     });
@@ -153,16 +156,22 @@ class DefaultGitToolTest {
                     "应返回失败结果。实际:\n" + result);
 
             // 关键断言 2：耗时应在 timeout(2s) + 一些 jgit 自身缓冲(<=10s) 内
-            //           —— 证明 setTimeout 真的生效了，不是依赖 Future.cancel
+            // —— 证明 setTimeout 真的生效了，不是依赖 Future.cancel
             assertTrue(cost < 15_000,
                     "应被超时打断，不应无限阻塞。实际耗时 " + cost + "ms");
             assertTrue(cost >= 1_500,
                     "应在超时(2s)左右才返回，过早返回(<1.5s) 说明配置没生效。实际 " + cost + "ms");
         } finally {
             stop.set(true);
-            try { server.close(); } catch (IOException ignored) { }
+            try {
+                server.close();
+            } catch (IOException ignored) {
+            }
             for (java.net.Socket s : held) {
-                try { s.close(); } catch (IOException ignored) { }
+                try {
+                    s.close();
+                } catch (IOException ignored) {
+                }
             }
         }
     }

@@ -3,7 +3,6 @@ package cn.wubo.spring.ai.loom.agent.document;
 import org.springframework.ai.document.Document;
 import org.springframework.core.io.Resource;
 
-import java.io.InputStream;
 import java.util.List;
 
 public interface IDocumentRead {

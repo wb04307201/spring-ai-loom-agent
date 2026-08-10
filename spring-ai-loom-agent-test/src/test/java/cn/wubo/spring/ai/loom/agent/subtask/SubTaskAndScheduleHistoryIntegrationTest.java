@@ -6,15 +6,12 @@ import cn.wubo.spring.ai.loom.agent.LoomAgentTestApplication;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
-import cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor;
-import cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;

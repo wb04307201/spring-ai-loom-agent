@@ -17,16 +17,17 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link DefaultMavenTool} 安全相关单元测试
  * <p>
  * 关注：
  * <ol>
- *   <li>username 为 null / 空字符串 时拒绝</li>
- *   <li>绝对路径 + .. 越权通过 symlink 防御</li>
- *   <li>工具构造时 fileBasePath 为 null 也能容错</li>
+ * <li>username 为 null / 空字符串 时拒绝</li>
+ * <li>绝对路径 + .. 越权通过 symlink 防御</li>
+ * <li>工具构造时 fileBasePath 为 null 也能容错</li>
  * </ol>
  */
 @DisplayName("DefaultMavenTool 安全测试")
@@ -36,6 +37,12 @@ class DefaultMavenToolSecurityTest {
     private MavenProperty props;
     private Path tmpRoot;
     private String username;
+
+    private static ToolContext ctx(String username) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("username", username);
+        return new ToolContext(m);
+    }
 
     @BeforeEach
     void setUp() throws IOException {
@@ -67,12 +74,6 @@ class DefaultMavenToolSecurityTest {
         }
     }
 
-    private static ToolContext ctx(String username) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("username", username);
-        return new ToolContext(m);
-    }
-
     // ==================== username 校验 ====================
 
     @Test
@@ -94,7 +95,7 @@ class DefaultMavenToolSecurityTest {
     @Test
     @DisplayName("username 仅含空白返回错误")
     void whitespaceUsernameRejected() {
-        ToolContext wsUser = ctx("   ");
+        ToolContext wsUser = ctx(" ");
         String result = tool.mavenBuild(null, null, null, null, wsUser);
         assertTrue(result.contains("无法获取用户名"), "应提示缺少 username: " + result);
     }

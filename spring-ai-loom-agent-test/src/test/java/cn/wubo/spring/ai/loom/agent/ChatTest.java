@@ -6,15 +6,11 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.FileSystemResource;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
 
 import java.io.File;
-
-import static java.lang.Thread.sleep;
 
 @Slf4j
 @SpringBootTest(classes = LoomAgentTestApplication.class)
@@ -40,6 +36,6 @@ class ChatTest {
 
         response.subscribe(log::info);
 
-        Thread.sleep(1000*30);
+        Thread.sleep(1000 * 30);
     }
 }

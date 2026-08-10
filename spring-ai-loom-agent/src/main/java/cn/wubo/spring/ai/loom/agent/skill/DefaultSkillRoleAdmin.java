@@ -5,8 +5,6 @@ import cn.wubo.spring.ai.loom.agent.model.RoleSkillItem;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.List;
 
 @Component
@@ -36,7 +34,6 @@ public class DefaultSkillRoleAdmin implements ISkillRoleAdmin {
                         rs.getString("name"),
                         rs.getString("description"),
                         rs.getString("content"),
-                        rs.getString("version"),
                         rs.getString("author"),
                         rs.getString("status"),
                         rs.getTimestamp("submitted_at").toLocalDateTime(),
@@ -53,7 +50,7 @@ public class DefaultSkillRoleAdmin implements ISkillRoleAdmin {
             int sort = 0;
             for (RoleSkillItem it : items) {
                 if (it == null || it.marketSkillId() == null) continue;
-                boolean def = it.defaultLoaded() == null ? true : it.defaultLoaded();
+                boolean def = it.defaultLoaded() == null || it.defaultLoaded();
                 jdbcTemplate.update(
                         "INSERT INTO role_skill (role_code, market_skill_id, sort_order, default_loaded) VALUES (?, ?, ?, ?)",
                         roleCode, it.marketSkillId(), sort++, def);

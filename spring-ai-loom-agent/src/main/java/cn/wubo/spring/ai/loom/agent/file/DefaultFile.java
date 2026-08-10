@@ -71,7 +71,7 @@ public class DefaultFile implements IFile {
         return jdbcTemplate.update(
                 "DELETE FROM file_info WHERE id = ? AND username = ?",
                 id,
-                 username
+                username
         );
     }
 
@@ -81,13 +81,13 @@ public class DefaultFile implements IFile {
                 "SELECT * FROM file_info WHERE id = ? AND username = ?",
                 this::mapFileRecord,
                 id,
-                 username
+                username
         );
     }
 
     @Override
     public Resource getResourceById(String id, String username) {
-        FileRecord fileRecord = getById(id,username);
+        FileRecord fileRecord = getById(id, username);
         return new FileSystemResource(fileRecord.path());
     }
 

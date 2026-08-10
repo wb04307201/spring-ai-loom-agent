@@ -53,7 +53,8 @@ public class DefaultMavenTool implements IMavenTool {
 
         File workDir = mavenOps.resolveWorkingDir(workingDir, username, this.fileBasePath);
         File pomFile = mavenOps.resolvePomFile(pomPath, username, this.fileBasePath, workDir);
-        if (pomFile == null || !pomFile.exists()) return "错误：在用户目录 " + workDir + " 中未找到 pom.xml，请指定正确的 pomPath 或 workingDir";
+        if (pomFile == null || !pomFile.exists())
+            return "错误：在用户目录 " + workDir + " 中未找到 pom.xml，请指定正确的 pomPath 或 workingDir";
 
         return mavenOps.execute(goals, workDir, pomFile, properties, timeoutMs);
     }

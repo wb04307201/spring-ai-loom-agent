@@ -7,12 +7,7 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 @Component
 public class DefaultRoleService implements IRoleService {
@@ -136,7 +131,7 @@ public class DefaultRoleService implements IRoleService {
             int sortOrder = 0;
             for (IRoleService.RoleMcpItem it : items) {
                 if (it == null || it.name() == null || it.name().isBlank()) continue;
-                boolean def = it.defaultEnabled() == null ? true : it.defaultEnabled();
+                boolean def = it.defaultEnabled() == null || it.defaultEnabled();
                 jdbcTemplate.update(
                         "INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled) VALUES (?, ?, ?, ?)",
                         roleCode, it.name(), sortOrder++, def);
@@ -171,7 +166,7 @@ public class DefaultRoleService implements IRoleService {
                         allowed.add(n);
                         int so = rs.getInt(2);
                         orderByName.merge(n, so, Math::min);
-                        if (Boolean.TRUE.equals(rs.getBoolean(3))) {
+                        if (rs.getBoolean(3)) {
                             defaultByName.put(n, true);
                         }
                         return null;

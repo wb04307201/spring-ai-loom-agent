@@ -14,13 +14,19 @@ import java.util.List;
  */
 public interface ILoomScheduleExecutionRepository {
 
-    /** Insert a new execution row. The {@code executionId} is assigned by the DB. */
+    /**
+     * Insert a new execution row. The {@code executionId} is assigned by the DB.
+     */
     void save(LoomScheduleExecutionRecord record);
 
-    /** Newest-first executions for the given task, capped at {@code limit}. */
+    /**
+     * Newest-first executions for the given task, capped at {@code limit}.
+     */
     List<LoomScheduleExecutionRecord> findByTaskName(String taskName, int limit);
 
-    /** Total execution count for a task — used to drive the per-task max-history trim. */
+    /**
+     * Total execution count for a task — used to drive the per-task max-history trim.
+     */
     int countByTaskName(String taskName);
 
     /**
@@ -29,7 +35,9 @@ public interface ILoomScheduleExecutionRepository {
      */
     int trimTaskHistory(String taskName, int keepLast);
 
-    /** Delete every row with {@code fire_time < cutoff}. Returns affected row count. */
+    /**
+     * Delete every row with {@code fire_time < cutoff}. Returns affected row count.
+     */
     int deleteOlderThan(Instant cutoff);
 
     /**
@@ -39,6 +47,8 @@ public interface ILoomScheduleExecutionRepository {
      */
     int deleteByUserAndConversation(String username, String conversationId);
 
-    /** Defensive schema bootstrap (mirrors V16). */
+    /**
+     * Defensive schema bootstrap (mirrors V16).
+     */
     void ensureSchema();
 }
