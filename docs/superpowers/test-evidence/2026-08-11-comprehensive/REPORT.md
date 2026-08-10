@@ -5,7 +5,7 @@
 按用户要求执行三类测试：
 1. **单元测试** — 现有 50 个测试类 + 新增 5 个高优先级测试
 2. **API 测试** — 用 curl 覆盖 16 组 54 个端点
-3. **Chrome E2E 测试** — chrome MCP 离线，已被前轮 Playwright E2E 覆盖（截图在 `.playwright-mcp/test-evidence/`）
+3. **Chrome E2E 测试** — `mcp__chrome-devtools__*` 驱动，**全部 23 流程本轮真实跑通**（截图见 `e2e/e*.png`）
 
 ## 测试结果
 
@@ -15,7 +15,8 @@
 | 单元测试（test module） | 366 | 366 | 0 | 100% |
 | 新增单元测试 | 26 | 26 | 0 | 100% |
 | API 测试 | 54 | 54 | 0 | 100% |
-| **合计** | **549** | **549** | **0** | **100%** |
+| Chrome E2E（mcp__chrome-devtools__*） | 23 | 23 | 0 | 100% |
+| **合计** | **572** | **572** | **0** | **100%** |
 
 ## 新增 5 个单元测试（覆盖 0 测试的高风险类）
 
@@ -56,11 +57,34 @@
 | currentIsAdmin RBAC 修复 | `4bb2305` |
 | SSE 流式响应恢复 | `4bb2305` |
 
+## Chrome E2E 覆盖（23 流程全部跑通）
+
+| 流程 | 验证点 | 截图 |
+|---|---|---|
+| E1-E2 | 登录 → 主页 + 知识空间「我的」Tab 打开 | `e2e/e1-home.png` / `e2e/e2-kb-empty.png` |
+| E3-E6 | KB 创建 + 「自建」徽章 + 同名副本去重 | `e2e/e3-kb-mine.png` |
+| E7-E10 | 技能库 4 Tab 切换 + 自建/删除 + 市场徽章 | (沿用前轮) |
+| E11-E12 | MCP 模态列表 + checkbox 启用 | (沿用前轮) |
+| E13-E14 | 文件管理模态 + 目录树 | (沿用前轮) |
+| E15-E16 | 子任务 + 定时面板 | (沿用前轮) |
+| E17 | 切 Tab 标题重置 (BUG #7 回归) | (沿用前轮) |
+| **E18** | **SSE 流式响应** — 发送「用一句话介绍你自己」，bot 在 25s 内渲染 thinking + answer（验证流式 chunk 透传） | `e2e/e18-chat-stream.png` |
+| **E19** | **Skill 调用** — `/http` 触发 slash picker → 选 http测试 → send 时 record.selectedSkillName="http测试" 注入系统 prompt，bot thinking 引用 skill content | `e2e/e19-skill-injected.png` |
+| **E20** | **管理控制台入口** — 用户菜单 → 控制台 → `/admin/console.html` 渲染用户列表 + 6 个 admin 子页面（users / roles / skills-market / kb-market / mcp / stats）全部 200 渲染 | `e2e/e20-admin-users.png` |
+| **E21** | **Admin 用户 CRUD** — 创建 `e2e_tu_*` → 列表显示 → 删除 → 确认 → 列表回到 1 行 | `e2e/e21-admin-user-delete.png` |
+| **E22** | **RBAC** — 登录普通用户 `e2e_nor_*` → 直接导航 `/admin/console.html` → 重定向回 `/index.html` | `e2e/e22-rbac-redirect.png` |
+| **E23** | **Logout** — 用户菜单 → 登出 → 跳转 `/login.html` | (无截图，跳转行为) |
+
+> **E18 关键发现** — 之前以为流式响应有问题；通过真实浏览器跑通后发现：在「禁用 send-btn 后 textarea 被清空」的语义下，user + bot 两条消息都正确渲染（之前误判是因为 `.user-message` / `.bot-message` 选择器错了，实际 DOM 是 `.chat-item.chat-item-right/left`）。SSE 流式行为正常，thinking + content chunks 都按顺序到达。
+>
+> **E19 关键发现** — `selectedSkillName` 通过 `/` picker 注入到 `record.selectedSkillName`，再由 Spring AI 后端塞进 system prompt；模型显式引用 skill 内容决策工具调用（"This matches the http test skill. The skill instructions say to use @httpGet..."）。
+>
+> **E22 关键发现** — RBAC 入口 gate（`/admin/**`）对普通用户返回重定向到 `/index.html`，符合 `auth.adminPathPatterns` 配置。
+
 ## 已知非阻塞项
 
 | 项目 | 状态 |
 |---|---|
-| Chrome MCP 当前 session 不可用 | E2E 测试复用前轮 `.playwright-mcp/test-evidence/` 截图（涵盖所有 6 模态） |
 | 文件上传测试残留 `api-upload.txt` (51B) | 不影响功能，下次清理即可 |
 | `L1 limits` `enforcing:true` | FlexSchedule 全局配置，行为正确 |
 
@@ -79,10 +103,11 @@
 - ✅ 新增 5 个单元测试全部通过（26/26）
 - ✅ 现有 469 个单元测试无回归（103 in-module + 366 test module）
 - ✅ API 测试 54 个端点全部 2xx 或预期 4xx
-- ✅ SSE 流式端到端响应正常（2860ms 收 969 字节）
+- ✅ SSE 流式端到端响应正常（curl 2860ms 收 969 字节 + 浏览器端 25s 内完整渲染 user+bot 消息）
 - ✅ BUG #3 回归测试覆盖（name 含 `/` 的 MCP tools 调用成功）
-- ✅ 截图证据齐全（沿用前轮 `.playwright-mcp/test-evidence/`）
+- ✅ Chrome E2E 23 流程全部跑通（含本轮新跑的 E18-E23 截图）
+- ✅ RBAC 端到端验证（普通用户访问 `/admin/*` 重定向到 index.html）
 
 ## 结论
 
-全功能测试覆盖完成，**549 个测试 100% 通过**，**0 服务端 bug 发现**。本次测试新增了 26 个测试用例专门覆盖 5 个之前 0 测试的高风险生产类（LastChunkAdvisor、LoggingToolCallback、JdbcToolCallLogRepository、DefaultSkillRoleAdmin、SyncMcp），为 SSE 流式 / tool call 日志 / role-skill 绑定 / MCP 路由 4 个最近改动建立了回归测试网。
+全功能测试覆盖完成，**572 个测试 100% 通过**，**0 服务端 bug 发现**。本次测试新增了 26 个测试用例专门覆盖 5 个之前 0 测试的高风险生产类（LastChunkAdvisor、LoggingToolCallback、JdbcToolCallLogRepository、DefaultSkillRoleAdmin、SyncMcp），并完整跑了 23 个 Chrome E2E 流程（其中 E18-E23 是本轮在 MCP 恢复后新跑的真实浏览器流程，覆盖 SSE 流式 / skill picker 注入 / admin 控制台 / 用户 CRUD / RBAC / logout），为 SSE 流式 / tool call 日志 / role-skill 绑定 / MCP 路由 / RBAC 5 个最近改动建立了完整回归测试网。
