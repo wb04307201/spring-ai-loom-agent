@@ -77,7 +77,7 @@
  (a.author + a.name).localeCompare(b.author + b.name));
  const rows = sorted.map(m => {
  return `<tr data-id="${m.id}">
- <td><strong>${escapeHtml(m.name)}</strong><br><span style="font-size:11px;color:var(--text-muted);">v${escapeHtml(m.version)}</span></td>
+ <td><strong>${escapeHtml(m.name)}</strong></td>
  <td>${escapeHtml(m.description || '（无）')}</td>
  <td>${escapeHtml(m.author)}</td>
  <td>${m.reviewedAt ? escapeHtml(m.reviewedAt.slice(0, 16).replace('T', ' ')) : '-'}</td>
@@ -112,8 +112,6 @@
  document.getElementById('es-name').value = m.name;
  document.getElementById('es-name').disabled = true; // 编辑模式：name 不能改（PK 关联）
  document.getElementById('es-desc').value = m.description || '';
- document.getElementById('es-version').value = m.version;
- document.getElementById('es-version').disabled = true;
  document.getElementById('es-content').value = m.content || '';
  document.getElementById('es-error').style.display = 'none';
  document.getElementById('edit-skill-modal').style.display = 'flex';
@@ -129,10 +127,9 @@
  async function saveEdit() {
  const name = document.getElementById('es-name').value.trim();
  const desc = document.getElementById('es-desc').value.trim();
- const version = document.getElementById('es-version').value.trim();
  const content = document.getElementById('es-content').value;
- if (!name || !version || !content.trim()) {
- showErr('名称、版本号、内容均不能为空');
+ if (!name || !content.trim()) {
+ showErr('名称、内容不能为空');
  return;
  }
  if (!currentEdit) {
@@ -140,7 +137,7 @@
  showErr('控制台不再新建技能');
  return;
  }
- const body = {name, description: desc, content, version, status: 'APPROVED'};
+ const body = {name, description: desc, content, status: 'APPROVED'};
  try {
  const r = await fetch(API.update(currentEdit.id), {
  method: 'PUT', credentials: 'include',

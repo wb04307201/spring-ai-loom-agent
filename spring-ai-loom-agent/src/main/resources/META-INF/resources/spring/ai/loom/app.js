@@ -3150,10 +3150,10 @@ const skills = {
  item.className = 'ks-item';
  item.innerHTML = `
  <span class="ks-item-name">${escapeHtml(m.name)}</span>
- <span class="ks-item-desc">by ${escapeHtml(m.username || m.author || '')}</span>
+ <span class="ks-item-desc">by ${escapeHtml(m.author || '')}</span>
  <span class="ks-item-desc">${escapeHtml(m.description || '')}</span>
  `;
- item.addEventListener('click', () => this._showMarketKbDetail(m, item));
+ item.addEventListener('click', () => this._selectMarketSkill(m, item));
  container.appendChild(item);
  }
  } catch (e) {
@@ -3171,7 +3171,6 @@ const skills = {
  <div class="detail-section-title">市场元数据</div>
  <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
  <div>作者：${escapeHtml(marketSkill.author)}</div>
- <div>版本：v${escapeHtml(marketSkill.version)}</div>
  <div>状态：<span class="type-badge ADMIN">${escapeHtml(marketSkill.status)}</span></div>
  </div>
  </div>
