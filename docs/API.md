@@ -892,23 +892,9 @@ GET /spring/ai/chat/loom/mcp
 
 The `@Tool` methods registered by `ISkillTool` for the LLM. These are **separate from** the admin REST APIs in `## 6. Skill Management` (which serve the admin console UI).
 
-### 8.1 `listSkills` — list available skills
+> The full skill catalog (name + description) is auto-injected into the system prompt under the `技能` section. The LLM does not need a list tool to discover skills — it calls `@getSkill` directly to fetch full content. This mirrors how `IKnowledgeTool` has no `listKnowledgeBases` tool.
 
-```
-@Tool: listSkills
-```
-
-List the current user's accessible skills (progressive-disclosure style). Default returns all (cap 200); filterable by `keyword` and `source`.
-
-| Parameter | Type | Required | Description |
-|------------|----------|----------|--------------------------------------------------------------------------------------------------------------|
-| `keyword` | string | No | Substring filter (case-insensitive) matched against `name` and `description` |
-| `source` | string | No | Filter by skill source: `USER_CREATED` / `ROLE_GRANTED` / `MARKET_PULLED` |
-| `maxCount` | integer | No | Max records returned; default `200` |
-
-**Returns**: A text table listing the matching skills (name + source + description), plus a truncation notice when the result is smaller than the user's total accessible skills.
-
-### 8.2 `getSkill` — fetch one skill's content
+### 8.1 `getSkill` — fetch one skill's content
 
 ```
 @Tool: getSkill
@@ -920,7 +906,7 @@ List the current user's accessible skills (progressive-disclosure style). Defaul
 
 **Returns**: Text with `技能名`, `技能描述`, and full `技能内容`. Throws if the user has no access to the skill.
 
-### 10.3 `createOrUpdateSkill` — create or update a user-owned skill
+### 8.2 `createOrUpdateSkill` — create or update a user-owned skill
 
 ```
 @Tool: createOrUpdateSkill

@@ -33,7 +33,7 @@
 |--------------------|--------|-------|----------------------------------------------------------|
 | `time.enabled` | boolean | `true` | 时间工具（`ITimeTool` — 当前时间、时区转换） |
 | `file.enabled` | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/删除） |
-| `skill.enabled` | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情） |
+| `skill.enabled` | boolean | `true` | 技能工具（`ISkillTool` — 获取技能详情；技能全量列表自动注入到 system prompt【技能】段） |
 | `subtask.enabled` | boolean | `true` | 子任务委派（`ISubTaskTool` — `start_sub_task` 把一段任务交给子模型同步执行） |
 | `schedule.enabled` | boolean | `true` | 定时任务（`IScheduleTool` — 创建/取消/列出/查历史；触发时以子任务方式运行，持久化到 H2 + 重启恢复） |
 | `git.enabled` | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
@@ -64,7 +64,7 @@ spring:
 | 子接口 | 默认实现 | 方法数 | 默认状态 | 备注 |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | 启用 | 未设 `time.enabled` 时始终开启 |
-| `ISkillTool` | `DefaultSkillTool` | 3 | 启用 | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取 |
+| `ISkillTool` | `DefaultSkillTool` | 2 | 启用 | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
 | `IFileTool` | `DefaultFileTool` | 16 | 启用 | 基于路径；根目录 = `{fileBasePath}/{username}/` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | 启用 | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | 启用 | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
@@ -94,7 +94,7 @@ spring:
 | **默认实现** | `DefaultSkillTool` |
 | **覆盖方式** | 自定义 `@Bean ISkillTool` |
 | **状态** | 默认启用；通过 `spring.ai.loom.agent.skill.enabled` 切换 |
-| **方法** | `listSkills(keyword, source, maxCount)`（渐进式披露：默认全返回，上限 200；按 `keyword` 模糊匹配 `name`/`description`，按 `source` 过滤）、`getSkill`（根据名称获取技能详情）、`createOrUpdateSkill(name, description, content)`（创建或覆盖自建技能；`ROLE_GRANTED` / `MARKET_PULLED` 锁定返回 403，要改 MARKET_PULLED 请用 duplicateSkill 复制后改） |
+| **方法** | `getSkill`（根据名称获取技能详情）、`createOrUpdateSkill(name, description, content)`（创建或覆盖自建技能；`ROLE_GRANTED` / `MARKET_PULLED` 锁定返回 403，要改 MARKET_PULLED 请用 duplicateSkill 复制后改）。技能全量列表自动注入到 system prompt【技能】段，无 `listSkills` 工具。 |
 | **数据源** | `user_skill`（数据库）。每次调用前 `DefaultSkillStorage` 自动 sync `role_skill` → `user_skill`（locked 的 ROLE_GRANTED 条目）。MARKET_PULLED 行始终是市场最新快照（作者 save() 时自动推送到所有拉取者；拉取者无需手动 re-pull）。 |
 
 ---

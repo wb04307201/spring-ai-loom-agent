@@ -908,23 +908,9 @@ GET /spring/ai/chat/loom/mcp
 
 `ISkillTool` 注册给 LLM 调用的 `@Tool` 方法。**与** `## 6. 技能管理` **的服务端 REST API 不同**（后者服务于管理控制台 UI）。
 
-### 10.1 `listSkills` — 列出可用技能
+> 技能全量列表（name + description）已自动注入到 system prompt【技能】段。LLM 不需要 list 工具来发现技能，直接调 `@getSkill` 取完整内容。这与 `IKnowledgeTool` 不提供 `listKnowledgeBases` 工具的设计对称。
 
-```
-@Tool: listSkills
-```
-
-列出当前用户可访问的技能（渐进式披露风格）。默认返回全部（上限 200），可按 `keyword` 和 `source` 过滤。
-
-| 参数 | 类型 | 必填 | 说明 |
-|-------------|---------|------|----------------------------------------------------------------------------------------------|
-| `keyword` | string | 否 | 子串过滤（不区分大小写），匹配 `name` 或 `description` |
-| `source` | string | 否 | 按 source 过滤：`USER_CREATED` / `ROLE_GRANTED` / `MARKET_PULLED` |
-| `maxCount` | integer | 否 | 最多返回数量，默认 `200` |
-
-**返回**：文本表格列出匹配的技能（name + source + description），结果数小于用户全部可访问技能数时附带截断提示。
-
-### 10.2 `getSkill` — 获取单个技能的内容
+### 8.1 `getSkill` — 获取单个技能的内容
 
 ```
 @Tool: getSkill
@@ -936,7 +922,7 @@ GET /spring/ai/chat/loom/mcp
 
 **返回**：包含 `技能名`、`技能描述` 和完整 `技能内容` 的文本。用户无访问权限时抛出异常。
 
-### 10.3 `createOrUpdateSkill` — 创建或更新自建技能
+### 8.2 `createOrUpdateSkill` — 创建或更新自建技能
 
 ```
 @Tool: createOrUpdateSkill

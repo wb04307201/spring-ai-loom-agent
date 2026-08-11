@@ -33,7 +33,7 @@ Every built-in tool group is gated by a `*.enabled` property under `spring.ai.lo
 |--------------------|---------|---------|-------------------------------------------------------------------|
 | `time.enabled` | boolean | `true` | Time tools (`ITimeTool` — current time, timezone conversion) |
 | `file.enabled` | boolean | `true` | File tools (`IFileTool` — 16 path-based read/write/edit/delete) |
-| `skill.enabled` | boolean | `true` | Skill tools (`ISkillTool` — list skills, get skill details) |
+| `skill.enabled` | boolean | `true` | Skill tools (`ISkillTool` — get skill details; full skill list is auto-injected into the system prompt under the `技能` section) |
 | `subtask.enabled` | boolean | `true` | Sub-task delegation (`ISubTaskTool` — `start_sub_task` runs a slice of work on a sub-model synchronously) |
 | `schedule.enabled` | boolean | `true` | Scheduled tasks (`IScheduleTool` — create/cancel/list/history; fires as a sub-task, persisted to H2 + restored on restart) |
 | `git.enabled` | boolean | `false` | Git tools (`IGitTool` — 28 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
@@ -64,7 +64,7 @@ spring:
 | Sub-Interface | Default Impl | Methods | Default State | Notes |
 |---------------------------|-----------------------------|---------|---------------|------------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | enabled | Always on when `time.enabled` is unset |
-| `ISkillTool` | `DefaultSkillTool` | 3 | enabled | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read |
+| `ISkillTool` | `DefaultSkillTool` | 2 | enabled | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
 | `IFileTool` | `DefaultFileTool` | 16 | enabled | Path-based; root = `{fileBasePath}/{username}/` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | enabled | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | enabled | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
@@ -94,7 +94,7 @@ spring:
 | **Default** | `DefaultSkillTool` |
 | **Override** | Custom `@Bean ISkillTool` |
 | **State** | Enabled by default; toggle with `spring.ai.loom.agent.skill.enabled` |
-| **Methods** | `listSkills(keyword, source, maxCount)` — progressive-disclosure listing; defaults to returning all (cap 200), filterable by `keyword` (substring on name/description) and `source` (`USER_CREATED` / `ROLE_GRANTED` / `MARKET_PULLED`); `getSkill(skillName)` — get one skill's full content; `createOrUpdateSkill(name, description, content)` — create or overwrite a user-owned skill (`ROLE_GRANTED` rejects with 403; `MARKET_PULLED` rejects with 403 — use `duplicateSkill` to copy it as USER_CREATED first) |
+| **Methods** | `getSkill(skillName)` — get one skill's full content; `createOrUpdateSkill(name, description, content)` — create or overwrite a user-owned skill (`ROLE_GRANTED` rejects with 403; `MARKET_PULLED` rejects with 403 — use `duplicateSkill` to copy it as USER_CREATED first). The full skill list is auto-injected into the system prompt `技能` section; there is no `listSkills` tool. |
 | **Data source** | `user_skill` (DB). On every call, `DefaultSkillStorage` auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries). MARKET_PULLED rows are always the latest market snapshot (the author pushes on every `save()`; pullers need no manual re-pull). |
 
 ---
