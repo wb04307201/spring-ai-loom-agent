@@ -248,11 +248,10 @@ public class DefaultChat implements IChat {
   // - knowledge bases: 列用户启用的 KB + 调 searchKnowledge 的说明
   // - tools (MCP): 不列 — Spring AI 通过 mcp.tools() 自动暴露 schema 给 LLM
 
-  // Inject skill summary (first 20)
-  List<SkillRecord> allSkills = skillStorage.list(username);
-  List<SkillRecord> skills = allSkills.stream()
+  // Inject skill summary — 全量注入，与【知识库】段一致不再截断。
+  // 详见 DefaultSkillTool 顶部 javadoc：system prompt 即权威列表，LLM 直接基于 prompt 决策。
+  List<SkillRecord> skills = skillStorage.list(username).stream()
           .filter(SkillRecord::load)
-          .limit(20)
           .toList();
 
   boolean hasSkills = !skills.isEmpty();
@@ -263,11 +262,7 @@ public class DefaultChat implements IChat {
   }
 
   if (hasSkills) {
-   sb.append("\n\n【技能】（共 ").append(allSkills.size()).append(" 个");
-   if (skills.size() < allSkills.size()) {
-    sb.append("，显示前 ").append(skills.size()).append(" 个");
-   }
-   sb.append("）\n");
+   sb.append("\n\n【技能】（共 ").append(skills.size()).append(" 个）\n");
 
    for (SkillRecord skill : skills) {
     sb.append("• ").append(skill.name()).append(" - ").append(skill.description()).append("\n");

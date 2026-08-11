@@ -10,7 +10,6 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,13 +18,18 @@ import static org.mockito.Mockito.*;
 /**
  * DefaultSkillTool 单元测试
  * <p>
- * 覆盖：
- * 1. listSkills 列出 load=true 的技能
- * 2. listSkills 空技能列表
- * 3. listSkills 按 keyword 模糊匹配
- * 4. listSkills 按 source 过滤
- * 5. listSkills maxCount 截断 + 提示
- * 6. username 通过 ToolContext 正确传递到 ISkillStorage
+ * 已移除 listSkills 相关用例 —— listSkills 工具已删除（设计变更：技能全量列表由
+ * buildDynamicSystemPrompt 注入到 system prompt【技能】段，LLM 无需工具列）。
+ * <p>
+ * 当前覆盖：
+ * 1. getSkill 返回完整信息
+ * 2. getSkill 把 username 透传给 storage
+ * 3. createOrUpdateSkill 新建：name 不存在
+ * 4. createOrUpdateSkill 更新：name 已存在
+ * 5. createOrUpdateSkill name 去前后空白
+ * 6. createOrUpdateSkill 校验：缺 name / 缺 content / 超长 name → 400
+ * 7. createOrUpdateSkill 锁定（ROLE_GRANTED / MARKET_PULLED） → 403 透传
+ * 8. createOrUpdateSkill description=null 自动视为空串
  */
 @DisplayName("DefaultSkillTool 单元测试")
 class DefaultSkillToolTest {
@@ -43,111 +47,6 @@ class DefaultSkillToolTest {
     void setUp() {
         storage = mock(ISkillStorage.class);
         tool = new DefaultSkillTool(storage);
-    }
-
-    @Test
-    @DisplayName("listSkills 仅列出 load=true 的技能")
-    void listSkills_listsLoadedSkills() {
-        when(storage.list("alice")).thenReturn(List.of(
-                new SkillRecord("news-watch", "月度报告生成", true, "content1", "classpath:skills/news-watch.st"),
-                new SkillRecord("daily-standup", "每日站会", false, "content2", "classpath:skills/standup.st")
-        ));
-
-        String result = tool.listSkills(null, null, null, ctx("alice"));
-        assertTrue(result.contains("news-watch"));
-        assertTrue(result.contains("月度报告生成"));
-        assertTrue(result.contains("命中 1 / 共 1 个"), "应只列出已加载的 1 个技能: " + result);
-        assertFalse(result.contains("daily-standup"), "未加载技能不应出现: " + result);
-    }
-
-    @Test
-    @DisplayName("listSkills 无技能时显示空目录")
-    void listSkills_emptyList() {
-        when(storage.list("bob")).thenReturn(List.of());
-        String result = tool.listSkills(null, null, null, ctx("bob"));
-        assertTrue(result.contains("命中 0 / 共 0 个"), "应提示 0 个技能: " + result);
-    }
-
-    @Test
-    @DisplayName("listSkills 把 username 透传给 storage")
-    void listSkills_passesUsername() {
-        when(storage.list("charlie")).thenReturn(List.of());
-        tool.listSkills(null, null, null, ctx("charlie"));
-        verify(storage).list("charlie");
-    }
-
-    @Test
-    @DisplayName("listSkills keyword 模糊匹配（不区分大小写，匹配 name 或 description）")
-    void listSkills_keywordFilter() {
-        when(storage.list("dave")).thenReturn(List.of(
-                new SkillRecord("deploy-app", "部署应用", true, "c1", "USER_CREATED"),
-                new SkillRecord("write-doc", "编写文档", true, "c2", "USER_CREATED"),
-                new SkillRecord("network", "部署网络", true, "c3", "MARKET_VIEW")
-        ));
-
-        String result = tool.listSkills("部署", null, null, ctx("dave"));
-        assertTrue(result.contains("deploy-app"), "name 含 '部署' 的应匹配: " + result);
-        assertTrue(result.contains("network"), "description 含 '部署' 的应匹配: " + result);
-        assertFalse(result.contains("write-doc"), "name/desc 都不含 '部署' 的不应匹配: " + result);
-        assertTrue(result.contains("命中 2 / 共 3 个"));
-    }
-
-    @Test
-    @DisplayName("listSkills source 精确过滤（移除 MARKET_VIEW，仅支持 USER_CREATED / ROLE_GRANTED / MARKET_PULLED）")
-    void listSkills_sourceFilter() {
-        when(storage.list("eve")).thenReturn(List.of(
-                new SkillRecord("user-skill", "用户自建", true, "c1", "USER_CREATED"),
-                new SkillRecord("mkt-skill", "市场技能", true, "c2", "MARKET_PULLED"),
-                new SkillRecord("role-skill", "角色授权", true, "c3", "ROLE_GRANTED")
-        ));
-
-        String result = tool.listSkills(null, "USER_CREATED", null, ctx("eve"));
-        assertTrue(result.contains("user-skill"));
-        assertFalse(result.contains("mkt-skill"), "MARKET_PULLED 应被过滤掉: " + result);
-        assertFalse(result.contains("role-skill"), "ROLE_GRANTED 应被过滤掉: " + result);
-        assertTrue(result.contains("命中 1 / 共 3 个"));
-    }
-
-    @Test
-    @DisplayName("listSkills maxCount 截断并提示缩小范围")
-    void listSkills_maxCountTruncates() {
-        List<SkillRecord> skills = List.of(
-                new SkillRecord("skill-1", "描述1", true, "c1", "USER_CREATED"),
-                new SkillRecord("skill-2", "描述2", true, "c2", "USER_CREATED"),
-                new SkillRecord("skill-3", "描述3", true, "c3", "USER_CREATED")
-        );
-        when(storage.list("frank")).thenReturn(skills);
-
-        String result = tool.listSkills(null, null, 2, ctx("frank"));
-        assertTrue(result.contains("skill-1"));
-        assertTrue(result.contains("skill-2"));
-        assertFalse(result.contains("skill-3"), "maxCount=2 时第 3 个应被截断: " + result);
-        assertTrue(result.contains("上限 2"));
-        assertTrue(result.contains("已截断"), "应有截断提示: " + result);
-        assertTrue(result.contains("建议用 keyword 缩小范围"), "应建议缩小范围: " + result);
-    }
-
-    @Test
-    @DisplayName("listSkills maxCount > total 时不截断也不提示")
-    void listSkills_maxCountAboveTotal() {
-        when(storage.list("grace")).thenReturn(List.of(
-                new SkillRecord("a", "x", true, "c", "USER_CREATED")
-        ));
-
-        String result = tool.listSkills(null, null, 100, ctx("grace"));
-        assertFalse(result.contains("已截断"), "总数 < maxCount 时不应有截断提示: " + result);
-    }
-
-    @Test
-    @DisplayName("listSkills 无参数时全部返回（默认 maxCount=200）")
-    void listSkills_defaultMaxCount() {
-        when(storage.list("henry")).thenReturn(List.of(
-                new SkillRecord("a", "x", true, "c", "USER_CREATED"),
-                new SkillRecord("b", "y", true, "c", "USER_CREATED")
-        ));
-        String result = tool.listSkills(null, null, null, ctx("henry"));
-        assertTrue(result.contains("命中 2 / 共 2 个"));
-        assertTrue(result.contains("上限 200"), "默认上限应为 200: " + result);
     }
 
     @Test

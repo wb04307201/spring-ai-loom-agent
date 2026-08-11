@@ -5,6 +5,7 @@ import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
 import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository;
 import cn.wubo.spring.ai.loom.agent.model.UserConversationRecord;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
@@ -38,6 +39,7 @@ class DefaultChatTest {
  private DefaultChat chat;
  private IUserConversation userConversation;
  private IToolCallLogRepository toolCallLogRepository;
+ private ISkillStorage skillStorage;
  private HttpServletRequest request;
 
  @BeforeEach
@@ -59,7 +61,7 @@ class DefaultChatTest {
  when(mcp.getVisibleToolCallbackProvider(anyString(), any())).thenReturn(null);
  userConversation = mock(IUserConversation.class);
  IFile file = mock(IFile.class);
- ISkillStorage skillStorage = mock(ISkillStorage.class);
+ skillStorage = mock(ISkillStorage.class);
  toolCallLogRepository = mock(IToolCallLogRepository.class);
  when(skillStorage.list(anyString())).thenReturn(List.of());
  when(skillStorage.get(anyString(), anyString())).thenAnswer(inv -> {
@@ -207,5 +209,59 @@ class DefaultChatTest {
  assertEquals(1, out.size(), "上游异常应被转换为单条 ChatResponse");
  String text = out.get(0).getResult().getOutput().getText();
  assertTrue(text.contains("欠费") || text.contains("充值"), "应给出可读的中文错误消息，实际：" + text);
+ }
+
+ // ============= buildDynamicSystemPrompt skill list 注入语义 =============
+
+ @Test
+ @DisplayName("buildDynamicSystemPrompt：无截断 — 30 个 skill 全部进 system prompt")
+ void buildDynamicSystemPrompt_noTruncationForManySkills() {
+  java.util.ArrayList<SkillRecord> manySkills = new java.util.ArrayList<>();
+  for (int i = 0; i < 30; i++) {
+   manySkills.add(new SkillRecord(
+    "skill-" + i, "描述-" + i, true, "content-" + i, "USER_CREATED"));
+  }
+  when(skillStorage.list("alice")).thenReturn(manySkills);
+
+  String prompt = chat.buildDynamicSystemPrompt("alice", java.util.List.of());
+
+  for (int i = 0; i < 30; i++) {
+   assertTrue(prompt.contains("skill-" + i),
+     "第 " + i + " 个 skill 应在 prompt 中，不能再被 .limit 截断");
+  }
+  assertTrue(prompt.contains("共 30 个"), "应报告总条数");
+  assertFalse(prompt.contains("显示前"),
+    "提示中不应再有截断说明（删除 .limit(20) 后该分支整段消失）");
+ }
+
+ @Test
+ @DisplayName("buildDynamicSystemPrompt：load=false 的 skill 不进 prompt")
+ void buildDynamicSystemPrompt_filtersDisabledSkills() {
+  when(skillStorage.list("alice")).thenReturn(java.util.List.of(
+   new SkillRecord("active-1", "active desc", true, "c1", "USER_CREATED"),
+   new SkillRecord("disabled-1", "disabled desc", false, "c2", "USER_CREATED"),
+   new SkillRecord("active-2", "second active", true, "c3", "ROLE_GRANTED")
+  ));
+
+  String prompt = chat.buildDynamicSystemPrompt("alice", java.util.List.of());
+
+  assertTrue(prompt.contains("active-1"));
+  assertTrue(prompt.contains("active-2"));
+  assertFalse(prompt.contains("disabled-1"),
+    "load=false 的 skill 不应在 system prompt 中出现");
+  assertTrue(prompt.contains("共 2 个"), "应只统计已启用的 2 个");
+ }
+
+ @Test
+ @DisplayName("buildDynamicSystemPrompt：无 skill 无 KB：兜底分支返回合法 prompt")
+ void buildDynamicSystemPrompt_emptySkillsAndKbFallback() {
+  // setUp 默认 skillStorage.list + knowledge.list 都返空，直接走兜底
+  String prompt = chat.buildDynamicSystemPrompt("alice", java.util.List.of());
+
+  assertNotNull(prompt);
+  assertTrue(prompt.startsWith("base-system"), "基础提示应保留在最前");
+  assertTrue(prompt.contains("当前用户未配置技能 / 知识库 / MCP 工具"),
+    "空配置应走兜底分支");
+  assertTrue(prompt.contains("直接基于通用知识回答"), "兜底说明句应在");
  }
 }

@@ -7,70 +7,18 @@ import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
-import java.util.List;
-
 public class DefaultSkillTool implements ISkillTool {
 
     /**
-     * 默认最多返回 200 条，避免 LLM 单次工具调用塞爆上下文。
+     * 已删除 listSkills。
+     * 原因：技能全量列表（name + description）由 buildDynamicSystemPrompt 注入到 system prompt【技能】段，
+     * LLM 再调工具列一遍是冗余。需要按 name 取完整内容请用 @getSkill。
+     * 与 DefaultKnowledgeTool 删除 listKnowledgeBases 的设计对称（参考其 javadoc）。
      */
-    private static final int DEFAULT_MAX_COUNT = 200;
     private final ISkillStorage skillStorage;
 
     public DefaultSkillTool(ISkillStorage skillStorage) {
         this.skillStorage = skillStorage;
-    }
-
-    @Override
-    @Tool(description = "列出当前用户可访问的技能（仅 name + 描述，不含完整内容；完整内容请用 @getSkill）。默认返回全部（上限 200）。可选按 keyword 模糊匹配 name/description，或按 source 过滤。")
-    public String listSkills(
-            @ToolParam(description = "模糊匹配关键词，匹配技能名或描述，可选", required = false) String keyword,
-            @ToolParam(description = "按 source 过滤：USER_CREATED / ROLE_GRANTED / MARKET_PULLED，可选", required = false) String source,
-            @ToolParam(description = "最多返回数量，默认 200，可选", required = false) Integer maxCount,
-            ToolContext toolContext) {
-        String username = (String) toolContext.getContext().get("username");
-        List<SkillRecord> allSkills = skillStorage.list(username).stream()
-                .filter(SkillRecord::load)
-                .toList();
-
-        int total = allSkills.size();
-        int cap = (maxCount == null || maxCount <= 0) ? DEFAULT_MAX_COUNT : Math.min(maxCount, total);
-
-        // 过滤：keyword 模糊匹配（不区分大小写）+ source 精确匹配
-        String kw = keyword == null ? null : keyword.trim().toLowerCase();
-        String src = source == null ? null : source.trim();
-        List<SkillRecord> filtered = allSkills.stream()
-                .filter(s -> {
-                    if (kw != null && !kw.isEmpty()) {
-                        boolean hit = s.name().toLowerCase().contains(kw)
-                                || (s.description() != null && s.description().toLowerCase().contains(kw));
-                        if (!hit) return false;
-                    }
-                    if (src != null && !src.isEmpty()) {
-                        return src.equals(s.source());
-                    }
-                    return true;
-                })
-                .limit(cap)
-                .toList();
-
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("技能目录（命中 %d / 共 %d 个，上限 %d）:%n%n", filtered.size(), total, cap));
-        sb.append(String.format("%-20s %-12s %-50s%n", "技能名", "来源", "技能描述"));
-        sb.append("-".repeat(86)).append("\n");
-
-        for (SkillRecord skill : filtered) {
-            sb.append(String.format("%-20s %-12s %-50s%n", skill.name(), skill.source(), skill.description()));
-        }
-
-        if (filtered.size() < total) {
-            sb.append(String.format("%n提示：结果已截断（命中 %d / 共 %d）。", filtered.size(), total));
-            if (kw == null && src == null) {
-                sb.append(" 建议用 keyword 缩小范围（如 keyword=\"部署\"），或用 source 过滤（如 source=\"USER_CREATED\"）。");
-            }
-        }
-
-        return sb.toString();
     }
 
     @Override
