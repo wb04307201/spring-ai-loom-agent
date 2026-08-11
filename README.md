@@ -80,7 +80,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.37</version>
+ <version>1.1.38</version>
 </dependency>
 ```
 
