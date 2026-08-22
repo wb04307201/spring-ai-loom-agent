@@ -1,18 +1,18 @@
 loom:
- compile:
- mcp:
- basePath: .local/file
- mavenTimeoutMs: 600000
- dockerBuildTimeoutMs: 600000
- dockerRunTimeoutMs: 60000
- healthCheckMaxWaitMs: 60000
- healthCheckIntervalMs: 2000
- keepWorkspace: false
+  compile:
+    mcp:
+      basePath: .local/file
+      mavenTimeoutMs: 600000
+      dockerBuildTimeoutMs: 600000
+      dockerRunTimeoutMs: 60000
+      healthCheckMaxWaitMs: 60000
+      healthCheckIntervalMs: 2000
+      keepWorkspace: false
 
 spring:
- ai:
- mcp:
- server:
- name: loom-compile-mcp
- version: 1.1.38
- type: SYNC
+  ai:
+    mcp:
+      server:
+        name: loom-compile-mcp
+        version: 1.1.38
+        type: SYNC
