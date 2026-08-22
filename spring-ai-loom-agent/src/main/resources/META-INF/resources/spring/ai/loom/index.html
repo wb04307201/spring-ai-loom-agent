@@ -1,344 +1,703 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
- <title>灵梭</title>
- <meta charset="UTF-8">
- <meta name="renderer" content="webkit">
- <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
- <meta name="viewport" content="width=device-width, initial-scale=1">
- <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
- <meta http-equiv="Pragma" content="no-cache">
- <meta http-equiv="Expires" content="0">
- <link rel="stylesheet" href="style.css">
- <script src="/marked@17.0.1/lib/marked.umd.js"></script>
-</head>
-<body>
-<div class="container">
- <!-- Header -->
- <header class="header">
- <div class="header-left">
- <button class="toolbar-btn" id="sidebar-toggle" style="display:none;">☰</button>
- <div class="logo"></div>
- <div class="header-title">灵梭</div>
- </div>
- <div class="header-actions">
- <div id="user-menu"></div>
- </div>
- </header>
+  <head>
+    <title>灵梭</title>
+    <meta charset="UTF-8" />
+    <meta name="renderer" content="webkit" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Cache-Control"
+      content="no-cache, no-store, must-revalidate"
+    />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="/marked@17.0.1/lib/marked.umd.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-left">
+          <button class="toolbar-btn" id="sidebar-toggle" style="display: none">
+            ☰
+          </button>
+          <div class="logo"></div>
+          <div class="header-title">灵梭</div>
+        </div>
+        <div class="header-actions">
+          <div id="user-menu"></div>
+        </div>
+      </header>
 
- <div class="app-body">
- <!-- Sidebar -->
- <aside class="sidebar" id="sidebar">
- <div class="sidebar-header">
- <h3>对话历史</h3>
- <button class="new-chat-btn" id="new-chat-btn">
- <span>+</span>
- <span>新建对话</span>
- </button>
- </div>
- <div class="sidebar-list" id="sidebarList">
- <div class="sidebar-loading">
- <span class="sidebar-loading-dot"></span>
- <span class="sidebar-loading-dot"></span>
- <span class="sidebar-loading-dot"></span>
- </div>
- </div>
- </aside>
+      <div class="app-body">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-header">
+            <h3>对话历史</h3>
+            <button class="new-chat-btn" id="new-chat-btn">
+              <span>+</span>
+              <span>新建对话</span>
+            </button>
+          </div>
+          <div class="sidebar-list" id="sidebarList">
+            <div class="sidebar-loading">
+              <span class="sidebar-loading-dot"></span>
+              <span class="sidebar-loading-dot"></span>
+              <span class="sidebar-loading-dot"></span>
+            </div>
+          </div>
+        </aside>
 
- <!-- Main Area -->
- <main class="main-area">
- <!-- Chat Content -->
- <div class="chat-content" id="mainContent">
- <div class="welcome-message">
- <h2>你好！我是你的 AI 助手</h2>
- <p>有什么我可以帮助你的吗？现在可以开始聊天了</p>
- </div>
- </div>
+        <!-- Main Area -->
+        <main class="main-area">
+          <!-- Chat Content -->
+          <div class="chat-content" id="mainContent">
+            <div class="welcome-message">
+              <h2>你好！我是你的 AI 助手</h2>
+              <p>有什么我可以帮助你的吗？现在可以开始聊天了</p>
+            </div>
+          </div>
 
- <!-- Conversation state strip (active schedules / recent failures) -->
- <div id="conv-state-strip" class="conv-state-strip" style="display:none;">
- <span class="conv-state-item" data-key="activeSchedules" title="当前会话运行中的定时任务">
- <span class="conv-state-icon">⏰</span><span class="conv-state-num">0</span><span class="conv-state-label">定时运行</span>
- </span>
- <span class="conv-state-item" data-key="executionsLast7d" title="过去 7 天触发次数">
- <span class="conv-state-icon">📊</span><span class="conv-state-num">0</span><span class="conv-state-label">触发 (7d)</span>
- </span>
- <span class="conv-state-item" data-key="executionsFailedLast7d" title="过去 7 天失败次数">
- <span class="conv-state-icon">✗</span><span class="conv-state-num">0</span><span class="conv-state-label">失败 (7d)</span>
- </span>
- <span class="conv-state-item" data-key="activeSubTasks" title="当前会话运行中的子任务">
- <span class="conv-state-icon">⚙</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务运行</span>
- </span>
- <span class="conv-state-item" data-key="subTaskHistoryLast7d" title="过去 7 天子任务历史">
- <span class="conv-state-icon">📋</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务 (7d)</span>
- </span>
- <span class="conv-state-item" data-key="subTaskFailedLast7d" title="过去 7 天子任务失败">
- <span class="conv-state-icon">⚠</span><span class="conv-state-num">0</span><span class="conv-state-label">子任务失败 (7d)</span>
- </span>
- </div>
- <style>
- .conv-state-strip {
- display: flex;
- gap: 16px;
- padding: 8px 20px;
- background: rgba(255,255,255,0.02);
- border-top: 1px solid var(--border-color, rgba(255,255,255,0.06));
- font-size: 12px;
- color: var(--text-muted, #888);
- align-items: center;
- overflow-x: auto;
- }
- .conv-state-item {
- display: inline-flex;
- align-items: center;
- gap: 4px;
- padding: 2px 8px;
- border-radius: 12px;
- background: rgba(255,255,255,0.03);
- cursor: default;
- }
- .conv-state-item.has-activity {
- background: rgba(46, 204, 113, 0.12);
- color: #2ecc71;
- }
- .conv-state-item.has-failures {
- background: rgba(231, 76, 60, 0.12);
- color: #e74c3c;
- }
- .conv-state-icon { font-size: 13px; }
- .conv-state-num { font-weight: 600; }
- </style>
+          <!-- Conversation state strip (active schedules / recent failures) -->
+          <div
+            id="conv-state-strip"
+            class="conv-state-strip"
+            style="display: none"
+          >
+            <span
+              class="conv-state-item"
+              data-key="activeSchedules"
+              title="当前会话运行中的定时任务"
+            >
+              <span class="conv-state-icon">⏰</span
+              ><span class="conv-state-num">0</span
+              ><span class="conv-state-label">定时运行</span>
+            </span>
+            <span
+              class="conv-state-item"
+              data-key="executionsLast7d"
+              title="过去 7 天触发次数"
+            >
+              <span class="conv-state-icon">📊</span
+              ><span class="conv-state-num">0</span
+              ><span class="conv-state-label">触发 (7d)</span>
+            </span>
+            <span
+              class="conv-state-item"
+              data-key="executionsFailedLast7d"
+              title="过去 7 天失败次数"
+            >
+              <span class="conv-state-icon">✗</span
+              ><span class="conv-state-num">0</span
+              ><span class="conv-state-label">失败 (7d)</span>
+            </span>
+            <span
+              class="conv-state-item"
+              data-key="activeSubTasks"
+              title="当前会话运行中的子任务"
+            >
+              <span class="conv-state-icon">⚙</span
+              ><span class="conv-state-num">0</span
+              ><span class="conv-state-label">子任务运行</span>
+            </span>
+            <span
+              class="conv-state-item"
+              data-key="subTaskHistoryLast7d"
+              title="过去 7 天子任务历史"
+            >
+              <span class="conv-state-icon">📋</span
+              ><span class="conv-state-num">0</span
+              ><span class="conv-state-label">子任务 (7d)</span>
+            </span>
+            <span
+              class="conv-state-item"
+              data-key="subTaskFailedLast7d"
+              title="过去 7 天子任务失败"
+            >
+              <span class="conv-state-icon">⚠</span
+              ><span class="conv-state-num">0</span
+              ><span class="conv-state-label">子任务失败 (7d)</span>
+            </span>
+          </div>
+          <style>
+            .conv-state-strip {
+              display: flex;
+              gap: 16px;
+              padding: 8px 20px;
+              background: rgba(255, 255, 255, 0.02);
+              border-top: 1px solid
+                var(--border-color, rgba(255, 255, 255, 0.06));
+              font-size: 12px;
+              color: var(--text-muted, #888);
+              align-items: center;
+              overflow-x: auto;
+            }
+            .conv-state-item {
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              padding: 2px 8px;
+              border-radius: 12px;
+              background: rgba(255, 255, 255, 0.03);
+              cursor: default;
+            }
+            .conv-state-item.has-activity {
+              background: rgba(46, 204, 113, 0.12);
+              color: #2ecc71;
+            }
+            .conv-state-item.has-failures {
+              background: rgba(231, 76, 60, 0.12);
+              color: #e74c3c;
+            }
+            .conv-state-icon {
+              font-size: 13px;
+            }
+            .conv-state-num {
+              font-weight: 600;
+            }
+          </style>
 
- <!-- Input Area -->
- <div class="input-area">
- <div class="toolbar">
- <button class="toolbar-btn" id="ks-button">
- <span>📚</span>
- <span>知识空间</span>
- </button>
- <button class="toolbar-btn" id="mcp-button">
- <span>🔧</span>
- <span>MCP服务</span>
- </button>
- <button class="toolbar-btn" id="skills-button">
- <span>🧠</span>
- <span>技能库</span>
- </button>
- <button class="toolbar-btn" id="file-manager-button">
- <span>📁</span>
- <span>文件</span>
- </button>
- <button class="toolbar-btn" id="subtask-button">
- <span>🧩</span>
- <span>子任务</span>
- </button>
- <button class="toolbar-btn" id="schedule-button">
- <span>⏰</span>
- <span>定时</span>
- </button>
- </div>
- <div id="chat-selected-skill" class="chat-selected-skill hidden">
- <span class="skill-tag" id="chat-selected-skill-name"></span>
- <button class="skill-tag-close" id="chat-selected-skill-clear" title="移除">&times;</button>
- </div>
- <textarea id="textarea" placeholder="输入消息... (Ctrl+Enter 换行，Enter 发送)"></textarea>
- <div id="slash-picker" class="slash-picker hidden"></div>
- <div class="image-upload-area" id="image-upload-area" style="display: none;">
- <div class="image-thumbnails" id="image-thumbnails"></div>
- </div>
- <div class="input-row">
- <button class="image-add-btn" id="image-add-btn" title="上传图片/文档">
- <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
- <path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
- </svg>
- </button>
- <input type="file" id="image-file-input" style="display: none;">
- <div class="button-area">
- <button id="send-btn">发送消息</button>
- <button id="stop-btn" style="display: none; background: var(--error-color, #ef4444); color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; margin-left: 8px;">停止</button>
- </div>
- </div>
- </div>
- </main>
- </div>
+          <!-- Input Area -->
+          <div class="input-area">
+            <div class="toolbar">
+              <button class="toolbar-btn" id="ks-button">
+                <span>📚</span>
+                <span>知识空间</span>
+              </button>
+              <button class="toolbar-btn" id="mcp-button">
+                <span>🔧</span>
+                <span>MCP服务</span>
+              </button>
+              <button class="toolbar-btn" id="skills-button">
+                <span>🧠</span>
+                <span>技能库</span>
+              </button>
+              <button class="toolbar-btn" id="file-manager-button">
+                <span>📁</span>
+                <span>文件</span>
+              </button>
+              <button class="toolbar-btn" id="subtask-button">
+                <span>🧩</span>
+                <span>子任务</span>
+              </button>
+              <button class="toolbar-btn" id="schedule-button">
+                <span>⏰</span>
+                <span>定时</span>
+              </button>
+            </div>
+            <div id="chat-selected-skill" class="chat-selected-skill hidden">
+              <span class="skill-tag" id="chat-selected-skill-name"></span>
+              <button
+                class="skill-tag-close"
+                id="chat-selected-skill-clear"
+                title="移除"
+              >
+                &times;
+              </button>
+            </div>
+            <textarea
+              id="textarea"
+              placeholder="输入消息... (Ctrl+Enter 换行，Enter 发送)"
+            ></textarea>
+            <div id="slash-picker" class="slash-picker hidden"></div>
+            <div
+              class="image-upload-area"
+              id="image-upload-area"
+              style="display: none"
+            >
+              <div class="image-thumbnails" id="image-thumbnails"></div>
+            </div>
+            <div class="input-row">
+              <button
+                class="image-add-btn"
+                id="image-add-btn"
+                title="上传图片/文档"
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M10 4v12M4 10h12"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+              <input type="file" id="image-file-input" style="display: none" />
+              <div class="button-area">
+                <button id="send-btn">发送消息</button>
+                <button
+                  id="stop-btn"
+                  style="
+                    display: none;
+                    background: var(--error-color, #ef4444);
+                    color: #fff;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    cursor: pointer;
+                    margin-left: 8px;
+                  "
+                >
+                  停止
+                </button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
 
- <!-- Toast -->
- <div id="toast-notification"></div>
+      <!-- Toast -->
+      <div id="toast-notification"></div>
 
- <!-- Image Viewer Modal -->
- <div id="image-viewer-overlay" class="image-viewer-overlay" style="display: none;">
- <div class="image-viewer-content">
- <img id="viewer-image" src="" alt="原图">
- <button class="viewer-close" id="viewer-close" title="关闭">&times;</button>
- <div class="viewer-hint">点击图片外部或按 ESC 关闭</div>
- </div>
- </div>
+      <!-- Image Viewer Modal -->
+      <div
+        id="image-viewer-overlay"
+        class="image-viewer-overlay"
+        style="display: none"
+      >
+        <div class="image-viewer-content">
+          <img id="viewer-image" src="" alt="原图" />
+          <button class="viewer-close" id="viewer-close" title="关闭">
+            &times;
+          </button>
+          <div class="viewer-hint">点击图片外部或按 ESC 关闭</div>
+        </div>
+      </div>
 
- <!-- MCP Modal -->
- <div id="mcp-modal-overlay" class="modal-overlay" style="display: none;">
- <div class="modal-content skills-modal-layout">
- <div class="skills-sidebar">
- <div class="skills-sidebar-header">
- <h3>MCP服务</h3>
- </div>
- <div class="skills-list" id="mcp-list"></div>
- </div>
- <div class="skills-detail-panel">
- <div class="skills-detail-header">
- <h3 class="skills-detail-title" id="mcp-detail-title">MCP详情</h3>
- <div class="close-button" id="mcp-close-btn">&times;</div>
- </div>
- <div class="skills-detail-body" id="mcp-detail">
- <div style="padding: 40px; text-align: center; color: var(--text-muted);">
- <p style="font-size: 16px; margin-bottom: 8px;">请选择一个MCP服务查看详情</p>
- </div>
- </div>
- </div>
- </div>
- </div>
+      <!-- MCP Modal -->
+      <div id="mcp-modal-overlay" class="modal-overlay" style="display: none">
+        <div class="modal-content skills-modal-layout">
+          <div class="skills-sidebar">
+            <div class="skills-sidebar-header">
+              <h3>MCP服务</h3>
+            </div>
+            <div class="skills-list" id="mcp-list"></div>
+          </div>
+          <div class="skills-detail-panel">
+            <div class="skills-detail-header">
+              <h3 class="skills-detail-title" id="mcp-detail-title">MCP详情</h3>
+              <div class="close-button" id="mcp-close-btn">&times;</div>
+            </div>
+            <div class="skills-detail-body" id="mcp-detail">
+              <div
+                style="
+                  padding: 40px;
+                  text-align: center;
+                  color: var(--text-muted);
+                "
+              >
+                <p style="font-size: 16px; margin-bottom: 8px">
+                  请选择一个MCP服务查看详情
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
- <!-- Skills Modal -->
- <div id="skills-modal-overlay" class="modal-overlay" style="display: none;">
- <div class="modal-content skills-modal-layout">
- <div class="skills-sidebar">
- <div class="skills-sidebar-header">
- <h3>技能库</h3>
- <div style="display: flex; gap: 6px;">
- <button class="skill-add-btn" id="skill-import-btn" title="从 .skill.md 导入技能">↑ 导入</button>
- <button class="skill-add-btn" id="skill-add-btn" title="新增技能">+ 新增</button>
- </div>
- </div>
- <input type="file" id="skill-import-file-input" accept=".md,.skill.md" style="display: none;">
- <!-- Tab 切换：我的 / 市场 / 共享 -->
- <div class="skill-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary, #f8fafc);">
- <button class="skill-tab active" data-tab="mine" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid var(--primary-color); color: var(--primary-color);">我的</button>
- <button class="skill-tab" data-tab="market" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">市场</button>
- <button class="skill-tab" data-tab="submit" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">共享</button>
- <button class="skill-tab" data-tab="mysubmit" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">我的发布</button>
- </div>
- <div class="skills-list" id="skills-list"></div>
- </div>
- <div class="skills-detail-panel">
- <div class="skills-detail-header">
- <h3 class="skills-detail-title" id="skill-detail-title">技能详情</h3>
- <div class="close-button" id="skills-close-btn">&times;</div>
- </div>
- <div class="skills-detail-body" id="skills-detail">
- <div style="padding: 40px; text-align: center; color: var(--text-muted);">
- <p style="font-size: 16px; margin-bottom: 8px;">请选择一个技能查看详情</p>
- </div>
- </div>
- </div>
- </div>
- </div>
+      <!-- Skills Modal -->
+      <div
+        id="skills-modal-overlay"
+        class="modal-overlay"
+        style="display: none"
+      >
+        <div class="modal-content skills-modal-layout">
+          <div class="skills-sidebar">
+            <div class="skills-sidebar-header">
+              <h3>技能库</h3>
+              <div style="display: flex; gap: 6px">
+                <button
+                  class="skill-add-btn"
+                  id="skill-import-btn"
+                  title="从 .skill.md 导入技能"
+                >
+                  ↑ 导入
+                </button>
+                <button
+                  class="skill-add-btn"
+                  id="skill-add-btn"
+                  title="新增技能"
+                >
+                  + 新增
+                </button>
+              </div>
+            </div>
+            <input
+              type="file"
+              id="skill-import-file-input"
+              accept=".md,.skill.md"
+              style="display: none"
+            />
+            <!-- Tab 切换：我的 / 市场 / 共享 -->
+            <div
+              class="skill-tabs"
+              style="
+                display: flex;
+                border-bottom: 1px solid var(--border-color);
+                background: var(--bg-secondary, #f8fafc);
+              "
+            >
+              <button
+                class="skill-tab active"
+                data-tab="mine"
+                style="
+                  flex: 1;
+                  padding: 8px 4px;
+                  border: none;
+                  background: transparent;
+                  cursor: pointer;
+                  font-size: 12px;
+                  border-bottom: 2px solid var(--primary-color);
+                  color: var(--primary-color);
+                "
+              >
+                我的
+              </button>
+              <button
+                class="skill-tab"
+                data-tab="market"
+                style="
+                  flex: 1;
+                  padding: 8px 4px;
+                  border: none;
+                  background: transparent;
+                  cursor: pointer;
+                  font-size: 12px;
+                  border-bottom: 2px solid transparent;
+                  color: var(--text-muted);
+                "
+              >
+                市场
+              </button>
+              <button
+                class="skill-tab"
+                data-tab="submit"
+                style="
+                  flex: 1;
+                  padding: 8px 4px;
+                  border: none;
+                  background: transparent;
+                  cursor: pointer;
+                  font-size: 12px;
+                  border-bottom: 2px solid transparent;
+                  color: var(--text-muted);
+                "
+              >
+                共享
+              </button>
+              <button
+                class="skill-tab"
+                data-tab="mysubmit"
+                style="
+                  flex: 1;
+                  padding: 8px 4px;
+                  border: none;
+                  background: transparent;
+                  cursor: pointer;
+                  font-size: 12px;
+                  border-bottom: 2px solid transparent;
+                  color: var(--text-muted);
+                "
+              >
+                我的发布
+              </button>
+            </div>
+            <div class="skills-list" id="skills-list"></div>
+          </div>
+          <div class="skills-detail-panel">
+            <div class="skills-detail-header">
+              <h3 class="skills-detail-title" id="skill-detail-title">
+                技能详情
+              </h3>
+              <div class="close-button" id="skills-close-btn">&times;</div>
+            </div>
+            <div class="skills-detail-body" id="skills-detail">
+              <div
+                style="
+                  padding: 40px;
+                  text-align: center;
+                  color: var(--text-muted);
+                "
+              >
+                <p style="font-size: 16px; margin-bottom: 8px">
+                  请选择一个技能查看详情
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
- <!-- File Manager Modal -->
- <div id="file-modal-overlay" class="modal-overlay" style="display: none;">
- <div class="modal-content" style="max-width: 900px; max-height: 80vh;">
- <div class="modal-header">
- <h3>文件管理</h3>
- <div class="close-button" id="file-close-btn">&times;</div>
- </div>
- <div class="modal-body" style="padding: 0; flex: 1; display: flex; flex-direction: column;">
- <div id="file-list" style="flex: 1; overflow: auto; padding: 16px;">
- <div class="loading-indicator">加载中...</div>
- </div>
- </div>
- <style>
- .file-tree { font-size: 14px; line-height: 1.6; }
- .tree-dir { margin: 2px 0; }
- .tree-dir-summary { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
- .tree-dir-summary:hover { background: rgba(255,255,255,0.05); }
- .tree-children { margin-left: 20px; }
- .tree-file { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; }
- .tree-file:hover { background: rgba(255,255,255,0.05); }
- .tree-file-icon { flex-shrink: 0; }
- .tree-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
- .tree-file-size { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
- .tree-file-btn { font-size: 12px; padding: 2px 8px; cursor: pointer; flex-shrink: 0; }
- </style>
- </div>
- </div>
- </div>
+      <!-- File Manager Modal -->
+      <div id="file-modal-overlay" class="modal-overlay" style="display: none">
+        <div class="modal-content" style="max-width: 900px; max-height: 80vh">
+          <div class="modal-header">
+            <h3>文件管理</h3>
+            <div class="close-button" id="file-close-btn">&times;</div>
+          </div>
+          <div
+            class="modal-body"
+            style="padding: 0; flex: 1; display: flex; flex-direction: column"
+          >
+            <div id="file-list" style="flex: 1; overflow: auto; padding: 16px">
+              <div class="loading-indicator">加载中...</div>
+            </div>
+          </div>
+          <style>
+            .file-tree {
+              font-size: 14px;
+              line-height: 1.6;
+            }
+            .tree-dir {
+              margin: 2px 0;
+            }
+            .tree-dir-summary {
+              cursor: pointer;
+              padding: 2px 4px;
+              border-radius: 4px;
+            }
+            .tree-dir-summary:hover {
+              background: rgba(255, 255, 255, 0.05);
+            }
+            .tree-children {
+              margin-left: 20px;
+            }
+            .tree-file {
+              display: flex;
+              align-items: center;
+              gap: 6px;
+              padding: 3px 4px;
+              border-radius: 4px;
+            }
+            .tree-file:hover {
+              background: rgba(255, 255, 255, 0.05);
+            }
+            .tree-file-icon {
+              flex-shrink: 0;
+            }
+            .tree-file-name {
+              flex: 1;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+            .tree-file-size {
+              color: var(--text-muted);
+              font-size: 12px;
+              flex-shrink: 0;
+            }
+            .tree-file-btn {
+              font-size: 12px;
+              padding: 2px 8px;
+              cursor: pointer;
+              flex-shrink: 0;
+            }
+          </style>
+        </div>
+      </div>
+    </div>
 
- <!-- Sub-task Panel Modal — operations-console surface (v4 redesign) -->
- <div id="subtask-modal-overlay" class="modal-overlay console-host" style="display: none;">
- <div class="modal-content operations-modal" id="subtask-modal-content">
- <!-- The toolbar (rendered by JS) lives at the top; everything
+    <!-- Sub-task Panel Modal — operations-console surface (v4 redesign) -->
+    <div
+      id="subtask-modal-overlay"
+      class="modal-overlay console-host"
+      style="display: none"
+    >
+      <div class="modal-content operations-modal" id="subtask-modal-content">
+        <!-- The toolbar (rendered by JS) lives at the top; everything
  else is the scrolling body. The body has flex:1 (in CSS)
  so the toolbar stays pinned at top. -->
- <div id="subtask-panel-body" class="console-panel-body">
- <div class="console-skeleton" aria-hidden="true">
- <div class="skel"></div><div class="skel"></div><div class="skel"></div>
- </div>
- </div>
- </div>
- </div>
+        <div id="subtask-panel-body" class="console-panel-body">
+          <div class="console-skeleton" aria-hidden="true">
+            <div class="skel"></div>
+            <div class="skel"></div>
+            <div class="skel"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
- <!-- Schedule Panel Modal — operations-console surface (v4 redesign) -->
- <div id="schedule-modal-overlay" class="modal-overlay console-host" style="display: none;">
- <div class="modal-content operations-modal" id="schedule-modal-content">
- <div id="schedule-panel-body" class="console-panel-body">
- <div class="console-skeleton" aria-hidden="true">
- <div class="skel"></div><div class="skel"></div>
- </div>
- </div>
- </div>
- </div>
+    <!-- Schedule Panel Modal — operations-console surface (v4 redesign) -->
+    <div
+      id="schedule-modal-overlay"
+      class="modal-overlay console-host"
+      style="display: none"
+    >
+      <div class="modal-content operations-modal" id="schedule-modal-content">
+        <div id="schedule-panel-body" class="console-panel-body">
+          <div class="console-skeleton" aria-hidden="true">
+            <div class="skel"></div>
+            <div class="skel"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
- <!-- Knowledge Space Modal (two-panel layout like skills modal) -->
- <div id="ks-modal-overlay" class="modal-overlay" style="display: none;">
- <div class="modal-content skills-modal-layout">
- <div class="skills-sidebar">
- <div class="skills-sidebar-header">
- <h3>知识空间</h3>
- <button class="ks-create-btn skill-add-btn">+ 创建知识库</button>
- </div>
- <!-- Tab 切换：我的 / 市场 / 共享 / 我的发布 -->
- <div class="ks-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary, #f8fafc);">
- <button class="ks-tab active" data-tab="mine" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid var(--primary-color); color: var(--primary-color);">我的</button>
- <button class="ks-tab" data-tab="market" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">市场</button>
- <button class="ks-tab" data-tab="share" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">共享</button>
- <button class="ks-tab" data-tab="mypublish" style="flex: 1; padding: 8px 4px; border: none; background: transparent; cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent; color: var(--text-muted);">我的发布</button>
- </div>
- <div class="ks-sidebar-list" id="ks-sidebar">
- <div class="sidebar-empty" style="padding: 40px 16px;">暂无知识库</div>
- </div>
- </div>
- <div class="skills-detail-panel">
- <div class="skills-detail-header">
- <h3 class="skills-detail-title" id="ks-detail-title">知识库详情</h3>
- <div class="close-button" id="ks-close-btn">&times;</div>
- </div>
- <div class="skills-detail-body" id="ks-detail">
- <div style="padding: 40px; text-align: center; color: var(--text-muted);">
- <p style="font-size: 16px; margin-bottom: 8px;">选择一个知识库查看文件</p>
- </div>
- </div>
- </div>
- </div>
- </div>
+    <!-- Knowledge Space Modal (two-panel layout like skills modal) -->
+    <div id="ks-modal-overlay" class="modal-overlay" style="display: none">
+      <div class="modal-content skills-modal-layout">
+        <div class="skills-sidebar">
+          <div class="skills-sidebar-header">
+            <h3>知识空间</h3>
+            <button class="ks-create-btn skill-add-btn">+ 创建知识库</button>
+          </div>
+          <!-- Tab 切换：我的 / 市场 / 共享 / 我的发布 -->
+          <div
+            class="ks-tabs"
+            style="
+              display: flex;
+              border-bottom: 1px solid var(--border-color);
+              background: var(--bg-secondary, #f8fafc);
+            "
+          >
+            <button
+              class="ks-tab active"
+              data-tab="mine"
+              style="
+                flex: 1;
+                padding: 8px 4px;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                font-size: 12px;
+                border-bottom: 2px solid var(--primary-color);
+                color: var(--primary-color);
+              "
+            >
+              我的
+            </button>
+            <button
+              class="ks-tab"
+              data-tab="market"
+              style="
+                flex: 1;
+                padding: 8px 4px;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                font-size: 12px;
+                border-bottom: 2px solid transparent;
+                color: var(--text-muted);
+              "
+            >
+              市场
+            </button>
+            <button
+              class="ks-tab"
+              data-tab="share"
+              style="
+                flex: 1;
+                padding: 8px 4px;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                font-size: 12px;
+                border-bottom: 2px solid transparent;
+                color: var(--text-muted);
+              "
+            >
+              共享
+            </button>
+            <button
+              class="ks-tab"
+              data-tab="mypublish"
+              style="
+                flex: 1;
+                padding: 8px 4px;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                font-size: 12px;
+                border-bottom: 2px solid transparent;
+                color: var(--text-muted);
+              "
+            >
+              我的发布
+            </button>
+          </div>
+          <div class="ks-sidebar-list" id="ks-sidebar">
+            <div class="sidebar-empty" style="padding: 40px 16px">
+              暂无知识库
+            </div>
+          </div>
+        </div>
+        <div class="skills-detail-panel">
+          <div class="skills-detail-header">
+            <h3 class="skills-detail-title" id="ks-detail-title">知识库详情</h3>
+            <div class="close-button" id="ks-close-btn">&times;</div>
+          </div>
+          <div class="skills-detail-body" id="ks-detail">
+            <div
+              style="
+                padding: 40px;
+                text-align: center;
+                color: var(--text-muted);
+              "
+            >
+              <p style="font-size: 16px; margin-bottom: 8px">
+                选择一个知识库查看文件
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
- <!-- Generic Confirm Modal -->
- <div id="confirm-modal-overlay" class="modal-overlay" style="display: none;">
- <div class="modal-content" style="max-width: 440px;">
- <div class="modal-header">
- <h3 id="confirm-modal-title">确认</h3>
- <div class="close-button" id="confirm-modal-close">&times;</div>
- </div>
- <div class="modal-body" style="padding: 24px 32px;">
- <div id="confirm-modal-message" style="font-size: 14px; line-height: 1.7; color: var(--text-primary);"></div>
- <div id="confirm-modal-form" style="display: none; margin-top: 16px;">
- <input type="text" id="confirm-modal-input" class="param-input" placeholder="">
- </div>
- </div>
- <div class="modal-footer" style="padding: 16px 32px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px;">
- <button class="modal-action-btn" id="confirm-modal-cancel">取消</button>
- <button class="modal-action-btn" id="confirm-modal-ok" style="background: var(--primary-color); color: #fff; border-color: var(--primary-color);">确定</button>
- </div>
- </div>
- </div>
+    <!-- Generic Confirm Modal -->
+    <div id="confirm-modal-overlay" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 440px">
+        <div class="modal-header">
+          <h3 id="confirm-modal-title">确认</h3>
+          <div class="close-button" id="confirm-modal-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div
+            id="confirm-modal-message"
+            style="
+              font-size: 14px;
+              line-height: 1.7;
+              color: var(--text-primary);
+            "
+          ></div>
+          <div id="confirm-modal-form" style="display: none; margin-top: 16px">
+            <input
+              type="text"
+              id="confirm-modal-input"
+              class="param-input"
+              placeholder=""
+            />
+          </div>
+        </div>
+        <div
+          class="modal-footer"
+          style="
+            padding: 16px 32px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+          "
+        >
+          <button class="modal-action-btn" id="confirm-modal-cancel">
+            取消
+          </button>
+          <button
+            class="modal-action-btn"
+            id="confirm-modal-ok"
+            style="
+              background: var(--primary-color);
+              color: #fff;
+              border-color: var(--primary-color);
+            "
+          >
+            确定
+          </button>
+        </div>
+      </div>
+    </div>
 
- <script type="module" src="app.js"></script>
-</body>
+    <script type="module" src="app.js"></script>
+  </body>
 </html>

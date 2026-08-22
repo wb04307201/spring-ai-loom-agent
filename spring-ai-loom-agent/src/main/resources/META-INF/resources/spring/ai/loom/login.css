@@ -1,198 +1,221 @@
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 :root {
-    --primary: #6366f1;
-    --primary-hover: #4f46e5;
-    --text-primary: #1e293b;
-    --text-secondary: #64748b;
-    --text-muted: #94a3b8;
-    --bg-page: #f8fafc;
-    --bg-card: #ffffff;
-    --border-color: #e2e8f0;
-    --error: #ef4444;
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --border-color: #e2e8f0;
+  --error: #ef4444;
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-    background: var(--bg-page);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    color: var(--text-primary);
-    overflow: hidden;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+  background: var(--bg-page);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-primary);
+  overflow: hidden;
 }
 
 /* 织线纹理：内联 SVG（见 login.html），静态不流动 */
 .threads {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 /* 与主应用 .header 同款：60px 白顶栏 */
 .app-header {
-    height: 60px;
-    padding: 0 20px;
-    background: var(--bg-card);
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
+  height: 60px;
+  padding: 0 20px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .header-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .header-left img {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    object-fit: cover;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
 }
 
 .header-title {
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: 1px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 
 .header-right {
-    font-size: 13px;
-    color: var(--text-muted);
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .login-main {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .login-card {
-    width: 100%;
-    max-width: 400px;
-    margin: 20px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, .06);
-    padding: 36px 40px;
-    animation: fadeUp .45s ease-out;
+  width: 100%;
+  max-width: 400px;
+  margin: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  padding: 36px 40px;
+  animation: fadeUp 0.45s ease-out;
 }
 
 @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(16px); }
-    to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .login-header {
-    text-align: center;
-    margin-bottom: 26px;
+  text-align: center;
+  margin-bottom: 26px;
 }
 
 .login-header .brand-logo {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    object-fit: cover;
-    box-shadow: 0 4px 14px rgba(99, 102, 241, .28);
-    margin-bottom: 12px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.28);
+  margin-bottom: 12px;
 }
 
 .login-header h1 {
-    font-size: 21px;
-    font-weight: 700;
-    letter-spacing: 1px;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 
 .login-header p {
-    margin-top: 4px;
-    font-size: 13px;
-    color: var(--text-muted);
-    letter-spacing: .3px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
 }
 
 .form-group {
-    margin-bottom: 16px;
+  margin-bottom: 16px;
 }
 
 .form-group label {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .form-group input {
-    width: 100%;
-    padding: 11px 14px;
-    font-size: 14px;
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    background: #fff;
-    color: var(--text-primary);
-    transition: border-color .15s, box-shadow .15s;
+  width: 100%;
+  padding: 11px 14px;
+  font-size: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text-primary);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .form-group input::placeholder {
-    color: var(--text-muted);
+  color: var(--text-muted);
 }
 
 .form-group input:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
 }
 
 .error-msg {
-    color: var(--error);
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    padding: 10px 12px;
-    border-radius: 10px;
-    font-size: 13px;
-    margin-bottom: 16px;
+  color: var(--error);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 16px;
 }
 
 .submit-btn {
-    width: 100%;
-    margin-top: 6px;
-    padding: 12px;
-    border: none;
-    border-radius: 10px;
-    background: var(--primary);
-    color: #fff;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background .15s, transform .15s, box-shadow .15s;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    transform 0.15s,
+    box-shadow 0.15s;
 }
 
 .submit-btn:hover:not(:disabled) {
-    background: var(--primary-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(99, 102, 241, .25);
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.25);
 }
 
 .submit-btn:disabled {
-    opacity: .6;
-    cursor: not-allowed;
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .login-footer {
-    margin-top: 26px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border-color);
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-muted);
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
 }
