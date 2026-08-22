@@ -1,156 +1,238 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
- <title>角色管理 - 灵梭管理控制台</title>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1">
- <link rel="stylesheet" href="/spring/ai/loom/style.css">
- <link rel="stylesheet" href="console.css">
-</head>
-<body>
-<div class="admin-layout">
- <aside class="admin-sidebar">
- <div class="admin-sidebar-header">
- <h2 class="admin-sidebar-title">管理控制台</h2>
- <span class="admin-sidebar-subtitle">用户 · 角色 · 技能 · MCP · 知识库</span>
- </div>
- <nav class="admin-sidebar-nav">
- <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
- <a href="roles.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
- <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a>
- <a href="knowledge-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📚</span><span>知识库市场</span></a>
- <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
- <a href="stats.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📈</span><span>日志</span></a>
- <div class="admin-sidebar-divider"></div>
- <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a>
- </nav>
- </aside>
- <div class="admin-main-wrap">
- <header class="admin-header">
- <div class="admin-header-left">
- <h1>角色管理</h1>
- <span class="admin-subtitle">业务角色 + 给角色授权 MCP / 技能 / 知识库</span>
- </div>
- <div class="admin-header-right">
- <span id="admin-username" class="admin-username"></span>
- </div>
- </header>
+  <head>
+    <title>角色管理 - 灵梭管理控制台</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/spring/ai/loom/style.css" />
+    <link rel="stylesheet" href="console.css" />
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+          <h2 class="admin-sidebar-title">管理控制台</h2>
+          <span class="admin-sidebar-subtitle"
+            >用户 · 角色 · 技能 · MCP · 知识库</span
+          >
+        </div>
+        <nav class="admin-sidebar-nav">
+          <a href="console.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a
+          >
+          <a href="roles.html" class="admin-sidebar-link active"
+            ><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a
+          >
+          <a href="skills-market.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a
+          >
+          <a href="knowledge-market.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">📚</span
+            ><span>知识库市场</span></a
+          >
+          <a href="mcps.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">🔧</span
+            ><span>MCP 描述维护</span></a
+          >
+          <a href="stats.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">📈</span><span>日志</span></a
+          >
+          <div class="admin-sidebar-divider"></div>
+          <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a
+          >
+        </nav>
+      </aside>
+      <div class="admin-main-wrap">
+        <header class="admin-header">
+          <div class="admin-header-left">
+            <h1>角色管理</h1>
+            <span class="admin-subtitle"
+              >业务角色 + 给角色授权 MCP / 技能 / 知识库</span
+            >
+          </div>
+          <div class="admin-header-right">
+            <span id="admin-username" class="admin-username"></span>
+          </div>
+        </header>
 
- <main class="admin-main">
- <div class="info-banner">
- <strong>业务角色</strong> —— 这里维护的是给「普通用户」授权 MCP 用的业务角色（如：研发、运营、客服）。
- <strong>不是</strong>用户类型（管理员 / 普通用户）；用户类型在 <a href="console.html" style="color: #1e40af; text-decoration: underline;">用户管理</a>里设置。
- </div>
- <div class="admin-toolbar">
- <button id="create-role-btn" class="primary-btn">+ 新建角色</button>
- <button id="refresh-btn" class="secondary-btn">刷新</button>
- </div>
+        <main class="admin-main">
+          <div class="info-banner">
+            <strong>业务角色</strong> —— 这里维护的是给「普通用户」授权 MCP
+            用的业务角色（如：研发、运营、客服）。
+            <strong>不是</strong>用户类型（管理员 / 普通用户）；用户类型在
+            <a
+              href="console.html"
+              style="color: #1e40af; text-decoration: underline"
+              >用户管理</a
+            >里设置。
+          </div>
+          <div class="admin-toolbar">
+            <button id="create-role-btn" class="primary-btn">+ 新建角色</button>
+            <button id="refresh-btn" class="secondary-btn">刷新</button>
+          </div>
 
- <div id="role-table-container" class="table-container">
- <div class="loading-indicator">加载中...</div>
- </div>
- </main>
- </div>
-</div>
+          <div id="role-table-container" class="table-container">
+            <div class="loading-indicator">加载中...</div>
+          </div>
+        </main>
+      </div>
+    </div>
 
-<!-- 新建角色模态框（只保留基本信息，授权统一在「编辑 / 授权」页） -->
-<div id="create-role-modal" class="modal-overlay" style="display: none;">
- <div class="modal-content" style="max-width: 480px;">
- <div class="modal-header">
- <h3>新建角色</h3>
- <div class="close-button" id="create-role-close">&times;</div>
- </div>
- <div class="modal-body" style="padding: 24px 32px;">
- <div class="form-group">
- <label>角色 code <span style="color: var(--error-color);">*</span></label>
- <input type="text" id="new-role-code" class="form-input" placeholder="英文，如 developer">
- </div>
- <div class="form-group">
- <label>名称 <span style="color: var(--error-color);">*</span></label>
- <input type="text" id="new-role-name" class="form-input" placeholder="显示名，如 研发工程师">
- </div>
- <div class="form-group">
- <label>描述</label>
- <input type="text" id="new-role-desc" class="form-input" placeholder="可选">
- </div>
- <div id="create-role-error" class="error-msg" style="display: none;"></div>
- <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
- 创建后请点击「编辑 / 授权」配置 MCP / 技能 / 知识库。
- </div>
- </div>
- <div class="modal-footer">
- <button class="secondary-btn" id="create-role-cancel">取消</button>
- <button class="primary-btn" id="create-role-submit">创建</button>
- </div>
- </div>
-</div>
+    <!-- 新建角色模态框（只保留基本信息，授权统一在「编辑 / 授权」页） -->
+    <div id="create-role-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 480px">
+        <div class="modal-header">
+          <h3>新建角色</h3>
+          <div class="close-button" id="create-role-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div class="form-group">
+            <label
+              >角色 code <span style="color: var(--error-color)">*</span></label
+            >
+            <input
+              type="text"
+              id="new-role-code"
+              class="form-input"
+              placeholder="英文，如 developer"
+            />
+          </div>
+          <div class="form-group">
+            <label>名称 <span style="color: var(--error-color)">*</span></label>
+            <input
+              type="text"
+              id="new-role-name"
+              class="form-input"
+              placeholder="显示名，如 研发工程师"
+            />
+          </div>
+          <div class="form-group">
+            <label>描述</label>
+            <input
+              type="text"
+              id="new-role-desc"
+              class="form-input"
+              placeholder="可选"
+            />
+          </div>
+          <div
+            id="create-role-error"
+            class="error-msg"
+            style="display: none"
+          ></div>
+          <div
+            style="font-size: 12px; color: var(--text-muted); margin-top: 4px"
+          >
+            创建后请点击「编辑 / 授权」配置 MCP / 技能 / 知识库。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="create-role-cancel">取消</button>
+          <button class="primary-btn" id="create-role-submit">创建</button>
+        </div>
+      </div>
+    </div>
 
-<!-- 角色详情（可改 mcp 授权 / 技能授权 / 删除） -->
-<div id="role-detail-modal" class="modal-overlay" style="display: none;">
- <div class="modal-content" style="max-width: 800px; max-height: 85vh;">
- <div class="modal-header">
- <h3 id="role-detail-title">角色</h3>
- <div class="close-button" id="role-detail-close">&times;</div>
- </div>
- <div class="modal-body" style="padding: 24px 32px; overflow-y: auto; max-height: 70vh;">
- <div class="form-group">
- <label>名称</label>
- <input type="text" id="rd-name" class="form-input">
- </div>
- <div class="form-group">
- <label>描述</label>
- <input type="text" id="rd-desc" class="form-input">
- </div>
+    <!-- 角色详情（可改 mcp 授权 / 技能授权 / 删除） -->
+    <div id="role-detail-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 800px; max-height: 85vh">
+        <div class="modal-header">
+          <h3 id="role-detail-title">角色</h3>
+          <div class="close-button" id="role-detail-close">&times;</div>
+        </div>
+        <div
+          class="modal-body"
+          style="padding: 24px 32px; overflow-y: auto; max-height: 70vh"
+        >
+          <div class="form-group">
+            <label>名称</label>
+            <input type="text" id="rd-name" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label>描述</label>
+            <input type="text" id="rd-desc" class="form-input" />
+          </div>
 
- <div class="form-group">
- <label>授权 MCP 服务</label>
- <div id="rd-mcps" style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; max-height: 280px; overflow-y: auto;">
- 加载中...
- </div>
- </div>
+          <div class="form-group">
+            <label>授权 MCP 服务</label>
+            <div
+              id="rd-mcps"
+              style="
+                border: 1px solid var(--border-color);
+                border-radius: 6px;
+                padding: 8px;
+                max-height: 280px;
+                overflow-y: auto;
+              "
+            >
+              加载中...
+            </div>
+          </div>
 
- <div class="form-group" style="margin-top: 16px;">
- <label>授权技能（来源：已审批的技能市场）</label>
- <div id="rd-skills" style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; max-height: 280px; overflow-y: auto;">
- 加载中...
- </div>
- </div>
+          <div class="form-group" style="margin-top: 16px">
+            <label>授权技能（来源：已审批的技能市场）</label>
+            <div
+              id="rd-skills"
+              style="
+                border: 1px solid var(--border-color);
+                border-radius: 6px;
+                padding: 8px;
+                max-height: 280px;
+                overflow-y: auto;
+              "
+            >
+              加载中...
+            </div>
+          </div>
 
- <div class="form-group" style="margin-top: 16px;">
- <label>授权知识库（来源：已审批的知识库市场）</label>
- <div id="rd-knowledge" style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; max-height: 280px; overflow-y: auto;">
- 加载中...
- </div>
- </div>
+          <div class="form-group" style="margin-top: 16px">
+            <label>授权知识库（来源：已审批的知识库市场）</label>
+            <div
+              id="rd-knowledge"
+              style="
+                border: 1px solid var(--border-color);
+                border-radius: 6px;
+                padding: 8px;
+                max-height: 280px;
+                overflow-y: auto;
+              "
+            >
+              加载中...
+            </div>
+          </div>
 
- <div id="rd-error" class="error-msg" style="display: none;"></div>
- </div>
- <div class="modal-footer">
- <button class="primary-btn" id="rd-save">保存</button>
- </div>
- </div>
-</div>
+          <div id="rd-error" class="error-msg" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="primary-btn" id="rd-save">保存</button>
+        </div>
+      </div>
+    </div>
 
-<!-- 通用确认模态框 -->
-<div id="confirm-modal" class="modal-overlay" style="display: none;">
- <div class="modal-content" style="max-width: 440px;">
- <div class="modal-header">
- <h3 id="confirm-title">确认</h3>
- <div class="close-button" id="confirm-close">&times;</div>
- </div>
- <div class="modal-body" style="padding: 24px 32px;">
- <div id="confirm-message" style="font-size: 14px; line-height: 1.7;"></div>
- </div>
- <div class="modal-footer">
- <button class="secondary-btn" id="confirm-cancel">取消</button>
- <button class="primary-btn danger-solid" id="confirm-ok">确定</button>
- </div>
- </div>
-</div>
+    <!-- 通用确认模态框 -->
+    <div id="confirm-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 440px">
+        <div class="modal-header">
+          <h3 id="confirm-title">确认</h3>
+          <div class="close-button" id="confirm-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div
+            id="confirm-message"
+            style="font-size: 14px; line-height: 1.7"
+          ></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="confirm-cancel">取消</button>
+          <button class="primary-btn danger-solid" id="confirm-ok">确定</button>
+        </div>
+      </div>
+    </div>
 
-<!-- Toast -->
-<div id="toast-notification" class="toast"></div>
+    <!-- Toast -->
+    <div id="toast-notification" class="toast"></div>
 
-<script src="roles.js"></script>
-</body>
+    <script src="roles.js"></script>
+  </body>
 </html>

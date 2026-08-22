@@ -1,89 +1,170 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
- <title>用户详情 - 灵梭</title>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1">
- <link rel="stylesheet" href="/spring/ai/loom/style.css">
- <link rel="stylesheet" href="console.css">
-</head>
-<body>
-<div class="admin-container">
- <header class="admin-header">
- <div class="admin-header-left">
- <h1 id="user-title">用户详情</h1>
- <span class="admin-subtitle" id="user-meta">-</span>
- </div>
- <div class="admin-header-right">
- <span id="admin-username" class="admin-username"></span>
- <a href="console.html" class="header-link">← 返回控制台</a>
- </div>
- </header>
+  <head>
+    <title>用户详情 - 灵梭</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/spring/ai/loom/style.css" />
+    <link rel="stylesheet" href="console.css" />
+  </head>
+  <body>
+    <div class="admin-container">
+      <header class="admin-header">
+        <div class="admin-header-left">
+          <h1 id="user-title">用户详情</h1>
+          <span class="admin-subtitle" id="user-meta">-</span>
+        </div>
+        <div class="admin-header-right">
+          <span id="admin-username" class="admin-username"></span>
+          <a href="console.html" class="header-link">← 返回控制台</a>
+        </div>
+      </header>
 
- <main class="admin-main">
- <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
- 「角色」是给普通用户授权 MCP 用的业务角色（<a href="roles.html" style="color: #1e40af; text-decoration: underline;">角色管理</a>里创建）。
- 管理员账号默认拥有全部 MCP 服务，无需分配角色。
- </div>
- <div class="stats-card">
- <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">最近 6 个月 Token 用量</h3>
- <div class="bar-chart" id="bar-chart"></div>
- </div>
+      <main class="admin-main">
+        <div
+          style="
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e40af;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.6;
+            margin-bottom: 12px;
+          "
+        >
+          「角色」是给普通用户授权 MCP 用的业务角色（<a
+            href="roles.html"
+            style="color: #1e40af; text-decoration: underline"
+            >角色管理</a
+          >里创建）。 管理员账号默认拥有全部 MCP 服务，无需分配角色。
+        </div>
+        <div class="stats-card">
+          <h3
+            style="
+              margin: 0 0 16px 0;
+              font-size: 14px;
+              color: var(--text-muted);
+              font-weight: 500;
+            "
+          >
+            最近 6 个月 Token 用量
+          </h3>
+          <div class="bar-chart" id="bar-chart"></div>
+        </div>
 
- <!-- 角色分配（仅普通用户需要） -->
- <div class="stats-card" id="role-card">
- <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
- <h3 style="margin: 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">角色分配</h3>
- <button id="save-roles-btn" class="primary-btn" style="display: none;">保存</button>
- </div>
- <div id="role-card-body">加载中...</div>
- <div id="role-save-error" class="error-msg" style="display: none; margin-top: 8px;"></div>
- </div>
+        <!-- 角色分配（仅普通用户需要） -->
+        <div class="stats-card" id="role-card">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              margin-bottom: 12px;
+            "
+          >
+            <h3
+              style="
+                margin: 0;
+                font-size: 14px;
+                color: var(--text-muted);
+                font-weight: 500;
+              "
+            >
+              角色分配
+            </h3>
+            <button
+              id="save-roles-btn"
+              class="primary-btn"
+              style="display: none"
+            >
+              保存
+            </button>
+          </div>
+          <div id="role-card-body">加载中...</div>
+          <div
+            id="role-save-error"
+            class="error-msg"
+            style="display: none; margin-top: 8px"
+          ></div>
+        </div>
 
- <div class="admin-toolbar" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
- <button id="refresh-btn" class="secondary-btn">刷新</button>
- <input type="search" id="conv-search" class="conv-search" placeholder="搜索预览内容..." style="flex: 1; max-width: 240px;">
- <select id="conv-sort" class="secondary-btn" title="排序">
- <option value="updatedAt-desc" selected>最后活跃 ↓</option>
- <option value="updatedAt-asc">最后活跃 ↑</option>
- <option value="createdAt-desc">创建 ↓</option>
- <option value="createdAt-asc">创建 ↑</option>
- <option value="totalTokens-desc">Token ↓</option>
- <option value="errorCount-desc">错误 ↓</option>
- <option value="toolCallCount-desc">工具调用 ↓</option>
- <option value="messageCount-desc">消息数 ↓</option>
- </select>
- <label class="conv-filter-label"><input type="checkbox" data-status="NORMAL" checked> 正常</label>
- <label class="conv-filter-label"><input type="checkbox" data-status="DELETED" checked> 已软删</label>
- <label class="conv-filter-label"><input type="checkbox" data-status="CLEANED" checked> 已清理</label>
- <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);" id="month-total"></span>
- </div>
+        <div
+          class="admin-toolbar"
+          style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap"
+        >
+          <button id="refresh-btn" class="secondary-btn">刷新</button>
+          <input
+            type="search"
+            id="conv-search"
+            class="conv-search"
+            placeholder="搜索预览内容..."
+            style="flex: 1; max-width: 240px"
+          />
+          <select id="conv-sort" class="secondary-btn" title="排序">
+            <option value="updatedAt-desc" selected>最后活跃 ↓</option>
+            <option value="updatedAt-asc">最后活跃 ↑</option>
+            <option value="createdAt-desc">创建 ↓</option>
+            <option value="createdAt-asc">创建 ↑</option>
+            <option value="totalTokens-desc">Token ↓</option>
+            <option value="errorCount-desc">错误 ↓</option>
+            <option value="toolCallCount-desc">工具调用 ↓</option>
+            <option value="messageCount-desc">消息数 ↓</option>
+          </select>
+          <label class="conv-filter-label"
+            ><input type="checkbox" data-status="NORMAL" checked /> 正常</label
+          >
+          <label class="conv-filter-label"
+            ><input type="checkbox" data-status="DELETED" checked />
+            已软删</label
+          >
+          <label class="conv-filter-label"
+            ><input type="checkbox" data-status="CLEANED" checked />
+            已清理</label
+          >
+          <span
+            style="margin-left: auto; font-size: 12px; color: var(--text-muted)"
+            id="month-total"
+          ></span>
+        </div>
 
- <div id="conv-list-container" class="table-container">
- <div class="loading-indicator">加载中...</div>
- </div>
- </main>
-</div>
+        <div id="conv-list-container" class="table-container">
+          <div class="loading-indicator">加载中...</div>
+        </div>
+      </main>
+    </div>
 
-<div id="toast-notification" class="toast"></div>
+    <div id="toast-notification" class="toast"></div>
 
-<!-- 通用确认模态框 -->
-<div id="confirm-modal" class="modal-overlay" style="display: none;">
- <div class="modal-content" style="max-width: 440px;">
- <div class="modal-header">
- <h3 id="confirm-title">确认</h3>
- <div class="close-button" id="confirm-close">&times;</div>
- </div>
- <div class="modal-body" style="padding: 24px 32px;">
- <div id="confirm-message" style="font-size: 14px; line-height: 1.7;"></div>
- </div>
- <div class="modal-footer">
- <button class="secondary-btn" id="confirm-cancel">取消</button>
- <button class="primary-btn" id="confirm-ok" style="background: var(--error-color, #ef4444); border-color: var(--error-color, #ef4444);">确定</button>
- </div>
- </div>
-</div>
+    <!-- 通用确认模态框 -->
+    <div id="confirm-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 440px">
+        <div class="modal-header">
+          <h3 id="confirm-title">确认</h3>
+          <div class="close-button" id="confirm-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div
+            id="confirm-message"
+            style="font-size: 14px; line-height: 1.7"
+          ></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="confirm-cancel">取消</button>
+          <button
+            class="primary-btn"
+            id="confirm-ok"
+            style="
+              background: var(--error-color, #ef4444);
+              border-color: var(--error-color, #ef4444);
+            "
+          >
+            确定
+          </button>
+        </div>
+      </div>
+    </div>
 
-<script src="user.js"></script>
-</body>
+    <script src="user.js"></script>
+  </body>
 </html>

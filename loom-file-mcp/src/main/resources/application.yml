@@ -1,34 +1,34 @@
 # Loom File MCP Server 配置
 loom:
- file:
- mcp:
- # 文件操作的基础目录路径
- basePath: .local/file
- # 文本文件最大大小（字节），默认 10MB
- maxFileSize: 10485760
- # 媒体文件最大大小（字节），默认 50MB
- maxMediaSize: 52428800
- # 目录遍历最大深度
- maxWalkDepth: 5
- # 目录遍历最大条目数
- maxWalkEntries: 1000
- # 搜索结果最大数量
- maxSearchResults: 100
- # 排除的目录名称
- excludedDirs:
- - .git
- - node_modules
- - .idea
- - target
- - .vscode
- # 删除操作的确认令牌
- deleteConfirmToken: I_CONFIRM_DELETE
+  file:
+    mcp:
+      # 文件操作的基础目录路径
+      basePath: .local/file
+      # 文本文件最大大小（字节），默认 10MB
+      maxFileSize: 10485760
+      # 媒体文件最大大小（字节），默认 50MB
+      maxMediaSize: 52428800
+      # 目录遍历最大深度
+      maxWalkDepth: 5
+      # 目录遍历最大条目数
+      maxWalkEntries: 1000
+      # 搜索结果最大数量
+      maxSearchResults: 100
+      # 排除的目录名称
+      excludedDirs:
+        - .git
+        - node_modules
+        - .idea
+        - target
+        - .vscode
+      # 删除操作的确认令牌
+      deleteConfirmToken: I_CONFIRM_DELETE
 
 # Spring AI MCP Server 配置
 spring:
- ai:
- mcp:
- server:
- name: loom-file-mcp
- version: 1.1.38
- type: SYNC
+  ai:
+    mcp:
+      server:
+        name: loom-file-mcp
+        version: @project.version@
+        type: SYNC

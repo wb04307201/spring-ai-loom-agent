@@ -1,65 +1,127 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
- <title>日志 - 灵梭管理控制台</title>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1">
- <link rel="stylesheet" href="/spring/ai/loom/style.css">
- <link rel="stylesheet" href="console.css">
-</head>
-<body>
-<div class="admin-layout">
- <aside class="admin-sidebar">
- <div class="admin-sidebar-header">
- <h2 class="admin-sidebar-title">管理控制台</h2>
- <span class="admin-sidebar-subtitle">用户 · 角色 · 技能 · MCP · 知识库</span>
- </div>
- <nav class="admin-sidebar-nav">
- <a href="console.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a>
- <a href="roles.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a>
- <a href="skills-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a>
- <a href="knowledge-market.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">📚</span><span>知识库市场</span></a>
- <a href="mcps.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">🔧</span><span>MCP 描述维护</span></a>
- <a href="stats.html" class="admin-sidebar-link active"><span class="admin-sidebar-icon">📈</span><span>日志</span></a>
- <div class="admin-sidebar-divider"></div>
- <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a>
- </nav>
- </aside>
- <div class="admin-main-wrap">
- <header class="admin-header">
- <div class="admin-header-left">
- <h1>日志</h1>
- <span class="admin-subtitle">所有用户月度 Token 用量</span>
- </div>
- <div class="admin-header-right">
- <span id="admin-username" class="admin-username"></span>
- </div>
- </header>
+  <head>
+    <title>日志 - 灵梭管理控制台</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/spring/ai/loom/style.css" />
+    <link rel="stylesheet" href="console.css" />
+  </head>
+  <body>
+    <div class="admin-layout">
+      <aside class="admin-sidebar">
+        <div class="admin-sidebar-header">
+          <h2 class="admin-sidebar-title">管理控制台</h2>
+          <span class="admin-sidebar-subtitle"
+            >用户 · 角色 · 技能 · MCP · 知识库</span
+          >
+        </div>
+        <nav class="admin-sidebar-nav">
+          <a href="console.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">📊</span><span>用户管理</span></a
+          >
+          <a href="roles.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a
+          >
+          <a href="skills-market.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a
+          >
+          <a href="knowledge-market.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">📚</span
+            ><span>知识库市场</span></a
+          >
+          <a href="mcps.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">🔧</span
+            ><span>MCP 描述维护</span></a
+          >
+          <a href="stats.html" class="admin-sidebar-link active"
+            ><span class="admin-sidebar-icon">📈</span><span>日志</span></a
+          >
+          <div class="admin-sidebar-divider"></div>
+          <a href="/spring/ai/loom/index.html" class="admin-sidebar-link"
+            ><span class="admin-sidebar-icon">⬅</span><span>返回主页</span></a
+          >
+        </nav>
+      </aside>
+      <div class="admin-main-wrap">
+        <header class="admin-header">
+          <div class="admin-header-left">
+            <h1>日志</h1>
+            <span class="admin-subtitle">所有用户月度 Token 用量</span>
+          </div>
+          <div class="admin-header-right">
+            <span id="admin-username" class="admin-username"></span>
+          </div>
+        </header>
 
- <main class="admin-main">
- <div class="admin-toolbar">
- <label style="font-size: 13px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px;">
- 年：<input type="number" id="year-input" style="width: 80px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px;">
- 月：<input type="number" id="month-input" min="1" max="12" style="width: 60px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 4px;">
- </label>
- <button id="reload-btn" class="primary-btn" style="padding: 6px 12px;">查询</button>
- <button id="refresh-btn" class="secondary-btn">刷新</button>
- </div>
+        <main class="admin-main">
+          <div class="admin-toolbar">
+            <label
+              style="
+                font-size: 13px;
+                color: var(--text-muted);
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+              "
+            >
+              年：<input
+                type="number"
+                id="year-input"
+                style="
+                  width: 80px;
+                  padding: 6px 8px;
+                  border: 1px solid var(--border-color);
+                  border-radius: 4px;
+                "
+              />
+              月：<input
+                type="number"
+                id="month-input"
+                min="1"
+                max="12"
+                style="
+                  width: 60px;
+                  padding: 6px 8px;
+                  border: 1px solid var(--border-color);
+                  border-radius: 4px;
+                "
+              />
+            </label>
+            <button
+              id="reload-btn"
+              class="primary-btn"
+              style="padding: 6px 12px"
+            >
+              查询
+            </button>
+            <button id="refresh-btn" class="secondary-btn">刷新</button>
+          </div>
 
- <div class="stats-card">
- <h3 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;" id="month-label">当月用量</h3>
- <div class="bar-chart" id="bar-chart">
- <div class="empty-state">加载中...</div>
- </div>
- </div>
+          <div class="stats-card">
+            <h3
+              style="
+                margin: 0 0 16px 0;
+                font-size: 14px;
+                color: var(--text-muted);
+                font-weight: 500;
+              "
+              id="month-label"
+            >
+              当月用量
+            </h3>
+            <div class="bar-chart" id="bar-chart">
+              <div class="empty-state">加载中...</div>
+            </div>
+          </div>
 
- <div id="stats-table" class="table-container">
- <div class="loading-indicator">加载中...</div>
- </div>
- </main>
- </div>
-</div>
+          <div id="stats-table" class="table-container">
+            <div class="loading-indicator">加载中...</div>
+          </div>
+        </main>
+      </div>
+    </div>
 
-<script src="stats.js"></script>
-</body>
+    <script src="stats.js"></script>
+  </body>
 </html>
