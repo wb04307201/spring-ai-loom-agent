@@ -1,38 +1,8 @@
 {
   "mcpServers": {
-    "bing-search": {
-      "args": [
-        "-y",
-        "bing-cn-mcp"
-      ],
-      "command": "npx.cmd"
-    },
-    "@tokenizin-agency/mcp-npx-fetch": {
-      "command": "npx.cmd",
-      "args": [
-        "-y",
-        "@tokenizin/mcp-npx-fetch"
-      ]
-    },
     "sequential-thinking": {
       "command": "npx.cmd",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking"
-      ]
-    },
-    "memory": {
-      "command": "npx.cmd",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ]
-    },
-    "cn-weather-mcp": {
-      "args": [
-        "io.github.wb04307201:cn-weather-mcp:1.0.1"
-      ],
-      "command": "jbang.cmd"
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     }
   }
 }
