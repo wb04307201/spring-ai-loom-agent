@@ -41,7 +41,7 @@ import java.util.Map;
  * 把所有入参收成单个 {@code Map<String,Object>} 后，本工具用自带的预清洗
  * （剥离未平衡注释、尾随逗号）再解析，完全绕开 Spring AI 的脆弱路径。
  */
-@ToolGroup("compile")
+@ToolGroup(value = "compile", description = "compileAndDeploy — 端到端部署:git clone → build (maven/npm/pip) → docker build → docker run → 健康检查")
 public interface ICompileAndDeployTool extends IEmbedTool {
 
     /**

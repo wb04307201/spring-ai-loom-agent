@@ -6,7 +6,7 @@ import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.List;
 
-@ToolGroup("git")
+@ToolGroup(value = "git", description = "gitInit / gitStatus / gitCommit / gitClone / gitPush 等 28 个 Git 命令")
 public interface IGitTool extends IEmbedTool {
 
     // ==================== Repository lifecycle ====================

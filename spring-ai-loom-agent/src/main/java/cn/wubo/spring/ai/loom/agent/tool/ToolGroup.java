@@ -23,4 +23,9 @@ import java.lang.annotation.Target;
 @Target(ElementType.TYPE)
 public @interface ToolGroup {
     String value();
+    /**
+     * 一行人类可读描述,在 admin 角色授权 UI 渲染。缺省时 CapabilityService
+     * 会 fallback 到 "N 个工具"。
+     */
+    String description() default "";
 }

@@ -6,7 +6,7 @@ import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
-@ToolGroup("knowledge")
+@ToolGroup(value = "knowledge", description = "searchKnowledge — 在指定已启用知识库中做向量检索")
 public interface IKnowledgeTool extends IEmbedTool {
 
     /**

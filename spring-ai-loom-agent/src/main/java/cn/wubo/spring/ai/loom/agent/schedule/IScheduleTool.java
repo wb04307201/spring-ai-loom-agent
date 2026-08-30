@@ -18,7 +18,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
  * LLM-spawned schedules from outlasting their parent sub-task).
  * </p>
  */
-@ToolGroup("schedule")
+@ToolGroup(value = "schedule", description = "create / cancel / list / history 定时任务(flex-schedule 持久化)")
 public interface IScheduleTool extends IEmbedTool {
 
     String createSchedule(

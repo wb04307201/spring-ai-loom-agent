@@ -7,7 +7,7 @@ import org.springframework.ai.chat.model.ToolContext;
 import java.util.List;
 import java.util.Map;
 
-@ToolGroup("maven")
+@ToolGroup(value = "maven", description = "mavenBuild / mavenPackage / mavenTest / mavenValidate 等 6 个 mvn 命令(基于 maven-invoker)")
 /**
  * Maven 构建工具接口。
  * <p>

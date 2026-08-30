@@ -14,6 +14,9 @@
       `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/tools`,
     setTools: (code) =>
       `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/tools`,
+    // B.5.5:M7 改造 — admin 角色授权页"授权本地工具"section 从这里拉真实 tool 列表
+    // (替代之前的硬编码 KNOWN_TOOL_GROUPS),新增 @ToolGroup 接口后无需同步改 admin UI
+    adminCapabilities: "/spring/ai/loom/admin/capabilities",
     getSkills: (code) =>
       `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/skills`,
     setSkills: (code) =>
@@ -218,6 +221,9 @@
   let currentSystemMcps = []; // 系统全部 mcp 视图
   // M5:当前 role 授权的本地 tool group({groupName, defaultEnabled})
   let currentAllowedTools = [];
+  // B.5.5:全量 LOCAL tool group,从 /admin/capabilities 拉取(替代硬编码 KNOWN_TOOL_GROUPS)
+  // {groupName, title, description, toolNames[]}
+  let currentKnownToolGroups = [];
   // 技能授权
   // currentRoleSkills = [{marketSkillId, defaultLoaded}, ...]
   let currentRoleSkills = [];
@@ -302,6 +308,17 @@
       }));
       currentMarketKnowledge = marketKnowledge || [];
       renderRoleMcpList();
+      // M7 修 B.5.5:从服务端拉真实 capability 列表(替代硬编码 KNOWN_TOOL_GROUPS)。
+      // 用动态数据而不是 9 个静态条目,新增 @ToolGroup 接口后无需同步改 admin UI。
+      const allCaps = await (await fetch(API.adminCapabilities, { credentials: "include" })).json();
+      currentKnownToolGroups = (allCaps || [])
+              .filter((c) => c.type === "LOCAL")
+              .map((c) => ({
+                groupName: c.id,                  // 形如 "tool_file"
+                title: c.title || c.name,
+                description: c.description || (c.tools ? c.tools.length + " 个工具" : ""),
+                toolNames: (c.tools || []).map((t) => t.name),
+              }));
       renderRoleToolList();
       renderRoleSkillList();
       renderRoleKnowledgeList();
@@ -320,32 +337,21 @@
    * ② 下方：未授权 mcp（按名称排序）—— 仅显示名称 + 维护状态 + 「添加授权」按钮
    * currentAllowed = [{name, defaultEnabled}, ...]，需同步维护。
    */
-  // M5:本地 tool group 是 LoomAgentConfiguration 硬编码的 9 个 I*Tool 接口
-  // (由 @ToolGroup 注解 + IEmbedTool 派生)。这里静态列出供 admin 授权。
-  // 跟 server 端 CapabilityService 拼 slug 的规则一致("tool_" + @ToolGroup value)。
-  const KNOWN_TOOL_GROUPS = [
-    { groupName: "tool_time", title: "时间", description: "getCurrentTime / convertTime" },
-    { groupName: "tool_file", title: "文件", description: "readTextFile / writeFile / listDirectory / editFile 等 16 个工具" },
-    { groupName: "tool_skill", title: "技能", description: "getSkill / createOrUpdateSkill" },
-    { groupName: "tool_knowledge", title: "知识库", description: "searchKnowledge 在指定 KB 中向量检索" },
-    { groupName: "tool_git", title: "Git", description: "gitInit / gitStatus / gitCommit / gitClone 等 28 个 git 命令" },
-    { groupName: "tool_maven", title: "Maven", description: "mavenBuild / mavenPackage / mavenTest / mavenValidate 等 6 个 mvn 命令" },
-    { groupName: "tool_compile", title: "项目部署", description: "compileAndDeploy (端到端 git clone → build → docker)" },
-    { groupName: "tool_subtask", title: "子任务", description: "start_sub_task / list_sub_tasks / cancel_sub_task / get_sub_task_history" },
-    { groupName: "tool_schedule", title: "定时", description: "create / cancel / list / history 定时任务" },
-  ];
+  // B.5.5 修:本地 tool group 不再静态列出,而是从 /admin/capabilities 拉取
+  // (loadDetail 里 await fetch 然后 currentKnownToolGroups = ...)。
+  // 这里仅保留 KNOWN_TOOL_GROUPS 作为 fallback,如果 fetch 失败渲染空列表。
 
   function renderRoleToolList() {
     const container = document.getElementById("rd-tools");
-    if (!KNOWN_TOOL_GROUPS || KNOWN_TOOL_GROUPS.length === 0) {
-      container.innerHTML = '<div style="color: var(--text-muted); padding: 8px;">无可用工具</div>';
+    if (!currentKnownToolGroups || currentKnownToolGroups.length === 0) {
+      container.innerHTML = '<div style="color: var(--text-muted); padding: 8px;">暂无可用工具(等待 /admin/capabilities 加载)</div>';
       return;
     }
     const allowed = currentAllowedTools.map((it) => ({
       it,
-      g: KNOWN_TOOL_GROUPS.find((x) => x.groupName === it.groupName),
+      g: currentKnownToolGroups.find((x) => x.groupName === it.groupName),
     })).filter((p) => p.g);
-    const notAllowed = KNOWN_TOOL_GROUPS.filter(
+    const notAllowed = currentKnownToolGroups.filter(
       (g) => !currentAllowedTools.some((it) => it.groupName === g.groupName)
     );
 

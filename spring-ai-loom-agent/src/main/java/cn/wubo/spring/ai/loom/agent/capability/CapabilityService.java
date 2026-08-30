@@ -241,10 +241,14 @@ public class CapabilityService {
             }
         }
         toolInfos.sort(Comparator.comparing(ToolInfo::name));
+        // description 优先用 @ToolGroup.description,缺省用 "N 个工具" 占位
+        String desc = (ann != null && ann.description() != null && !ann.description().isBlank())
+                ? ann.description()
+                : (toolInfos.size() + " 个本地工具");
         return new CapabilityInfo(
                 id, CapabilityInfo.Type.LOCAL, id,
-                rawName,           // title 暂用 raw name,后续可加注解字段
-                null,              // description 待 metadata 表或注解字段
+                rawName,
+                desc,
                 toolInfos,
                 null
         );

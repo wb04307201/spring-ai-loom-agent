@@ -1673,6 +1673,23 @@ public class LoomAgentConfiguration {
                 }
             });
 
+            // B.5.5：admin 用 — 列出所有 LOCAL capability(忽略 RBAC / 默认勾选),
+            // 供 admin 角色授权页("授权本地工具"section)替代之前的硬编码 KNOWN_TOOL_GROUPS。
+            builder.GET("spring/ai/loom/admin/capabilities", request -> {
+                try {
+                    // 过滤 LOCAL 类型,排除 MCP(用同一份 CapabilityInfo shape)
+                    java.util.List<cn.wubo.spring.ai.loom.agent.model.CapabilityInfo> all = capabilityService.listAll();
+                    java.util.List<cn.wubo.spring.ai.loom.agent.model.CapabilityInfo> local =
+                            all.stream()
+                                    .filter(c -> c.type() == cn.wubo.spring.ai.loom.agent.model.CapabilityInfo.Type.LOCAL)
+                                    .toList();
+                    return ServerResponse.ok().body(local);
+                } catch (Exception e) {
+                    log.warn("/admin/capabilities degraded, returning empty list: {}", e.getMessage());
+                    return ServerResponse.ok().body(java.util.Collections.emptyList());
+                }
+            });
+
             // 当前用户角色允许的 mcp 的工具列表
             // 用 query string 接收 name：path variable 在 mcp name 含 "/" 时
             // （如 "spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch"）

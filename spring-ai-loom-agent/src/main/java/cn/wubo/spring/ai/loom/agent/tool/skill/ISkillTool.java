@@ -6,7 +6,7 @@ import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
-@ToolGroup("skill")
+@ToolGroup(value = "skill", description = "getSkill / createOrUpdateSkill — 技能市场查询 + 自建技能管理")
 public interface ISkillTool extends IEmbedTool {
 
     @Tool(description = "根据技能名称获取详细的技能信息，包含技能名称、描述和完整内容。")
