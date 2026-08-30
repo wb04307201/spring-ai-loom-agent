@@ -32,7 +32,7 @@
           >
           <a href="mcps.html" class="admin-sidebar-link"
             ><span class="admin-sidebar-icon">🔧</span
-            ><span>MCP 描述维护</span></a
+            ><span>能力维护</span></a
           >
           <a href="stats.html" class="admin-sidebar-link"
             ><span class="admin-sidebar-icon">📈</span><span>日志</span></a
@@ -152,6 +152,22 @@
           <div class="form-group">
             <label>描述</label>
             <input type="text" id="rd-desc" class="form-input" />
+          </div>
+
+          <div class="form-group">
+            <label>授权本地工具组（M5:对应 9 个 I*Tool 接口）</label>
+            <div
+              id="rd-tools"
+              style="
+                border: 1px solid var(--border-color);
+                border-radius: 6px;
+                padding: 8px;
+                max-height: 280px;
+                overflow-y: auto;
+              "
+            >
+              加载中...
+            </div>
           </div>
 
           <div class="form-group">

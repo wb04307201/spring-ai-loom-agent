@@ -28,6 +28,7 @@ const API = {
   deleteConversation: (id) => `/spring/ai/loom/conversation/${id}`,
   stream: "/spring/ai/loom/stream",
   listMcps: "/spring/ai/loom/mcps",
+  listCapabilities: "/spring/ai/loom/api/capabilities",
   // mcpTools 用 query string 而不是 path variable，避免 name 含 "/" 时
   // Tomcat 把 "%2F" 当 "/" 拆路径，导致 404（实测：
   // "spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch" 调不通）
@@ -76,7 +77,9 @@ const state = {
   userType: null, // 'ADMIN' / 'USER'
   conversationId: null,
   conversationTitle: null, // tracks the current conversation's title to gate auto-rename
-  selectedMcps: [],
+  selectedMcps: [],      // legacy MCP checkbox state(向后兼容;新面板用 capabilities + selectedToolGroups)
+  capabilities: [],     // M5:统一 capability 列表(本地 tool group + MCP server),从 /api/capabilities 拉
+  selectedToolGroups: [], // M5:用户在前端勾选的本地 tool group 名列表(纯 group_name,如 "tool_file")
   enabledKnowledgeIds: [],
   selectedSkill: null, // {name, description} | null，用户通过 / 命令精准选中的 Skill
   isStreaming: false,
@@ -1631,6 +1634,8 @@ const chat = {
       message: text,
       conversationId: state.conversationId,
       mcps: state.selectedMcps,
+      // M5:本地 tool group 勾选状态(空 = 信任角色授权全集)
+      enabledToolGroups: state.selectedToolGroups.length > 0 ? state.selectedToolGroups : null,
       enabledKnowledgeIds:
         state.enabledKnowledgeIds.length > 0 ? state.enabledKnowledgeIds : null,
       fileIds:
@@ -3478,7 +3483,12 @@ const mcp = {
 
   openModal() {
     ui.showModal("mcp-modal-overlay");
-    this.renderModal();
+    // 打开时如果还没加载(初次或登录后),异步拉一次再渲染
+    if (state.capabilities.length === 0) {
+      this.loadList().then(() => this.renderModal());
+    } else {
+      this.renderModal();
+    }
   },
 
   closeModal() {
@@ -3489,48 +3499,63 @@ const mcp = {
     const container = document.getElementById("mcp-list");
     const detail = document.getElementById("mcp-detail");
     detail.innerHTML =
-      '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个MCP服务查看详情</p></div>';
+      '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 16px; margin-bottom: 8px;">请选择一个能力查看详情</p></div>';
 
-    if (state.mcps.length === 0) {
+    if (state.capabilities.length === 0) {
       container.innerHTML =
-        '<div style="padding: 20px; text-align: center; color: var(--text-muted);">暂无可用MCP服务</div>';
+        '<div style="padding: 20px; text-align: center; color: var(--text-muted);">暂无可用能力</div>';
       return;
     }
     container.innerHTML = "";
-    for (const m of state.mcps) {
+    for (const c of state.capabilities) {
       const item = document.createElement("div");
-      item.className =
-        "skill-item" + (state.selectedMcps.includes(m.name) ? " selected" : "");
+      const checked = c.type === "LOCAL"
+        ? state.selectedToolGroups.includes(c.id)
+        : state.selectedMcps.includes(c.id);
+      const enabled = c.effectiveEnabled === true;
+      item.className = "skill-item" + (checked ? " selected" : "") + (enabled ? "" : " disabled");
+      // 类型徽章:本地(M5 前是 MCP 唯一,现在要区分)
+      const badge = c.type === "LOCAL"
+        ? '<span style="background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px;">本地</span>'
+        : '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px;">MCP</span>';
       item.innerHTML = `
  <div style="display: flex; align-items: center; gap: 12px;">
- <input type="checkbox" ${state.selectedMcps.includes(m.name) ? "checked" : ""} style="width: 18px; height: 18px; cursor: pointer;" class="mcp-checkbox">
- <div class="mcp-item-text" style="flex: 1; cursor: pointer;">
- <div class="skill-item-name">${m.title || m.name}</div>
+ <input type="checkbox" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"} style="width: 18px; height: 18px; cursor: ${enabled ? "pointer" : "not-allowed"};" class="mcp-checkbox">
+ <div class="mcp-item-text" style="flex: 1; cursor: ${enabled ? "pointer" : "not-allowed"};">
+ <div class="skill-item-name">${c.title || c.name}${badge}</div>
+ <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${c.description || ""}</div>
  </div>
  </div>`;
       item.querySelector(".mcp-checkbox").addEventListener("click", (e) => {
         e.stopPropagation();
-        this.toggleSelect(m.name, item);
+        if (!enabled) return;
+        this.toggleSelect(c.id, item);
       });
       item
         .querySelector(".mcp-item-text")
-        .addEventListener("click", () => this.showDetail(m));
+        .addEventListener("click", () => {
+          if (!enabled) return;
+          this.showDetail(c);
+        });
       container.appendChild(item);
     }
   },
 
-  toggleSelect(name, element) {
-    const idx = state.selectedMcps.indexOf(name);
+  toggleSelect(id, element) {
+    // id 是 capability id(本地用 "tool_xxx",MCP 用 live client name)
+    const isLocal = id.startsWith("tool_");
+    const arr = isLocal ? state.selectedToolGroups : state.selectedMcps;
+    const idx = arr.indexOf(id);
     if (idx >= 0) {
-      state.selectedMcps.splice(idx, 1);
+      arr.splice(idx, 1);
       element.classList.remove("selected");
     } else {
-      state.selectedMcps.push(name);
+      arr.push(id);
       element.classList.add("selected");
     }
     this._savePersisted();
     showToast(
-      `已${state.selectedMcps.includes(name) ? "选中" : "取消"}MCP服务`,
+      `已${arr.includes(id) ? "选中" : "取消"}能力`,
       "success",
     );
   },
@@ -3580,26 +3605,39 @@ const mcp = {
 
   async loadList() {
     try {
-      const data = await api.listMcps();
+      // M5:从 /api/capabilities 拉统一列表(本地 tool group + MCP server,带 type)
+      const resp = await apiFetch(API.listCapabilities);
+      const data = await resp.json();
       if (data && data.length > 0) {
-        state.mcps = data;
-        // Restore persisted selection if available; otherwise use defaults.
-        // Filter against current server list so deleted servers don't linger. (BUG-MCP-PERSIST)
-        const validNames = new Set(data.map((m) => m.name));
+        state.capabilities = data;
+        // 兼容:state.mcps 保留原 MCP 列表,供详情面板 / 其他遗留代码用
+        state.mcps = data.filter((c) => c.type === "MCP");
+        // 按 id 拆分:tool_* 进 selectedToolGroups,其他(MCP live name)进 selectedMcps
+        const toolIds = data.filter((c) => c.type === "LOCAL").map((c) => c.id);
+        const mcpIds = data.filter((c) => c.type === "MCP").map((c) => c.id);
         const persisted = this._loadPersisted();
         if (persisted && persisted.length > 0) {
-          state.selectedMcps = persisted.filter((n) => validNames.has(n));
+          state.selectedToolGroups = persisted.filter((n) => toolIds.includes(n));
+          state.selectedMcps = persisted.filter((n) => mcpIds.includes(n));
         } else {
-          state.selectedMcps = data
-            .filter((m) => m.defaultSelected)
-            .map((m) => m.name);
+          // 默认:effectiveEnabled=true 的全勾(角色授权的都能用)
+          state.selectedToolGroups = toolIds.filter((id) => {
+            const c = data.find((x) => x.id === id);
+            return c && c.effectiveEnabled === true;
+          });
+          state.selectedMcps = mcpIds.filter((id) => {
+            const c = data.find((x) => x.id === id);
+            return c && c.effectiveEnabled === true;
+          });
         }
         return;
       }
     } catch (e) {
-      console.warn("[mcp.loadList] failed:", e);
+      console.warn("[capability.loadList] failed:", e);
     }
+    state.capabilities = [];
     state.mcps = [];
+    state.selectedToolGroups = [];
     state.selectedMcps = [];
   },
 };

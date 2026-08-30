@@ -10,6 +10,10 @@
       `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/mcps`,
     setMcps: (code) =>
       `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/mcps`,
+    getTools: (code) =>
+      `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/tools`,
+    setTools: (code) =>
+      `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/tools`,
     getSkills: (code) =>
       `/spring/ai/loom/admin/roles/${encodeURIComponent(code)}/skills`,
     setSkills: (code) =>
@@ -212,6 +216,8 @@
   // 后端 /admin/roles/{code}/mcps 直接返回 RoleMcpItem 列表
   let currentAllowed = [];
   let currentSystemMcps = []; // 系统全部 mcp 视图
+  // M5:当前 role 授权的本地 tool group({groupName, defaultEnabled})
+  let currentAllowedTools = [];
   // 技能授权
   // currentRoleSkills = [{marketSkillId, defaultLoaded}, ...]
   let currentRoleSkills = [];
@@ -243,6 +249,7 @@
     document.getElementById("rd-desc").value = "";
     document.getElementById("rd-error").style.display = "none";
     document.getElementById("rd-mcps").innerHTML = "加载中...";
+    document.getElementById("rd-tools").innerHTML = "加载中...";
     document.getElementById("rd-skills").innerHTML = "加载中...";
     document.getElementById("rd-knowledge").innerHTML = "加载中...";
     document.getElementById("role-detail-modal").style.display = "flex";
@@ -252,6 +259,7 @@
         allRoles,
         allowed,
         system,
+        roleTools,
         roleSkills,
         market,
         roleKnowledge,
@@ -260,6 +268,8 @@
         (await fetch(API.list, { credentials: "include" })).json(),
         (await fetch(API.getMcps(code), { credentials: "include" })).json(),
         loadAllSystemMcps(),
+        (await fetch(API.getTools(code), { credentials: "include" })).json()
+          .catch(() => []),
         (await fetch(API.getSkills(code), { credentials: "include" }))
           .json()
           .catch(() => []),
@@ -280,6 +290,7 @@
       document.getElementById("rd-desc").value = role.description || "";
       currentSystemMcps = system;
       currentAllowed = allowed || [];
+      currentAllowedTools = roleTools || [];
       currentRoleSkills = (roleSkills || []).map((it) => ({
         marketSkillId: it.marketSkillId,
         defaultLoaded: it.defaultLoaded !== false,
@@ -291,6 +302,7 @@
       }));
       currentMarketKnowledge = marketKnowledge || [];
       renderRoleMcpList();
+      renderRoleToolList();
       renderRoleSkillList();
       renderRoleKnowledgeList();
     } catch (e) {
@@ -308,6 +320,124 @@
    * ② 下方：未授权 mcp（按名称排序）—— 仅显示名称 + 维护状态 + 「添加授权」按钮
    * currentAllowed = [{name, defaultEnabled}, ...]，需同步维护。
    */
+  // M5:本地 tool group 是 LoomAgentConfiguration 硬编码的 9 个 I*Tool 接口
+  // (由 @ToolGroup 注解 + IEmbedTool 派生)。这里静态列出供 admin 授权。
+  // 跟 server 端 CapabilityService 拼 slug 的规则一致("tool_" + @ToolGroup value)。
+  const KNOWN_TOOL_GROUPS = [
+    { groupName: "tool_time", title: "时间", description: "getCurrentTime / convertTime" },
+    { groupName: "tool_file", title: "文件", description: "readTextFile / writeFile / listDirectory / editFile 等 16 个工具" },
+    { groupName: "tool_skill", title: "技能", description: "getSkill / createOrUpdateSkill" },
+    { groupName: "tool_knowledge", title: "知识库", description: "searchKnowledge 在指定 KB 中向量检索" },
+    { groupName: "tool_git", title: "Git", description: "gitInit / gitStatus / gitCommit / gitClone 等 28 个 git 命令" },
+    { groupName: "tool_maven", title: "Maven", description: "mavenBuild / mavenPackage / mavenTest / mavenValidate 等 6 个 mvn 命令" },
+    { groupName: "tool_compile", title: "项目部署", description: "compileAndDeploy (端到端 git clone → build → docker)" },
+    { groupName: "tool_subtask", title: "子任务", description: "start_sub_task / list_sub_tasks / cancel_sub_task / get_sub_task_history" },
+    { groupName: "tool_schedule", title: "定时", description: "create / cancel / list / history 定时任务" },
+  ];
+
+  function renderRoleToolList() {
+    const container = document.getElementById("rd-tools");
+    if (!KNOWN_TOOL_GROUPS || KNOWN_TOOL_GROUPS.length === 0) {
+      container.innerHTML = '<div style="color: var(--text-muted); padding: 8px;">无可用工具</div>';
+      return;
+    }
+    const allowed = currentAllowedTools.map((it) => ({
+      it,
+      g: KNOWN_TOOL_GROUPS.find((x) => x.groupName === it.groupName),
+    })).filter((p) => p.g);
+    const notAllowed = KNOWN_TOOL_GROUPS.filter(
+      (g) => !currentAllowedTools.some((it) => it.groupName === g.groupName)
+    );
+
+    const allowedHtml = allowed.length === 0
+      ? '<div style="color: var(--text-muted); font-size: 12px; padding: 8px;">尚未授权任何本地工具。点击下方"添加授权"加入。</div>'
+      : allowed.map(({ it, g }, idx) => {
+          const defaultSel = it.defaultEnabled !== false;
+          const isFirst = idx === 0;
+          const isLast = idx === allowed.length - 1;
+          return `<div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-color); background: #f0fdf4;">
+ <span style="width: 24px; text-align: center; color: var(--text-muted); font-size: 12px;">${idx + 1}.</span>
+ <span style="flex: 1;">
+ <div style="font-weight: 500; font-size: 13px;">${escapeHtml(g.title)}<span class="type-badge" style="background:#dbeafe;color:#1e40af;margin-left:6px;">本地</span></div>
+ <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(g.groupName)} — ${escapeHtml(g.description)}</div>
+ </span>
+ <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; user-select: none;">
+ <input type="checkbox" class="default-tool-cb" data-tool-name="${escapeHtml(g.groupName)}" ${defaultSel ? "checked" : ""}>
+ <strong>默认启用</strong>
+ </label>
+ <span style="display: flex; flex-direction: column; gap: 2px;">
+ <button class="secondary-btn tool-up-btn" data-idx="${idx}" style="padding: 0 6px; font-size: 11px;" ${isFirst ? "disabled" : ""}>↑</button>
+ <button class="secondary-btn tool-down-btn" data-idx="${idx}" style="padding: 0 6px; font-size: 11px;" ${isLast ? "disabled" : ""}>↓</button>
+ </span>
+ <button class="secondary-btn remove-tool-btn" data-tool-name="${escapeHtml(g.groupName)}" style="padding: 4px 8px; font-size: 12px; color: var(--error-color, #ef4444);">移除</button>
+ </div>`;
+        }).join("");
+
+    const notAllowedHtml = notAllowed.length === 0
+      ? '<div style="color: var(--text-muted); font-size: 12px; padding: 8px;">所有本地工具都已授权。</div>'
+      : notAllowed.map((g) => {
+          return `<div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border-color);">
+ <span style="flex: 1;">
+ <div style="font-weight: 500; font-size: 13px;">${escapeHtml(g.title)}<span class="type-badge" style="background:#dbeafe;color:#1e40af;margin-left:6px;">本地</span></div>
+ <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(g.groupName)} — ${escapeHtml(g.description)}</div>
+ </span>
+ <button class="primary-btn add-tool-btn" data-tool-name="${escapeHtml(g.groupName)}" style="padding: 4px 12px; font-size: 12px;">添加授权</button>
+ </div>`;
+        }).join("");
+
+    container.innerHTML = `
+ <div style="margin-bottom: 6px; font-size: 12px; color: var(--text-muted);">① 已授权本地工具（${allowed.length}）</div>
+ <div id="rd-tools-allowed-list" style="border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 16px; max-height: 280px; overflow-y: auto;">${allowedHtml}</div>
+ <div style="margin-bottom: 6px; font-size: 12px; color: var(--text-muted);">② 可选本地工具（${notAllowed.length}）</div>
+ <div id="rd-tools-available-list" style="border: 1px solid var(--border-color); border-radius: 6px; max-height: 220px; overflow-y: auto;">${notAllowedHtml}</div>
+ `;
+
+    // 事件绑定：default toggle、上下移、移除、添加
+    const allowedBox = container.querySelector("#rd-tools-allowed-list");
+    const availBox = container.querySelector("#rd-tools-available-list");
+    allowedBox.querySelectorAll(".default-tool-cb[data-tool-name]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const name = cb.getAttribute("data-tool-name");
+        const it = currentAllowedTools.find((x) => x.groupName === name);
+        if (it) it.defaultEnabled = cb.checked;
+      });
+    });
+    allowedBox.querySelectorAll(".remove-tool-btn[data-tool-name]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const name = b.getAttribute("data-tool-name");
+        currentAllowedTools = currentAllowedTools.filter((x) => x.groupName !== name);
+        renderRoleToolList();
+      });
+    });
+    allowedBox.querySelectorAll(".tool-up-btn[data-idx]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const i = parseInt(b.getAttribute("data-idx"), 10);
+        if (i > 0) {
+          [currentAllowedTools[i - 1], currentAllowedTools[i]] = [currentAllowedTools[i], currentAllowedTools[i - 1]];
+          renderRoleToolList();
+        }
+      });
+    });
+    allowedBox.querySelectorAll(".tool-down-btn[data-idx]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const i = parseInt(b.getAttribute("data-idx"), 10);
+        if (i < currentAllowedTools.length - 1) {
+          [currentAllowedTools[i + 1], currentAllowedTools[i]] = [currentAllowedTools[i], currentAllowedTools[i + 1]];
+          renderRoleToolList();
+        }
+      });
+    });
+    availBox.querySelectorAll(".add-tool-btn[data-tool-name]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const name = b.getAttribute("data-tool-name");
+        if (!currentAllowedTools.some((x) => x.groupName === name)) {
+          currentAllowedTools.push({ groupName: name, defaultEnabled: true });
+          renderRoleToolList();
+        }
+      });
+    });
+  }
+
   function renderRoleMcpList() {
     const container = document.getElementById("rd-mcps");
     if (!currentSystemMcps || currentSystemMcps.length === 0) {
@@ -450,8 +580,13 @@
       marketKnowledgeId: it.marketKnowledgeId,
       defaultEnabled: it.defaultEnabled !== false,
     }));
+    // M5:本地 tool group 授权
+    const toolItems = currentAllowedTools.map((it) => ({
+      groupName: it.groupName,
+      defaultEnabled: it.defaultEnabled !== false,
+    }));
     try {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4] = await Promise.all([
         fetch(API.setMcps(code), {
           method: "PUT",
           credentials: "include",
@@ -470,10 +605,16 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ items: knowledgeItems }),
         }),
+        fetch(API.setTools(code), {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: toolItems }),
+        }),
       ]);
-      if (r1.ok && r2.ok && r3.ok) {
+      if (r1.ok && r2.ok && r3.ok && r4.ok) {
         showToast(
-          `已保存：${mcpItems.length} 项 MCP + ${skillItems.length} 项技能 + ${knowledgeItems.length} 项知识库`,
+          `已保存：${mcpItems.length} 项 MCP + ${skillItems.length} 项技能 + ${knowledgeItems.length} 项知识库 + ${toolItems.length} 项本地工具`,
           "success",
         );
         closeDetail();
@@ -483,7 +624,9 @@
           ? await r1.text()
           : !r2.ok
             ? await r2.text()
-            : await r3.text();
+            : !r3.ok
+              ? await r3.text()
+              : await r4.text();
         showRdError("保存失败：" + (t || "HTTP"));
       }
     } catch (e) {
