@@ -94,12 +94,18 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
                     }
                     lastResponse[0] = resp;
                 })
-                // doFinally 替代 doOnComplete：流无论以 ON_COMPLETE / ON_ERROR / CANCEL
-                // 哪种 signal 结束都触发。这样即使将来再有别的 edge case 让流 errored，
-                // 至少把已累积的 assistant text + USER 消息写进 chat memory，
-                // 避免用户提问因框架 bug 而丢失上下文。
-                // 保留 P9 修复目标（每个会话恰好 1 行 USER + 1 行 ASSISTANT）。
+                // M5 修 doFinally 副作用:doFinally 不区分 ON_COMPLETE / ON_ERROR / CANCEL
+                // —— 上游 error 时它也会触发,导致 partial 文本被持久化(测试 failing)。
+                // 用 reactor.core.publisher.Signal.isOnComplete() 区分:
+                //   - ON_COMPLETE → 正常完成 → 写库(每个会话 1 行 USER + 1 行 ASSISTANT)
+                //   - ON_ERROR     → 上游异常 → 不写(避免 partial 文本持久化)
+                //   - CANCEL       → 用户/框架主动取消 → 不写
                 .doFinally(signal -> {
+                    if (signal != reactor.core.publisher.SignalType.ON_COMPLETE) {
+                        log.debug("LastChunkAdvisor: stream terminated with {} for conv={}, skip write",
+                                signal, conversationId);
+                        return;
+                    }
                     if (lastResponse[0] == null) {
                         log.debug("LastChunkAdvisor: empty stream, skip write for conv={}", conversationId);
                         return;
@@ -108,8 +114,8 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
                     AssistantMessage fullAssistant = new AssistantMessage(fullText);
                     try {
                         doWriteMemory(lastResponse[0].context(), request, fullAssistant);
-                        log.info("LastChunkAdvisor wrote memory once for conv={}, assistantTextLen={}, signal={}",
-                                conversationId, fullText.length(), signal);
+                        log.info("LastChunkAdvisor wrote memory once for conv={}, assistantTextLen={}",
+                                conversationId, fullText.length());
                     } catch (Exception e) {
                         log.warn("LastChunkAdvisor write failed for conv={}: {}", conversationId, e.getMessage());
                     }
