@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "methodTraceLog-mcp": {
+      "command": "jbang",
+      "args": [
+        "./methodTraceLog-mcp/target/methodTraceLog-mcp-1.0-SNAPSHOT.jar",
+        "--method-trace-log.mcp.hosts[0].name=local-dev",
+        "--method-trace-log.mcp.hosts[0].url=http://localhost:8085",
+        "--method-trace-log.mcp.hosts[0].description=本地开发",
+        "--method-trace-log.mcp.hosts[0].api-key=change-me-in-production"
+      ]
+    }
+  }
+}

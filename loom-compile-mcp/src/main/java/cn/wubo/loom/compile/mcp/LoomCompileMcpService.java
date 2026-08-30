@@ -4,7 +4,7 @@ import cn.wubo.loom.compile.core.CompileAndDeployOperations;
 import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.loom.compile.core.CompileConfig;
 import cn.wubo.loom.compile.core.ImageTemplate;
-import org.springframework.ai.tool.annotation.Tool;
+import org.springaicommunity.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.nio.file.Path;
@@ -42,7 +42,7 @@ public class LoomCompileMcpService {
         this.operations = new CompileAndDeployOperations(props.getMavenHome(), config);
     }
 
-    @Tool(description = "端到端编译部署：git clone → 构建 → docker build → docker run → 健康检查。"
+    @McpTool(name = "compile_and_deploy", description = "端到端编译部署：git clone → 构建 → docker build → docker run → 健康检查。"
             + "一次调用完成整个部署流水线。")
     public String compileAndDeploy(
             @ToolParam(description = "参数 Map，包含：gitUrl（必填）、port（必填）、containerPort（必填）、"

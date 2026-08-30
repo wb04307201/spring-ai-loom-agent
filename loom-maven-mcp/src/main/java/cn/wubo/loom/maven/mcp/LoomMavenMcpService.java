@@ -1,7 +1,7 @@
 package cn.wubo.loom.maven.mcp;
 
 import cn.wubo.loom.maven.core.MavenOperations;
-import org.springframework.ai.tool.annotation.Tool;
+import org.springaicommunity.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.io.File;
@@ -29,7 +29,7 @@ public class LoomMavenMcpService {
         );
     }
 
-    @Tool(description = "执行 Maven 命令（通用入口）。可指定任意 goals，如 clean、package、dependency:tree 等。")
+    @McpTool(name = "maven_execute", description = "执行 Maven 命令（通用入口）。可指定任意 goals，如 clean、package、dependency:tree 等。")
     public String mavenExecute(
             @ToolParam(description = "Maven goals 列表，如 [\"clean\", \"package\"]") List<String> goals,
             @ToolParam(description = "pom.xml 路径（相对或绝对）", required = false) String pomPath,
@@ -41,7 +41,7 @@ public class LoomMavenMcpService {
         return mavenOps.execute(goals, workDir, pomFile, properties, timeoutMs);
     }
 
-    @Tool(description = "编译项目（mvn compile）")
+    @McpTool(name = "maven_build", description = "编译项目（mvn compile）")
     public String mavenBuild(
             @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
             @ToolParam(description = "工作目录", required = false) String workingDir,
@@ -57,7 +57,7 @@ public class LoomMavenMcpService {
         return mavenOps.execute(goals, workDir, pomFile, props.isEmpty() ? null : props, null);
     }
 
-    @Tool(description = "打包项目（mvn package），默认跳过测试")
+    @McpTool(name = "maven_package", description = "打包项目（mvn package），默认跳过测试")
     public String mavenPackage(
             @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
             @ToolParam(description = "工作目录", required = false) String workingDir,
@@ -73,7 +73,7 @@ public class LoomMavenMcpService {
         return mavenOps.execute(goals, workDir, pomFile, props.isEmpty() ? null : props, null);
     }
 
-    @Tool(description = "运行单元测试（mvn test）")
+    @McpTool(name = "maven_test", description = "运行单元测试（mvn test）")
     public String mavenTest(
             @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
             @ToolParam(description = "工作目录", required = false) String workingDir,
@@ -89,7 +89,7 @@ public class LoomMavenMcpService {
         return mavenOps.execute(goals, workDir, pomFile, props.isEmpty() ? null : props, null);
     }
 
-    @Tool(description = "查看依赖树（mvn dependency:tree）")
+    @McpTool(name = "maven_dependency_tree", description = "查看依赖树（mvn dependency:tree）")
     public String mavenDependencyTree(
             @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
             @ToolParam(description = "工作目录", required = false) String workingDir,
@@ -105,7 +105,7 @@ public class LoomMavenMcpService {
         return mavenOps.execute(goals, workDir, pomFile, props, null);
     }
 
-    @Tool(description = "验证项目结构（mvn validate）")
+    @McpTool(name = "maven_validate", description = "验证项目结构（mvn validate）")
     public String mavenValidate(
             @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
             @ToolParam(description = "工作目录", required = false) String workingDir) {
