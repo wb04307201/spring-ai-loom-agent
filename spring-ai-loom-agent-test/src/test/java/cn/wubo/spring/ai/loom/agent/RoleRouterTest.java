@@ -52,7 +52,8 @@ class RoleRouterTest {
                 mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
                 roleService,
                 mock(IMcpServerAdmin.class),
-                mock(JdbcTemplate.class));
+                mock(JdbcTemplate.class),
+                mock(cn.wubo.spring.ai.loom.agent.capability.CapabilityService.class));
     }
 
     @AfterEach

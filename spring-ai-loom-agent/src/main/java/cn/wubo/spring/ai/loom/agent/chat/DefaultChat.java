@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.chat;
 
+import cn.wubo.spring.ai.loom.agent.capability.CapabilityService;
 import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
@@ -39,12 +40,14 @@ public class DefaultChat implements IChat {
  private final ISkillStorage skillStorage;
  private final IKnowledge knowledge;
  private final LoomAgentProperties properties;
+ private final CapabilityService capabilityService;
 
  public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
                     IUserConversation userConversation, IFile file,
                     ISkillStorage skillStorage, IKnowledge knowledge,
                     LoomAgentProperties properties,
-                    cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository) {
+                    cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
+                    CapabilityService capabilityService) {
   this.chatClient = chatClient;
   this.mcp = mcp;
   this.embedTools = embedTools;
@@ -54,6 +57,7 @@ public class DefaultChat implements IChat {
   this.knowledge = knowledge;
   this.properties = properties;
   this.toolCallLogRepository = toolCallLogRepository;
+  this.capabilityService = capabilityService;
  }
 
  private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
@@ -133,7 +137,35 @@ public class DefaultChat implements IChat {
   // （写 obs-* 前缀），Spring AI 1.1.7 DashScope 流式 chunk 让 onStart+onStop 各写一次 → 12 次真实
   // 工具调用 → 84 行 DB。统一用 LoggingToolCallback（write wrap-* + unique 约束）后
   // DB 行数 = 真实调用次数。
-  ToolCallback[] embedToolCallbacks = cn.wubo.spring.ai.loom.agent.tool.ToolCallbacks.from(embedTools.toArray());
+  //
+  // M3 起加 RBAC + 用户勾选过滤（M4）：
+  //  - role_auth = CapabilityService 给出的"该用户角色授权的 tool_xxx 集合"
+  //  - user_pick = ChatRequestRecord 里前端勾选的 group_name（暂未实现字段，null = 信任角色授权全集）
+  //  - visible = role_auth ∩ user_pick（user_pick 为空时取 role_auth）
+  //  - bean.id 是 "tool_" + @ToolGroup value；过滤时 @ToolGroup("file") → group_name = "tool_file"
+  //  - 没有 role 授权 → visibleTools 为空 → wrappedEmbedTools 为空 → LLM 看不到任何 tool
+  java.util.Set<String> visibleToolGroups = capabilityService.allowedCapabilityIdsFor(
+          username,
+          chatRequestRecord.enabledToolGroups() == null || chatRequestRecord.enabledToolGroups().isEmpty()
+                  ? new java.util.HashSet<>(capabilityService.visibleToolGroupsFor(username))  // 旧路径:不传 enabledToolGroups 则用角色全集
+                  : new java.util.HashSet<>(chatRequestRecord.enabledToolGroups())  // 新路径:∩ user_pick
+  );
+  log.debug("DefaultChat username={} visibleToolGroups={}", username, visibleToolGroups);
+  java.util.List<IEmbedTool> filteredEmbedTools = embedTools.stream()
+          .filter(t -> {
+              // 找带 @ToolGroup 注解的接口(可能在多层接口里)
+              Class<?> iface = null;
+              for (Class<?> i : t.getClass().getInterfaces()) {
+                  if (i.isAnnotationPresent(cn.wubo.spring.ai.loom.agent.tool.ToolGroup.class)) { iface = i; break; }
+              }
+              if (iface == null) return true; // 没标 @ToolGroup 的 bean 强制通过（兼容老实现）
+              cn.wubo.spring.ai.loom.agent.tool.ToolGroup ann = iface.getAnnotation(cn.wubo.spring.ai.loom.agent.tool.ToolGroup.class);
+              if (ann == null) return true;
+              return visibleToolGroups.contains("tool_" + ann.value());
+          })
+          .toList();
+
+  ToolCallback[] embedToolCallbacks = cn.wubo.spring.ai.loom.agent.tool.ToolCallbacks.from(filteredEmbedTools.toArray());
   ToolCallback[] wrappedEmbedTools = new ToolCallback[embedToolCallbacks.length];
   for (int i = 0; i < embedToolCallbacks.length; i++) {
    wrappedEmbedTools[i] = new cn.wubo.spring.ai.loom.agent.tool.LoggingToolCallback(

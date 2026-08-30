@@ -48,7 +48,8 @@ class AdminRouterSpotTest {
         router = new LoomAgentConfiguration.WebConfiguration().loomAgentBaseRouter(
                 user, new LoomAgentProperties(), mock(IUserConversation.class), chatUsageService,
                 mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
-                mock(IRoleService.class), mock(IMcpServerAdmin.class), mock(JdbcTemplate.class));
+                mock(IRoleService.class), mock(IMcpServerAdmin.class), mock(JdbcTemplate.class),
+                mock(cn.wubo.spring.ai.loom.agent.capability.CapabilityService.class));
     }
 
     @AfterEach
