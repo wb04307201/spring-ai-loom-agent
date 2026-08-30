@@ -194,7 +194,7 @@
       const r = await fetch(API.create, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
         body: JSON.stringify({ code, name, description: desc }),
       });
       if (!r.ok) {
@@ -596,25 +596,25 @@
         fetch(API.setMcps(code), {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
           body: JSON.stringify({ items: mcpItems }),
         }),
         fetch(API.setSkills(code), {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
           body: JSON.stringify({ items: skillItems }),
         }),
         fetch(API.setKnowledge(code), {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
           body: JSON.stringify({ items: knowledgeItems }),
         }),
         fetch(API.setTools(code), {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
           body: JSON.stringify({ items: toolItems }),
         }),
       ]);

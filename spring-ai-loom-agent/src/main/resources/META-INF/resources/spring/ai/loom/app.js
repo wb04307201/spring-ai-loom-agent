@@ -366,7 +366,7 @@ const api = {
   async autoLogin() {
     const r = await fetch(API.autoLogin, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       credentials: "include",
     });
     if (r.status === 401) return false;
@@ -375,7 +375,7 @@ const api = {
   async login(req) {
     const r = await fetch(API.login, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       credentials: "include",
       body: JSON.stringify(req),
     });
@@ -417,7 +417,7 @@ const api = {
   async changePassword(oldPassword, newPassword) {
     const r = await fetch(API.changePassword, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       credentials: "include",
       body: JSON.stringify({ oldPassword, newPassword }),
     });
@@ -448,7 +448,7 @@ const api = {
   async createConversation(title = "新对话") {
     const r = await apiFetch(API.createConversation, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({ title }),
     });
     return r.ok ? r.json() : null;
@@ -456,7 +456,7 @@ const api = {
   async renameConversation(id, title) {
     const r = await apiFetch(API.renameConversation(id), {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({ title }),
     });
     if (r.status === 403) {
@@ -501,7 +501,7 @@ const api = {
   async upsertSkill(skill) {
     const r = await apiFetch("/spring/ai/loom/skill/upsert", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(skill),
     });
     if (!r.ok) {
@@ -517,7 +517,7 @@ const api = {
   async createSkill(skill) {
     const r = await apiFetch(API.createSkill, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(skill),
     });
     return r.ok ? r.json() : null;
@@ -525,7 +525,7 @@ const api = {
   async updateSkill(skill) {
     const r = await apiFetch(API.updateSkill, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(skill),
     });
     return r.ok ? r.json() : null;
@@ -539,7 +539,7 @@ const api = {
   async patchSkill(name, body) {
     const r = await apiFetch(API.patchSkill(name), {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(body),
     });
     return r.ok ? r.json() : null;
@@ -557,7 +557,7 @@ const api = {
   async submitMarketSkill(body) {
     const r = await apiFetch(API.submitMarketSkill, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error((await r.text()) || "HTTP " + r.status);
@@ -580,7 +580,7 @@ const api = {
   async createKnowledge(name, description) {
     const r = await apiFetch(API.createKnowledge, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({ name, description }),
     });
     return r.ok ? r.json() : null;
@@ -592,7 +592,7 @@ const api = {
   async updateKnowledge(id, name, description) {
     const r = await apiFetch(API.updateKnowledge(id), {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({ name, description }),
     });
     if (r.ok) return { ok: true };
@@ -726,7 +726,7 @@ const api = {
   async cancelSchedule(fullName) {
     const r = await apiFetch("/spring/ai/loom/schedule/cancel", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify({ name: fullName }),
     });
     return r.ok;
@@ -768,7 +768,7 @@ const api = {
   async streamChat(record, onChunk, onComplete, onError, signal) {
     const resp = await apiFetch(API.stream, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       body: JSON.stringify(record),
       signal,
     });

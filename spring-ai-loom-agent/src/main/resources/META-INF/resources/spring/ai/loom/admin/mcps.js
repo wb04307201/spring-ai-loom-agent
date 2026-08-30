@@ -239,7 +239,7 @@
       const r = await fetch(API.update(name), {
         method: "PUT",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
         body: JSON.stringify(body),
       });
       if (!r.ok) {
@@ -267,7 +267,7 @@
           fetch(API.updateTool(id), {
             method: "PUT",
             credentials: "include",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json; charset=UTF-8" },
             body: JSON.stringify({
               mcpName: mcpName,
               name: toolName,

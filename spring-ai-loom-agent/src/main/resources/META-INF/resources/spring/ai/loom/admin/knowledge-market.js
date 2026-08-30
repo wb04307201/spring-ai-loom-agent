@@ -17,7 +17,7 @@
       credentials: "include",
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=UTF-8",
         ...(options.headers || {}),
       },
     });

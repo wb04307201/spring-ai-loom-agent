@@ -192,7 +192,7 @@
     try {
       const resp = await fetch("/spring/ai/loom/admin/users", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
         credentials: "include",
         body: JSON.stringify({ username, nickname, password, type }),
       });
@@ -263,7 +263,7 @@
   async function postJson(url, body) {
     const resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       credentials: "include",
       body: body ? JSON.stringify(body) : null,
     });
@@ -389,7 +389,7 @@
         {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
           body: JSON.stringify({ roleCodes: checked }),
         },
       );
