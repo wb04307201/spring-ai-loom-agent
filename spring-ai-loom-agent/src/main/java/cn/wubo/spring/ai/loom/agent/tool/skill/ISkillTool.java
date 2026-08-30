@@ -1,10 +1,12 @@
 package cn.wubo.spring.ai.loom.agent.tool.skill;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+@ToolGroup("skill")
 public interface ISkillTool extends IEmbedTool {
 
     @Tool(description = "根据技能名称获取详细的技能信息，包含技能名称、描述和完整内容。")

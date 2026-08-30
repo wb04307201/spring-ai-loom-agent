@@ -2,6 +2,7 @@ package cn.wubo.spring.ai.loom.agent.tool.compile;
 
 import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -40,6 +41,7 @@ import java.util.Map;
  * 把所有入参收成单个 {@code Map<String,Object>} 后，本工具用自带的预清洗
  * （剥离未平衡注释、尾随逗号）再解析，完全绕开 Spring AI 的脆弱路径。
  */
+@ToolGroup("compile")
 public interface ICompileAndDeployTool extends IEmbedTool {
 
     /**

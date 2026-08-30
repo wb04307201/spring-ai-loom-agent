@@ -1,11 +1,13 @@
 package cn.wubo.spring.ai.loom.agent.tool.maven;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.List;
 import java.util.Map;
 
+@ToolGroup("maven")
 /**
  * Maven 构建工具接口。
  * <p>

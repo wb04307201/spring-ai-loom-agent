@@ -1,10 +1,12 @@
 package cn.wubo.spring.ai.loom.agent.tool.git;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.List;
 
+@ToolGroup("git")
 public interface IGitTool extends IEmbedTool {
 
     // ==================== Repository lifecycle ====================

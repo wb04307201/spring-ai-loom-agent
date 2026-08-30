@@ -1,10 +1,12 @@
 package cn.wubo.spring.ai.loom.agent.tool.knowledge;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+@ToolGroup("knowledge")
 public interface IKnowledgeTool extends IEmbedTool {
 
     /**

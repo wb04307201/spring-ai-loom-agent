@@ -1,11 +1,13 @@
 package cn.wubo.spring.ai.loom.agent.tool.file;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.List;
 import java.util.Map;
 
+@ToolGroup("file")
 public interface IFileTool extends IEmbedTool {
 
     String readTextFile(String path, Integer head, Integer tail, ToolContext toolContext);

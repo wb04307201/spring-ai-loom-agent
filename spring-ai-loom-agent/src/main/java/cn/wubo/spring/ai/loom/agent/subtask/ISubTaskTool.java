@@ -1,6 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.subtask;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.ToolParam;
 
@@ -12,6 +13,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
  * final answer as a string for the main conversation to consume.
  * </p>
  */
+@ToolGroup("subtask")
 public interface ISubTaskTool extends IEmbedTool {
 
     /**
