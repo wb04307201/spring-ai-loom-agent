@@ -213,8 +213,10 @@ public class DefaultSkillStorage implements ISkillStorage {
 
     private void syncRoleSkills(String username, String roleCode) {
         // 查 role_skill JOIN market_skill
+        // m.version 已从 schema 移除(V1.0__init.sql 注释:market_skill.version 字段已移除),
+        // 这里不再 SELECT 它,避免 chat 端点 500。
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT r.market_skill_id AS mid, r.default_loaded AS def, m.id, m.name, m.description, m.content, m.version " +
+                "SELECT r.market_skill_id AS mid, r.default_loaded AS def, m.id, m.name, m.description, m.content " +
                         "FROM role_skill r JOIN market_skill m ON r.market_skill_id = m.id " +
                         "WHERE r.role_code = ?", roleCode);
         for (Map<String, Object> r : rows) {
