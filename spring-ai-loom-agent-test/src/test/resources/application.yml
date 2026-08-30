@@ -3,25 +3,15 @@ spring:
     url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY:dummy-test-key}
+      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
       chat:
-        enabled: false
         options:
           model: qwen3.8-max
           multi_model: true
           enable_thinking: true
       embedding:
-        enabled: false
         options:
           model: text-embedding-v4
-    anthropic:
-      api-key: ${MINIMAX_API_KEY:sk-test-dummy-key}
-      base-url: ${ANTHROPIC_BASE_URL:https://api.minimaxi.com/anthropic}
-      chat:
-        options:
-          model: MiniMax-M3
-      embedding:
-        enabled: false
 loom:
   agent:
     datasource-dir: ./target/test-ds

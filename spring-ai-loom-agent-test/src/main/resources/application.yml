@@ -31,39 +31,29 @@ spring:
 #      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
 #    zhipuai:
 #      api-key: ${ZHIPUAI_API_KEY}
-#    dashscope:
-#      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
-#      chat:
-#        enabled: false  # 禁用 DashScope ChatModel，只用 Anthropic
-#        options:
-#          model: qwen3.8-max
-#          multi_model: true
-#          enable_thinking: true
-#      embedding:
-#        options:
-#          model: text-embedding-v4
+    dashscope:
+      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
+      chat:
+        enabled: true
+        options:
+          model: qwen3.8-max
+          multi_model: true
+          enable_thinking: true
+      embedding:
+        options:
+          model: text-embedding-v4
 #    anthropic:
 #      api-key: ${NEW_API_KEY}
 #      base-url: http://123.56.128.32:3000
 #      chat:
 #        options:
 #          model: qwen3.7-plus
-    anthropic:
-      api-key: ${MINIMAX_API_KEY}
-      base-url: https://api.minimaxi.com/anthropic
-      chat:
-        options:
-          model: MiniMax-M3
-          thinking:
-            type: enabled
-      embedding:
-        enabled: false
-    ollama:
-      chat:
-        enabled: false
-      embedding:
-        options:
-          model: qwen3-embedding
+#    ollama:
+#      chat:
+#        enabled: false
+#      embedding:
+#        options:
+#          model: qwen3-embedding
 #    ollama:
 #      chat:
 #        options:

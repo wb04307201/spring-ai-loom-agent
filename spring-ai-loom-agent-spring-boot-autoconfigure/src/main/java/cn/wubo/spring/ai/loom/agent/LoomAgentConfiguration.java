@@ -104,8 +104,10 @@ import java.util.concurrent.CompletableFuture;
         "org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration",
         "org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration",
         "org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration",
-        "org.springframework.ai.model.minimax.autoconfigure.MiniMaxChatAutoConfiguration",
+        "org.springframework.ai.model.minimax.autoconfigure.MiniMaxEmbeddingAutoConfiguration",
         "org.springframework.ai.model.mistralai.autoconfigure.MistralAiChatAutoConfiguration",
+        // spring-ai-model 1.1.8 通过传递依赖保留 ollama starter;测试只跑 dashscope(chat + embedding),
+        // 这里 exclude OllamaChatAutoConfiguration 避免 ollamaChatModel 跟 dashScopeChatModel 撞。
         "org.springframework.ai.model.ollama.autoconfigure.OllamaChatAutoConfiguration",
         "org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration",
         "org.springframework.ai.model.bedrock.converse.autoconfigure.BedrockConverseProxyChatAutoConfiguration",
