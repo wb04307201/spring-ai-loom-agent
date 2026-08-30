@@ -54,6 +54,8 @@ spring:
       chat:
         options:
           model: MiniMax-M3
+          thinking:
+            type: enabled
       embedding:
         enabled: false
     ollama:
