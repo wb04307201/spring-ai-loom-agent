@@ -1797,6 +1797,13 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/admin/roles", request -> ServerResponse.ok().body(roleService.list()));
             builder.POST("spring/ai/loom/admin/roles", request -> {
                 cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest.class);
+                // P3.1:role.code 长度校验(DB VARCHAR 32)。超长返 400 而不是 500。
+                if (body.code() == null || body.code().length() > 32 || body.code().isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "role.code 必填且长度 1-32 字符"));
+                }
+                if (body.name() == null || body.name().isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "role.name 必填"));
+                }
                 try {
                     return ServerResponse.ok().body(roleService.create(body.code(), body.name(), body.description(), body.mcpNames()));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
