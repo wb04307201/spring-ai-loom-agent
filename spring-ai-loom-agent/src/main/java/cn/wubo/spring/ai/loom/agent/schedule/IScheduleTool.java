@@ -1,6 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.schedule;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.ToolParam;
 
@@ -17,6 +18,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
  * LLM-spawned schedules from outlasting their parent sub-task).
  * </p>
  */
+@ToolGroup(value = "schedule", defaultGranted = true, description = "create / cancel / list / history 定时任务(flex-schedule 持久化)")
 public interface IScheduleTool extends IEmbedTool {
 
     String createSchedule(

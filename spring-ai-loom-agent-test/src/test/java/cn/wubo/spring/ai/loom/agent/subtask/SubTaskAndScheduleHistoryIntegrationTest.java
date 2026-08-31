@@ -10,6 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.test.context.TestPropertySource;
 
 import java.time.Duration;
@@ -29,6 +31,7 @@ import static org.awaitility.Awaitility.await;
  * the sub-task shows up in {@link SubTaskRegistry#listHistory} and the
  * schedule's execution history increments.
  */
+@MockBean(VectorStore.class)  // 跳过 ollama 模型拉取(本地 ollama 经常没预 pull)
 @Slf4j
 @SpringBootTest(classes = LoomAgentTestApplication.class)
 @TestPropertySource(properties = {
@@ -37,7 +40,10 @@ import static org.awaitility.Awaitility.await;
         // they own their own DB lock.
         "spring.datasource.url=jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE",
         "spring.ai.loom.agent.file-base-path=./target/test-file-base",
-        "spring.ai.loom.agent.knowledge-base-path=./target/test-knowledge-base"
+        "spring.ai.loom.agent.knowledge-base-path=./target/test-knowledge-base",
+        // 本地 ollama 经常没预 pull mxbai-embed-large → 关闭 auto-pull 跳过拉取
+        // (测试不真正用 vector store,只是验证 sub-task / schedule 流程)
+        "spring.ai.vectorstore.jvector.auto-pull=false"
 })
 class SubTaskAndScheduleHistoryIntegrationTest {
 

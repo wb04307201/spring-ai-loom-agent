@@ -15,19 +15,23 @@ public record ChatRequestRecord(String message,
                                 List<String> mcps,
                                 List<String> enabledKnowledgeIds,
                                 List<String> fileIds,
-                                String selectedSkillName) {
+                                String selectedSkillName,
+                                List<String> enabledToolGroups) {
 
     /**
-     * 兼容旧调用方：未传 {@code selectedSkillName} 时为 {@code null}。
+     * 兼容旧调用方：未传 {@code selectedSkillName / enabledToolGroups} 时为 {@code null}。
      * <p>
-     * 该 5 参数构造器保留是为了不破坏既有代码（例如旧的测试 / 业务调用），它仅委托到 canonical 6 参数构造器，
-     * 并把 {@code selectedSkillName} 设为 {@code null}（等价于"无显式选中技能"）。
+     * 该 5 参数构造器保留是为了不破坏既有代码（例如旧的测试 / 业务调用），它仅委托到 canonical 7 参数构造器，
+     * 并把 {@code selectedSkillName / enabledToolGroups} 设为 {@code null}（等价于"无显式选中技能 / 全部启用"）。
+     * <p>
+     * {@code enabledToolGroups} 是 M4 引入的用户级勾选字段：null/空时 DefaultChat 信任角色授权全集,
+     * 非空时取交集。group_name 形式为 {@code "tool_<@ToolGroup value>"}（如 {@code "tool_file"}）。
      */
     public ChatRequestRecord(String message,
                              String conversationId,
                              List<String> mcps,
                              List<String> enabledKnowledgeIds,
                              List<String> fileIds) {
-        this(message, conversationId, mcps, enabledKnowledgeIds, fileIds, null);
+        this(message, conversationId, mcps, enabledKnowledgeIds, fileIds, null, null);
     }
 }

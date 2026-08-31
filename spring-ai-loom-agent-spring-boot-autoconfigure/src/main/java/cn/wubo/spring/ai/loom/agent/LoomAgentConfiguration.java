@@ -104,8 +104,10 @@ import java.util.concurrent.CompletableFuture;
         "org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration",
         "org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration",
         "org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration",
-        "org.springframework.ai.model.minimax.autoconfigure.MiniMaxChatAutoConfiguration",
+        "org.springframework.ai.model.minimax.autoconfigure.MiniMaxEmbeddingAutoConfiguration",
         "org.springframework.ai.model.mistralai.autoconfigure.MistralAiChatAutoConfiguration",
+        // spring-ai-model 1.1.8 通过传递依赖保留 ollama starter;测试只跑 dashscope(chat + embedding),
+        // 这里 exclude OllamaChatAutoConfiguration 避免 ollamaChatModel 跟 dashScopeChatModel 撞。
         "org.springframework.ai.model.ollama.autoconfigure.OllamaChatAutoConfiguration",
         "org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration",
         "org.springframework.ai.model.bedrock.converse.autoconfigure.BedrockConverseProxyChatAutoConfiguration",
@@ -514,9 +516,10 @@ public class LoomAgentConfiguration {
                           IUserConversation userConversation, IFile file,
                           ISkillStorage skillStorage, IKnowledge knowledge,
                           LoomAgentProperties properties,
-                          cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository) {
+                          cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
+                          cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
-                    skillStorage, knowledge, properties, toolCallLogRepository);
+                    skillStorage, knowledge, properties, toolCallLogRepository, capabilityService);
         }
 
         // ============== ：loom_tool_call_log 仓储 ==============
@@ -775,28 +778,24 @@ public class LoomAgentConfiguration {
     @Configuration
     public static class ToolConfiguration {
 
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.time.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(ITimeTool.class)
         @Bean
         public ITimeTool defaultTimeTool(LoomAgentProperties properties) {
             return new DefaultTimeTool(properties);
         }
 
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.skill.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(ISkillTool.class)
         @Bean
         public ISkillTool defaultSkillTool(ISkillStorage skillStorage) {
             return new DefaultSkillTool(skillStorage);
         }
 
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.file.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(IFileTool.class)
         @Bean
         public IFileTool defaultFileTool(IFile file, LoomAgentProperties properties) {
             return new DefaultFileTool(file, properties.getFileBasePath(), properties.getFile());
         }
 
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")
         @ConditionalOnMissingBean(IGitTool.class)
         @Bean
         public IGitTool defaultGitTool(LoomAgentProperties properties) {
@@ -804,21 +803,18 @@ public class LoomAgentConfiguration {
         }
 
         @ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")
         @ConditionalOnMissingBean(IMavenTool.class)
         @Bean
         public IMavenTool defaultMavenTool(LoomAgentProperties properties) {
             return new DefaultMavenTool(properties.getMaven(), properties.getFileBasePath());
         }
 
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.compile.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(ICompileAndDeployTool.class)
         @Bean
         public ICompileAndDeployTool defaultCompileAndDeployTool(LoomAgentProperties properties) {
             return new DefaultCompileAndDeployTool(properties);
         }
 
-        @ConditionalOnProperty(name = "spring.ai.loom.agent.knowledge.enabled", havingValue = "true", matchIfMissing = true)
         @ConditionalOnMissingBean(IKnowledgeTool.class)
         @ConditionalOnBean(VectorStore.class)
         @Bean
@@ -835,7 +831,6 @@ public class LoomAgentConfiguration {
      * 才加入 —— 本配置只搭骨架。
      */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "spring.ai.loom.agent.subtask.enabled", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor.class)
     @Slf4j
     public static class SubTaskConfiguration {
@@ -1046,7 +1041,6 @@ public class LoomAgentConfiguration {
      */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "cn.wubo.flex.schedule.core.FlexScheduledTaskService")
-    @ConditionalOnProperty(name = "spring.ai.loom.agent.schedule.enabled", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool.class)
     @Slf4j
     public static class ScheduleConfiguration {
@@ -1571,7 +1565,8 @@ public class LoomAgentConfiguration {
                                                                   cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService conversationFlowService,
                                                                   cn.wubo.spring.ai.loom.agent.rbac.IRoleService roleService,
                                                                   cn.wubo.spring.ai.loom.agent.rbac.IMcpServerAdmin mcpServerAdmin,
-                                                                  JdbcTemplate jdbcTemplate) {
+                                                                  JdbcTemplate jdbcTemplate,
+                                                                  cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom", request -> ServerResponse.temporaryRedirect(URI.create("/spring/ai/loom/index.html")).build());
 
@@ -1664,6 +1659,35 @@ public class LoomAgentConfiguration {
                 } catch (Exception e) {
                     // 临时不可用（例如角色数据初始化失败）→ 返回空列表，避免页面 init 卡死
                     log.warn("/mcps degraded, returning empty list: {}", e.getMessage());
+                    return ServerResponse.ok().body(java.util.Collections.emptyList());
+                }
+            });
+
+            // M5：统一 capability 列表（本地 tool group + MCP server），给 chat 面板渲染
+            // 返回 List<CapabilityInfo>，前端按 type 字段区分 local / MCP
+            builder.GET("spring/ai/loom/api/capabilities", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                try {
+                    return ServerResponse.ok().body(capabilityService.list(username));
+                } catch (Exception e) {
+                    log.warn("/api/capabilities degraded, returning empty list: {}", e.getMessage());
+                    return ServerResponse.ok().body(java.util.Collections.emptyList());
+                }
+            });
+
+            // B.5.5：admin 用 — 列出所有 LOCAL capability(忽略 RBAC / 默认勾选),
+            // 供 admin 角色授权页("授权本地工具"section)替代之前的硬编码 KNOWN_TOOL_GROUPS。
+            builder.GET("spring/ai/loom/admin/capabilities", request -> {
+                try {
+                    // 过滤 LOCAL 类型,排除 MCP(用同一份 CapabilityInfo shape)
+                    java.util.List<cn.wubo.spring.ai.loom.agent.model.CapabilityInfo> all = capabilityService.listAll();
+                    java.util.List<cn.wubo.spring.ai.loom.agent.model.CapabilityInfo> local =
+                            all.stream()
+                                    .filter(c -> c.type() == cn.wubo.spring.ai.loom.agent.model.CapabilityInfo.Type.LOCAL)
+                                    .toList();
+                    return ServerResponse.ok().body(local);
+                } catch (Exception e) {
+                    log.warn("/admin/capabilities degraded, returning empty list: {}", e.getMessage());
                     return ServerResponse.ok().body(java.util.Collections.emptyList());
                 }
             });
@@ -1775,6 +1799,13 @@ public class LoomAgentConfiguration {
             builder.GET("spring/ai/loom/admin/roles", request -> ServerResponse.ok().body(roleService.list()));
             builder.POST("spring/ai/loom/admin/roles", request -> {
                 cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.CreateRoleRequest.class);
+                // P3.1:role.code 长度校验(DB VARCHAR 32)。超长返 400 而不是 500。
+                if (body.code() == null || body.code().length() > 32 || body.code().isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "role.code 必填且长度 1-32 字符"));
+                }
+                if (body.name() == null || body.name().isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "role.name 必填"));
+                }
                 try {
                     return ServerResponse.ok().body(roleService.create(body.code(), body.name(), body.description(), body.mcpNames()));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
@@ -1799,6 +1830,23 @@ public class LoomAgentConfiguration {
                 roleService.setRoleMcps(request.pathVariable("code"),
                         body == null ? null : body.items());
                 return ServerResponse.ok().body(true);
+            });
+            // M5：本地 tool group 授权（与 mcps 平行）
+            builder.GET("spring/ai/loom/admin/roles/{code}/tools", request -> {
+                return ServerResponse.ok().body(roleService.getRoleToolsWithDefault(request.pathVariable("code")));
+            });
+            builder.PUT("spring/ai/loom/admin/roles/{code}/tools", request -> {
+                cn.wubo.spring.ai.loom.agent.model.SetRoleToolsRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleToolsRequest.class);
+                // role 不存在 → 4xx 而不是 500（service 抛 LoomAgentRuntimeException）
+                try {
+                    roleService.setRoleTools(request.pathVariable("code"),
+                            body == null ? null : body.items());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             builder.GET("spring/ai/loom/admin/users/{username}/roles", request -> {
                 return ServerResponse.ok().body(roleService.getUserRoles(request.pathVariable("username")));

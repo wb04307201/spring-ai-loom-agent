@@ -3,6 +3,7 @@ package cn.wubo.spring.ai.loom.agent.chat;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
+import cn.wubo.spring.ai.loom.agent.rbac.IRoleService;
 import cn.wubo.spring.ai.loom.agent.model.ChatRequestRecord;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
@@ -74,12 +75,16 @@ class DefaultChatTest {
  LoomAgentProperties properties = mock(LoomAgentProperties.class);
  when(properties.getDefaultSystem()).thenReturn("base-system");
 
+ IRoleService roleService = mock(IRoleService.class);
+ when(roleService.getVisibleMcpsForUser(anyString())).thenReturn(List.of());
+ when(roleService.getVisibleToolsForUser(anyString())).thenReturn(List.of());
+
  request = mock(HttpServletRequest.class);
  when(request.getScheme()).thenReturn("http");
  when(request.getServerName()).thenReturn("localhost");
  when(request.getServerPort()).thenReturn(8080);
 
- chat = new DefaultChat(chatClient, mcp, List.of(), userConversation, file, skillStorage, knowledge, properties, toolCallLogRepository);
+ chat = new DefaultChat(chatClient, mcp, List.of(), userConversation, file, skillStorage, knowledge, properties, toolCallLogRepository, new cn.wubo.spring.ai.loom.agent.capability.CapabilityService(List.of(), mcp, roleService));
  }
 
  @SuppressWarnings("unchecked")
@@ -162,7 +167,7 @@ class DefaultChatTest {
  @Test
  @DisplayName("selectedSkillName=null：不追加 Skill 块（兼容旧调用）")
  void selectedSkillNameNullKeepsBasePrompt() {
- ChatRequestRecord record = new ChatRequestRecord("hi", "conv-1", null, null, null, null);
+ ChatRequestRecord record = new ChatRequestRecord("hi", "conv-1", null, null, null, null, null);
 
  String prompt = captureSystemPrompt(record);
 
@@ -172,7 +177,7 @@ class DefaultChatTest {
  @Test
  @DisplayName("selectedSkillName 合法：Skill 完整 content 追加到 system prompt 末尾")
  void selectedSkillNameValidAppendsSkillBlock() {
- ChatRequestRecord record = new ChatRequestRecord("hi", "conv-1", null, null, null, "note-health");
+ ChatRequestRecord record = new ChatRequestRecord("hi", "conv-1", null, null, null, "note-health", null);
 
  String prompt = captureSystemPrompt(record);
 

@@ -8,6 +8,8 @@ import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.jdbc.core.JdbcTemplate;
 import reactor.core.publisher.Flux;
 
@@ -78,13 +80,32 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
                 // doOnNext 是 no-buffering side-effect operator，每个 chunk 立即透传下游，
                 // 不再像之前的 .collectList() 那样把整条流卡到内存里再批量 emit
                 .doOnNext(resp -> {
-                    String t = resp.chatResponse().getResult().getOutput().getText();
-                    if (t != null) assistantTextBuf.append(t);
+                    // 三层 null 守卫：Spring AI Anthropic 流里的 message_start /
+                    // content_block_start (tool_use) / content_block_stop / ping / message_delta
+                    // 等事件会产生 ChatResponse 但 getResults() 为空（或 getResult()==null）。
+                    // 不加守卫 → .getOutput() NPE → Flux 进入 onError → 上游
+                    // ToolCallingAdvisor 被截断 → tool_use chunk 没被消费 → 工具没被调用。
+                    ChatResponse cr = resp.chatResponse();
+                    Generation gen = (cr == null) ? null : cr.getResult();
+                    AssistantMessage am = (gen == null) ? null : gen.getOutput();
+                    if (am != null) {
+                        String t = am.getText();
+                        if (t != null) assistantTextBuf.append(t);
+                    }
                     lastResponse[0] = resp;
                 })
-                // 仅在流正常完成时触发写库 — 保留 P9 修复目标（每个会话恰好 1 行 USER + 1 行 ASSISTANT）
-                // 上游异常时 doOnComplete 不触发，避免写 partial text
-                .doOnComplete(() -> {
+                // M5 修 doFinally 副作用:doFinally 不区分 ON_COMPLETE / ON_ERROR / CANCEL
+                // —— 上游 error 时它也会触发,导致 partial 文本被持久化(测试 failing)。
+                // 用 reactor.core.publisher.Signal.isOnComplete() 区分:
+                //   - ON_COMPLETE → 正常完成 → 写库(每个会话 1 行 USER + 1 行 ASSISTANT)
+                //   - ON_ERROR     → 上游异常 → 不写(避免 partial 文本持久化)
+                //   - CANCEL       → 用户/框架主动取消 → 不写
+                .doFinally(signal -> {
+                    if (signal != reactor.core.publisher.SignalType.ON_COMPLETE) {
+                        log.debug("LastChunkAdvisor: stream terminated with {} for conv={}, skip write",
+                                signal, conversationId);
+                        return;
+                    }
                     if (lastResponse[0] == null) {
                         log.debug("LastChunkAdvisor: empty stream, skip write for conv={}", conversationId);
                         return;
@@ -93,7 +114,8 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
                     AssistantMessage fullAssistant = new AssistantMessage(fullText);
                     try {
                         doWriteMemory(lastResponse[0].context(), request, fullAssistant);
-                        log.info("LastChunkAdvisor wrote memory once for conv={}, assistantTextLen={}", conversationId, fullText.length());
+                        log.info("LastChunkAdvisor wrote memory once for conv={}, assistantTextLen={}",
+                                conversationId, fullText.length());
                     } catch (Exception e) {
                         log.warn("LastChunkAdvisor write failed for conv={}: {}", conversationId, e.getMessage());
                     }

@@ -51,6 +51,12 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void delete(String code) {
+        // B.2.1 修复:显式 cascade 删子表,避免 role 删除后子行变成 dangling 引用。
+        // V2.2__role_cascade.sql 加了 FK ON DELETE CASCADE,DB 层也会兜底,
+        // 这里显式 DELETE 让 SQL 路径可见、易追踪(也防止某些 DB 不严格 cascade 时漏删)。
+        jdbcTemplate.update("DELETE FROM user_role WHERE role_code = ?", code);
+        jdbcTemplate.update("DELETE FROM role_mcp WHERE role_code = ?", code);
+        jdbcTemplate.update("DELETE FROM role_tool WHERE role_code = ?", code);
         jdbcTemplate.update("DELETE FROM role WHERE code = ? AND is_system = FALSE", code);
     }
 
@@ -73,7 +79,14 @@ public class DefaultRoleService implements IRoleService {
     @Override
     public void setUserRoles(String username, List<String> roleCodes) {
         if (findUserType(username) == null) {
-            throw new LoomAgentRuntimeException("用户不存在: " + username);
+            throw new LoomAgentRuntimeException(400, "用户不存在: " + username);
+        }
+        if (roleCodes != null && !roleCodes.isEmpty()) {
+            for (String r : roleCodes) {
+                if (!roleExists(r)) {
+                    throw new LoomAgentRuntimeException(400, "角色不存在: " + r);
+                }
+            }
         }
         jdbcTemplate.update("DELETE FROM user_role WHERE username = ?", username);
         if (roleCodes != null && !roleCodes.isEmpty()) {
@@ -84,16 +97,35 @@ public class DefaultRoleService implements IRoleService {
         }
     }
 
+    /**
+     * M5 起去掉 admin bypass：admin 也必须通过角色授权访问 MCP / tool。
+     * <p>
+     * 历史原因：admin 类型历史上自动 bypass RBAC,但 M5 决定所有用户严格 RBAC,
+     * 这里不再跳过 admin。如果 admin 之前没分配任何角色,登录后看不到任何
+     * MCP / tool —— 需要 admin 控制台手动授权。
+     */
     @Override
     public void setUserRolesOrSkipAdmin(String username, List<String> roleCodes) {
         String type = findUserType(username);
         if (type == null) {
-            throw new LoomAgentRuntimeException("用户不存在: " + username);
-        }
-        if ("ADMIN".equals(type)) {
-            return;
+            throw new LoomAgentRuntimeException(400, "用户不存在: " + username);
         }
         setUserRoles(username, roleCodes);
+    }
+
+    /**
+     * 查询角色是否存在；返回 false 表示 role 不存在。
+     * 供 {@link #setUserRoles} 和 {@link #setRoleTools} 前置校验使用,
+     * 避免 FK 约束触发 500。系统角色（full / ADMIN 等）和其他正常 role 走同一路径。
+     */
+    private boolean roleExists(String roleCode) {
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM role WHERE code = ?", Integer.class, roleCode);
+            return count != null && count > 0;
+        } catch (EmptyResultDataAccessException e) {
+            return false;
+        }
     }
 
     /**
@@ -140,22 +172,16 @@ public class DefaultRoleService implements IRoleService {
     }
 
     /**
-     * admin 全部 mcp（defaultSelected=true）；
-     * 普通用户：按角色 sort_order 升序，按角色 default_enabled OR（任一角色 default=true）算 defaultSelected。
+     * 所有用户（含 admin）严格走 RBAC：按用户所有角色的 sort_order / default_enabled
+     * 合并后过滤 system 视图。<b>M3 起去掉 admin bypass</b>，admin 账号必须被分配角色
+     * 才能看到 MCP（之前是 {@code if ("ADMIN".equals(type))} 全集,被去掉以保证 admin / 普通
+     * 用户走同一套过滤逻辑,避免 admin 超能）。
      */
     @Override
     public List<McpSystemView> getVisibleMcpsForUser(String username) {
-        String type = findUserType(username);
         List<McpSystemView> system = mcpServerAdmin.listSystem();
         if (system == null) system = List.of();
-        if ("ADMIN".equals(type)) {
-            return system.stream()
-                    .sorted((a, b) -> a.name().compareTo(b.name()))
-                    .toList();
-        }
-        // 普通用户：合并所有角色允许的 mcp
         Set<String> allowed = new HashSet<>();
-        // per-mcp info：最小 sort_order + 是否任一角色 default_enabled
         Map<String, Integer> orderByName = new HashMap<>();
         Map<String, Boolean> defaultByName = new HashMap<>();
         for (String role : getUserRoles(username)) {
@@ -186,5 +212,52 @@ public class DefaultRoleService implements IRoleService {
                     return a.name().compareTo(b.name());
                 })
                 .toList();
+    }
+
+    // ==================== 本地工具 RBAC（M3 新增）====================
+
+    @Override
+    public List<String> getRoleTools(String roleCode) {
+        return jdbcTemplate.queryForList(
+                "SELECT group_name FROM role_tool WHERE role_code = ? ORDER BY sort_order, group_name",
+                String.class, roleCode);
+    }
+
+    @Override
+    public List<IRoleService.RoleToolItem> getRoleToolsWithDefault(String roleCode) {
+        return jdbcTemplate.query(
+                "SELECT group_name, default_enabled FROM role_tool WHERE role_code = ? ORDER BY sort_order, group_name",
+                (rs, n) -> new IRoleService.RoleToolItem(rs.getString(1), rs.getBoolean(2)),
+                roleCode);
+    }
+
+    @Override
+    public void setRoleTools(String roleCode, List<IRoleService.RoleToolItem> items) {
+        if (!roleExists(roleCode)) {
+            throw new LoomAgentRuntimeException(404, "角色不存在: " + roleCode);
+        }
+        jdbcTemplate.update("DELETE FROM role_tool WHERE role_code = ?", roleCode);
+        if (items != null && !items.isEmpty()) {
+            int sortOrder = 0;
+            for (IRoleService.RoleToolItem it : items) {
+                if (it == null || it.groupName() == null || it.groupName().isBlank()) continue;
+                boolean def = it.defaultEnabled() == null || it.defaultEnabled();
+                jdbcTemplate.update(
+                        "INSERT INTO role_tool (role_code, group_name, sort_order, default_enabled) VALUES (?, ?, ?, ?)",
+                        roleCode, it.groupName(), sortOrder++, def);
+            }
+        }
+    }
+
+    @Override
+    public List<String> getVisibleToolsForUser(String username) {
+        // 与 getVisibleMcpsForUser 同口径：合并所有角色，按 sort_order 升序
+        Set<String> allowed = new LinkedHashSet<>();
+        for (String role : getUserRoles(username)) {
+            allowed.addAll(jdbcTemplate.queryForList(
+                    "SELECT group_name FROM role_tool WHERE role_code = ? ORDER BY sort_order, group_name",
+                    String.class, role));
+        }
+        return new ArrayList<>(allowed);
     }
 }

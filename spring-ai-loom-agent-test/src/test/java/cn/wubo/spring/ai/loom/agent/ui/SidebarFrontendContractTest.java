@@ -18,12 +18,12 @@ class SidebarFrontendContractTest {
             source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
 
-        assertThat(source).contains("createConversation: '/spring/ai/loom/user-conversations'");
+        assertThat(source).contains("createConversation: \"/spring/ai/loom/user-conversations\"");
         assertThat(source).contains("renameConversation: (id) => `/spring/ai/loom/user-conversations/${id}`");
         assertThat(source).contains("sidebar-item-rename");
-        assertThat(source).contains("if (!state.conversationId) {\r\n await conversation.createNew();");
+        assertThat(source).contains("if (!state.conversationId) {\r\n      await conversation.createNew();\r\n      if (!state.conversationId) return;");
         assertThat(source).contains("if (deleted)");
-        assertThat(source).contains("reason === 'forbidden'");
+        assertThat(source).contains("reason === \"forbidden\"");
         assertThat(source).contains("无权重命名该对话");
         assertThat(source).doesNotContain("else {\n await conversation.createNew();");
         assertThat(source).doesNotContain("if (ok) {\n if (state.conversationId === id)");

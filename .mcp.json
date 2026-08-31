@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "loom-compile-mcp": {
+      "command": "jbang",
+      "args": [
+        "./loom-compile-mcp/target/loom-compile-mcp-1.0-SNAPSHOT.jar"
+      ]
+    },
+    "loom-file-mcp": {
+      "command": "jbang",
+      "args": [
+        "--java-options=-Dfile.encoding=UTF-8",
+        "--java-options=-Dsun.jnu.encoding=UTF-8",
+        "./loom-file-mcp/target/loom-file-mcp-1.0-SNAPSHOT.jar"
+      ]
+    },
+    "loom-git-mcp": {
+      "command": "jbang",
+      "args": [
+        "./loom-git-mcp/target/loom-git-mcp-1.0-SNAPSHOT.jar"
+      ]
+    },
+    "loom-maven-mcp": {
+      "command": "jbang",
+      "args": [
+        "./loom-maven-mcp/target/loom-maven-mcp-1.0-SNAPSHOT.jar"
+      ]
+    }
+  }
+}

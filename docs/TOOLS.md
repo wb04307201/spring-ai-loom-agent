@@ -6,14 +6,18 @@
 
 ## Table of Contents
 
-- [1. Tool Group Switches](#1-tool-group-switches)
+- [1. Tool Visibility & RBAC](#1-tool-visibility--rbac)
 - [2. `IEmbedTool` Overview](#2-iembedtool-overview)
 - [3. `ITimeTool` — Time Tools](#3-itimetool--time-tools)
 - [4. `ISkillTool` — Skill Tools](#4-iskilltool--skill-tools)
 - [5. `IFileTool` — File Tools](#5-ifiletool--file-tools)
 - [6. `IGitTool` — Git Tools (JGit)](#6-igittool--git-tools-jgit)
 - [7. `IMavenTool` — Maven Build Tools (maven-invoker)](#7-imaventool--maven-build-tools-maven-invoker)
-- [8. `ICompileAndDeployTool` — End-to-End Deployment](#8-icompileanddeploytool--end-to-end-deployment)
+- [8. `IKnowledgeTool` — Knowledge RAG Retrieval](#8-iknowledgetool--knowledge-rag-retrieval)
+- [9. `ICompileAndDeployTool` — End-to-End Deployment](#9-icompileanddeploytool--end-to-end-deployment)
+- [10. `ISubTaskTool` — Sub-task Delegation](#10-isubtasktool--sub-task-delegation)
+- [11. `IScheduleTool` — Scheduled Tasks](#11-ischeduletool--scheduled-tasks)
+- [12. Replacing a Sub-Tool](#12-replacing-a-sub-tool)
  - [8.1 Tool-call Parameters](#81-tool-call-parameters)
  - [8.2 Configuration](#82-configuration)
  - [8.3 Base-image Templates (built-in)](#83-base-image-templates-built-in)
@@ -25,52 +29,68 @@
 
 ---
 
-## 1. Tool Group Switches
+## 1. Tool Visibility & RBAC
 
-Every built-in tool group is gated by a `*.enabled` property under `spring.ai.loom.agent.*`. The `time` / `file` / `skill` / `subtask` / `schedule` / `compile` groups are enabled by default; `git` and `maven` are **opt-in** because end-to-end deployment already covers the compile/package use case.
+Since M3, all 9 `I*Tool` beans are **always created** regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
 
-| Property | Type | Default | Description |
-|--------------------|---------|---------|-------------------------------------------------------------------|
-| `time.enabled` | boolean | `true` | Time tools (`ITimeTool` — current time, timezone conversion) |
-| `file.enabled` | boolean | `true` | File tools (`IFileTool` — 16 path-based read/write/edit/delete) |
-| `skill.enabled` | boolean | `true` | Skill tools (`ISkillTool` — get skill details; full skill list is auto-injected into the system prompt under the `技能` section) |
-| `subtask.enabled` | boolean | `true` | Sub-task delegation (`ISubTaskTool` — `start_sub_task` runs a slice of work on a sub-model synchronously) |
-| `schedule.enabled` | boolean | `true` | Scheduled tasks (`IScheduleTool` — create/cancel/list/history; fires as a sub-task, persisted to H2 + restored on restart) |
-| `git.enabled` | boolean | `false` | Git tools (`IGitTool` — 28 git operations via JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
-| `maven.enabled` | boolean | `false` | Maven build tools (`IMavenTool` — also requires `maven-invoker` on classpath). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
-| `compile.enabled` | boolean | `true` | End-to-end deployment tool (`ICompileAndDeployTool` — git clone → buildTool build [maven/npm/pip] → docker build → docker run → health check). Supports Spring Boot, Node (backend + static-frontend → nginx), and Python projects. |
+1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 6 universal tools are listed below.
+2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 3 RBAC tools are listed below.
 
-> Even with the tool group disabled, you can still register your own `@Bean IGitTool` / `@Bean IMavenTool` to opt back in — `@ConditionalOnMissingBean` honors user beans first.
+### Universal tools (always visible)
 
-### Disable example
+| Tool | Group | Reason for defaultGrant |
+|------|-------|-------------------------|
+| `ITimeTool` | `tool_time` | Read-only; returns current time / timezone conversion — no side effects |
+| `IFileTool` | `tool_file` | Per-user file isolation (`{fileBasePath}/{username}/`); LLM prompt guides safe usage; includes `deleteFileOrDirectory` — admins should review any auto-deletion flows |
+| `ISkillTool` | `tool_skill` | Skill content is per-user; allows self-created skill editing |
+| `IKnowledgeTool` | `tool_knowledge` | KB access is independently gated by `role_knowledge` table — the tool itself needs no extra RBAC |
+| `ISubTaskTool` | `tool_subtask` | Sub-task runs inherit user identity — no privilege escalation surface |
+| `IScheduleTool` | `tool_schedule` | Per-user namespace `loom-sched-{user}-{conv}-{name}`; fires as sub-task — no privilege escalation |
+
+### RBAC tools (require `role_tool` authorization)
+
+| Tool | Group | Reason for opt-in |
+|------|-------|-------------------|
+| `IGitTool` | `tool_git` | `git push` writes to remote repositories; end-to-end deployment via `ICompileAndDeployTool` covers the common case |
+| `IMavenTool` | `tool_maven` | Arbitrary `mvn` builds; compile/package goes through `ICompileAndDeployTool` |
+| `ICompileAndDeployTool` | `tool_compile` | Spawns Docker containers; runs build pipelines; consumes network & disk resources |
+
+### Why the yml `*.enabled` switches no longer gate tools
+
+The `*.enabled` properties still exist for backward compatibility (e.g. `time.enabled`, `git.enabled`, `maven.enabled`, `compile.enabled`) — see `LoomAgentProperties` — but they were deprecated in M3 and have no effect on whether the tool is created. The only meaningful toggle for opt-in tools is to register a custom `@Bean` (which wins over the default via `@ConditionalOnMissingBean`).
+
+### Migration note: V2.4 cleanup
+
+Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` ran a one-time `DELETE FROM role_tool WHERE group_name IN ('tool_schedule', 'tool_subtask', 'tool_knowledge', 'tool_time', 'tool_skill', 'tool_file')` to clear any historical RBAC rows for universal groups. Pre-existing databases now reflect M6 semantics: a `role` no longer needs to be granted universal tools for users to see them.
+
+### Re-enable example (replace with custom implementation)
 
 ```yaml
-spring:
- ai:
- loom:
- agent:
- git:
- enabled: false
- maven:
- enabled: false
+# No yml flag needed. Replace the bean with @ConditionalOnMissingBean:
+@Bean
+@ConditionalOnMissingBean
+public IGitTool customGitTool() { return new MyGitTool(); }
 ```
 
 ---
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. Sub-interfaces (`ITimeTool`, `ISkillTool`, `IFileTool`, `ISubTaskTool`, `IScheduleTool`, `IGitTool`, `IMavenTool`) each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. 9 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
-| Sub-Interface | Default Impl | Methods | Default State | Notes |
-|---------------------------|-----------------------------|---------|---------------|------------------------------------------------|
-| `ITimeTool` | `DefaultTimeTool` | 2 | enabled | Always on when `time.enabled` is unset |
-| `ISkillTool` | `DefaultSkillTool` | 2 | enabled | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
-| `IFileTool` | `DefaultFileTool` | 16 | enabled | Path-based; root = `{fileBasePath}/{username}/` |
-| `ISubTaskTool` | `DefaultSubTaskTool` | 4 | enabled | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
-| `IScheduleTool` | `DefaultScheduleTool` | 4 | enabled | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
-| `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **disabled** | Opt-in via `git.enabled=true` |
-| `IMavenTool` | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **disabled** | Opt-in via `maven.enabled=true`; needs `maven-invoker` on classpath |
-| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | enabled | End-to-end `git clone → build → docker run → health check` |
+| Sub-Interface | Default Impl | Methods | Visibility | Notes |
+|---------------------------|-----------------------------|---------|------------|------------------------------------------------|
+| `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | Read-only current time / timezone conversion |
+| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
+| `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{fileBasePath}/{username}/` |
+| `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
+| `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
+| `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
+| `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **RBAC** | Requires `role_tool.tool_git` authorization; opt-in via `@Bean IGitTool` replacement |
+| `IMavenTool` | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **RBAC** | Requires `role_tool.tool_maven`; needs `maven-invoker` on classpath |
+| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | **RBAC** | Requires `role_tool.tool_compile`; end-to-end `git clone → build → docker run → health check` |
+
+> Each tool's individual section below still lists any remaining yml flags as **legacy** — they are kept for backward compatibility only and have no functional effect since M3.
 
 ---
 
@@ -81,7 +101,7 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool` |
 | **Default** | `DefaultTimeTool` |
 | **Override** | Custom `@Bean ITimeTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.time.enabled` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user regardless of role. |
 | **Methods** | `getCurrentTime` — get current time by timezone; `convertTime` — convert between timezones |
 
 ---
@@ -93,7 +113,7 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool` |
 | **Default** | `DefaultSkillTool` |
 | **Override** | Custom `@Bean ISkillTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.skill.enabled` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user regardless of role. |
 | **Methods** | `getSkill(skillName)` — get one skill's full content; `createOrUpdateSkill(name, description, content)` — create or overwrite a user-owned skill (`ROLE_GRANTED` rejects with 403; `MARKET_PULLED` rejects with 403 — use `duplicateSkill` to copy it as USER_CREATED first). The full skill list is auto-injected into the system prompt `技能` section; there is no `listSkills` tool. |
 | **Data source** | `user_skill` (DB). On every call, `DefaultSkillStorage` auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries). MARKET_PULLED rows are always the latest market snapshot (the author pushes on every `save()`; pullers need no manual re-pull). |
 
@@ -106,7 +126,7 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.file.IFileTool` |
 | **Default** | `DefaultFileTool` |
 | **Override** | Custom `@Bean IFileTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.file.enabled` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user regardless of role. Includes `deleteFileOrDirectory` — admins should review any auto-deletion flows. |
 | **Root path** | All path-based operations use `{fileBasePath}/{username}/` (default `.local/file/{username}/`) |
 
 **Methods (16)**:
@@ -139,7 +159,7 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool` |
 | **Default** | `DefaultGitTool` (based on Eclipse JGit 7.6.0) |
 | **Override** | Custom `@Bean IGitTool` |
-| **State** | `@ConditionalOnProperty(name = "spring.ai.loom.agent.git.enabled", havingValue = "true")` — **disabled by default** |
+| **State** | **RBAC + opt-in bean**. Bean is conditional on `spring.ai.loom.agent.git.enabled=true` (default `false`, `matchIfMissing=false`) plus `@ConditionalOnMissingBean`. Once created, only visible to users whose roles grant `tool_git` via the `role_tool` table. |
 | **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{fileBasePath}/{username}/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
 
 **Methods (28)**:
@@ -165,7 +185,7 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool` |
 | **Default** | `DefaultMavenTool` (based on maven-invoker 3.3.0, no shell dependency) |
 | **Override** | Custom `@Bean IMavenTool` |
-| **State** | `@ConditionalOnClass(name = "org.apache.maven.shared.invoker.Invoker")` and `@ConditionalOnProperty(name = "spring.ai.loom.agent.maven.enabled", havingValue = "true")` — **disabled by default** |
+| **State** | **RBAC + opt-in bean**. Bean is conditional on `maven-invoker` classpath + `spring.ai.loom.agent.maven.enabled=true` (default `false`) plus `@ConditionalOnMissingBean`. Once created, only visible to users whose roles grant `tool_maven` via the `role_tool` table. |
 | **Methods (6)** | `mavenExecute` (generic Maven goal execution); `mavenBuild` (compile); `mavenPackage` (package JAR/WAR); `mavenTest` (run tests, supports test pattern); `mavenDependencyTree` (dependency tree with scope filter); `mavenValidate` (validate project structure) |
 
 **Configuration**:
@@ -191,7 +211,7 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool` |
 | **Default** | `DefaultKnowledgeTool` |
 | **Override** | Custom `@Bean IKnowledgeTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.knowledge.enabled` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Per-call RBAC still applies: each `searchKnowledge` call verifies the user has access to the target KB (own / subscribed / role-granted). |
 | **Methods** | `searchKnowledge(knowledgeId, query, topK?)` — vector-search a single KB and return top-k chunks with similarity score |
 | **Access check**| Each call verifies the user has access to the target KB (own / subscribed / role-granted); returns "没有权限访问该知识库" if not |
 | **Filter** | Built SpEL filter `type == 'knowledge' && knowledgeId == ?` so search is scoped to the requested KB only |
@@ -201,7 +221,7 @@ spring:
 
 ---
 
-## 10. `ICompileAndDeployTool` — End-to-End Deployment
+## 9. `ICompileAndDeployTool` — End-to-End Deployment
 
 `ICompileAndDeployTool` runs the full pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. It is the **supported entry point** for `git clone → build → docker run` workflows — LLM only needs to supply the parameters and read back the `accessUrl`.
 
@@ -210,11 +230,11 @@ spring:
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.compile.ICompileAndDeployTool` |
 | **Default** | `DefaultCompileAndDeployTool` |
 | **Override** | Custom `@Bean ICompileAndDeployTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.compile.enabled` |
+| **State** | **RBAC** — `@ToolGroup(defaultGranted=false)`. Only visible to users whose roles grant `tool_compile` via the `role_tool` table (admin → `/admin/roles/{code}/tools`). |
 | **Method** | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
 | **Workspace** | Each call creates an isolated work dir under `{fileBasePath}/{username}/compile-deploy-<uuid>/` |
 
-### 10.1 Tool-call Parameters
+### 9.1 Tool-call Parameters
 
 `params` is a case-insensitive Map. Required: `gitUrl`, `port`, `containerPort`. Others are optional.
 
@@ -234,7 +254,7 @@ spring:
 | `baseImage` | no | Template alias (`java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve`) or full image name (e.g. `openjdk:17-slim`). Default per `buildTool`: `maven→java17`, `npm→node20`, `npm-frontend→node20-serve`, `pip→python3`. |
 | `runCommand` | no | String array overriding the template's default ENTRYPOINT (rare) |
 
-### 10.2 Configuration
+### 9.2 Configuration
 
 All settings live under `spring.ai.loom.agent.compile.*`.
 
@@ -252,7 +272,7 @@ All settings live under `spring.ai.loom.agent.compile.*`.
 | `spring.ai.loom.agent.compile.imageTemplates` | map | (6 pre-set templates) | Pre-set base-image templates keyed by alias; see below |
 | `spring.ai.loom.agent.compile.extraRunArgs` | string[] | `[]` | Extra `docker run` args injected between `--name` and the image name |
 
-### 10.3 Base-image Templates (built-in)
+### 9.3 Base-image Templates (built-in)
 
 | Alias | Image | Default ENTRYPOINT |
 |-------------------|--------------------------------------|---------------------------------------------|
@@ -282,7 +302,7 @@ spring:
 
 Pass the alias to `baseImage` to select a template, or pass a full image name (e.g. `openjdk:17-slim`) to use it directly — `command` falls back to `java17`.
 
-### 10.4 Example Invocation
+### 9.4 Example Invocation
 
 ```json
 {
@@ -296,7 +316,7 @@ Pass the alias to `baseImage` to select a template, or pass a full image name (e
 }
 ```
 
-### 10.5 End-to-End Conversation Examples
+### 9.5 End-to-End Conversation Examples
 
 Below are three complete walkthroughs showing how a user describes a deployment in chat, how the LLM extracts and asks clarifying questions, and how it finally invokes the end-to-end deployment tool (`ICompileAndDeployTool` — the actual registered tool name is auto-derived from the method by Spring AI; do not hardcode it in skill templates).
 
@@ -423,14 +443,14 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 
 ---
 
-## 9. `ISubTaskTool` — Sub-task Delegation
+## 10. `ISubTaskTool` — Sub-task Delegation
 
 | Item | Details |
 |-----------------|---------------------------------------------------------------------------------------|
 | **Interface** | `cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool` |
 | **Default** | `DefaultSubTaskTool` |
 | **Override** | Custom `@Bean ISubTaskTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.subtask.enabled` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Sub-task runs inherit user identity — no privilege escalation surface. |
 | **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
 
 The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool`) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
@@ -466,7 +486,7 @@ The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor
 | **Interface** | `cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool` |
 | **Default** | `DefaultScheduleTool` |
 | **Override** | Custom `@Bean IScheduleTool` |
-| **State** | Enabled by default; toggle with `spring.ai.loom.agent.schedule.enabled` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Scheduled tasks are namespaced `loom-sched-{user}-{conv}-{name}` and fire as sub-tasks. |
 | **Methods (4)** | `createSchedule` (cron / fixed_delay / fixed_rate / one_shot), `cancelSchedule`, `listSchedules`, `getScheduleHistory` |
 
 Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` and **fire as sub-tasks** when triggered. LoomAgent owns the H2 persistence (`loom_scheduled_task`, added in ``); `ScheduleRestoreListener` rehydrates rows on `ApplicationReadyEvent` preserving the original `createdAt` so the `max-lifetime` ceiling accumulates across restarts (rows older than the ceiling are cleaned up). Cancelling verifies row ownership (cross-user cancel is refused) and deletes the persisted row so the restore listener cannot resurrect a "ghost" task.

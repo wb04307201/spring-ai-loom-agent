@@ -10,6 +10,7 @@ import cn.wubo.spring.ai.loom.agent.user.IUser;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,7 +53,8 @@ class RoleRouterTest {
                 mock(cn.wubo.spring.ai.loom.agent.chat.ConversationFlowService.class),
                 roleService,
                 mock(IMcpServerAdmin.class),
-                mock(JdbcTemplate.class));
+                mock(JdbcTemplate.class),
+                mock(cn.wubo.spring.ai.loom.agent.capability.CapabilityService.class));
     }
 
     @AfterEach
@@ -109,6 +111,30 @@ class RoleRouterTest {
                 .when(roleService).deleteOrThrow("ADMIN");
 
         ServerResponse response = route("DELETE", "/spring/ai/loom/admin/roles/ADMIN", null);
+
+        assertThat(response.statusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    @DisplayName("PUT /admin/roles/{code}/tools — service 抛 404 → router 透传 404")
+    void putRoleTools_missingRole_returns404() throws Exception {
+        doThrow(new LoomAgentRuntimeException(404, "角色不存在: ghost"))
+                .when(roleService).setRoleTools(eq("ghost"), any());
+
+        ServerResponse response = route("PUT", "/spring/ai/loom/admin/roles/ghost/tools",
+                "{\"items\":[{\"groupName\":\"tool_git\",\"sortOrder\":0,\"defaultEnabled\":true}]}");
+
+        assertThat(response.statusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    @DisplayName("PUT /admin/roles/{code}/tools — service 抛 400 → router 透传 400")
+    void putRoleTools_service400_returns400() throws Exception {
+        doThrow(new LoomAgentRuntimeException(400, "参数错误: empty groupName"))
+                .when(roleService).setRoleTools(any(), any());
+
+        ServerResponse response = route("PUT", "/spring/ai/loom/admin/roles/x/tools",
+                "{\"items\":[]}");
 
         assertThat(response.statusCode().value()).isEqualTo(400);
     }

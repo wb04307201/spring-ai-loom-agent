@@ -170,7 +170,7 @@
       const r = await fetch(API.update(currentEdit.id), {
         method: "PUT",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
         body: JSON.stringify(body),
       });
       if (!r.ok) {

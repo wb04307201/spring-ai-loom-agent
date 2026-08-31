@@ -91,10 +91,16 @@
     const rows = users
       .map((u) => {
         const typeLabel = u.type === "ADMIN" ? "管理员" : "普通用户";
+        // 已分配角色:空数组显示 "—" 占位,让 admin 一眼能看出谁没分配
+        const roles = Array.isArray(u.roles) ? u.roles : [];
+        const roleBadges = roles.length === 0
+          ? '<span class="role-empty">— 未分配</span>'
+          : roles.map((r) => `<span class="role-badge">${escapeHtml(r)}</span>`).join("");
         return `<tr data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">
  <td><strong>${escapeHtml(u.username)}</strong></td>
  <td>${escapeHtml(u.nickname || "")}</td>
  <td><span class="type-badge ${u.type}">${typeLabel}</span></td>
+ <td><div class="role-badge-list">${roleBadges}</div></td>
  <td>
  <button class="secondary-btn assign-role-btn" data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">分配角色</button>
  <button class="delete-btn" data-username="${escapeHtml(u.username)}">删除</button>
@@ -105,7 +111,7 @@
     tableContainer.innerHTML = `
  <table class="user-table">
  <thead>
- <tr><th>用户名</th><th>昵称</th><th>类型</th><th>操作</th></tr>
+ <tr><th>用户名</th><th>昵称</th><th>类型</th><th>已分配角色</th><th>操作</th></tr>
  </thead>
  <tbody>${rows}</tbody>
  </table>`;
@@ -192,7 +198,7 @@
     try {
       const resp = await fetch("/spring/ai/loom/admin/users", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
         credentials: "include",
         body: JSON.stringify({ username, nickname, password, type }),
       });
@@ -263,7 +269,7 @@
   async function postJson(url, body) {
     const resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
       credentials: "include",
       body: body ? JSON.stringify(body) : null,
     });
@@ -389,7 +395,7 @@
         {
           method: "PUT",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
           body: JSON.stringify({ roleCodes: checked }),
         },
       );

@@ -3,7 +3,7 @@ spring:
     url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
       chat:
         options:
           model: qwen3.8-max

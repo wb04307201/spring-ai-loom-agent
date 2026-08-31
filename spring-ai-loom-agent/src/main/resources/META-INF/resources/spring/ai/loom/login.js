@@ -45,7 +45,7 @@
     try {
       const resp = await fetch("/spring/ai/loom/user/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
         credentials: "include",
         body: JSON.stringify({ username, password }),
       });

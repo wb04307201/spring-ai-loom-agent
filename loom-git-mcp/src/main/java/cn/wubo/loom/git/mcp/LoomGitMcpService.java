@@ -1,7 +1,7 @@
 package cn.wubo.loom.git.mcp;
 
 import cn.wubo.loom.git.core.GitOperations;
-import org.springframework.ai.tool.annotation.Tool;
+import org.springaicommunity.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.nio.file.Path;
@@ -21,7 +21,7 @@ public class LoomGitMcpService {
         this.gitOps = new GitOperations(props.getGitUsername(), props.getGitToken(), props.getRemoteTimeoutSeconds());
     }
 
-    @Tool(description = "初始化一个新的 Git 仓库")
+    @McpTool(name = "git_init", description = "初始化一个新的 Git 仓库")
     public String gitInit(
             @ToolParam(description = "仓库路径（相对于基础目录）") String path,
             @ToolParam(description = "初始分支名", required = false) String initialBranch,
@@ -29,7 +29,7 @@ public class LoomGitMcpService {
         return gitOps.gitInit(basePath, path, initialBranch, bare);
     }
 
-    @Tool(description = "克隆远程仓库")
+    @McpTool(name = "git_clone", description = "克隆远程仓库")
     public String gitClone(
             @ToolParam(description = "远程仓库 URL") String url,
             @ToolParam(description = "本地路径（相对于基础目录）") String path,
@@ -40,14 +40,14 @@ public class LoomGitMcpService {
         return gitOps.gitClone(basePath, url, path, branch, depth, bare, mirror);
     }
 
-    @Tool(description = "查看工作区状态")
+    @McpTool(name = "git_status", description = "查看工作区状态")
     public String gitStatus(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "是否包含未跟踪文件", required = false) Boolean includeUntracked) {
         return gitOps.gitStatus(Paths.get(workingDir), includeUntracked);
     }
 
-    @Tool(description = "暂存文件")
+    @McpTool(name = "git_add", description = "暂存文件")
     public String gitAdd(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "要暂存的文件路径列表", required = false) List<String> paths,
@@ -57,7 +57,7 @@ public class LoomGitMcpService {
         return gitOps.gitAdd(Paths.get(workingDir), paths, update, all, force);
     }
 
-    @Tool(description = "创建提交")
+    @McpTool(name = "git_commit", description = "创建提交")
     public String gitCommit(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "提交信息") String message,
@@ -70,7 +70,7 @@ public class LoomGitMcpService {
         return gitOps.gitCommit(Paths.get(workingDir), message, authorName, authorEmail, amend, allowEmpty, noVerify, filesToStage);
     }
 
-    @Tool(description = "查看 diff")
+    @McpTool(name = "git_diff", description = "查看 diff")
     public String gitDiff(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "源引用", required = false) String source,
@@ -84,7 +84,7 @@ public class LoomGitMcpService {
         return gitOps.gitDiff(Paths.get(workingDir), source, target, paths, staged, nameOnly, stat, contextLines, autoExclude);
     }
 
-    @Tool(description = "查看提交历史")
+    @McpTool(name = "git_log", description = "查看提交历史")
     public String gitLog(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "最大条数", required = false) Integer maxCount,
@@ -102,7 +102,7 @@ public class LoomGitMcpService {
         return gitOps.gitLog(Paths.get(workingDir), maxCount, skip, since, until, author, grep, branch, filePath, oneline, stat, patch, showSignature);
     }
 
-    @Tool(description = "查看文件逐行修改历史")
+    @McpTool(name = "git_blame", description = "查看文件逐行修改历史")
     public String gitBlame(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "文件路径") String filePath,
@@ -112,7 +112,7 @@ public class LoomGitMcpService {
         return gitOps.gitBlame(Paths.get(workingDir), filePath, startLine, endLine, ignoreWhitespace);
     }
 
-    @Tool(description = "切换分支或恢复文件")
+    @McpTool(name = "git_checkout", description = "切换分支或恢复文件")
     public String gitCheckout(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "目标分支或提交") String target,
@@ -123,7 +123,7 @@ public class LoomGitMcpService {
         return gitOps.gitCheckout(Paths.get(workingDir), target, createBranch, force, paths, track);
     }
 
-    @Tool(description = "拉取远程更新")
+    @McpTool(name = "git_pull", description = "拉取远程更新")
     public String gitPull(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "远程名称", required = false) String remote,
@@ -133,7 +133,7 @@ public class LoomGitMcpService {
         return gitOps.gitPull(Paths.get(workingDir), remote, branch, rebase, fastForwardOnly);
     }
 
-    @Tool(description = "推送到远程")
+    @McpTool(name = "git_push", description = "推送到远程")
     public String gitPush(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "远程名称", required = false) String remote,
@@ -148,7 +148,7 @@ public class LoomGitMcpService {
         return gitOps.gitPush(Paths.get(workingDir), remote, branch, force, forceWithLease, setUpstream, tags, dryRun, delete, remoteBranch);
     }
 
-    @Tool(description = "管理分支")
+    @McpTool(name = "git_branch", description = "管理分支")
     public String gitBranch(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "操作模式：list/create/delete/rename/show-current") String mode,
@@ -164,7 +164,7 @@ public class LoomGitMcpService {
         return gitOps.gitBranch(Paths.get(workingDir), mode, branchName, newBranchName, startPoint, force, all, remote, merged, noMerged, limit);
     }
 
-    @Tool(description = "合并分支")
+    @McpTool(name = "git_merge", description = "合并分支")
     public String gitMerge(
             @ToolParam(description = "工作目录路径") String workingDir,
             @ToolParam(description = "要合并的分支") String branch,
@@ -176,7 +176,7 @@ public class LoomGitMcpService {
         return gitOps.gitMerge(Paths.get(workingDir), branch, strategy, noFastForward, squash, message, abort);
     }
 
-    @Tool(description = "设置工作目录（返回绝对路径，后续操作传入此路径）")
+    @McpTool(name = "git_set_working_dir", description = "设置工作目录（返回绝对路径，后续操作传入此路径）")
     public String gitSetWorkingDir(
             @ToolParam(description = "目录路径") String path) {
         Path resolved = basePath.resolve(path).toAbsolutePath().normalize();

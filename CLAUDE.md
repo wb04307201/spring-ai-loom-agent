@@ -80,15 +80,112 @@ Organized into 7 nested static `@Configuration` classes:
 | `ChatConfiguration` | ChatClient, IChat, SseController |
 | `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — `time/file/skill/knowledge/compile` 默认 enabled；`git/maven` 默认 disabled。Each can be enabled/disabled via `spring.ai.loom.agent.{time,file,skill,knowledge,git,maven,compile}.enabled=true/false`. IMavenTool additionally requires maven-invoker on the classpath. |
+| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **9 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 14 RouterFunctions + `SseController` |
+| `CapabilityConfiguration` | `CapabilityService` (统一 list 本地 + MCP capability) + `IRoleService` 的 tool/mcp/skill/knowledge 授权方法 |
 
-- `@AutoConfigureAfter` all Spring AI model/embedding/vectorstore/memory/MCP auto-configurations
-- Creates `ChatClient` with `MessageChatMemoryAdvisor` and `SimpleLoggerAdvisor`
-- Default `JVectorStore` (HNSW index, disk-persisted) when no other `VectorStore` bean exists
-- `RetrievalAugmentationAdvisor` with configurable prompt templates and similarity threshold
-- `IGitTool` (Eclipse JGit 7.6.0) is **disabled by default** (`git.enabled=false`); users opt in with `spring.ai.loom.agent.git.enabled=true` for single-point git operations (status/log/blame/branch etc.) or replace it with a custom `@Bean IGitTool` via `@ConditionalOnMissingBean`. End-to-end deployment is handled by `ICompileAndDeployTool`.
+### Capability 统一模型(M1-M7 重构)
+
+新增 4 个组件来替代旧的"9 个 I*Tool + 5 个 MCP server 各管各的"混乱:
+
+1. **`@ToolGroup` 注解**(`cn.wubo.spring.ai.loom.agent.tool.ToolGroup`)
+   放在 9 个 `I*Tool` 接口上,声明所属 capability group:
+   ```java
+   @ToolGroup(value = "file", description = "readTextFile / writeFile / listDirectory ...")
+   public interface IFileTool extends IEmbedTool { ... }
+   ```
+   `value` 是 group 名(如 "file");`description` 渲染到 admin UI。`@Target=TYPE`,放接口不放实现(实现可替换不丢 group 身份)。
+
+2. **`role_tool` 表**(已合并入 `V1.0__init.sql`,与 `role_mcp` 镜像):
+   ```sql
+   CREATE TABLE role_tool (
+     role_code VARCHAR(32) NOT NULL,
+     group_name VARCHAR(64) NOT NULL,    -- 'tool_' + @ToolGroup value
+     sort_order INT NOT NULL DEFAULT 0,
+     default_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+     PRIMARY KEY (role_code, group_name)
+   );
+   ALTER TABLE role_tool ADD CONSTRAINT fk_role_tool_role
+     FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+   ```
+   **role 删除时自动 cascade 清 role_tool**(B.2.1 修复 — `V1.0` 中加 FK,应用层 `DefaultRoleService.delete` 也显式 DELETE 兜底)。
+
+3. **`CapabilityService` 服务**(`cn.wubo.spring.ai.loom.agent.capability`)
+   - `list(username)` — 当前用户可见 capability(含 effectiveEnabled,从 `IRoleService.getVisibleToolsForUser` / `getVisibleMcpsForUser` 算)
+   - `visibleToolGroupsFor(username)` — RBAC 视角的本地 tool group 授权集
+   - `allowedCapabilityIdsFor(username, userPick)` — 角色授权 ∩ 前端勾选(空 pick 退化为角色全集)
+   - `toLocalCapability(bean)` — 反射 `@Tool` 注解方法(包括接口上的继承注解,使用 `MergedAnnotations` 走 `TYPE_HIERARCHY`)
+   - **`MCP name 必须原样保留**(`role_mcp.mcp_name = McpSyncClient.getClientInfo().name()`,不做 REPLACE / 不加 prefix)
+
+4. **API 端点**:
+   - `GET  /spring/ai/loom/api/capabilities` — 聊天面板用(返回 9 LOCAL + N MCP,带 effectiveEnabled)
+   - `GET  /spring/ai/loom/admin/capabilities` — admin 角色授权用(只 LOCAL,无 effectiveEnabled)
+   - `GET  /admin/roles/{code}/tools` + `PUT` — 角色授权 tool 增删
+   - `GET  /admin/roles/{code}/mcps` + `PUT` — 角色授权 MCP 增删
+   - `GET  /admin/roles/{code}/skills` + `PUT` — 角色授权技能(已有,镜像 tools 模式)
+   - `GET  /admin/roles/{code}/knowledge` + `PUT` — 角色授权知识库(已有,镜像 tools 模式)
+
+5. **`ChatRequestRecord` 加 `enabledToolGroups` 字段**:
+   ```java
+   public record ChatRequestRecord(String message, String conversationId,
+                                   List<String> mcps,
+                                   List<String> enabledKnowledgeIds,
+                                   List<String> fileIds,
+                                   String selectedSkillName,
+                                   List<String> enabledToolGroups) { ... }
+   ```
+   - `null` / 空 → 服务端 fallback 到角色授权全集(全勾)
+   - 非空 → `role_auth ∩ user_pick` 交集
+   - 包含 5-arg 兼容构造器(旧调用方传 null,等同"全部启用")
+
+6. **`DefaultChat` filter 改造**:
+   ```java
+   Set<String> visibleToolGroups = capabilityService.visibleToolGroupsFor(username);
+   List<IEmbedTool> filtered = embedTools.stream()
+       .filter(t -> t instanceof ToolGroup-anotated iface
+                 && visibleToolGroups.contains("tool_" + @ToolGroup value))
+       .toList();
+   toolCallbacks(toolCallbacksFrom(filtered));
+   ```
+   之前是 `embedTools` 全部 → 改成 role ∩ pick 过滤后 → LLM 看到的 tool callback 列表被严格按 RBAC 筛选
+
+7. **strict RBAC(无 admin bypass)**:
+   - `IRoleService.getVisibleMcpsForUser` 不再走 `if ("ADMIN".equals(type)) return ALL`
+   - `setUserRolesOrSkipAdmin` 删掉 admin 短路(普通 user / admin 都走同一路径)
+   - **新装 admin 没有任何 role → 0 capability → 必须进 admin 控制台手动授权**
+
+8. **admin UI 整合**(M6 + M7):
+   - 聊天面板 `🔧 MCP服务` 按钮 → `🔧 工具` 按钮,带类型徽章("本地" / "MCP")
+   - admin 角色管理页 "授权本地工具组" section,真实从 `/admin/capabilities` 拉动态列表(替换之前的硬编码 `KNOWN_TOOL_GROUPS` 9 行)
+   - `app.js` 所有 fetch 显式 `Content-Type: application/json; charset=UTF-8`(解决 GBK 解析错)
+
+#### Universal 工具(M6:平台默认能力,不受 RBAC 控制)
+
+`@ToolGroup` 注解加 `boolean defaultGranted() default false` 字段。设为 `true` 的工具对**所有登录用户可见**,与 `role_tool` 表完全解耦:
+
+| Universal 工具 | group | 理由 |
+|----------------|-------|------|
+| `IScheduleTool` | `tool_schedule` | per-user 命名空间,触发也走子模型 user 身份,无越权风险 |
+| `ISubTaskTool` | `tool_subtask` | 子任务 tool 调用继承 user 角色,无越权风险 |
+| `IKnowledgeTool` | `tool_knowledge` | KB 列表本身受 `role_knowledge` 控制,工具无授权必要 |
+| `ITimeTool` | `tool_time` | 只读返回时间,无副作用 |
+| `ISkillTool` | `tool_skill` | 允许用户自由创建/编辑自建 skill |
+| `IFileTool` | `tool_file` | 默认放开本地文件访问(⚠️ 含 `deleteFileOrDirectory` 递归删除,LLM 端需谨慎 prompt 约束) |
+
+**RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行,必须显式授权。
+
+**实现机制**:
+- 元数据单一源 = `@ToolGroup(defaultGranted=true)` 注解,**DB 端无 `loom_universal_tool` 表**
+- `CapabilityService.universalToolGroups()` 反射所有 `@ToolGroup` 注解,返回默认授予的 group_name 集合
+- `visibleToolGroupsFor(username) = role_granted ∪ universal` —— 新装 admin / 普通用户也能至少调用 6 个 universal 工具
+- `allowedCapabilityIdsFor(...)` 在 `role ∩ user_pick` 之外再 `addAll(universalGroups)`,user_pick 不能拒绝 universal
+- 聊天面板"工具"弹窗**完全不展示** universal 工具的 checkbox(无感调用)
+- admin 角色授权页"已授权本地工具"列表**完全不展示** universal 工具入口(没有"移除"按钮,只有 RBAC 工具可操作)
+- Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` 一次性清理 `role_tool` 表里 6 个 universal 工具的历史授权记录(防止旧库"残留可见但 UI 无法移除"的歧义)
+  — **历史:已合并入 V1.0 的末尾 DELETE 段,新装环境天然干净**
+
+
 - `IMavenTool` is **disabled by default** (`maven.enabled=false`); same opt-in pattern. Compile/package is handled by `ICompileAndDeployTool`.
 - `ICompileAndDeployTool` is **enabled by default**; the supported entry point for `git clone → buildTool build (maven/npm/pip) → docker build → docker run → health check`. Supports `maven` / `npm` (Node 后端) / `npm-frontend` (Node 前端 → nginx) / `pip` (Python) — selected by `buildTool` param or auto-detected from marker files (`pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`).
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
@@ -96,12 +193,12 @@ Organized into 7 nested static `@Configuration` classes:
 
 ### Data Layer
 
-- **Schema** (库自带的 schema + admin seed)：
- - 库 `src/main/resources/db/migration/V1.0__init.sql` — 基础建表（knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp）+ 默认 admin 账号。**保持稳定,不再改动**
- - 库 `src/main/resources/db/migration/V2.0__subtask_and_schedule.sql` — **增量**（把历史 V12~V17 合并成一个文件）：新增 `loom_scheduled_task` / `loom_schedule_execution` / `loom_subtask_history`，给 `user_conversation` 追加侧边栏三列 title/created_at/updated_at，`SPRING_AI_CHAT_MEMORY.conversation_id` 加宽到 255（子任务命名空间 id 需要）。旧 `flex_scheduled_task`（V12）已删——flex-schedule 1.x 纯内存、无 JdbcTaskRepository、零引用（保留一条防御性 `DROP IF EXISTS` 清理残留）
- - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据：12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill
- - Flyway 用版本号在同一实例里按序执行：``(基础) → ``(业务数据) → ``(子任务/定时增量)
- - **升级注意**：全新库按上述顺序干净跑通。已跑过旧 V12~V17 的历史库无法就地迁移到 （旧版本号已从磁盘移除）——需全新库或 `flyway baseline`；本地开发 `rm -rf ~/.loom/datasource` 即可重跑
+- **Schema** (单一 V1.0 一站式 init,**项目只跑全新库**;任何已有 V1/V2 历史部署必须 `flyway baseline` 或 `rm -rf ~/.loom/datasource` 重跑):
+ - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool)+ RBAC 3 张子表 CASCADE FK(user_role.role_code → role.code, role_mcp.role_code → role.code, role_tool.role_code → role.code, user_role.username → user_info.username)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号
+ - **保持稳定,不再拆分增量**:所有 schema 演进(loom_scheduled_task / loom_schedule_execution / loom_subtask_history / user_conversation 三列 / SPRING_AI_CHAT_MEMORY.conversation_id 加宽 / loom_market_knowledge / loom_user_knowledge / loom_role_knowledge / loom_file_content / loom_tool_call_log / loom_chat_usage / loom_chat_reasoning / tool_call_log + chat_token_usage 替换等)都已合并入 V1.0 单一文件;V12~V17 历史也已 inline 进 V1.0
+ - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据:12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill。test 模块独立 Flyway,与库主 schema 物理隔离(`./target/test-ds`)
+ - Flyway 在同实例按版本号顺序执行:`V1.0__init.sql`(库)→ `V1.1__init_app_data.sql`(业务)
+ - **升级注意**(已收紧):任何已有 V1/V2.x 历史数据库 → 必须清空后重跑(`rm -rf ~/.loom/datasource`),或 `flyway baseline` 后手动迁移数据。本项目**不接受在已运行实例上增量升级 schema**
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
 - **Flyway table**: `flyway_schema_history`（Spring Boot 默认，库不覆盖）
 

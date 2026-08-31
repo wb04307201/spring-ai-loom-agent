@@ -186,20 +186,27 @@ spring:
 
 > Git credentials can also be passed per-request via `ToolContext` (`gitUsername` / `gitToken` keys), which override the configured defaults.
 
-### 1.9 Tool Group Switches (`{time,file,skill,git,maven,compile}.enabled`)
+### 1.9 Tool Visibility & RBAC (Universal vs RBAC tools)
 
-For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
+For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
 
-A quick summary of the switches:
+Since M6 (commit history), tool visibility is governed by two mechanisms instead of the legacy `*.enabled` yml switches:
 
-| Property | Type | Default | Description |
+1. **Universal tools** — annotated `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user, no role needed. The 6 universal groups are: `tool_time`, `tool_file`, `tool_skill`, `tool_knowledge`, `tool_subtask`, `tool_schedule`.
+2. **RBAC tools** — annotated `@ToolGroup(defaultGranted=false)`. Visible only after an admin grants the tool group to a role via `/admin/roles/{code}/tools` (persisted in the `role_tool` table). The 3 RBAC groups are: `tool_git`, `tool_maven`, `tool_compile`. The `IGitTool` and `IMavenTool` beans are also still gated by `spring.ai.loom.agent.{git,maven}.enabled` for bean creation; the `*.enabled` flags on the universal tools are deprecated since M3 and have no effect.
+
+Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
+
+| Property | Type | Default | Effect |
 |--------------------|---------|---------|-------------------------------------------------------------------|
-| `time.enabled` | boolean | `true` | `ITimeTool` — time and timezone tools |
-| `file.enabled` | boolean | `true` | `IFileTool` — 16 path-based file tools |
-| `skill.enabled` | boolean | `true` | `ISkillTool` — list skills, get skill details |
-| `git.enabled` | boolean | `false` | `IGitTool` (JGit). **Opt-in** — end-to-end deployment uses `ICompileAndDeployTool`. |
-| `maven.enabled` | boolean | `false` | `IMavenTool` (maven-invoker required). **Opt-in** — compile/package goes through `ICompileAndDeployTool`. |
-| `compile.enabled` | boolean | `true` | `ICompileAndDeployTool` — end-to-end `git clone → build → docker run → health check` |
+| `time.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
+| `file.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
+| `skill.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
+| `git.enabled` | boolean | `false` | Gates `IGitTool` bean creation; once created, RBAC via `role_tool` |
+| `maven.enabled` | boolean | `false` | Gates `IMavenTool` bean creation (also requires `maven-invoker` on classpath); once created, RBAC via `role_tool` |
+| `compile.enabled` | boolean | `true` | **Deprecated since M3** — RBAC tool, the `*.enabled` flag has no effect; grant via `role_tool.tool_compile` |
+
+> Pre-existing databases: Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` already cleared any historical RBAC rows for the 6 universal tool groups. New databases start clean. See TOOLS.md §1 for details.
 
 ---
 

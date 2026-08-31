@@ -1,10 +1,12 @@
 package cn.wubo.spring.ai.loom.agent.tool.git;
 
 import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
+import cn.wubo.spring.ai.loom.agent.tool.ToolGroup;
 import org.springframework.ai.chat.model.ToolContext;
 
 import java.util.List;
 
+@ToolGroup(value = "git", description = "gitInit / gitStatus / gitCommit / gitClone / gitPush 等 28 个 Git 命令")
 public interface IGitTool extends IEmbedTool {
 
     // ==================== Repository lifecycle ====================

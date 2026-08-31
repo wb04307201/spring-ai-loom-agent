@@ -320,6 +320,31 @@ table.user-table {
   color: var(--text-muted, #94a3b8);
 }
 
+/* 已分配角色列:多 badge 横向排列,空状态用 muted 文字 */
+.role-badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.role-empty {
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  font-style: italic;
+}
+
 .delete-btn {
   padding: 8px 16px;
   background: transparent;

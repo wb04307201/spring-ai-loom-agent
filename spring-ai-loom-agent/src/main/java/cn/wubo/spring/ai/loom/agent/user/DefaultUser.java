@@ -152,11 +152,29 @@ public class DefaultUser implements IUser {
 
     @Override
     public List<UserInfo> listAllUsers() {
-        return jdbcTemplate.query(
+        // 两步取,避免 LEFT JOIN + GROUP_CONCAT 在 SQLite/H2 上的方言差异;先拿所有用户,再批量拿所有 user_role。
+        List<UserInfo> users = jdbcTemplate.query(
                 "SELECT username, nickname, type FROM user_info ORDER BY id",
                 (rs, rowNum) -> new UserInfo(rs.getString("username"),
                         rs.getString("nickname"),
-                        rs.getString("type")));
+                        rs.getString("type"),
+                        new java.util.ArrayList<>()));
+        if (users.isEmpty()) return users;
+        Map<String, List<String>> rolesByUser = jdbcTemplate.query(
+                "SELECT username, role_code FROM user_role",
+                (rs) -> {
+                    Map<String, List<String>> m = new java.util.LinkedHashMap<>();
+                    while (rs.next()) {
+                        m.computeIfAbsent(rs.getString(1), k -> new java.util.ArrayList<>())
+                                .add(rs.getString(2));
+                    }
+                    return m;
+                });
+        users.forEach(u -> {
+            List<String> r = rolesByUser.get(u.username());
+            if (r != null) u.roles().addAll(r);
+        });
+        return users;
     }
 
     @Override

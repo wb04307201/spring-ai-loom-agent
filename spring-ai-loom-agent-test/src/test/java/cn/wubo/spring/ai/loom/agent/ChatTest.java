@@ -4,8 +4,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
@@ -13,6 +15,7 @@ import reactor.core.publisher.Flux;
 import java.io.File;
 
 @Slf4j
+@MockBean(VectorStore.class)  // 跳过 ollama 模型拉取(本地 ollama 经常没预 pull)
 @SpringBootTest(classes = LoomAgentTestApplication.class)
 class ChatTest {
 
