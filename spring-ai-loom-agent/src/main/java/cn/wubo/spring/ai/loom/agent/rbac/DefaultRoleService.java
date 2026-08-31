@@ -79,7 +79,14 @@ public class DefaultRoleService implements IRoleService {
     @Override
     public void setUserRoles(String username, List<String> roleCodes) {
         if (findUserType(username) == null) {
-            throw new LoomAgentRuntimeException("用户不存在: " + username);
+            throw new LoomAgentRuntimeException(400, "用户不存在: " + username);
+        }
+        if (roleCodes != null && !roleCodes.isEmpty()) {
+            for (String r : roleCodes) {
+                if (!roleExists(r)) {
+                    throw new LoomAgentRuntimeException(400, "角色不存在: " + r);
+                }
+            }
         }
         jdbcTemplate.update("DELETE FROM user_role WHERE username = ?", username);
         if (roleCodes != null && !roleCodes.isEmpty()) {
@@ -101,9 +108,24 @@ public class DefaultRoleService implements IRoleService {
     public void setUserRolesOrSkipAdmin(String username, List<String> roleCodes) {
         String type = findUserType(username);
         if (type == null) {
-            throw new LoomAgentRuntimeException("用户不存在: " + username);
+            throw new LoomAgentRuntimeException(400, "用户不存在: " + username);
         }
         setUserRoles(username, roleCodes);
+    }
+
+    /**
+     * 查询角色是否存在；返回 false 表示 role 不存在。
+     * 供 {@link #setUserRoles} 和 {@link #setRoleTools} 前置校验使用,
+     * 避免 FK 约束触发 500。系统角色（full / ADMIN 等）和其他正常 role 走同一路径。
+     */
+    private boolean roleExists(String roleCode) {
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM role WHERE code = ?", Integer.class, roleCode);
+            return count != null && count > 0;
+        } catch (EmptyResultDataAccessException e) {
+            return false;
+        }
     }
 
     /**
@@ -211,6 +233,9 @@ public class DefaultRoleService implements IRoleService {
 
     @Override
     public void setRoleTools(String roleCode, List<IRoleService.RoleToolItem> items) {
+        if (!roleExists(roleCode)) {
+            throw new LoomAgentRuntimeException(404, "角色不存在: " + roleCode);
+        }
         jdbcTemplate.update("DELETE FROM role_tool WHERE role_code = ?", roleCode);
         if (items != null && !items.isEmpty()) {
             int sortOrder = 0;

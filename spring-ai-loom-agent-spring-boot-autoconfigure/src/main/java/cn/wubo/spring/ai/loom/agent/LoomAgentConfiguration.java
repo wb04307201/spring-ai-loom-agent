@@ -1837,9 +1837,16 @@ public class LoomAgentConfiguration {
             });
             builder.PUT("spring/ai/loom/admin/roles/{code}/tools", request -> {
                 cn.wubo.spring.ai.loom.agent.model.SetRoleToolsRequest body = request.body(cn.wubo.spring.ai.loom.agent.model.SetRoleToolsRequest.class);
-                roleService.setRoleTools(request.pathVariable("code"),
-                        body == null ? null : body.items());
-                return ServerResponse.ok().body(true);
+                // role 不存在 → 4xx 而不是 500（service 抛 LoomAgentRuntimeException）
+                try {
+                    roleService.setRoleTools(request.pathVariable("code"),
+                            body == null ? null : body.items());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    Integer sc = ex.getStatusCode();
+                    int code = sc != null ? sc : 400;
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             builder.GET("spring/ai/loom/admin/users/{username}/roles", request -> {
                 return ServerResponse.ok().body(roleService.getUserRoles(request.pathVariable("username")));
