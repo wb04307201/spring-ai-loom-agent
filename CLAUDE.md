@@ -80,7 +80,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `ChatConfiguration` | ChatClient, IChat, SseController |
 | `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **9 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;唯一控制是 RBAC)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**所有 capability 启停由 `role_tool` 表控制**:admin 在 `/admin/capabilities` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
+| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **9 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 14 RouterFunctions + `SseController` |
 | `CapabilityConfiguration` | `CapabilityService` (统一 list 本地 + MCP capability) + `IRoleService` 的 tool/mcp/skill/knowledge 授权方法 |
@@ -156,9 +156,33 @@ Organized into 7 nested static `@Configuration` classes:
    - **新装 admin 没有任何 role → 0 capability → 必须进 admin 控制台手动授权**
 
 8. **admin UI 整合**(M6 + M7):
-   - 聊天面板 `🔧 MCP服务` 按钮 → `🔧 工具与服务` 按钮,带类型徽章("本地" / "MCP")
+   - 聊天面板 `🔧 MCP服务` 按钮 → `🔧 工具` 按钮,带类型徽章("本地" / "MCP")
    - admin 角色管理页 "授权本地工具组" section,真实从 `/admin/capabilities` 拉动态列表(替换之前的硬编码 `KNOWN_TOOL_GROUPS` 9 行)
    - `app.js` 所有 fetch 显式 `Content-Type: application/json; charset=UTF-8`(解决 GBK 解析错)
+
+#### Universal 工具(M6:平台默认能力,不受 RBAC 控制)
+
+`@ToolGroup` 注解加 `boolean defaultGranted() default false` 字段。设为 `true` 的工具对**所有登录用户可见**,与 `role_tool` 表完全解耦:
+
+| Universal 工具 | group | 理由 |
+|----------------|-------|------|
+| `IScheduleTool` | `tool_schedule` | per-user 命名空间,触发也走子模型 user 身份,无越权风险 |
+| `ISubTaskTool` | `tool_subtask` | 子任务 tool 调用继承 user 角色,无越权风险 |
+| `IKnowledgeTool` | `tool_knowledge` | KB 列表本身受 `role_knowledge` 控制,工具无授权必要 |
+| `ITimeTool` | `tool_time` | 只读返回时间,无副作用 |
+| `ISkillTool` | `tool_skill` | 允许用户自由创建/编辑自建 skill |
+| `IFileTool` | `tool_file` | 默认放开本地文件访问(⚠️ 含 `deleteFileOrDirectory` 递归删除,LLM 端需谨慎 prompt 约束) |
+
+**RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行,必须显式授权。
+
+**实现机制**:
+- 元数据单一源 = `@ToolGroup(defaultGranted=true)` 注解,**DB 端无 `loom_universal_tool` 表**
+- `CapabilityService.universalToolGroups()` 反射所有 `@ToolGroup` 注解,返回默认授予的 group_name 集合
+- `visibleToolGroupsFor(username) = role_granted ∪ universal` —— 新装 admin / 普通用户也能至少调用 6 个 universal 工具
+- `allowedCapabilityIdsFor(...)` 在 `role ∩ user_pick` 之外再 `addAll(universalGroups)`,user_pick 不能拒绝 universal
+- 聊天面板"工具"弹窗**完全不展示** universal 工具的 checkbox(无感调用)
+- admin 角色授权页"已授权本地工具"列表**完全不展示** universal 工具入口(没有"移除"按钮,只有 RBAC 工具可操作)
+- Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` 一次性清理 `role_tool` 表里 6 个 universal 工具的历史授权记录(防止旧库"残留可见但 UI 无法移除"的歧义)
 
 
 - `IMavenTool` is **disabled by default** (`maven.enabled=false`); same opt-in pattern. Compile/package is handled by `ICompileAndDeployTool`.
@@ -172,7 +196,8 @@ Organized into 7 nested static `@Configuration` classes:
  - 库 `src/main/resources/db/migration/V1.0__init.sql` — 基础建表（knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp）+ 默认 admin 账号。**保持稳定,不再改动**
  - 库 `src/main/resources/db/migration/V2.0__subtask_and_schedule.sql` — **增量**（把历史 V12~V17 合并成一个文件）：新增 `loom_scheduled_task` / `loom_schedule_execution` / `loom_subtask_history`，给 `user_conversation` 追加侧边栏三列 title/created_at/updated_at，`SPRING_AI_CHAT_MEMORY.conversation_id` 加宽到 255（子任务命名空间 id 需要）。旧 `flex_scheduled_task`（V12）已删——flex-schedule 1.x 纯内存、无 JdbcTaskRepository、零引用（保留一条防御性 `DROP IF EXISTS` 清理残留）
  - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据：12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill
- - Flyway 用版本号在同一实例里按序执行：``(基础) → ``(业务数据) → ``(子任务/定时增量)
+ - 库 `src/main/resources/db/migration/V2.4__cleanup_universal_tools_from_role_tool.sql` — M6 一次性 DELETE `role_tool` 中 6 个 universal 工具(`tool_schedule` / `tool_subtask` / `tool_knowledge` / `tool_time` / `tool_skill` / `tool_file`)的历史授权记录;后续由 `@ToolGroup(defaultGranted=true)` 注解层硬约束,代码路径不再 INSERT
+ - Flyway 用版本号在同一实例里按序执行：``(基础) → ``(业务数据) → ``(子任务/定时增量) → ``(universal 清理)
  - **升级注意**：全新库按上述顺序干净跑通。已跑过旧 V12~V17 的历史库无法就地迁移到 （旧版本号已从磁盘移除）——需全新库或 `flyway baseline`；本地开发 `rm -rf ~/.loom/datasource` 即可重跑
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
 - **Flyway table**: `flyway_schema_history`（Spring Boot 默认，库不覆盖）

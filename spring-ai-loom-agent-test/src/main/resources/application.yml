@@ -34,7 +34,6 @@ spring:
     dashscope:
       api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
       chat:
-        enabled: true
         options:
           model: qwen3.8-max
           multi_model: true
