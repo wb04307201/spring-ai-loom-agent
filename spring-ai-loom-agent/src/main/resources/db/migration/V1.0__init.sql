@@ -514,3 +514,105 @@ CREATE TABLE loom_chat_reasoning (
  created_at TIMESTAMP(9) WITH TIME ZONE NOT NULL,
  updated_at TIMESTAMP(9) WITH TIME ZONE NOT NULL
 );
+
+
+-- =============================================================
+-- 本地工具组 RBAC：role_tool（原 V2.1）
+-- =============================================================
+-- 镜像 role_mcp 的设计：
+--   - role_code    : 业务角色代码（与 role 表 code 对齐）
+--   - group_name   : 本地工具组 slug（@ToolGroup 注解值 + "tool_" 前缀，
+--                    例如 IFileTool(@ToolGroup("file")) → group_name = "tool_file"）
+--   - default_enabled: TRUE → 用户的聊天面板 checkbox 默认勾选（用户可手动取消）
+--   - sort_order   : 角色授权列表的展示顺序
+--
+-- 设计要点：
+--   1. group_name 用 VARCHAR(64) 容纳 "tool_" 前缀（最多 32+1+32）。
+--   2. 镜像 role_mcp 的 default_enabled 默认 TRUE。
+--   3. 不 seed 默认 admin 授权（admin 账号首次部署后必须手动进控制台授权）—— Q12 决定。
+--   4. 不创建 user_tool_enabled 表：用户级 checkbox 状态由前端 state 持有。
+-- =============================================================
+
+CREATE TABLE role_tool
+(
+    role_code       VARCHAR(32)  NOT NULL,
+    group_name      VARCHAR(64)  NOT NULL,
+    sort_order      INT          NOT NULL DEFAULT 0,
+    default_enabled BOOLEAN      NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (role_code, group_name)
+);
+CREATE INDEX idx_role_tool_code ON role_tool(role_code, sort_order);
+
+
+-- =============================================================
+-- Role 删除 cascade（原 V2.2，B.2.1 修复）
+-- =============================================================
+-- user_role / role_mcp / role_tool 三张子表对 role.code 都没有 FK 约束,
+-- 也没有应用层 cascade。删除 role 时,这三张表的子行变成 dangling 引用。
+--
+-- 修复:
+--   1. 加 FK 约束 + ON DELETE CASCADE,DB 层保证
+--   2. 应用层 deleteOrThrow 显式 DELETE 子表(防御性 + SQL 可见)
+-- 对已运行实例也兼容(只是补加约束,不影响已有数据)。
+-- =============================================================
+
+-- 1. user_role.role_code → role.code
+ALTER TABLE user_role
+    ADD CONSTRAINT fk_user_role_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
+-- 2. role_mcp.role_code → role.code
+ALTER TABLE role_mcp
+    ADD CONSTRAINT fk_role_mcp_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
+-- 3. role_tool.role_code → role.code
+ALTER TABLE role_tool
+    ADD CONSTRAINT fk_role_tool_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
+
+-- =============================================================
+-- V2.3: user_role.username 加 FK + CASCADE 修 P0.3.3 bug
+-- =============================================================
+-- 背景:user_role.username 之前没 FK,删除 user 时 user_role 行
+-- 留为 orphan。补上 FK,让 user 删除自动清理 user_role。
+
+-- 1) Cleanup pre-existing orphan user_role rows (safety)
+DELETE FROM user_role
+WHERE username NOT IN (SELECT username FROM user_info);
+
+-- 2) Add FK constraint (CASCADE so user delete also drops user_role)
+ALTER TABLE user_role
+    ADD CONSTRAINT fk_user_role_user
+    FOREIGN KEY (username) REFERENCES user_info(username) ON DELETE CASCADE;
+
+
+-- =============================================================
+-- V2.4: M6 清理 role_tool 表里 6 个 universal 工具的历史授权记录
+-- =============================================================
+-- 背景:M6 引入 @ToolGroup(defaultGranted=true) 机制,把
+--   schedule / subtask / knowledge / time / skill / file
+-- 6 个工具标记为"平台默认能力",对所有登录用户可见,与 role_tool
+-- RBAC 完全解耦。admin UI 不展示这 6 个工具的可增删入口,数据库
+-- 端保留旧行只会带来误导("为什么这个 role 还显示 schedule 已被
+-- 授权但我又没法移除它?")。
+--
+-- 本 migration 一次性 DELETE 这 6 个 group_name 的所有 role_tool
+-- 行。后续 INSERT 也由 CapabilityService.defaultGranted 硬约束
+-- 不写入;DDL 层不强制阻止(保留 schema 灵活性),但代码路径上
+-- 不会再有新增。
+--
+-- 安全:DELETE 而非 TRUNCATE,只动指定 group_name;如果某些环境
+-- 期望保留这些记录做审计,可注释掉本文件后手动跑。
+-- =============================================================
+
+DELETE FROM role_tool
+WHERE group_name IN (
+    'tool_schedule',
+    'tool_subtask',
+    'tool_knowledge',
+    'tool_time',
+    'tool_skill',
+    'tool_file'
+);
