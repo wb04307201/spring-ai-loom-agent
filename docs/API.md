@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.39
+> **Version**: 1.1.40
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -873,7 +873,7 @@ GET /spring/ai/chat/loom/mcp
  {
  "name": "weather-mcp",
  "title": "Weather",
- "version": "1.1.39",
+ "version": "1.1.40",
  "description": "Provides real-time weather query service",
  "defaultSelected": true,
  "tools": [
