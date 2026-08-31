@@ -57,6 +57,16 @@ class CapabilityServiceTest {
         String getCurrentTime(@ToolParam(description = "tz") String timezone);
     }
 
+    /**
+     * M6 引入 {@code defaultGranted} 后,作为 fixture 的 universal 工具:
+     * 不需要 role 授权即可被所有用户可见。
+     */
+    @ToolGroup(value = "skill", defaultGranted = true, description = "skill fixture (universal)")
+    public interface ITestUniversalSkillTool extends IEmbedTool {
+        @Tool(description = "get skill")
+        String getSkill(@ToolParam(description = "name") String name);
+    }
+
     // ===== mocks =====
     private IRoleService roleService;
     private IMcp mcp;
@@ -85,36 +95,90 @@ class CapabilityServiceTest {
     @DisplayName("visibleToolGroupsFor")
     class VisibleToolGroupsTests {
         @Test
-        @DisplayName("空角色 → 空集合")
+        @DisplayName("空角色 → 只剩 universal(M6 引入 defaultGranted)")
         void empty() {
             when(roleService.getVisibleToolsForUser("u")).thenReturn(List.of());
-            assertTrue(newService().visibleToolGroupsFor("u").isEmpty());
+            // 注册一个 universal fixture → 即便无 role,用户也能看到 tool_skill
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            Set<String> s = newService(skill).visibleToolGroupsFor("u");
+            assertEquals(Set.of("tool_skill"), s);
         }
 
         @Test
-        @DisplayName("单角色 3 个 tool group")
+        @DisplayName("单角色 3 个 tool group(无 universal 时)")
         void singleRole() {
             when(roleService.getVisibleToolsForUser("u")).thenReturn(
                     List.of("tool_file", "tool_git", "tool_maven"));
+            // 不注册 universal → 结果纯 RBAC 视角
             Set<String> s = newService().visibleToolGroupsFor("u");
             assertEquals(3, s.size());
             assertTrue(s.contains("tool_file"));
         }
+
+        @Test
+        @DisplayName("role ∪ universal — 新装用户也能调默认工具")
+        void roleUnionUniversal() {
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(
+                    List.of("tool_file", "tool_git"));
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            Set<String> s = newService(skill).visibleToolGroupsFor("u");
+            assertEquals(3, s.size());
+            assertTrue(s.contains("tool_file"));
+            assertTrue(s.contains("tool_git"));
+            assertTrue(s.contains("tool_skill"));
+        }
     }
 
     // ============================================================
-    //  allowedCapabilityIdsFor — role ∩ user_pick
+    //  universalToolGroups — 直接反射 @ToolGroup(defaultGranted=true)
+    // ============================================================
+    @Nested
+    @DisplayName("universalToolGroups")
+    class UniversalToolGroups {
+        @Test
+        @DisplayName("无 defaultGranted → 空结果")
+        void none() {
+            assertTrue(newService().universalToolGroups().isEmpty());
+        }
+
+        @Test
+        @DisplayName("一个 defaultGranted=true 工具 → 仅返回它")
+        void oneDefault() {
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            Set<String> u = newService(skill).universalToolGroups();
+            assertEquals(Set.of("tool_skill"), u);
+        }
+
+        @Test
+        @DisplayName("混合 — RBAC 工具 + universal 工具 → 仅返回 universal")
+        void mixedPickUniversal() {
+            ITestFileTool file = mock(ITestFileTool.class);
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            Set<String> u = newService(file, skill).universalToolGroups();
+            assertEquals(Set.of("tool_skill"), u);
+        }
+    }
+
+    // ============================================================
+    //  allowedCapabilityIdsFor — role ∩ user_pick + universal 强制
     // ============================================================
     @Nested
     @DisplayName("allowedCapabilityIdsFor")
     class AllowedCapabilityIds {
         @Test
-        @DisplayName("空 pick → 空结果(fail-safe)")
+        @DisplayName("空 pick → 只剩 universal(M6 起不再 fail-safe 为空)")
         void emptyPick() {
             when(roleService.getVisibleToolsForUser("u")).thenReturn(
                     List.of("tool_file", "tool_git"));
+            // 无 universal 时空 pick → 空结果(原行为保留)
             assertTrue(newService().allowedCapabilityIdsFor("u", new HashSet<>()).isEmpty());
             assertTrue(newService().allowedCapabilityIdsFor("u", null).isEmpty());
+            // 注册 universal 后,空 pick 仍返回 universal(Q5 强制包含)
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            Set<String> r1 = newService(skill).allowedCapabilityIdsFor("u", new HashSet<>());
+            Set<String> r2 = newService(skill).allowedCapabilityIdsFor("u", null);
+            assertEquals(Set.of("tool_skill"), r1);
+            assertEquals(Set.of("tool_skill"), r2);
         }
 
         @Test
@@ -129,13 +193,27 @@ class CapabilityServiceTest {
         }
 
         @Test
-        @DisplayName("pick 完全不在 role → 空结果")
+        @DisplayName("pick ⊂ role 且有 universal → (role ∩ pick) ∪ universal")
+        void pickSubsetWithUniversal() {
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(
+                    List.of("tool_file", "tool_git"));
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            // pick file + compile → 交集 file;再加 universal tool_skill
+            Set<String> r = newService(skill).allowedCapabilityIdsFor(
+                    "u", Set.of("tool_file", "tool_compile"));
+            assertEquals(Set.of("tool_file", "tool_skill"), r);
+        }
+
+        @Test
+        @DisplayName("pick 完全不在 role → 空结果 + universal")
         void pickNotInRole() {
             when(roleService.getVisibleToolsForUser("u")).thenReturn(
                     List.of("tool_file"));
-            assertTrue(newService()
-                    .allowedCapabilityIdsFor("u", Set.of("tool_xyz", "tool_abc"))
-                    .isEmpty());
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            // pick 完全未授权 → 仅 universal 出现
+            Set<String> r = newService(skill)
+                    .allowedCapabilityIdsFor("u", Set.of("tool_xyz", "tool_abc"));
+            assertEquals(Set.of("tool_skill"), r);
         }
 
         @Test
@@ -189,6 +267,43 @@ class CapabilityServiceTest {
             long enabled = caps.stream().filter(CapabilityInfo::effectiveEnabled).count();
             // tool_file + tool_time + mcp-1 + mcp-2 = 4
             assertEquals(4, enabled);
+        }
+
+        @Test
+        @DisplayName("M6:universal 工具不出现在 list()(Q4 '完全不显示')")
+        void listExcludesUniversal() {
+            ITestFileTool fileImpl = mock(ITestFileTool.class);
+            ITestTimeTool timeImpl = mock(ITestTimeTool.class);
+            ITestUniversalSkillTool skillImpl = mock(ITestUniversalSkillTool.class);
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(List.of());  // 无 role
+            when(roleService.getVisibleMcpsForUser("u")).thenReturn(List.of());
+
+            List<CapabilityInfo> caps = newService(fileImpl, timeImpl, skillImpl).list("u");
+            // 2 LOCAL(file + time, skill 被排除) + 0 MCP = 2
+            assertEquals(2, caps.size());
+            // universal 工具 tool_skill 不出现在列表里
+            assertTrue(caps.stream().noneMatch(c -> "tool_skill".equals(c.id())),
+                    () -> "universal 工具不应出现在聊天面板列表");
+            // tool_file / tool_time 是 RBAC → 没 role = false
+            caps.stream()
+                    .filter(c -> "tool_file".equals(c.id()) || "tool_time".equals(c.id()))
+                    .forEach(c -> assertFalse(c.effectiveEnabled(),
+                            () -> c.id() + " 应为 false(无 role 授权)"));
+        }
+
+        @Test
+        @DisplayName("M6:visibleToolGroupsFor 仍含 universal — LLM tool callback 仍可用")
+        void visibleToolGroupsStillIncludesUniversal() {
+            ITestFileTool fileImpl = mock(ITestFileTool.class);
+            ITestTimeTool timeImpl = mock(ITestTimeTool.class);
+            ITestUniversalSkillTool skillImpl = mock(ITestUniversalSkillTool.class);
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(List.of());
+
+            CapabilityService svc = newService(fileImpl, timeImpl, skillImpl);
+            // chat 面板 UI 看不到 skill,但 LLM 调 tool callback 时仍能拿到
+            assertTrue(svc.list("u").stream().noneMatch(c -> "tool_skill".equals(c.id())));
+            assertTrue(svc.visibleToolGroupsFor("u").contains("tool_skill"),
+                    () -> "universal 必须仍在 visibleToolGroupsFor,否则 LLM 无法调用");
         }
     }
 

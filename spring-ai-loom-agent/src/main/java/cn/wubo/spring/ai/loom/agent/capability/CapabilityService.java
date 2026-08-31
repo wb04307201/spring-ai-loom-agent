@@ -27,7 +27,7 @@ import java.util.Set;
  *
  * <p><b>调用方:</b>
  * <ul>
- *   <li>前端 GET /api/capabilities —— 渲染"工具与服务"面板</li>
+ *   <li>前端 GET /api/capabilities —— 渲染"工具"面板</li>
  *   <li>DefaultChat.stream() —— 计算"这次会话能调哪些 capability",再分流到:
  *     本地 tool 通过 enableToolGroups + role 过滤;MCP 通过 {@link IMcp#getVisibleToolCallbackProvider} 现有过滤</li>
  * </ul>
@@ -64,13 +64,19 @@ public class CapabilityService {
         List<CapabilityInfo> all = new ArrayList<>();
         Set<String> visibleMcpNames = mcpNamesFor(username);
         Set<String> visibleToolGroups = toolGroupsFor(username);
+        Set<String> universalGroups = universalToolGroups();
 
-        // 本地 tool
+        // 本地 tool — M6 起,universal 工具不返回给聊天面板(Q4 "完全不显示" 决定)。
+        // 它们仍然参与 tool callback filter(visibleToolGroupsFor 包含 universal),
+        // LLM 可正常调用,只是 UI 上不展示 checkbox。
         for (IEmbedTool tool : embedTools) {
             CapabilityInfo ci = toLocalCapability(tool);
+            if (universalGroups.contains(ci.id())) continue;
+            // RBAC 工具 effectiveEnabled 跟随 role
+            boolean enabled = visibleToolGroups.contains(ci.id());
             all.add(new CapabilityInfo(
                     ci.id(), ci.type(), ci.name(), ci.title(), ci.description(), ci.tools(),
-                    visibleToolGroups.contains(ci.id())));
+                    enabled));
         }
         // MCP server
         List<McpRecord> mcpRecords = mcp.mcps();
@@ -99,11 +105,17 @@ public class CapabilityService {
      * 列出所有 capability(不管用户权限),admin 控制台用。
      * 跟 {@link #list(String)} 的差别:不去掉被 role 屏蔽的 capability,
      * 但仍把 {@code effectiveEnabled = role ∩ 服务状态} 标出来。
+     * <p>
+     * M6 起:universal 工具同样不返回(Q3 "完全隐藏" 决定) — 它们对所有用户默认可见,
+     * 没有"是否授权"的语义,admin UI 没必要展示入口。
      */
     public List<CapabilityInfo> listAll() {
         List<CapabilityInfo> all = new ArrayList<>();
+        Set<String> universalGroups = universalToolGroups();
         for (IEmbedTool tool : embedTools) {
-            all.add(toLocalCapability(tool));
+            CapabilityInfo ci = toLocalCapability(tool);
+            if (universalGroups.contains(ci.id())) continue;
+            all.add(ci);
         }
         for (McpRecord rec : mcp.mcps()) {
             String id = rec.name();
@@ -136,17 +148,23 @@ public class CapabilityService {
      */
     public Set<String> allowedCapabilityIdsFor(String username, Set<String> requestedPick) {
         Set<String> allowed = new LinkedHashSet<>();
-        if (requestedPick == null || requestedPick.isEmpty()) return allowed;
         Set<String> visibleMcpNames = mcpNamesFor(username);
         Set<String> visibleToolGroups = toolGroupsFor(username);
-        for (String id : requestedPick) {
-            if (id.startsWith("tool_")) {
-                if (visibleToolGroups.contains(id)) allowed.add(id);
-            } else {
-                // MCP: id 就是 live client name,直接 in 检查
-                if (visibleMcpNames.contains(id)) allowed.add(id);
+        Set<String> universalGroups = universalToolGroups();
+
+        if (requestedPick != null && !requestedPick.isEmpty()) {
+            for (String id : requestedPick) {
+                if (id.startsWith("tool_")) {
+                    if (visibleToolGroups.contains(id)) allowed.add(id);
+                } else {
+                    // MCP: id 就是 live client name,直接 in 检查
+                    if (visibleMcpNames.contains(id)) allowed.add(id);
+                }
             }
         }
+        // 强制包含 universal:Q5 决定 — universal 工具对所有用户可见,与 user_pick / role_tool 无关。
+        // 注解层硬约束：admin UI 不展示入口,role_tool 历史行被 V2.4 迁移清理。
+        allowed.addAll(universalGroups);
         return allowed;
     }
 
@@ -180,19 +198,41 @@ public class CapabilityService {
 
     private Set<String> toolGroupsFor(String username) {
         // M3 已实现：合并用户所有 role 授权的 group_name（"tool_xxx" 形式）。
+        // M6 扩展：再 union 上 universal 工具（@ToolGroup(defaultGranted=true)），
+        // 任何登录用户都能调这些工具,与 role_tool 表无关。
         Set<String> s = new HashSet<>();
         for (String g : roleService.getVisibleToolsForUser(username)) {
             s.add(g);
         }
+        s.addAll(universalToolGroups());
         return s;
     }
 
     /**
      * 公开版本：供 {@code DefaultChat} 在"用户没传 enabledToolGroups"路径下作为全集 fallback。
-     * 跟 {@link #toolGroupsFor} 一样只读,纯 RBAC 视角。
+     * 等价于 {@link #toolGroupsFor}：返回该用户最终可见的工具 group 集合 = role 授权 ∪ universal。
      */
     public Set<String> visibleToolGroupsFor(String username) {
         return toolGroupsFor(username);
+    }
+
+    /**
+     * 扫描所有 embedTools 的 @ToolGroup 注解,返回 {@code defaultGranted=true} 的 group_name 集合
+     * （{@code "tool_xxx"} 形式）。在 Spring 容器初始化后第一次调用时构建缓存。
+     * <p>
+     * universal 工具是平台默认能力,对所有用户可见 — 与 role_tool RBAC 完全解耦。
+     */
+    public Set<String> universalToolGroups() {
+        Set<String> u = new HashSet<>();
+        for (IEmbedTool tool : embedTools) {
+            Class<?> iface = findToolInterface(tool);
+            if (iface == null) continue;
+            ToolGroup ann = iface.getAnnotation(ToolGroup.class);
+            if (ann != null && ann.defaultGranted()) {
+                u.add("tool_" + ann.value());
+            }
+        }
+        return u;
     }
 
     /**
