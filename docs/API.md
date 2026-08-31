@@ -1182,7 +1182,7 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | DELETE | `/admin/users/{username}` | Delete user; refuses to delete self |
 | GET | `/admin/users/{username}/conversations` | List a user's conversations (admin view) |
 | GET | `/admin/users/{username}/roles` | Get user's roles |
-| PUT | `/admin/users/{username}/roles` | Replace user's roles (body: array of role codes) |
+| PUT | `/admin/users/{username}/roles` | Replace user's roles (body: `SetUserRolesRequest` — `{"roleCodes": ["dev", "ops"]}`). Returns 400 `{"error":"用户不存在: xxx"}` or `{"error":"角色不存在: xxx"}` |
 
 ### 10.2 Conversation Management (admin)
 
