@@ -3509,10 +3509,13 @@ const mcp = {
     container.innerHTML = "";
     for (const c of state.capabilities) {
       const item = document.createElement("div");
-      const checked = c.type === "LOCAL"
+      const isSelected = c.type === "LOCAL"
         ? state.selectedToolGroups.includes(c.id)
         : state.selectedMcps.includes(c.id);
       const enabled = c.effectiveEnabled === true;
+      // 修复:未授权的能力强制 unchecked,避免 "checked + disabled" 死锁态。
+      // localStorage 里残留的未授权 id 会在 loadList 清理(见 capability.loadList)
+      const checked = enabled && isSelected;
       item.className = "skill-item" + (checked ? " selected" : "") + (enabled ? "" : " disabled");
       // 类型徽章:本地(M5 前是 MCP 唯一,现在要区分)
       const badge = c.type === "LOCAL"
@@ -3612,24 +3615,21 @@ const mcp = {
         state.capabilities = data;
         // 兼容:state.mcps 保留原 MCP 列表,供详情面板 / 其他遗留代码用
         state.mcps = data.filter((c) => c.type === "MCP");
-        // 按 id 拆分:tool_* 进 selectedToolGroups,其他(MCP live name)进 selectedMcps
-        const toolIds = data.filter((c) => c.type === "LOCAL").map((c) => c.id);
-        const mcpIds = data.filter((c) => c.type === "MCP").map((c) => c.id);
+        // 按 id + effectiveEnabled 双过滤:localStorage 残留的(已撤销授权 / MCP 已下线)
+        // id 会自动剔除,UI 也不再出现 "checked + disabled" 死锁态。
+        const toolIds = data.filter((c) => c.type === "LOCAL" && c.effectiveEnabled === true).map((c) => c.id);
+        const mcpIds = data.filter((c) => c.type === "MCP" && c.effectiveEnabled === true).map((c) => c.id);
         const persisted = this._loadPersisted();
         if (persisted && persisted.length > 0) {
           state.selectedToolGroups = persisted.filter((n) => toolIds.includes(n));
           state.selectedMcps = persisted.filter((n) => mcpIds.includes(n));
         } else {
           // 默认:effectiveEnabled=true 的全勾(角色授权的都能用)
-          state.selectedToolGroups = toolIds.filter((id) => {
-            const c = data.find((x) => x.id === id);
-            return c && c.effectiveEnabled === true;
-          });
-          state.selectedMcps = mcpIds.filter((id) => {
-            const c = data.find((x) => x.id === id);
-            return c && c.effectiveEnabled === true;
-          });
+          state.selectedToolGroups = toolIds.slice();
+          state.selectedMcps = mcpIds.slice();
         }
+        // 重新持久化一次,顺手清理残留(下次 refresh 就干净了)
+        this._savePersisted();
         return;
       }
     } catch (e) {
