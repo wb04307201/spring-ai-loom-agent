@@ -25,6 +25,10 @@
 
   const toastEl = document.getElementById("toast-notification");
 
+  // M0 T14: 跨市场 PENDING 待审核 chip 容器。与 market-skills.html / knowledge-market.html
+  // 内同名 chip 共享 .pending-chip / .pending-chip-red 样式。
+  const pendingChipContainer = document.getElementById("pending-chip-container");
+
   // 1. 进入页面：先校验管理员身份
   async function bootstrap() {
     try {
@@ -56,6 +60,11 @@
       const me = await postJson("/spring/ai/loom/user/currentUser");
       adminUsername.textContent = `${me.nickname || me.username}（${me.type === "ADMIN" ? "管理员" : "用户"}）`;
       await loadUsers();
+      // 进入用户管理后,异步拉取两侧市场的 PENDING 计数,不阻塞主列表渲染。
+      loadPendingChip().catch((e) => {
+        console.warn("[console] pending chip load failed:", e);
+        renderPendingChip(0);
+      });
     } catch (e) {
       // 网络错误 / JSON 解析错误 = 强制跳走
       window.location.replace("/spring/ai/loom/index.html");
@@ -162,6 +171,59 @@
       await loadUsers();
     } catch (e) {
       showToast("删除失败：" + e.message, "error");
+    }
+  }
+
+  /**
+   * M0 T14: 跨市场 PENDING 待审核汇总。
+   * 分别请求 Skill 市场 + Knowledge 市场 admin 列表，客户端按 status==='PENDING'
+   * 过滤求和。任一端点失败 (401/403/5xx) 视为 0,不阻塞另一端计数。
+   */
+  async function loadPendingChip() {
+    const endpoints = [
+      "/spring/ai/loom/admin/market-skills",
+      "/spring/ai/loom/admin/market-knowledge",
+    ];
+    const counts = await Promise.all(
+      endpoints.map(async (url) => {
+        try {
+          const r = await fetch(url, {
+            credentials: "include",
+            headers: { "Content-Type": "application/json; charset=UTF-8" },
+          });
+          if (!r.ok) return 0;
+          const data = await r.json();
+          // 兼容 v1 (List<...>) 与 v2 (Page<...>) 两种返回结构
+          const rows = Array.isArray(data)
+            ? data
+            : data && Array.isArray(data.content)
+              ? data.content
+              : [];
+          return rows.filter(
+            (m) => String((m && m.status) || "").toUpperCase() === "PENDING",
+          ).length;
+        } catch (_) {
+          return 0;
+        }
+      }),
+    );
+    const total = counts.reduce((a, b) => a + b, 0);
+    renderPendingChip(total);
+  }
+
+  /**
+   * 渲染顶部"待审核 (N)"红色 chip。N=0 时隐藏容器,与 market-skills.html 内
+   * 同款 chip 共用样式类名。
+   */
+  function renderPendingChip(n) {
+    if (!pendingChipContainer) return;
+    if (n > 0) {
+      pendingChipContainer.innerHTML =
+        '<div class="pending-chip pending-chip-red">待审核 (' + n + ")</div>";
+      pendingChipContainer.style.display = "";
+    } else {
+      pendingChipContainer.innerHTML = "";
+      pendingChipContainer.style.display = "none";
     }
   }
 
@@ -295,7 +357,13 @@
 
   // 事件绑定
   createBtn.addEventListener("click", openCreate);
-  refreshBtn.addEventListener("click", loadUsers);
+  refreshBtn.addEventListener("click", () => {
+    loadUsers();
+    loadPendingChip().catch((e) => {
+      console.warn("[console] pending chip refresh failed:", e);
+      renderPendingChip(0);
+    });
+  });
   createClose.addEventListener("click", closeCreate);
   createCancel.addEventListener("click", closeCreate);
   createSubmit.addEventListener("click", submitCreate);

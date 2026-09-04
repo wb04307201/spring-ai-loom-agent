@@ -2180,7 +2180,20 @@ const knowledge = {
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
     try {
       const data = await api.listMarketKnowledge(1, 50);
-      const items = (data && data.content) || data || [];
+      const rawItems = (data && data.content) || data || [];
+      // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
+      // 当前后端 MarketKnowledgeRecord 未暴露 isOfficial/featuredRank，比较退化为 submittedAt。
+      const items = [...rawItems].sort((a, b) => {
+        const ao = a && a.isOfficial ? 1 : 0;
+        const bo = b && b.isOfficial ? 1 : 0;
+        if (ao !== bo) return bo - ao;
+        const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
+        const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
+        if (ar !== br) return br - ar;
+        const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+        const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+        return bd - ad;
+      });
       if (!items || items.length === 0) {
         container.innerHTML =
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
@@ -2190,10 +2203,13 @@ const knowledge = {
       for (const kb of items) {
         const div = document.createElement("div");
         div.className = "ks-item";
+        const officialBadge = kb && kb.isOfficial
+          ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
+          : "";
         div.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ <span class="ks-item-name">${escapeHtml(kb.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
  <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author || "")} · ${escapeHtml(kb.description || "")}</span>
  </div>
@@ -2346,13 +2362,21 @@ const knowledge = {
 
   _showMyPublishDetail(kb, detail) {
     // -2: 详情面板显示完整信息 + 「撤回共享（下架）」按钮
+    // M0 T14: 镜像 Skills 市场「我的发布」详情面板：后端若返回 reviewComment 则展示
+    // （KB 当前无审批流，字段多为 null；保留条件渲染以便后端将来接入审核意见时无感生效）
+    const reviewCommentBlock = kb && kb.reviewComment
+      ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;color:#991b1b;font-size:12px;line-height:1.6;">审核意见：${escapeHtml(kb.reviewComment)}</div>`
+      : "";
     detail.innerHTML = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
  <div>名称：<strong>${escapeHtml(kb.name)}</strong></div>
  <div>描述：${escapeHtml(kb.description || "无")}</div>
  <div>上架时间：${kb.submittedAt ? new Date(kb.submittedAt).toLocaleString() : "-"}</div>
+ ${kb && kb.reviewedAt ? "<div>审核时间：" + new Date(kb.reviewedAt).toLocaleString() + "</div>" : ""}
+ ${kb && kb.reviewedBy ? "<div>审核人：" + escapeHtml(kb.reviewedBy) + "</div>" : ""}
  </div>
+ ${reviewCommentBlock}
  <div style="font-size: 12px; color: var(--text-muted);">
  上架即可被其他用户订阅。你的本地实例保持不变，可正常编辑或删除。
  </div>
@@ -3756,7 +3780,21 @@ const skills = {
       '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
     try {
       const list = await api.listMarketSkills(1, 50);
-      const items = (list && list.content) || list || [];
+      const rawItems = (list && list.content) || list || [];
+      // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序。后端目前未在 DTO 中
+      // 暴露 isOfficial/featuredRank（MarketSkill 仅含 10 个基础字段），所以比较退化为
+      // submittedAt 降序；待后端扩展 MarketSkill DTO 后这里会自动生效。
+      const items = [...rawItems].sort((a, b) => {
+        const ao = a && a.isOfficial ? 1 : 0;
+        const bo = b && b.isOfficial ? 1 : 0;
+        if (ao !== bo) return bo - ao;
+        const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
+        const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
+        if (ar !== br) return br - ar;
+        const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+        const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+        return bd - ad;
+      });
       if (!items || items.length === 0) {
         container.innerHTML =
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
@@ -3766,10 +3804,13 @@ const skills = {
       for (const m of items) {
         const item = document.createElement("div");
         item.className = "ks-item";
+        const officialBadge = m && m.isOfficial
+          ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
+          : "";
         item.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(m.name)} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ <span class="ks-item-name">${escapeHtml(m.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
  <span class="ks-item-desc">by ${escapeHtml(m.author || "")} · ${escapeHtml(m.description || "")}</span>
  </div>
@@ -3924,6 +3965,21 @@ const skills = {
       .forEach((i) => i.classList.remove("selected"));
     element.classList.add("selected");
     const st = this._statusLabel(skill.status);
+    // M0 T14: REJECTED 时把审核意见做成醒目的红框块，避免被淹没在元信息文字流中。
+    // 其他状态若有评论也降级显示在一行（保留历史兼容）。
+    let reviewCommentBlock = "";
+    if (skill.reviewComment) {
+      if (skill.status === "REJECTED") {
+        reviewCommentBlock =
+          '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;color:#991b1b;font-size:12px;line-height:1.6;">' +
+          "拒绝原因：" +
+          escapeHtml(skill.reviewComment) +
+          "</div>";
+      } else {
+        reviewCommentBlock =
+          "<div>审核意见：" + escapeHtml(skill.reviewComment) + "</div>";
+      }
+    }
     let html = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
@@ -3933,7 +3989,7 @@ const skills = {
  <div>共享时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : "-"}</div>
  ${skill.reviewedAt ? "<div>审核时间：" + new Date(skill.reviewedAt).toLocaleString() + "</div>" : ""}
  ${skill.reviewedBy ? "<div>审核人：" + escapeHtml(skill.reviewedBy) + "</div>" : ""}
- ${skill.reviewComment ? "<div>审核意见：" + escapeHtml(skill.reviewComment) + "</div>" : ""}
+ ${reviewCommentBlock}
  </div>
  <div style="font-size: 13px; color: var(--text-muted);">${escapeHtml(skill.description || "无说明")}</div>
  <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(skill.content || "")}</div>
