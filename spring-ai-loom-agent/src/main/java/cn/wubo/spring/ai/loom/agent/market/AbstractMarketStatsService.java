@@ -151,10 +151,28 @@ public abstract class AbstractMarketStatsService<M> implements IMarketContentSta
      * values; pass {@code newCount=0} and {@code newLastAt=null} for the
      * canonical "reset" semantics. If no row exists yet, the lazy-upsert
      * ensures one is created with the requested values.
+     *
+     * <p><b>Fix-up B2:</b> before the direct UPDATE, we discard any buffered
+     * delta for this specific {@code (table, keyCol, key, cntCol)} tuple.
+     * Otherwise an admin "reset" call could be silently overwritten 0–30s
+     * later when the {@link BatchedCounterService#scheduledFlush()} drains
+     * pending increments — the admin's request would appear to be a no-op
+     * even though it succeeded. We use
+     * {@link BatchedCounterService#discard} (single-key) instead of
+     * {@link BatchedCounterService#flush()} (whole buffer) so unrelated
+     * counters in the same buffer keep their queued increments.</p>
      */
     public void resetStats(Long marketId, long newCount, LocalDateTime newLastAt) {
         if (marketId == null) {
             return;
+        }
+        // Drop pending buffered deltas for this exact tuple — the direct
+        // UPDATE below will overwrite whatever the flush would have written,
+        // so leaving the buffer would corrupt the admin's intent.
+        boolean discarded = batchedCounterService.discard(tableName(), keyCol(), marketId, countCol());
+        if (discarded) {
+            log.debug("{}: discarded buffered delta before reset for {}={}",
+                    getClass().getSimpleName(), tableName(), marketId);
         }
         ensureStatsRowExists(marketId);
         Timestamp ts = (newLastAt == null) ? null : Timestamp.valueOf(newLastAt);

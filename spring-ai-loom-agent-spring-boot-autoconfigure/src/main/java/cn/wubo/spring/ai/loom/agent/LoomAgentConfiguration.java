@@ -2829,6 +2829,11 @@ public class LoomAgentConfiguration {
             // 9.5 pull — 把市场 Skill 拉到当前用户的 user_skill。
             // 走 ISkillMarketService.pull(username, id) — service 内部处理 USER_CREATED 冲突、
             // MARKET_PULLED 刷新 content 等语义,M0 抽象层不覆盖此 user-side 行为。
+            //
+            // T16 接线 (fix-up B1): 每次成功的 pull 自增 market_skill_stats.pull_count。
+            // 失败/异常分支不计数。统计写入走 BatchedCounterService(30s 周期刷),失败重试一次
+            // 后丢弃 — 与 incrementStat 内部 upsert 同款"best-effort"语义;绝不能让 stats
+            // 故障把用户面 pull 拉崩。
             builder.POST("spring/ai/loom/market-skills/{id}/pull", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 Long id;
@@ -2839,7 +2844,15 @@ public class LoomAgentConfiguration {
                             "error", "id 必须是数字: " + request.pathVariable("id")));
                 }
                 try {
-                    return ServerResponse.ok().body(svc.pull(username, id));
+                    Object body = svc.pull(username, id);
+                    // 统计写入必须不阻塞主路径 — 失败仅 WARN,不重抛
+                    try {
+                        skillStatsService.incrementStat(id, "PULL");
+                    } catch (RuntimeException statEx) {
+                        log.warn("skill pull stats increment failed for skill {}: {}",
+                                id, statEx.getMessage());
+                    }
+                    return ServerResponse.ok().body(body);
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
@@ -3302,6 +3315,12 @@ public class LoomAgentConfiguration {
             // 10.6 access(KB 独有) — 自增 loom_user_knowledge.access_count;用户未订阅时 no-op
             // (rows=0 → 返回 0),不创建 phantom pull 占用 source='MARKET_PULLED' 配额。
             // 完整 KB search stat(loom_market_knowledge_stats)由 T16 接线。
+            //
+            // T16 接线 (fix-up B1): access 成功后,把 KB id 试 parseLong 自增 search_count。
+            // 由于 V1.0 schema 里 loom_market_knowledge.id 是 VARCHAR(36) UUID 而 stats 表 PK
+            // 是 BIGINT (详见 DefaultKnowledgeStatsService),String id 大概率 parse 失败 —
+            // 此时 incrementStat 内部 NumberFormatException 会被 catch,只 log WARN 不上抛,
+            // access 主路径不受影响。schema migration 落地后这条会自然开始计数。
             builder.POST("spring/ai/loom/market-knowledge/{id}/access", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 String id = request.pathVariable("id");
@@ -3310,6 +3329,15 @@ public class LoomAgentConfiguration {
                 }
                 try {
                     long newCount = kbSvc.access(username, id);
+                    // KB search stat 接线:parse + increment 必须不阻塞主路径 — 失败仅 WARN,不重抛
+                    try {
+                        Long marketId = Long.parseLong(id);
+                        kbStatsService.incrementStat(marketId, "SEARCH");
+                    } catch (NumberFormatException nfe) {
+                        log.debug("KB access stats skipped — id={} is not a Long market_id", id);
+                    } catch (RuntimeException statEx) {
+                        log.warn("KB access stats increment failed for kb {}: {}", id, statEx.getMessage());
+                    }
                     return ServerResponse.ok().body(java.util.Map.of(
                             "accessCount", newCount,
                             "subscribed", newCount > 0));

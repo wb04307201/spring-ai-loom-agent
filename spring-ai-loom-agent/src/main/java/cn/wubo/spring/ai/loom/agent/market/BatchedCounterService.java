@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -179,6 +180,39 @@ public class BatchedCounterService {
             entry.delta.incrementAndGet();
             return entry;
         });
+    }
+
+    /**
+     * Discard the buffered delta for a specific {@code (table, keyCol, key,
+     * cntCol)} tuple without flushing it to the DB. Used by
+     * {@link AbstractMarketStatsService#resetStats(Long, long, java.time.LocalDateTime)}
+     * so an admin "reset" wipes both the persisted count and any in-flight
+     * increments that haven't been flushed yet — without nuking other rows
+     * in the same buffer.
+     * <p>
+     * Concurrent-safety mirrors {@link #increment}: a single {@code compute()}
+     * holds the bin lock for the whole detach, so a concurrent
+     * {@code increment()} on the same key blocks until our lambda returns
+     * {@code null} (detach succeeds) or returns the original entry (nothing
+     * to discard). Either way, the discard is atomic with respect to
+     * concurrent increments on the same key.
+     * </p>
+     *
+     * @return {@code true} if a buffered delta was discarded; {@code false}
+     *         if the key was not in the buffer (already flushed, never
+     *         incremented, or different cntCol).
+     */
+    public boolean discard(String table, String keyCol, Long key, String cntCol) {
+        String bk = table + ":" + keyCol + ":" + key + ":" + cntCol;
+        AtomicBoolean discarded = new AtomicBoolean(false);
+        buffer.compute(bk, (k, v) -> {
+            if (v == null) {
+                return null;
+            }
+            discarded.set(true);
+            return null; // detach: next increment on this key creates a fresh entry
+        });
+        return discarded.get();
     }
 
     /**

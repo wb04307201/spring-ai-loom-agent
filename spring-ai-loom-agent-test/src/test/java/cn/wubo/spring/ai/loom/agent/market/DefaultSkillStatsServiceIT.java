@@ -244,6 +244,85 @@ class DefaultSkillStatsServiceIT {
                 "reset on missing row must lazy-upsert with the new count");
     }
 
+    /* ===== fix-up tests (B1 + B2) ===== */
+
+    /**
+     * B1: production wire-up — 每次成功的 POST /market-skills/{id}/pull 都要自增
+     * {@code pull_count}。这条端到端覆盖:路由 → svc.pull() 成功 →
+     * skillStatsService.incrementStat(..., "PULL") → flush → DB 落库。
+     */
+    @Test
+    @DisplayName("B1: POST /market-skills/{id}/pull 走完后 pull_count >= 1")
+    @SuppressWarnings("unchecked")
+    void incrementStatLandsInDbAndPullEndpointRoutesThrough() throws Exception {
+        // 准备:让 alice 有一个 user_skill 同名 USER_CREATED 行会阻塞 pull,所以我们用全新 name。
+        Long skillId = skillMarketService.create("alice", new MarketCreateRequest(
+                "stats-pull-" + System.nanoTime(), "d", "c", null)).id();
+        // 起:无 stats row
+        Integer before = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM market_skill_stats WHERE market_skill_id = ?",
+                Integer.class, skillId);
+        assertEquals(0, before);
+
+        // 走真实 router 端点 — 不要直接调 svc.pull()
+        UserContextHolder.setCurrentUser("alice");
+        ServerResponse response = route(skillPublicRouter, "POST",
+                "/spring/ai/loom/market-skills/" + skillId + "/pull", null);
+        assertEquals(200, response.statusCode().value(),
+                "pull endpoint must succeed for the seeded skill");
+
+        // 落库:BatchedCounterService 30s 周期不一定跑过;手动 flush 让测试确定。
+        batchedCounterService.flush();
+
+        Long count = jdbc.queryForObject(
+                "SELECT pull_count FROM market_skill_stats WHERE market_skill_id = ?",
+                Long.class, skillId);
+        assertNotNull(count, "stats row must exist (lazy-upsert from incrementStat)");
+        assertTrue(count >= 1L,
+                "successful pull must have incremented pull_count; got " + count);
+    }
+
+    /**
+     * B2: resetStats 必须清掉 buffer 里挂着的 deltas。否则 admin reset 后 30s 内
+     * scheduled flush 会把之前 incrementStat 的 delta 落到 DB,把 admin 的 reset 覆盖回去。
+     * <p>
+     * 测试场景:incrementStat 3 次(buffer 里有 +3 还没 flush),然后直接调
+     * resetStats(0, null)——不调 flush——再读 DB,断言 count == 0。
+     * </p>
+     */
+    @Test
+    @DisplayName("B2: resetStats 不需要手动 flush 也能把缓冲的 delta 一并清零")
+    void resetDrainsPendingIncrements() {
+        Long skillId = skillMarketService.create("alice", new MarketCreateRequest(
+                "stats-buf-" + System.nanoTime(), "d", "c", null)).id();
+        skillStatsService.incrementStat(skillId, "PULL");
+        skillStatsService.incrementStat(skillId, "PULL");
+        skillStatsService.incrementStat(skillId, "PULL");
+
+        // 不调 flush — buffer 里挂着 +3
+        // 注意:lazy-upsert 已经创建了 row(pull_count=0, last=NULL),但 buffer 的 +3 还没落库
+        Long beforeReset = jdbc.queryForObject(
+                "SELECT pull_count FROM market_skill_stats WHERE market_skill_id = ?",
+                Long.class, skillId);
+        assertEquals(0L, beforeReset, "buffered deltas must NOT have flushed yet (pre-reset)");
+
+        // 直接调 resetStats — 内部会先 discard 掉 buffer 里挂着的 +3,然后 UPDATE 写 0
+        skillStatsService.resetStats(skillId, 0L, null);
+
+        Long afterReset = jdbc.queryForObject(
+                "SELECT pull_count FROM market_skill_stats WHERE market_skill_id = ?",
+                Long.class, skillId);
+        assertEquals(0L, afterReset, "resetStats must overwrite any pending buffered deltas");
+
+        // 再 flush,确认 buffer 已经空 —— 否则 30s 后 scheduled flush 会再 +3 把 0 推回 3
+        batchedCounterService.flush();
+        Long afterFlush = jdbc.queryForObject(
+                "SELECT pull_count FROM market_skill_stats WHERE market_skill_id = ?",
+                Long.class, skillId);
+        assertEquals(0L, afterFlush,
+                "post-reset flush must NOT resurrect the discarded buffered deltas");
+    }
+
     /* ===== helpers ===== */
 
     private ServerResponse route(RouterFunction<ServerResponse> router,
