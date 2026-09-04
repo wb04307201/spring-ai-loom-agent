@@ -616,3 +616,78 @@ WHERE group_name IN (
     'tool_skill',
     'tool_file'
 );
+
+-- ==== M0 market upgrade (spec § 4) ====
+
+-- 公共列(skill + knowledge 两表都加)
+ALTER TABLE market_skill          ADD COLUMN is_official     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE loom_market_knowledge ADD COLUMN is_official     BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE market_skill          ADD COLUMN featured_rank   INT NOT NULL DEFAULT 0;
+ALTER TABLE loom_market_knowledge ADD COLUMN featured_rank   INT NOT NULL DEFAULT 0;
+
+ALTER TABLE market_skill          ADD COLUMN category        VARCHAR(64);
+ALTER TABLE loom_market_knowledge ADD COLUMN category        VARCHAR(64);
+
+ALTER TABLE market_skill          ADD COLUMN created_by_kind VARCHAR(16) NOT NULL DEFAULT 'USER';
+ALTER TABLE loom_market_knowledge ADD COLUMN created_by_kind VARCHAR(16) NOT NULL DEFAULT 'USER';
+
+-- 附表
+CREATE TABLE market_skill_stats (
+  market_skill_id BIGINT PRIMARY KEY,
+  pull_count BIGINT NOT NULL DEFAULT 0,
+  last_pulled_at TIMESTAMP,
+  FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
+);
+
+CREATE TABLE market_skill_review (
+  market_skill_id BIGINT NOT NULL,
+  username VARCHAR(64) NOT NULL,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  edit_count SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (market_skill_id, username),
+  FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_skill_review ON market_skill_review(username);
+
+CREATE TABLE loom_market_knowledge_stats (
+  market_id BIGINT PRIMARY KEY,
+  search_count BIGINT NOT NULL DEFAULT 0,
+  last_searched_at TIMESTAMP,
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+);
+
+CREATE TABLE loom_market_knowledge_review (
+  market_id BIGINT NOT NULL,
+  username VARCHAR(64) NOT NULL,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  edit_count SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (market_id, username),
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_kb_review ON loom_market_knowledge_review(username);
+
+CREATE TABLE market_content_announcement (
+  market_kind VARCHAR(16) NOT NULL,
+  market_id BIGINT NOT NULL,
+  title VARCHAR(128) NOT NULL,
+  body TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (market_kind, market_id)
+);
+
+-- 索引建议(性能)
+CREATE INDEX idx_market_skill_official_rank   ON market_skill(is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_kb_official_rank      ON loom_market_knowledge(is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_skill_status_approved ON market_skill(status, is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_kb_status_approved    ON loom_market_knowledge(status, is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_skill_category        ON market_skill(category);
+CREATE INDEX idx_market_kb_category           ON loom_market_knowledge(category);
+
+CREATE INDEX idx_user_knowledge_access_check ON loom_user_knowledge(username, market_knowledge_id);
