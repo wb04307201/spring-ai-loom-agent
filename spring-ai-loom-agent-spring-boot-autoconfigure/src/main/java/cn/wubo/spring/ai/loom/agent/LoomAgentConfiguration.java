@@ -1413,6 +1413,17 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * M2 / T20:KB 市场多对多 tag 服务。
+         * 通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService knowledgeTagService(
+                JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService(jdbcTemplate);
+        }
+
+        /**
          * 文件下载与预览：通过 {@code @ConditionalOnMissingBean} 允许替换为自定义实现。
          * 依赖 {@code IFileStorage}（数据库或磁盘）透明读取知识库文件内容。
          */
@@ -3149,6 +3160,7 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentMarketKnowledgeAdminRouter")
         public RouterFunction<ServerResponse> loomAgentMarketKnowledgeAdminRouter(
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService svc,
+                cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
                 IUser user,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
@@ -3511,6 +3523,80 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("error", msg));
                 }
             });
+
+            // M2/T20: admin 改 KB tag —— body {tags: [...]} 整组替换。
+            // KB id 是 VARCHAR(36) UUID,path-variable 直接当 String,不 parseLong。
+            // replaceTags 内部 DELETE + 批量 MERGE,KB 不存在时抛 IllegalArgumentException
+            // → router 翻译成 404 (与 GET detail 端点对齐)。
+            builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/tags", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                if (body == null) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                Object tagsObj = body.get("tags");
+                java.util.List<String> tags;
+                if (tagsObj == null) {
+                    tags = java.util.Collections.emptyList();
+                } else if (tagsObj instanceof java.util.List<?> raw) {
+                    tags = new java.util.ArrayList<>();
+                    for (Object o : raw) {
+                        if (o != null) tags.add(o.toString());
+                    }
+                } else {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "tags 字段必须是数组"));
+                }
+                try {
+                    kbTagService.replaceTags(
+                            cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService.MARKET_KIND_KNOWLEDGE,
+                            id, tags);
+                    java.util.List<String> after = kbTagService.listTags(
+                            cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService.MARKET_KIND_KNOWLEDGE,
+                            id);
+                    return ServerResponse.ok().body(java.util.Map.of("tags", after));
+                } catch (IllegalArgumentException ex) {
+                    return ServerResponse.status(HttpStatus.NOT_FOUND)
+                            .body(java.util.Map.of("error", ex.getMessage()));
+                } catch (RuntimeException ex) {
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("replace tags failed for kb {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
+                }
+            });
+
+            // M2/T20: admin 查 KB tag —— 与公开 GET 等价但路径在 /admin/ 下,
+            // 方便 admin 控制台 / 表单预填。语义一致:返回 {tags: [...]};
+            // 不存在 / 空 KB 直接 [] (no 4xx),保证 admin UI 不会因脏 id 弹 toast。
+            builder.GET("spring/ai/loom/admin/market-knowledge/{id}/tags", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                try {
+                    java.util.List<String> tags = kbTagService.listTags(
+                            cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id);
+                    return ServerResponse.ok().body(java.util.Map.of("tags", tags));
+                } catch (RuntimeException ex) {
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("admin list tags failed for kb {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
+                }
+            });
+
             return builder.build();
         }
 
@@ -3545,6 +3631,7 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentMarketKnowledgePublicRouter")
         public RouterFunction<ServerResponse> loomAgentMarketKnowledgePublicRouter(
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc,
+                cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
@@ -3552,20 +3639,61 @@ public class LoomAgentConfiguration {
 
             // 10.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
             // 支持分页(page/size)、分类过滤(category)、关键字搜索(query)、排序(sortBy)。
+            // M2/T20 tag 过滤:?tag=foo&tag=bar → 交集查询(KB 必须同时挂有所有指定 tag),
+            // 与 MarketFilter.status='APPROVED' 联合生效。无 tag 参数时走原 listPaged 路径。
             builder.GET("spring/ai/loom/market-knowledge", request -> {
-                cn.wubo.spring.ai.loom.agent.market.MarketFilter filter =
-                        new cn.wubo.spring.ai.loom.agent.market.MarketFilter(
-                                parsePageOr(request, "page", 0),
-                                parsePageOr(request, "size", 20),
-                                cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.APPROVED,
-                                request.param("category").orElse(null),
-                                request.param("query").orElse(null),
-                                request.param("sortBy").orElse("official_rank"));
+                java.util.List<String> tagParams = new java.util.ArrayList<>();
+                request.params().getOrDefault("tag", java.util.Collections.emptyList())
+                        .forEach(t -> {
+                            if (t != null && !t.isBlank()) tagParams.add(t.trim());
+                        });
+                int page = parsePageOr(request, "page", 0);
+                int size = parsePageOr(request, "size", 20);
                 try {
+                    if (!tagParams.isEmpty()) {
+                        // tag 交集模式 — 直接走 tagService.findByAllTags (不通过 MarketFilter;
+                        // 该方法内部仅以 tag AND status=APPROVED 过滤,语义与 listPaged 一致)。
+                        // post-filter APPROVED:findByAllTags 当前不过滤 status,需在 router 层收口。
+                        java.util.List<cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord> rows =
+                                kbTagService.findByAllTags(tagParams, page, size);
+                        java.util.List<cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord> approved =
+                                rows.stream()
+                                        .filter(r -> cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.APPROVED.name().equals(r.status()))
+                                        .toList();
+                        return ServerResponse.ok().body(approved);
+                    }
+                    cn.wubo.spring.ai.loom.agent.market.MarketFilter filter =
+                            new cn.wubo.spring.ai.loom.agent.market.MarketFilter(
+                                    page,
+                                    size,
+                                    cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.APPROVED,
+                                    request.param("category").orElse(null),
+                                    request.param("query").orElse(null),
+                                    request.param("sortBy").orElse("official_rank"));
                     return ServerResponse.ok().body(kbSvc.listPaged(filter));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // M2/T20: 公开 GET tag 列表 — 任何已登录用户可查 KB 挂的 tag。
+            // KB id 是 VARCHAR(36) UUID — path-variable 直接当 String,不 parseLong。
+            // 不存在 / 空 KB 直接返回 [] (no 4xx),与 listApproved 模式一致。
+            builder.GET("spring/ai/loom/market-knowledge/{id}/tags", request -> {
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                try {
+                    java.util.List<String> tags = kbTagService.listTags(
+                            cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id);
+                    return ServerResponse.ok().body(java.util.Map.of("tags", tags));
+                } catch (RuntimeException ex) {
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("list tags failed for kb {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
                 }
             });
 

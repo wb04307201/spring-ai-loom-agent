@@ -693,3 +693,14 @@ CREATE INDEX idx_market_kb_category           ON loom_market_knowledge(category)
 ALTER TABLE loom_user_knowledge ADD COLUMN access_count BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX idx_user_knowledge_access_check ON loom_user_knowledge(username, market_knowledge_id, access_count);
+
+-- M2 T20: KB 多对多 tag — spec § 4.2 / § M2。
+-- market_id 与 loom_market_knowledge.id 对齐(VARCHAR(36) UUID,NOT BIGINT)。
+-- 删除 KB 时通过 FK ON DELETE CASCADE 自动清理 tag 行。
+CREATE TABLE loom_market_knowledge_tag (
+  market_id VARCHAR(36) NOT NULL,
+  tag       VARCHAR(64) NOT NULL,
+  PRIMARY KEY (market_id, tag),
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_kb_tag ON loom_market_knowledge_tag(tag);

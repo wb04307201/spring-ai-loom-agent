@@ -70,4 +70,12 @@ class MarketSchemaTest {
     void userKnowledgeHasAccessCount() {
         assertTrue(columnExists("loom_user_knowledge", "access_count"));
     }
+
+    @Test
+    void loomMarketKnowledgeTagTableExists() {
+        Integer t = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_TAG'",
+            Integer.class);
+        assertEquals(1, t);
+    }
 }
