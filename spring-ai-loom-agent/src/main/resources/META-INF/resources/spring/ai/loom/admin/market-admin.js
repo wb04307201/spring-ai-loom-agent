@@ -14,7 +14,8 @@
  *                                 announcementHtml, getAnnouncement,
  *                                 setAnnouncement, deleteAnnouncement,
  *                                 deleteReview, submitReview,
- *                                 renderStarWidget }
+ *                                 renderStarWidget,
+ *                                 getMarketTags, listWithTags, updateMarketTags }
  *
  * Convention: plain JS + template strings (matches existing skills-market.js /
  * knowledge-market.js style). No Vue / React / external deps.
@@ -715,6 +716,134 @@
     return await resp.json();
   }
 
+  /**
+   * getMarketTags(kind, id) -> Promise<string[]>
+   *
+   * Public read endpoint: `GET /market-{kind}s/{id}/tags`.
+   * Resolves to an array of tag strings (may be empty). Per-row fetch failures
+   * (404 / 204 / network) resolve to `[]` so callers can safely decorate rows
+   * without try/catch. 401/403 bounce to /index.html (login redirect).
+   */
+  async function getMarketTags(kind, id) {
+    if (!PUBLIC_API[kind]) {
+      throw new Error(
+        "MarketAdmin.getMarketTags: unknown kind " + JSON.stringify(kind),
+      );
+    }
+    const url = PUBLIC_API[kind] + "/" + encodeURIComponent(id) + "/tags";
+    let resp;
+    try {
+      resp = await fetch(url, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+      });
+    } catch (_) {
+      return [];
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      window.location.replace("/spring/ai/loom/index.html");
+      return [];
+    }
+    if (resp.status === 204 || resp.status === 404) return [];
+    if (!resp.ok) return [];
+    try {
+      const data = await resp.json();
+      if (Array.isArray(data)) return data.map(String);
+      if (data && Array.isArray(data.tags)) return data.tags.map(String);
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
+   * listWithTags(kind, items?) -> Promise<Array>
+   *
+   * Mirrors {@link #listWithAnnouncements} for tags. Fetches per-row tags
+   * via {@link #getMarketTags} in parallel and decorates each row with a
+   * `tags: string[]` field. Rows are mutated in place; the same array
+   * reference is returned. Calling patterns match listWithAnnouncements:
+   *
+   *   // 1) fetch + decorate
+   *   const items = await MarketAdmin.listWithTags("KNOWLEDGE");
+   *
+   *   // 2) pass pre-fetched items (preferred when sorted/filtered upstream)
+   *   let items = unwrapAndSort(await api.listMarketKnowledge(1, 50));
+   *   items = await MarketAdmin.listWithTags("KNOWLEDGE", items);
+   *
+   * Per-row fetch failures yield `tags = []` (graceful degradation).
+   */
+  async function listWithTags(kind, items) {
+    let rows;
+    if (Array.isArray(items)) {
+      rows = items;
+    } else {
+      rows = await list(kind);
+    }
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+    const promises = rows.map((row) =>
+      getMarketTags(kind, row.id)
+        .then((tags) => {
+          try {
+            row.tags = Array.isArray(tags) ? tags : [];
+          } catch (_) {
+            // defensive — row frozen in some envs
+          }
+          return row;
+        })
+        .catch(() => {
+          try {
+            row.tags = [];
+          } catch (_) {}
+          return row;
+        }),
+    );
+    await Promise.all(promises);
+    return rows;
+  }
+
+  /**
+   * updateMarketTags(kind, id, tags) -> Promise<string[]>
+   *
+   * Admin-side: PUT /admin/market-{kind}s/{id}/tags with body
+   * `{tags: [...]}`. Returns the saved tag array as returned by the
+   * backend (`{tags: [...]}` → `[...]`). Empty array clears all tags.
+   */
+  async function updateMarketTags(kind, id, tags) {
+    if (!ADMIN_API[kind]) {
+      throw new Error(
+        "MarketAdmin.updateMarketTags: unknown kind " + JSON.stringify(kind),
+      );
+    }
+    const url = ADMIN_API[kind] + "/" + encodeURIComponent(id) + "/tags";
+    const resp = await fetch(url, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ tags: Array.isArray(tags) ? tags : [] }),
+    });
+    if (!resp.ok) {
+      let t = "";
+      try {
+        t = await resp.text();
+      } catch (_) {
+        t = "";
+      }
+      throw new Error(
+        "updateMarketTags failed: HTTP " +
+          resp.status +
+          (t ? " — " + t : ""),
+      );
+    }
+    try {
+      const data = await resp.json();
+      if (data && Array.isArray(data.tags)) return data.tags.map(String);
+      return Array.isArray(tags) ? tags.map(String) : [];
+    } catch (_) {
+      return Array.isArray(tags) ? tags.map(String) : [];
+    }
+  }
+
   window.MarketAdmin = {
     list: list,
     listWithAnnouncements: listWithAnnouncements,
@@ -728,5 +857,8 @@
     deleteReview: deleteReview,
     submitReview: submitReview,
     renderStarWidget: renderStarWidget,
+    getMarketTags: getMarketTags,
+    listWithTags: listWithTags,
+    updateMarketTags: updateMarketTags,
   };
 })();

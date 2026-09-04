@@ -116,6 +116,17 @@
     try {
       // M0 T11/T13: route list fetch through the shared MarketAdmin namespace.
       allKnowledge = listItems(await MarketAdmin.list("KNOWLEDGE"));
+      // M2 T21: 并行 fetch 每条记录的 tag,装饰到 row.tags,失败静默
+      if (
+        MarketAdmin &&
+        typeof MarketAdmin.listWithTags === "function"
+      ) {
+        try {
+          await MarketAdmin.listWithTags("KNOWLEDGE", allKnowledge);
+        } catch (_) {
+          // 静默 — 表仍可显示
+        }
+      }
       renderPendingChip(allKnowledge);
       renderTable();
     } catch (e) {
@@ -125,6 +136,28 @@
         pendingChipContainer.style.display = "none";
       }
     }
+  }
+
+  /** M2 T21: 把 tag 数组渲染成可读 chip 列表;空时显示 "—"。 */
+  function renderTagChipsHtml(tags) {
+    const list = Array.isArray(tags) ? tags.filter(Boolean) : [];
+    if (list.length === 0) {
+      return '<span style="color: var(--text-muted)">—</span>';
+    }
+    return (
+      '<div class="tag-chip-group">' +
+      list
+        .map(
+          (t) =>
+            '<span class="tag-chip" data-tag="' +
+            escapeHtml(String(t)) +
+            '">' +
+            escapeHtml(String(t)) +
+            "</span>",
+        )
+        .join("") +
+      "</div>"
+    );
   }
 
   /**
@@ -204,10 +237,12 @@
  <td>${officialMark}</td>
  <td>${rank}</td>
  <td>${category}</td>
+ <td>${renderTagChipsHtml(m.tags)}</td>
  <td>${submitted}</td>
  <td>${annCell}<button class="secondary-btn ann-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:2px 8px;font-size:11px;margin-left:6px;">${hasAnn ? "编辑" : "发布"}</button></td>
  <td>${ratingCell}<button class="secondary-btn reviews-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:2px 8px;font-size:11px;margin-left:6px;">管理</button></td>
  <td>
+ <button class="secondary-btn tag-edit-row-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑标签</button>
  <button class="secondary-btn edit-btn" data-id="${escapeHtml(id)}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
  <button class="delete-btn del-btn btn-sm" data-id="${escapeHtml(id)}">下架</button>
  </td>
@@ -217,7 +252,7 @@
 
     tableContainer.innerHTML = `
  <table class="user-table">
- <thead><tr><th>名称</th><th>状态</th><th>作者</th><th>官方</th><th>排序</th><th>分类</th><th>提交时间</th><th>公告</th><th>评分</th><th>操作</th></tr></thead>
+ <thead><tr><th>名称</th><th>状态</th><th>作者</th><th>官方</th><th>排序</th><th>分类</th><th>标签</th><th>提交时间</th><th>公告</th><th>评分</th><th>操作</th></tr></thead>
  <tbody>${rows}</tbody>
  </table>`;
     bindRowActions();
@@ -244,6 +279,103 @@
         openReviews(btn.getAttribute("data-id")),
       );
     });
+    tableContainer.querySelectorAll(".tag-edit-row-btn").forEach((btn) => {
+      btn.addEventListener("click", () =>
+        openTagEdit(btn.getAttribute("data-id")),
+      );
+    });
+  }
+
+  // ============== M2 T21: 标签批量编辑 ==============
+
+  function parseTagInput(text) {
+    // 接受中英文逗号、空格、顿号分隔。空标签和重复项忽略。
+    if (!text) return [];
+    const parts = String(text)
+      .split(/[,，、 \t\r\n]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const seen = new Set();
+    const out = [];
+    for (const p of parts) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+    }
+    return out;
+  }
+
+  function renderTagEditCurrent(tags) {
+    const list = Array.isArray(tags) ? tags.filter(Boolean) : [];
+    const el = document.getElementById("tag-edit-current");
+    if (!el) return;
+    if (list.length === 0) {
+      el.innerHTML =
+        '<div class="tag-edit-list-empty">（暂无标签）</div>';
+      return;
+    }
+    el.innerHTML =
+      '<div class="tag-chip-group">' +
+      list
+        .map(
+          (t) =>
+            '<span class="tag-chip tag-chip-removable">' +
+            escapeHtml(String(t)) +
+            "</span>",
+        )
+        .join("") +
+      "</div>";
+  }
+
+  function openTagEdit(id) {
+    const m = allKnowledge.find((x) => String(x.id) === String(id));
+    if (!m) return;
+    document.getElementById("tag-edit-title-text").textContent =
+      "编辑标签：" + (m.name || ("#" + id));
+    const existing =
+      m && Array.isArray(m.tags) ? m.tags : [];
+    renderTagEditCurrent(existing);
+    document.getElementById("tag-edit-input").value = existing.join(", ");
+    document.getElementById("tag-edit-error").style.display = "none";
+    document.getElementById("tag-edit-modal").style.display = "flex";
+    document
+      .getElementById("tag-edit-modal")
+      .setAttribute("data-current-id", String(id));
+    // autofocus 输入框
+    setTimeout(() => {
+      const inp = document.getElementById("tag-edit-input");
+      if (inp) {
+        inp.focus();
+        inp.select();
+      }
+    }, 50);
+  }
+
+  function closeTagEdit() {
+    document.getElementById("tag-edit-modal").style.display = "none";
+  }
+
+  async function saveTagEdit() {
+    const modal = document.getElementById("tag-edit-modal");
+    const id = modal.getAttribute("data-current-id");
+    const errEl = document.getElementById("tag-edit-error");
+    const raw = document.getElementById("tag-edit-input").value;
+    const tags = parseTagInput(raw);
+    try {
+      await MarketAdmin.updateMarketTags("KNOWLEDGE", id, tags);
+      // 乐观更新本地 row,避免重拉整个列表
+      const m = allKnowledge.find((x) => String(x.id) === String(id));
+      if (m) m.tags = tags.slice();
+      renderTagEditCurrent(tags);
+      showToast("已保存 " + tags.length + " 个标签", "success");
+      closeTagEdit();
+      // 重渲染表格 — 简单做法:直接调用 renderTable() 用更新后的 allKnowledge
+      renderTable();
+    } catch (e) {
+      errEl.textContent = "保存失败：" + e.message;
+      errEl.style.display = "block";
+    }
   }
 
   // ============== M0 T19: 公告 + 评论 管理 ==============
@@ -514,6 +646,17 @@
   document
     .getElementById("review-cancel")
     ?.addEventListener("click", closeReviews);
+
+  // T21: 标签批量编辑 模态框事件
+  document
+    .getElementById("tag-edit-close")
+    ?.addEventListener("click", closeTagEdit);
+  document
+    .getElementById("tag-edit-cancel")
+    ?.addEventListener("click", closeTagEdit);
+  document
+    .getElementById("tag-edit-save")
+    ?.addEventListener("click", saveTagEdit);
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", loadList);

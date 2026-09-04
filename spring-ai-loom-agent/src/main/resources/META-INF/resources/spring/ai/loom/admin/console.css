@@ -1269,3 +1269,150 @@ table.user-table {
 .review-del-btn {
   margin-left: auto;
 }
+
+/* ===== M2 T21: Tag chip styles (KB market tag filter + admin batch edit) ===== */
+.tag-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: default;
+  transition: background 0.15s ease;
+}
+.tag-chip-muted {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+.tag-chip-filter {
+  cursor: pointer;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+}
+.tag-chip-filter:hover {
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+}
+.tag-chip-filter.active {
+  background: var(--primary-color, #6366f1);
+  color: #fff;
+  border-color: var(--primary-color, #6366f1);
+}
+.tag-chip-removable {
+  cursor: default;
+}
+.tag-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: rgba(67, 56, 202, 0.18);
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.tag-chip-remove:hover {
+  background: rgba(67, 56, 202, 0.35);
+}
+
+.kb-tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+.kb-tag-filter-bar-label {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.kb-tag-filter-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color, #e2e8f0);
+}
+.kb-tag-filter-input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #1e293b);
+}
+.kb-tag-filter-input:focus {
+  outline: none;
+  border-color: var(--primary-color, #6366f1);
+}
+.kb-tag-filter-empty {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+}
+.kb-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
+}
+.tag-edit-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  background: var(--bg-secondary, #f8fafc);
+  min-height: 40px;
+  margin-bottom: 6px;
+}
+.tag-edit-list-empty {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+  padding: 6px;
+}
+.tag-edit-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.tag-edit-hint {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 4px;
+  line-height: 1.5;
+}

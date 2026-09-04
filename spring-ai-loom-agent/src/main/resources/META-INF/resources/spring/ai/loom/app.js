@@ -2172,15 +2172,61 @@ const knowledge = {
         return { text: status || "未知", bg: "#f1f5f9", color: "#475569" };
     }
   },
-  async _renderMarketTab(container, detail) {
+  _kbTagFilter: null,
+  _renderTagChipsHtml(tags, opts) {
+    // Render a list of tag strings as `.tag-chip` spans. opts.onChipClick
+    // (when present) wires each chip as a filter button; otherwise they're
+    // static display chips. `emptyText` is shown when tags is empty.
+    const list = Array.isArray(tags) ? tags.filter(Boolean) : [];
+    if (list.length === 0) {
+      if (opts && opts.emptyText) {
+        return '<span class="kb-tag-filter-empty">' + escapeHtml(opts.emptyText) + "</span>";
+      }
+      return "";
+    }
+    const klass = opts && opts.onChipClick ? "tag-chip tag-chip-filter" : "tag-chip";
+    const extraAttr = opts && opts.activeTag
+      ? ' data-tag="' + escapeHtml(opts.activeTag) + '"'
+      : "";
+    return list
+      .map(
+        (t) =>
+          '<span class="' +
+          klass +
+          '"' +
+          extraAttr +
+          ' data-tag="' +
+          escapeHtml(String(t)) +
+          '">' +
+          escapeHtml(String(t)) +
+          "</span>",
+      )
+      .join("");
+  },
+  async _renderMarketTab(container, detail, tagFilter) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
+    // M2 T21: tagFilter (string|null) — 当非空时走公开 /market-knowledge?tag=...
+    // 端点(返回 list 形态);为空时走默认 /api/knowledge-market 分页接口。
+    this._kbTagFilter = tagFilter || null;
     container.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">加载中...</div>';
     detail.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
     try {
-      const data = await api.listMarketKnowledge(1, 50);
-      const rawItems = (data && data.content) || data || [];
+      let rawItems;
+      if (tagFilter) {
+        // T21: tag 过滤走 /market-knowledge?tag=... (返回 list,不分页)
+        const url =
+          "/spring/ai/loom/market-knowledge?tag=" +
+          encodeURIComponent(tagFilter) +
+          "&page=0&size=50";
+        const r = await apiFetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        rawItems = (await r.json()) || [];
+      } else {
+        const data = await api.listMarketKnowledge(1, 50);
+        rawItems = (data && data.content) || data || [];
+      }
       // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
       // 当前后端 MarketKnowledgeRecord 未暴露 isOfficial/featuredRank，比较退化为 submittedAt。
       let items = [...rawItems].sort((a, b) => {
@@ -2194,9 +2240,25 @@ const knowledge = {
         const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
         return bd - ad;
       });
+      // M2 T21: 并行 fetch 每条记录的 tag,装饰到 row.tags;失败行保持 []。
+      if (
+        window.MarketAdmin &&
+        typeof window.MarketAdmin.listWithTags === "function"
+      ) {
+        try {
+          items = await window.MarketAdmin.listWithTags("KNOWLEDGE", items);
+        } catch (_) {
+          // 静默失败 — 列表仍可显示,只是没 tag
+        }
+      }
       if (!items || items.length === 0) {
-        container.innerHTML =
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+        const empty = tagFilter
+          ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
+            escapeHtml(tagFilter) +
+            "」的知识库</div>"
+          : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+        container.innerHTML = this._renderKbTagFilterBar([], tagFilter) + empty;
+        this._bindKbTagFilterBar(container, detail);
         return;
       }
       // T19 fix-up 2: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
@@ -2216,7 +2278,26 @@ const knowledge = {
           // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
         }
       }
+      // M2 T21: 客户端聚合当前页所有 unique tag,渲染成可点击的过滤 chip
+      const aggregatedTags = [];
+      const seen = new Set();
+      for (const kb of items) {
+        const tags = kb && Array.isArray(kb.tags) ? kb.tags : [];
+        for (const t of tags) {
+          const s = String(t);
+          if (s && !seen.has(s)) {
+            seen.add(s);
+            aggregatedTags.push(s);
+          }
+        }
+      }
+      aggregatedTags.sort();
       container.innerHTML = "";
+      container.insertAdjacentHTML(
+        "beforeend",
+        this._renderKbTagFilterBar(aggregatedTags, tagFilter),
+      );
+      this._bindKbTagFilterBar(container, detail);
       // T19 fix-up 2: per-row announcement banner — 当 row.announcement 存在时,
       // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
       for (const kb of items) {
@@ -2243,12 +2324,18 @@ const knowledge = {
         const officialBadge = kb && kb.isOfficial
           ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
           : "";
+        const tagChips = (kb && Array.isArray(kb.tags) && kb.tags.length > 0)
+          ? '<div class="kb-tag-row">' +
+            this._renderTagChipsHtml(kb.tags) +
+            "</div>"
+          : "";
         div.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
  <span class="ks-item-name">${escapeHtml(kb.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
  <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author || "")} · ${escapeHtml(kb.description || "")}</span>
+ ${tagChips}
  </div>
  `;
         div.addEventListener("click", () =>
@@ -2264,12 +2351,94 @@ const knowledge = {
     }
   },
 
+  _renderKbTagFilterBar(tags, activeTag) {
+    // M2 T21: 渲染 KB 市场 Tag 过滤栏 — 始终展示 "全部" chip + 当前页聚合的 tag chips
+    // (可点击过滤) + 自由文本输入 + "应用筛选" 按钮。"全部" 是 active 当 activeTag 为空。
+    const tagList = Array.isArray(tags) ? tags : [];
+    const active = activeTag || null;
+    const allActive = active == null || active === "";
+    const chipsHtml = tagList
+      .map((t) => {
+        const isActive = active === t;
+        const cls =
+          "tag-chip tag-chip-filter" + (isActive ? " active" : "");
+        return (
+          '<span class="' +
+          cls +
+          '" data-tag="' +
+          escapeHtml(t) +
+          '">' +
+          escapeHtml(t) +
+          "</span>"
+        );
+      })
+      .join("");
+    const allChipCls =
+      "tag-chip tag-chip-filter" + (allActive ? " active" : "");
+    return (
+      '<div class="kb-tag-filter-bar">' +
+      '<span class="kb-tag-filter-bar-label">标签筛选：</span>' +
+      '<span class="' +
+      allChipCls +
+      '" data-tag="">全部</span>' +
+      '<div class="tag-chip-group">' +
+      chipsHtml +
+      "</div>" +
+      '<div class="kb-tag-filter-input-row">' +
+      '<input type="text" id="kb-tag-filter-input" class="kb-tag-filter-input" placeholder="输入标签（如 RAG / FAQ）然后点应用筛选" value="' +
+      escapeHtml(active || "") +
+      '"/>' +
+      '<button class="primary-btn" id="kb-tag-filter-apply" style="padding:5px 14px;font-size:12px;">应用筛选</button>' +
+      "</div>" +
+      "</div>"
+    );
+  },
+
+  _bindKbTagFilterBar(container, detail) {
+    // 绑定 chip 点击和「应用筛选」按钮 → 重新拉取过滤后列表
+    const self = this;
+    container.querySelectorAll(".kb-tag-filter-bar .tag-chip-filter").forEach(
+      (chip) => {
+        chip.addEventListener("click", () => {
+          const tag = chip.getAttribute("data-tag") || "";
+          // 已经 active 时再点一下 = 清除过滤
+          if (
+            chip.classList.contains("active") &&
+            tag !== ""
+          ) {
+            self._renderMarketTab(container, detail, null);
+            return;
+          }
+          self._renderMarketTab(container, detail, tag || null);
+        });
+      },
+    );
+    const applyBtn = container.querySelector("#kb-tag-filter-apply");
+    const inputEl = container.querySelector("#kb-tag-filter-input");
+    if (applyBtn && inputEl) {
+      const trigger = () => {
+        const v = inputEl.value.trim();
+        self._renderMarketTab(container, detail, v || null);
+      };
+      applyBtn.addEventListener("click", trigger);
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          trigger();
+        }
+      });
+    }
+  },
+
   _showMarketKbDetail(marketKb, element, detail) {
     // 详情面板（与技能库 _selectMarketSkill 一致的样式 + 交互）
     document
       .querySelectorAll("#ks-sidebar .ks-item")
       .forEach((i) => i.classList.remove("selected"));
     element.classList.add("selected");
+    // M2 T21: 优先用 listWithTags 阶段已装饰的 row.tags,否则实时拉一次
+    const preloadedTags =
+      marketKb && Array.isArray(marketKb.tags) ? marketKb.tags : null;
     detail.innerHTML = `
  <div id="market-announcement-slot"></div>
  <div class="detail-section">
@@ -2278,6 +2447,7 @@ const knowledge = {
  <div>作者：${escapeHtml(marketKb.username || marketKb.author || "-")}</div>
  <div>状态：<span class="type-badge ADMIN">${escapeHtml(marketKb.status || "APPROVED")}</span></div>
  <div>上架时间：${marketKb.reviewedAt ? new Date(marketKb.reviewedAt).toLocaleString() : marketKb.submittedAt ? new Date(marketKb.submittedAt).toLocaleString() : "-"}</div>
+ <div id="kb-detail-tags-row" style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:var(--text-muted);">标签：</span><span id="kb-detail-tags-slot"></span></div>
  </div>
  </div>
  <div class="detail-section">
@@ -2299,6 +2469,36 @@ const knowledge = {
     // T19: load announcement + review list + submission form.
     const annSlot = detail.querySelector("#market-announcement-slot");
     const reviewSlot = detail.querySelector("#market-reviews-slot");
+    // M2 T21: tag slot — 优先用 listWithTags 已装饰的 row.tags,
+    // 否则实时 fetch。失败时显示「—」静默。
+    const tagSlot = detail.querySelector("#kb-detail-tags-slot");
+    const renderTags = (tags) => {
+      if (!tagSlot) return;
+      if (Array.isArray(tags) && tags.length > 0) {
+        tagSlot.outerHTML =
+          '<span id="kb-detail-tags-slot" class="tag-chip-group">' +
+          this._renderTagChipsHtml(tags) +
+          "</span>";
+      } else {
+        tagSlot.outerHTML =
+          '<span id="kb-detail-tags-slot" style="color:var(--text-muted);font-size:12px;">无</span>';
+      }
+    };
+    if (preloadedTags) {
+      renderTags(preloadedTags);
+    } else if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getMarketTags === "function"
+    ) {
+      window.MarketAdmin
+        .getMarketTags("KNOWLEDGE", marketKb.id)
+        .then(renderTags)
+        .catch(() => {
+          if (tagSlot) tagSlot.textContent = "无";
+        });
+    } else if (tagSlot) {
+      tagSlot.textContent = "—";
+    }
     if (
       window.MarketAdmin &&
       typeof window.MarketAdmin.getAnnouncement === "function"
