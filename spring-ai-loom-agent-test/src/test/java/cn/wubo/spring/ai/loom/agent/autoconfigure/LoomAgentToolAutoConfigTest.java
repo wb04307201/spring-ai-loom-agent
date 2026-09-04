@@ -96,5 +96,13 @@ class LoomAgentToolAutoConfigTest {
         IKnowledge iKnowledge() {
             return mock(IKnowledge.class);
         }
+
+        // IKnowledgeTool.defaultKnowledgeTool 注入 KB stats service (T16) — 测试上下文不加载
+        // StorageConfiguration,所以这里提供一个 mock;defaultKnowledgeTool 用它的 incrementStat 接口,
+        // 测试本身不调用 searchKnowledge,所以 stub 不会触发。
+        @Bean("kbStatsService")
+        cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService kbStatsService() {
+            return mock(cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService.class);
+        }
     }
 }

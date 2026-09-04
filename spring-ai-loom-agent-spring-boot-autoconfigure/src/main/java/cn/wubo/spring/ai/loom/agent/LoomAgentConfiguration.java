@@ -16,12 +16,15 @@ import cn.wubo.spring.ai.loom.agent.file.IUpload;
 import cn.wubo.spring.ai.loom.agent.file.view.LoomAgentFileStorageImpl;
 import cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledge;
 import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
+import cn.wubo.spring.ai.loom.agent.knowledge.stats.DefaultKnowledgeStatsService;
+import cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService;
 import cn.wubo.spring.ai.loom.agent.mcp.ASyncMcp;
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
 import cn.wubo.spring.ai.loom.agent.mcp.SyncMcp;
 import cn.wubo.spring.ai.loom.agent.model.*;
 import cn.wubo.spring.ai.loom.agent.skill.DefaultSkillStorage;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
+import cn.wubo.spring.ai.loom.agent.skill.stats.DefaultSkillStatsService;
 import cn.wubo.spring.ai.loom.agent.tool.compile.DefaultCompileAndDeployTool;
 import cn.wubo.spring.ai.loom.agent.tool.compile.ICompileAndDeployTool;
 import cn.wubo.spring.ai.loom.agent.tool.file.DefaultFileTool;
@@ -818,8 +821,12 @@ public class LoomAgentConfiguration {
         @ConditionalOnMissingBean(IKnowledgeTool.class)
         @ConditionalOnBean(VectorStore.class)
         @Bean
-        public IKnowledgeTool defaultKnowledgeTool(IKnowledge knowledge, VectorStore vectorStore, LoomAgentProperties properties) {
-            return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag());
+        public IKnowledgeTool defaultKnowledgeTool(
+                IKnowledge knowledge,
+                VectorStore vectorStore,
+                LoomAgentProperties properties,
+                @Qualifier("kbStatsService") IMarketContentStatsService kbStatsService) {
+            return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag(), kbStatsService);
         }
     }
 
@@ -1433,6 +1440,40 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.market.BatchedCounterService batchedCounterService(JdbcTemplate jdbcTemplate) {
             return new cn.wubo.spring.ai.loom.agent.market.BatchedCounterService(jdbcTemplate);
+        }
+
+        /**
+         * Stats for Skill marketplace content (T16). Backed by
+         * {@code market_skill_stats}; buffered writes flow through
+         * {@link cn.wubo.spring.ai.loom.agent.market.BatchedCounterService}.
+         * The {@link IMarketContentStatsService} interface allows the
+         * {@code DefaultKnowledgeTool} to take a stats dep without knowing
+         * about Skill vs KB specifics — it only sees
+         * {@code incrementStat(marketId, "SEARCH")}.
+         */
+        @ConditionalOnMissingBean(name = "skillStatsService")
+        @Bean("skillStatsService")
+        public DefaultSkillStatsService skillStatsService(
+                JdbcTemplate jdbcTemplate,
+                cn.wubo.spring.ai.loom.agent.market.BatchedCounterService batchedCounterService) {
+            return new DefaultSkillStatsService(jdbcTemplate, batchedCounterService);
+        }
+
+        /**
+         * Stats for KB marketplace content (T16). Backed by
+         * {@code loom_market_knowledge_stats}; same BatchedCounterService
+         * pattern as Skill. Note the schema mismatch in
+         * {@link DefaultKnowledgeStatsService} (stats PK is BIGINT while
+         * parent {@code loom_market_knowledge.id} is VARCHAR(36) UUID) —
+         * the call-site converts gracefully and skips the stat when the
+         * {@code knowledgeId} is a non-numeric String.
+         */
+        @ConditionalOnMissingBean(name = "kbStatsService")
+        @Bean("kbStatsService")
+        public DefaultKnowledgeStatsService kbStatsService(
+                JdbcTemplate jdbcTemplate,
+                cn.wubo.spring.ai.loom.agent.market.BatchedCounterService batchedCounterService) {
+            return new DefaultKnowledgeStatsService(jdbcTemplate, batchedCounterService);
         }
     }
 
@@ -2405,7 +2446,8 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentMarketSkillAdminRouter")
         public RouterFunction<ServerResponse> loomAgentMarketSkillAdminRouter(
                 cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
-                IUser user) {
+                IUser user,
+                @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 9.1 列出所有（含 PENDING / APPROVED / REJECTED，按 MarketFilter 分页 + 排序）
@@ -2632,6 +2674,46 @@ public class LoomAgentConfiguration {
             });
             // DEFER to T18: /announcement PUT/DELETE（需要 MarketAnnouncementRepository 实现）
             // DEFER to T18: /reviews/{username} DELETE（需要 IMarketContentReviewService.deleteAsAdmin 实现）
+
+            // T16: admin 重置 market_skill 的 pull_count / last_pulled_at。
+            // body { count: 0 } → 把 pull_count 改写成 body.count、last_pulled_at 置 null
+            // (canonical "reset" 语义)。即便 stats row 不存在也会 lazy-upsert 创建。
+            builder.PUT("spring/ai/loom/admin/market-skills/{id}/stats-reset", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                long newCount = 0L;
+                if (body != null && body.get("count") instanceof Number n) {
+                    newCount = n.longValue();
+                }
+                try {
+                    skillStatsService.resetStats(id, newCount, null);
+                    cn.wubo.spring.ai.loom.agent.market.StatsRow row = skillStatsService.getStats(id);
+                    // HashMap (not Map.of) — lastAt can be null after reset, and
+                    // Map.of forbids null values which would 500 the response.
+                    java.util.Map<String, Object> statsBody = new java.util.HashMap<>();
+                    statsBody.put("id", row.marketId());
+                    statsBody.put("pullCount", row.pullCountOrSearchCount());
+                    statsBody.put("lastAt", row.lastAt());
+                    return ServerResponse.ok().body(statsBody);
+                } catch (RuntimeException ex) {
+                    // null-safe: getMessage() can be null (e.g. NullPointerException
+                    // without a message), and Map.of rejects null values.
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("stats-reset failed for skill {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
+                }
+            });
             return builder.build();
         }
 
@@ -2653,7 +2735,8 @@ public class LoomAgentConfiguration {
          */
         @Bean("loomAgentSkillMarketPublicRouter")
         public RouterFunction<ServerResponse> loomAgentSkillMarketPublicRouter(
-                cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc) {
+                cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
+                @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 9.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
@@ -2769,8 +2852,27 @@ public class LoomAgentConfiguration {
             //   — 需要 IMarketContentReviewService.listReviews(M, int, int) 实现
             // DEFER to T18: PUT /spring/ai/loom/market-skills/{id}/reviews/me
             //   — 需要 IMarketContentReviewService.updateOwnReview(M, R) 实现
-            // DEFER to T16: GET /spring/ai/loom/market-skills/{id}/stats
-            //   — 需要 IMarketContentStatsService.getStats(M) 实现
+
+            // T16: 公开 stats — 任意已登录用户可查 market_skill 的 pull_count / last_pulled_at。
+            // 返回 { id, pullCount, lastAt };首次访问(无 row)返回 count=0, lastAt=null。
+            // 不需要 admin 权限,因为这只是只读计数,不暴露任何敏感数据。
+            builder.GET("spring/ai/loom/market-skills/{id}/stats", request -> {
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                cn.wubo.spring.ai.loom.agent.market.StatsRow row = skillStatsService.getStats(id);
+                // HashMap (not Map.of) — lastAt can be null (no row yet / just-reset),
+                // and Map.of forbids null values.
+                java.util.Map<String, Object> body = new java.util.HashMap<>();
+                body.put("id", row.marketId());
+                body.put("pullCount", row.pullCountOrSearchCount());
+                body.put("lastAt", row.lastAt());
+                return ServerResponse.ok().body(body);
+            });
             return builder.build();
         }
 
@@ -2810,7 +2912,8 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentMarketKnowledgeAdminRouter")
         public RouterFunction<ServerResponse> loomAgentMarketKnowledgeAdminRouter(
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService svc,
-                IUser user) {
+                IUser user,
+                @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 8.1 列出所有（含 PENDING / APPROVED / REJECTED，按 MarketFilter 分页 + 排序）
@@ -3024,6 +3127,49 @@ public class LoomAgentConfiguration {
             });
             // DEFER to T18: /announcement PUT/DELETE（需要 MarketAnnouncementRepository 实现）
             // DEFER to T18: /reviews/{username} DELETE（需要 IMarketContentReviewService.deleteAsAdmin 实现）
+
+            // T16: admin 重置 market_knowledge 的 search_count / last_searched_at。
+            // 与 Skill 端 stats-reset 镜像;id 是 VARCHAR(36) UUID 但 stats PK 是 BIGINT
+            // (V1.0 schema mismatch),所以 path-variable 解析成 Long 与 stats 表 PK 对齐。
+            builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/stats-reset", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String idStr = request.pathVariable("id");
+                if (idStr == null || idStr.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                Long id;
+                try {
+                    id = Long.parseLong(idStr);
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + idStr));
+                }
+                java.util.Map<String, Object> body = request.body(java.util.Map.class);
+                long newCount = 0L;
+                if (body != null && body.get("count") instanceof Number n) {
+                    newCount = n.longValue();
+                }
+                try {
+                    kbStatsService.resetStats(id, newCount, null);
+                    cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(id);
+                    // HashMap (not Map.of) — lastAt can be null after reset.
+                    java.util.Map<String, Object> statsBody = new java.util.HashMap<>();
+                    statsBody.put("id", row.marketId());
+                    statsBody.put("searchCount", row.pullCountOrSearchCount());
+                    statsBody.put("lastAt", row.lastAt());
+                    return ServerResponse.ok().body(statsBody);
+                } catch (RuntimeException ex) {
+                    // null-safe: getMessage() can be null, and Map.of rejects null values.
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("stats-reset failed for kb {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
+                }
+            });
             return builder.build();
         }
 
@@ -3056,7 +3202,8 @@ public class LoomAgentConfiguration {
          */
         @Bean("loomAgentMarketKnowledgePublicRouter")
         public RouterFunction<ServerResponse> loomAgentMarketKnowledgePublicRouter(
-                cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc) {
+                cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc,
+                @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 10.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
@@ -3178,8 +3325,29 @@ public class LoomAgentConfiguration {
             //   — 需要 IMarketContentReviewService.listReviews(M, int, int) 实现
             // DEFER to T18: PUT /spring/ai/loom/market-knowledge/{id}/reviews/me
             //   — 需要 IMarketContentReviewService.updateOwnReview(M, R) 实现
-            // DEFER to T16: GET /spring/ai/loom/market-knowledge/{id}/stats
-            //   — 需要 IMarketContentStatsService.getStats(M) 实现
+
+            // T16: 公开 stats — 任意已登录用户可查 market_knowledge 的 search_count / last_searched_at。
+            // 返回 { id, searchCount, lastAt };首次访问(无 row)返回 count=0, lastAt=null。
+            // 注意:loom_market_knowledge.id 是 VARCHAR(36) UUID,但 stats 表 PK 是 BIGINT
+            // (V1.0 schema mismatch,详见 DefaultKnowledgeStatsService)。这里 path-variable 解析成 Long,
+            // 与 stats 表的 PK 类型对齐 —— 调用方需保证传入的是可解析的数字。
+            builder.GET("spring/ai/loom/market-knowledge/{id}/stats", request -> {
+                String idStr = request.pathVariable("id");
+                Long id;
+                try {
+                    id = Long.parseLong(idStr);
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + idStr));
+                }
+                cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(id);
+                // HashMap (not Map.of) — lastAt can be null, and Map.of forbids null values.
+                java.util.Map<String, Object> body = new java.util.HashMap<>();
+                body.put("id", row.marketId());
+                body.put("searchCount", row.pullCountOrSearchCount());
+                body.put("lastAt", row.lastAt());
+                return ServerResponse.ok().body(body);
+            });
             return builder.build();
         }
 
