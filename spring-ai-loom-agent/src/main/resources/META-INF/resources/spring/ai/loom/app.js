@@ -2199,36 +2199,42 @@ const knowledge = {
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
         return;
       }
+      // T19 fix-up 2: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
+      // 装饰到 row.announcement。KB 是 VARCHAR(36) UUID,findOneByRawId 对 UUID
+      // 走 graceful-degradation 返回 null (204),所以 UUID KB row 不会有 banner —
+      // 与「V1.0 schema 不支持 UUID 公告」的现状一致,不报错。
+      if (
+        window.MarketAdmin &&
+        typeof window.MarketAdmin.listWithAnnouncements === "function"
+      ) {
+        try {
+          await window.MarketAdmin.listWithAnnouncements("KNOWLEDGE");
+        } catch (_) {
+          // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
+        }
+      }
       container.innerHTML = "";
-      // T19: top-of-list announcement banner — only rendered when the DTO
-      // embeds `announcementTitle` (T18 join); otherwise silently skipped.
-      const announcementItems = items.filter(
-        (kb) => kb && kb.announcementTitle && kb.announcementBody,
-      );
-      if (announcementItems.length > 0) {
-        for (const kb of announcementItems) {
+      // T19 fix-up 2: per-row announcement banner — 当 row.announcement 存在时,
+      // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
+      for (const kb of items) {
+        if (kb && kb.announcement && kb.announcement.title) {
           const banner = document.createElement("div");
           banner.className = "market-announcement market-announcement-list";
           banner.innerHTML =
             window.MarketAdmin && window.MarketAdmin.announcementHtml
-              ? window.MarketAdmin.announcementHtml({
-                  title: kb.announcementTitle,
-                  body: kb.announcementBody,
-                  createdAt: kb.announcementCreatedAt || null,
-                })
+              ? window.MarketAdmin.announcementHtml(kb.announcement)
               : `<div class="market-announcement-title">📢 ${escapeHtml(
-                  kb.announcementTitle,
+                  kb.announcement.title,
                 )}</div><div class="market-announcement-body">${escapeHtml(
-                  kb.announcementBody,
+                  kb.announcement.body || "",
                 )}</div>`;
           banner.style.cursor = "pointer";
-          banner.addEventListener("click", () =>
-            this._showMarketKbDetail(kb, banner, detail),
-          );
+          banner.addEventListener("click", () => {
+            const rowEl = banner.nextElementSibling;
+            if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
+          });
           container.appendChild(banner);
         }
-      }
-      for (const kb of items) {
         const div = document.createElement("div");
         div.className = "ks-item";
         const officialBadge = kb && kb.isOfficial
@@ -3998,36 +4004,43 @@ const skills = {
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
         return;
       }
+      // T19 fix-up 2: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
+      // (≤50 个 Promise.all) 装饰到 row.announcement。已读取的 row 即可在下方
+      // per-row banner 渲染时直接使用,不再依赖 list DTO embed。
+      if (
+        window.MarketAdmin &&
+        typeof window.MarketAdmin.listWithAnnouncements === "function"
+      ) {
+        try {
+          await window.MarketAdmin.listWithAnnouncements("SKILL");
+        } catch (_) {
+          // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
+        }
+      }
       container.innerHTML = "";
-      // T19: top-of-list announcement banner — only rendered when the DTO
-      // embeds `announcementTitle` (T18 join); otherwise silently skipped.
-      const announcementItems = items.filter(
-        (m) => m && m.announcementTitle && m.announcementBody,
-      );
-      if (announcementItems.length > 0) {
-        for (const m of announcementItems) {
+      // T19 fix-up 2: per-row announcement banner — 当 row.announcement 存在时,
+      // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
+      for (const m of items) {
+        if (m && m.announcement && m.announcement.title) {
           const banner = document.createElement("div");
           banner.className = "market-announcement market-announcement-list";
           banner.innerHTML =
             window.MarketAdmin && window.MarketAdmin.announcementHtml
-              ? window.MarketAdmin.announcementHtml({
-                  title: m.announcementTitle,
-                  body: m.announcementBody,
-                  createdAt: m.announcementCreatedAt || null,
-                })
+              ? window.MarketAdmin.announcementHtml(m.announcement)
               : `<div class="market-announcement-title">📢 ${escapeHtml(
-                  m.announcementTitle,
+                  m.announcement.title,
                 )}</div><div class="market-announcement-body">${escapeHtml(
-                  m.announcementBody,
+                  m.announcement.body || "",
                 )}</div>`;
           banner.style.cursor = "pointer";
-          banner.addEventListener("click", () =>
-            this._selectMarketSkill(m, banner),
-          );
+          // 点击 banner 时 banner 自身不是 list item — 暂时用 placeholder,
+          // 真正选中由下面 row 的 click 处理。
+          banner.addEventListener("click", () => {
+            const rowEl = banner.nextElementSibling;
+            if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
+          });
           container.appendChild(banner);
         }
-      }
-      for (const m of items) {
         const item = document.createElement("div");
         item.className = "ks-item";
         const officialBadge = m && m.isOfficial

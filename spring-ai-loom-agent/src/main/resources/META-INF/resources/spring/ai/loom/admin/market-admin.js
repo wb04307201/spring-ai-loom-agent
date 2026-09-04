@@ -496,6 +496,51 @@
   }
 
   /**
+   * listWithAnnouncements(kind) -> Promise<Array>
+   *
+   * Wraps the standard {@link #list} with a parallel fetch of each row's
+   * announcement (uses {@link #getAnnouncement} which hits the public
+   * `/market-{kind}s/{id}/announcement` endpoint). Each item in the returned
+   * array is decorated with an `announcement` field when the public endpoint
+   * returns a non-null record:
+   *
+   *   { id, name, ..., announcement: { title, body, createdAt } }
+   *
+   * For items whose id parses as a Long, the public endpoint will look up
+   * the announcement row. For items whose id is a VARCHAR(36) UUID (KB only),
+   * the endpoint returns 204 and `announcement` stays `undefined` —
+   * graceful-degradation, no row exists for UUIDs in the BIGINT
+   * {@code market_content_announcement.market_id} column anyway.
+   *
+   * Items with no announcement are returned unchanged (no `announcement` key).
+   *
+   * Used by the user-side market list renderer so each row with an
+   * announcement can show a per-row banner above it.
+   */
+  async function listWithAnnouncements(kind) {
+    const rows = await list(kind);
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+    const promises = rows.map((row) =>
+      getAnnouncement(kind, row.id)
+        .then((ann) => {
+          if (ann && ann.title) {
+            // Mutate a shallow copy so caller still sees an Array of plain
+            // objects. (rows already came from JSON.parse → mutable.)
+            try {
+              row.announcement = ann;
+            } catch (_) {
+              // defensive — row frozen in some envs
+            }
+          }
+          return row;
+        })
+        .catch(() => row),
+    );
+    await Promise.all(promises);
+    return rows;
+  }
+
+  /**
    * getAnnouncement(kind, id) -> Promise<MarketAnnouncement | null>
    *
    * Calls the public read endpoint `GET /market-{kind}s/{id}/announcement`
@@ -655,6 +700,7 @@
 
   window.MarketAdmin = {
     list: list,
+    listWithAnnouncements: listWithAnnouncements,
     form: form,
     reviewList: reviewList,
     approvalBadge: approvalBadge,

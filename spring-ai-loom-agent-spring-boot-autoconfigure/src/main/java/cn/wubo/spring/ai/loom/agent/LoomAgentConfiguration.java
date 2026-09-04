@@ -3766,16 +3766,27 @@ public class LoomAgentConfiguration {
             // T16: 公开 stats — 任意已登录用户可查 market_knowledge 的 search_count / last_searched_at。
             // 返回 { id, searchCount, lastAt };首次访问(无 row)返回 count=0, lastAt=null。
             // 注意:loom_market_knowledge.id 是 VARCHAR(36) UUID,但 stats 表 PK 是 BIGINT
-            // (V1.0 schema mismatch,详见 DefaultKnowledgeStatsService)。这里 path-variable 解析成 Long,
-            // 与 stats 表的 PK 类型对齐 —— 调用方需保证传入的是可解析的数字。
+            // (V1.0 schema mismatch,详见 DefaultKnowledgeStatsService)。
+            //
+            // T19 fix-up 2: UUID 字符串走 graceful-degradation 返回 {id=null, searchCount=0,
+            // lastAt=null} 而不是 4xx,与 /announcement /reviews 端点对齐。Numeric id
+            // (测试用)走 Long 路径正常查表。
             builder.GET("spring/ai/loom/market-knowledge/{id}/stats", request -> {
                 String idStr = request.pathVariable("id");
+                if (idStr == null || idStr.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
                 Long id;
                 try {
                     id = Long.parseLong(idStr);
                 } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
+                    // UUID KB id — schema mismatch; return empty stats.
+                    java.util.Map<String, Object> body = new java.util.HashMap<>();
+                    body.put("id", null);
+                    body.put("searchCount", 0);
+                    body.put("lastAt", null);
+                    return ServerResponse.ok().body(body);
                 }
                 cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(id);
                 // HashMap (not Map.of) — lastAt can be null, and Map.of forbids null values.
@@ -3788,25 +3799,19 @@ public class LoomAgentConfiguration {
 
             // T19 fix-up: 公开读取公告 — 任何已登录用户可查 market_knowledge 的公告。
             // 不需要 admin 权限,因为公告是 admin 已发布的内容,纯只读,无敏感字段。
-            // Long.parseLong 失败走 4xx;无公告 row 返回 204 No Content(announcementRepo.findOne
-            // 在 row 不存在时返回 null)。与 Skill 端完全镜像,KB id 的 VARCHAR(36) UUID
-            // 解析失败(graceful-degradation)的语义不变。
+            // KB id 在 V1.0 schema 是 VARCHAR(36) UUID,market_content_announcement.market_id
+            // 是 BIGINT — UUIDs 永远不会有匹配 row。通过 findOneByRawId 把 UUID 字符串
+            // 走 graceful-degradation 返回 null (204),而不是 4xx。Numeric id (测试用)
+            // 走 Long 路径正常查表。
             builder.GET("spring/ai/loom/market-knowledge/{id}/announcement", request -> {
                 String idStr = request.pathVariable("id");
                 if (idStr == null || idStr.isBlank()) {
                     return ServerResponse.badRequest().body(java.util.Map.of(
                             "error", "id 不能为空"));
                 }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
                 try {
                     cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement ann =
-                            marketAnnouncementRepository.findOne("KNOWLEDGE", id);
+                            marketAnnouncementRepository.findOneByRawId("KNOWLEDGE", idStr);
                     if (ann == null) {
                         return ServerResponse.noContent().build();
                     }
@@ -3819,7 +3824,7 @@ public class LoomAgentConfiguration {
                     return ServerResponse.ok().body(body);
                 } catch (RuntimeException ex) {
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
-                    log.warn("announcement read failed for kb {}: {}", id, msg, ex);
+                    log.warn("announcement read failed for kb {}: {}", idStr, msg, ex);
                     return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(java.util.Map.of("error", msg));
                 }
