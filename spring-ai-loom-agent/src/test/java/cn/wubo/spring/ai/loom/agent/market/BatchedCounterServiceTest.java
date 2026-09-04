@@ -2,10 +2,14 @@ package cn.wubo.spring.ai.loom.agent.market;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -222,5 +226,124 @@ class BatchedCounterServiceTest {
         assertEquals(1, updates.size(), "concurrent increments on same key must dedup");
         assertEquals((long) threads * perThread, updates.get(0).delta(),
                 "delta must equal total increments — no lost updates");
+    }
+
+    /**
+     * Regression test for the race in {@code drainBuffer()}.
+     * <p>
+     * The naive "snapshot delta then remove entry" loses increments that land
+     * on the same entry AFTER the delta is read but BEFORE the entry is
+     * removed from the buffer — the entry gets removed with its post-snapshot
+     * delta still inside, and our {@link BatchedCounterService.Update} only
+     * carries the pre-snapshot value.
+     * </p>
+     * <p>
+     * To exercise the race we run {@code increment()} and {@code flush()}
+     * concurrently. With the buggy implementation, the cumulative delta across
+     * all captured batches is <em>less</em> than the total number of
+     * increments because some increments land on an entry that has already
+     * been detached. With the {@code compute()}-based fix, every increment is
+     * either captured in a batch (snapshot happens-after the increment) or
+     * lands in a fresh entry created post-flush (which the next flush picks
+     * up). The final flush guarantees no stragglers.
+     * </p>
+     */
+    @Test
+    void concurrentIncrementDuringFlushDoesNotLoseUpdates() throws Exception {
+        // Concatenate every batch the executor sees into one list.
+        List<BatchedCounterService.Update> allBatches = java.util.Collections.synchronizedList(new ArrayList<>());
+        BatchedCounterService svc = new BatchedCounterService(batch -> {
+            allBatches.addAll(batch);
+            return CompletableFuture.completedFuture(null);
+        });
+
+        int totalIncrements = 50_000;
+        int incrementThreads = 8;
+        int flushThreads = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(incrementThreads + flushThreads);
+        CountDownLatch start = new CountDownLatch(1);
+        // Track SUBMISSION and COMPLETION separately — a thread can have
+        // incremented the submission counter but still be inside
+        // svc.increment() when we observe it. Without this distinction,
+        // the final flush races with in-flight increments.
+        AtomicInteger incrementsSubmitted = new AtomicInteger();
+        AtomicInteger incrementsCompleted = new AtomicInteger();
+        AtomicBoolean incrementsDone = new AtomicBoolean(false);
+
+        try {
+            // Increment workers — push totalIncrements increments as fast as they can.
+            for (int t = 0; t < incrementThreads; t++) {
+                pool.submit(() -> {
+                    try {
+                        start.await();
+                        while (true) {
+                            int next = incrementsSubmitted.incrementAndGet();
+                            if (next > totalIncrements) {
+                                return;
+                            }
+                            svc.increment("t", "id", 1L, "c", "l");
+                            // Count AFTER the call returns — guarantees the
+                            // increment has actually landed in the buffer.
+                            incrementsCompleted.incrementAndGet();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            }
+
+            // Flush workers — hammer flush() in parallel with the increments.
+            // The race window is between drainBuffer reading delta and removing
+            // the entry; aggressive flushes maximise the chance of catching it.
+            for (int t = 0; t < flushThreads; t++) {
+                pool.submit(() -> {
+                    try {
+                        start.await();
+                        while (!incrementsDone.get()) {
+                            svc.flush();
+                            Thread.sleep(0, 100_000); // ~0.1ms — maximise flush frequency
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            }
+
+            start.countDown();
+
+            // Wait for all increments to have ACTUALLY returned from
+            // svc.increment(), not just been dispatched.
+            while (incrementsCompleted.get() < totalIncrements) {
+                Thread.sleep(5);
+            }
+            incrementsDone.set(true);
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(15, TimeUnit.SECONDS),
+                    "workers must finish within 15s — completed=" + incrementsCompleted.get() + "/" + totalIncrements);
+
+            // One final synchronous flush to drain anything left in the buffer
+            // (increments that landed AFTER the last concurrent flush).
+            assertEquals(0, svc.bufferSizeForTest(),
+                    "concurrent flush workers should have drained everything; "
+                            + "remaining buffer means a drainBuffer() race lost an update");
+            svc.flush();
+            assertEquals(0, svc.bufferSizeForTest(),
+                    "final flush should leave the buffer empty");
+
+            // Sum the deltas of every batch the executor saw.
+            long totalFlushed = allBatches.stream()
+                    .mapToLong(BatchedCounterService.Update::delta)
+                    .sum();
+
+            assertEquals(totalIncrements, totalFlushed,
+                    "lost increments: completed=" + totalIncrements
+                            + " flushed=" + totalFlushed
+                            + " batches=" + allBatches.size()
+                            + " — this indicates an atomicity gap between increment() and drainBuffer()");
+        } finally {
+            if (!pool.isTerminated()) {
+                pool.shutdownNow();
+            }
+        }
     }
 }

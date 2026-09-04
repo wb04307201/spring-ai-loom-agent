@@ -160,7 +160,25 @@ public class BatchedCounterService {
      */
     public void increment(String table, String keyCol, Long key, String cntCol, String lastCol) {
         String bk = table + ":" + keyCol + ":" + key + ":" + cntCol;
-        buffer.computeIfAbsent(bk, k -> new BufferEntry(lastCol)).delta.incrementAndGet();
+        // Single compute() holds the bin lock for the WHOLE read-modify-write:
+        // 1. If the entry exists, reuse it.
+        // 2. Otherwise create a fresh one.
+        // 3. AtomicLong.incrementAndGet on its delta.
+        // 4. Return the entry so it stays in the buffer.
+        //
+        // Why NOT computeIfAbsent + incrementAndGet? The two-step version
+        // has a race window: computeIfAbsent releases the bin lock after
+        // returning the entry, so a concurrent flush's compute(K) can
+        // detach the entry BEFORE our incrementAndGet lands. The
+        // increment would then update a BufferEntry that's no longer in
+        // the buffer — the delta is silently dropped. Combining into one
+        // compute() makes the create-or-reuse + increment atomic with
+        // respect to drainBuffer's detach-and-snapshot.
+        buffer.compute(bk, (k, v) -> {
+            BufferEntry entry = (v != null) ? v : new BufferEntry(lastCol);
+            entry.delta.incrementAndGet();
+            return entry;
+        });
     }
 
     /**
@@ -220,30 +238,47 @@ public class BatchedCounterService {
      * independently of the executor. The buffer is cleared BEFORE the
      * executor is invoked so concurrent {@link #increment} calls during
      * a slow flush land in the next window instead of being dropped.
+     *
+     * <p><b>Race fix:</b> naive "snapshot delta, then remove entry" loses
+     * concurrent increments between the two reads — the entry gets removed
+     * from the map but its post-snapshot delta is dropped on the floor.
+     * We use {@link ConcurrentHashMap#compute(Object, java.util.function.BiFunction)
+     * compute()} which holds the bin lock for the key being drained, so any
+     * concurrent {@code increment()} on the same key is blocked until our
+     * lambda returns {@code null}, at which point the increment sees a
+     * missing entry and creates a fresh one via {@code computeIfAbsent}.
+     * The atomic read-modify-write is what guarantees no delta is lost.</p>
      */
     private List<Update> drainBuffer() {
-        List<Update> updates = new ArrayList<>(buffer.size());
-        // Snapshot into a local map so we can clear without holding the
-        // CHM's bin lock while iterating the values list.
-        var entries = new ArrayList<>(buffer.entrySet());
-        for (var e : entries) {
-            String bk = e.getKey();
-            BufferEntry entry = e.getValue();
-            String[] parts = bk.split(":", 4);
-            // parts = [table, keyCol, key, cntCol]; lastCol lives in the entry.
-            updates.add(new Update(
-                    parts[0],
-                    parts[1],
-                    Long.parseLong(parts[2]),
-                    parts[3],
-                    entry.delta.get(),
-                    entry.lastCol
-            ));
-        }
-        // Only remove the keys we actually snapshotted — leaves concurrent
-        // post-snapshot increments in the buffer for the next flush.
-        for (var e : entries) {
-            buffer.remove(e.getKey(), e.getValue());
+        List<Update> updates = new ArrayList<>();
+        // Snapshot the current key set — keys that appear after this point
+        // are NEW entries created by concurrent increment() calls; we leave
+        // them in the buffer for the next flush.
+        for (String key : new ArrayList<>(buffer.keySet())) {
+            // Atomic detach-and-drain: compute() holds the bin lock for THIS
+            // key, so any concurrent increment() against the same key blocks
+            // until our lambda returns null, then creates a fresh entry via
+            // computeIfAbsent — never mixing its delta into ours.
+            buffer.compute(key, (k, v) -> {
+                if (v == null) {
+                    // Another drain (or expiry) got here first — nothing to do.
+                    return null;
+                }
+                String[] parts = k.split(":", 4);
+                // parts = [table, keyCol, key, cntCol]; lastCol lives in the entry.
+                // Atomic read of delta is safe here: the bin lock is held,
+                // so no concurrent increment() can land between our read and
+                // our return-null (which detaches the entry).
+                updates.add(new Update(
+                        parts[0],
+                        parts[1],
+                        Long.parseLong(parts[2]),
+                        parts[3],
+                        v.delta.get(),
+                        v.lastCol
+                ));
+                return null; // detach: the next increment will computeIfAbsent a fresh entry
+            });
         }
         return updates;
     }
@@ -255,5 +290,14 @@ public class BatchedCounterService {
      */
     public JdbcTemplate getJdbcTemplate() {
         return jdbcTemplate;
+    }
+
+    /**
+     * Package-private test hook: returns the number of distinct buffered
+     * entries. Lets tests assert that the buffer is fully drained after a
+     * flush. Not part of the public API — do not call from production code.
+     */
+    int bufferSizeForTest() {
+        return buffer.size();
     }
 }
