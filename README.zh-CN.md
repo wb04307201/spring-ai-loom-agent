@@ -251,7 +251,7 @@ spring:
 |--------------|-----------------------------------|---------------------------------|
 | 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 批量清理会话内容 |
 | 角色管理 | `admin/roles.html` | 业务角色 + 给角色授权 MCP / Skill |
-| Skill 市场 | `admin/skills-market.html` | 编辑 / 下架（：不再新建技能） |
+| Skill 市场 | `admin/market-skills.html` | 编辑 / 下架（：不再新建技能） |
 | MCP 描述维护 | `admin/mcps.html` | 给 SDK MCP 工具维护中文描述 |
 | 用量统计 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
 | 返回主页 | `/` | 回到聊天首页 |

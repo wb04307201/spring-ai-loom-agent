@@ -706,7 +706,7 @@
     const container = document.getElementById("rd-skills");
     if (!currentMarketSkills || currentMarketSkills.length === 0) {
       container.innerHTML =
-        '<div style="color: var(--text-muted); padding: 8px;">市场暂无已审批的技能。请先到<a href="skills-market.html">技能市场</a>创建。</div>';
+        '<div style="color: var(--text-muted); padding: 8px;">市场暂无已审批的技能。请先到<a href="market-skills.html">技能市场</a>创建。</div>';
       return;
     }
     const granted = currentRoleSkills

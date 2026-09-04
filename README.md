@@ -307,7 +307,7 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 |-----------------|-------------------------------|--------------------------------------|
 | 用户管理 | `admin/console.html` | User list + role assignment + batch content cleanup |
 | 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill |
-| Skill 市场 | `admin/skills-market.html` | Approve / reject / directly CRUD Skill |
+| Skill 市场 | `admin/market-skills.html` | Approve / reject / directly CRUD Skill |
 | MCP 描述维护 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
 | 用量统计 | `admin/stats.html` | Monthly Token usage (year + month filter) |
 | 返回主页 | `/` | Back to chat home page |

@@ -1024,3 +1024,67 @@ table.user-table {
   font-weight: 500;
   padding: 4px 0;
 }
+
+/* M0 T12: 待审核角标（admin market-skills 顶部红色 chip） */
+.pending-chip {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.pending-chip-red {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* M0 T11/T12: 审批状态徽章（admin market 表「状态」列渲染） */
+.approval-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.approval-status-PENDING {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.approval-status-APPROVED {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+.approval-status-REJECTED {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+.approval-status-WITHDRAWN {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.approval-status-UNKNOWN {
+  background: #f3f4f6;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+}
+.approval-meta {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+.approval-comment {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #475569);
+  background: #f8fafc;
+  border-left: 3px solid #cbd5e1;
+  padding: 4px 8px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+}

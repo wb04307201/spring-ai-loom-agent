@@ -2,9 +2,9 @@
   "use strict";
 
   const tableContainer = document.getElementById("skill-table-container");
+  const pendingChipContainer = document.getElementById("pending-chip-container");
   const API = {
     list: "/spring/ai/loom/admin/market-skills",
-    create: "/spring/ai/loom/admin/market-skills",
     update: (id) => `/spring/ai/loom/admin/market-skills/${id}`,
     del: (id) => `/spring/ai/loom/admin/market-skills/${id}`,
   };
@@ -67,26 +67,57 @@
     });
   }
 
+  /**
+   * Render the top-of-page red "待审核 (N)" chip.
+   * Counts items whose status === "PENDING". Hidden if zero.
+   * Inserted into #pending-chip-container (declared in market-skills.html).
+   */
+  function renderPendingChip(items) {
+    if (!pendingChipContainer) return;
+    const n = items.filter(
+      (m) => String(m.status || "").toUpperCase() === "PENDING",
+    ).length;
+    if (n > 0) {
+      pendingChipContainer.innerHTML =
+        '<div class="pending-chip pending-chip-red">待审核 (' +
+        n +
+        ")</div>";
+      pendingChipContainer.style.display = "";
+    } else {
+      pendingChipContainer.innerHTML = "";
+      pendingChipContainer.style.display = "none";
+    }
+  }
+
   async function loadList() {
     tableContainer.innerHTML = '<div class="loading-indicator">加载中...</div>';
     try {
-      const r = await fetch(API.list, { credentials: "include" });
-      if (r.status === 401 || r.status === 403) {
-        window.location.replace("/spring/ai/loom/index.html");
-        return;
-      }
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      allSkills = await r.json();
+      // M0 T11/T12: route list fetch through MarketAdmin.list (single source of truth).
+      // Throws on network/auth/HTTP failure (handles 401/403 redirect internally).
+      allSkills = await MarketAdmin.list("SKILL");
+      renderPendingChip(allSkills);
       renderTable();
     } catch (e) {
       tableContainer.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+      if (pendingChipContainer) {
+        pendingChipContainer.innerHTML = "";
+        pendingChipContainer.style.display = "none";
+      }
     }
   }
 
   /**
-   * 去掉审批流 —— 提交即上架。
-   * 所有列出的市场 Skill 都是 APPROVED（用户提交 + admin 创建）。
-   * 表格按 author, name 排序。
+   * Render the table.
+   *
+   * Columns (M0 T12): 名称 / 状态 / 作者 / 官方 / 排序 / 分类 / 提交时间 / 操作
+   * - 状态: MarketAdmin.approvalBadge(status, reviewer, reviewedAt, comment)
+   * - 官方: 🏛️ if isOfficial truthy, else "—"
+   * - 排序: featuredRank (or "—" if null/empty)
+   * - 分类: category (or "—" if null/empty)
+   * - 提交时间: submittedAt (truncated to minutes)
+   *
+   * Sort: 状态升序 (PENDING first → APPROVED → REJECTED → WITHDRAWN), then author+name.
+   * Filter: all statuses visible (admin can review/re-approve/etc.).
    */
   function renderTable() {
     if (!allSkills || allSkills.length === 0) {
@@ -94,16 +125,35 @@
         '<div class="empty-state">市场暂无任何技能</div>';
       return;
     }
-    const sorted = [...allSkills].sort((a, b) =>
-      (a.author + a.name).localeCompare(b.author + b.name),
-    );
+    const STATUS_ORDER = { PENDING: 0, APPROVED: 1, REJECTED: 2, WITHDRAWN: 3 };
+    const sorted = [...allSkills].sort((a, b) => {
+      const sa = STATUS_ORDER[String(a.status || "").toUpperCase()] ?? 99;
+      const sb = STATUS_ORDER[String(b.status || "").toUpperCase()] ?? 99;
+      if (sa !== sb) return sa - sb;
+      return (a.author + a.name).localeCompare(b.author + b.name);
+    });
     const rows = sorted
       .map((m) => {
+        const officialMark = m.isOfficial ? "🏛️" : "—";
+        const rank = m.featuredRank == null ? "—" : m.featuredRank;
+        const category = m.category ? escapeHtml(m.category) : "—";
+        const submittedAt = m.submittedAt
+          ? escapeHtml(String(m.submittedAt).slice(0, 16).replace("T", " "))
+          : "—";
+        const statusBadge = MarketAdmin.approvalBadge(
+          m.status,
+          m.reviewer,
+          m.reviewedAt,
+          m.reviewComment,
+        );
         return `<tr data-id="${m.id}">
  <td><strong>${escapeHtml(m.name)}</strong></td>
- <td>${escapeHtml(m.description || "（无）")}</td>
+ <td>${statusBadge}</td>
  <td>${escapeHtml(m.author)}</td>
- <td>${m.reviewedAt ? escapeHtml(m.reviewedAt.slice(0, 16).replace("T", " ")) : "-"}</td>
+ <td>${officialMark}</td>
+ <td>${rank}</td>
+ <td>${category}</td>
+ <td>${submittedAt}</td>
  <td>
  <button class="secondary-btn edit-btn" data-id="${m.id}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
  <button class="delete-btn del-btn btn-sm" data-id="${m.id}">下架</button>
@@ -113,7 +163,7 @@
       .join("");
     tableContainer.innerHTML = `
  <table class="user-table">
- <thead><tr><th>名称</th><th>描述</th><th>作者</th><th>上架时间</th><th>操作</th></tr></thead>
+ <thead><tr><th>名称</th><th>状态</th><th>作者</th><th>官方</th><th>排序</th><th>分类</th><th>提交时间</th><th>操作</th></tr></thead>
  <tbody>${rows}</tbody>
  </table>`;
     bindRowActions();
@@ -144,8 +194,6 @@
     document.getElementById("es-error").style.display = "none";
     document.getElementById("edit-skill-modal").style.display = "flex";
   }
-
-  // 删除 openCreate() —— admin 控制台不再新建技能
 
   function closeEdit() {
     document.getElementById("edit-skill-modal").style.display = "none";

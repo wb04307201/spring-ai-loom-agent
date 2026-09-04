@@ -1213,7 +1213,7 @@ All under `/admin/...` and already documented in:
 | --- | --- |
 | `admin/console.html` (→ user.html) | User list + role assignment + batch content cleanup |
 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
-| `admin/skills-market.html` | Approve / reject / directly CRUD Skill |
+| `admin/market-skills.html` | Approve / reject / directly CRUD Skill |
 | `admin/knowledge-market.html` | Approve / reject / directly CRUD Knowledge |
 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
 | `admin/conversation.html` | Drill into any user's conversation turns (admin only) |
