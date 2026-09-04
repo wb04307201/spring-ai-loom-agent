@@ -3009,6 +3009,162 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * KB 市场公共路由 v2(M0 重构后的契约) — 任意已登录用户使用,无需 admin 权限。
+         * <p>
+         * 与 T8 admin 路由(走 M0 重构后的 {@code AbstractMarketAdminService})对称;本 bean 镜像
+         * T9 skill public router 的 5 端点 + 1 KB 独有端点:
+         * <ol>
+         *   <li>{@code GET /spring/ai/loom/market-knowledge} — 公开 list(APPROVED only)</li>
+         *   <li>{@code GET /spring/ai/loom/market-knowledge/{id}} — 公开 detail</li>
+         *   <li>{@code POST /spring/ai/loom/user/market-knowledge} — author submit → PENDING
+         *       (走 v2 {@code kbSvc.create(username, body)})</li>
+         *   <li>{@code DELETE /spring/ai/loom/user/market-knowledge/{id}} — author withdraw
+         *       (走 v1 {@code IKnowledgeMarketService.withdraw(String)};非作者/不存在统一返回 404,
+         *       与 T9 同款隐私适配,不泄露他人市场条目的存在性)</li>
+         *   <li>{@code POST /spring/ai/loom/market-knowledge/{id}/pull} — 拉取到自己的 KB
+         *       (走 v1 {@code IKnowledgeMarketService.pull(username, id)})</li>
+         *   <li>{@code POST /spring/ai/loom/market-knowledge/{id}/access} — KB 独有,
+         *       自增 {@code loom_user_knowledge.access_count};完整 KB search stat 由 T16 接线</li>
+         * </ol>
+         * {@code /reviews} POST/GET/PUT 三个端点 {@code DEFER to T18}
+         * (依赖 {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService});
+         * {@code /stats} GET 端点 {@code DEFER to T16}
+         * (依赖 {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService})。
+         * <p>
+         * KB 端 id 是 {@code VARCHAR(36)} UUID,不允许 parseLong;所有 path-variable 直接当 String 传。
+         * 认证由 {@link cn.wubo.spring.ai.loom.agent.user.AuthenticationFilter} 在 Servlet filter 层
+         * 拦截,本 router 内不再做 admin 二次校验(6 个端点全部面向普通已登录用户)。
+         */
+        @Bean("loomAgentMarketKnowledgePublicRouter")
+        public RouterFunction<ServerResponse> loomAgentMarketKnowledgePublicRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+
+            // 10.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
+            // 支持分页(page/size)、分类过滤(category)、关键字搜索(query)、排序(sortBy)。
+            builder.GET("spring/ai/loom/market-knowledge", request -> {
+                cn.wubo.spring.ai.loom.agent.market.MarketFilter filter =
+                        new cn.wubo.spring.ai.loom.agent.market.MarketFilter(
+                                parsePageOr(request, "page", 0),
+                                parsePageOr(request, "size", 20),
+                                cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.APPROVED,
+                                request.param("category").orElse(null),
+                                request.param("query").orElse(null),
+                                request.param("sortBy").orElse("official_rank"));
+                try {
+                    return ServerResponse.ok().body(kbSvc.listPaged(filter));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // 10.2 公开 detail — KB id 是 VARCHAR(36) UUID,path-variable 直接传 String,不 parseLong。
+            builder.GET("spring/ai/loom/market-knowledge/{id}", request -> {
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(kbSvc.getById(id));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // 10.3 author submit — 走 v2 kbSvc.create(username, body),落 PENDING(M0 默认行为)。
+            // body 走 MarketCreateRequest(name/description/content/category);content 在 KB 端
+            // 被忽略(loom_market_knowledge 无 content 列),行为差异由 service 自身保证。
+            builder.POST("spring/ai/loom/user/market-knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(kbSvc.create(username, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "字段缺失（name/description 必填）"));
+                }
+            });
+
+            // 10.4 author withdraw — v1 IKnowledgeMarketService.withdraw(String) 内部已做 author 校验
+            // (非作者抛 403,不存在抛 404)。router 层把两种异常统一映射到 404,与 T9 同款隐私适配
+            // (避免泄露他人市场条目的存在性)。
+            builder.DELETE("spring/ai/loom/user/market-knowledge/{id}", request -> {
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                try {
+                    kbSvc.withdraw(id);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    // 404 for both not-found & not-owned — privacy adaptation (mirrors T9)
+                    return ServerResponse.status(HttpStatus.NOT_FOUND)
+                            .body(java.util.Map.of("error", "market_knowledge 不存在或不属于当前用户"));
+                }
+            });
+
+            // 10.5 pull — v1 IKnowledgeMarketService.pull(username, id) 内部处理已订阅检查
+            // (409) 与 ROLE_GRANTED 锁定冲突(409),M0 抽象层不覆盖此 user-side 行为。
+            builder.POST("spring/ai/loom/market-knowledge/{id}/pull", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                try {
+                    kbSvc.pull(username, id);
+                    return ServerResponse.ok().body(java.util.Map.of("success", true));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // 10.6 access(KB 独有) — 自增 loom_user_knowledge.access_count;用户未订阅时 no-op
+            // (rows=0 → 返回 0),不创建 phantom pull 占用 source='MARKET_PULLED' 配额。
+            // 完整 KB search stat(loom_market_knowledge_stats)由 T16 接线。
+            builder.POST("spring/ai/loom/market-knowledge/{id}/access", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
+                }
+                try {
+                    long newCount = kbSvc.access(username, id);
+                    return ServerResponse.ok().body(java.util.Map.of(
+                            "accessCount", newCount,
+                            "subscribed", newCount > 0));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // DEFER to T18: POST /spring/ai/loom/market-knowledge/{id}/reviews
+            //   — 需要 IMarketContentReviewService.submitReview(M, R) 实现
+            // DEFER to T18: GET /spring/ai/loom/market-knowledge/{id}/reviews
+            //   — 需要 IMarketContentReviewService.listReviews(M, int, int) 实现
+            // DEFER to T18: PUT /spring/ai/loom/market-knowledge/{id}/reviews/me
+            //   — 需要 IMarketContentReviewService.updateOwnReview(M, R) 实现
+            // DEFER to T16: GET /spring/ai/loom/market-knowledge/{id}/stats
+            //   — 需要 IMarketContentStatsService.getStats(M) 实现
+            return builder.build();
+        }
+
+        /**
          * 解析整数 query 参数 —— 非数字 / 缺失走默认值，不抛 500。
          */
         private static int parsePageOr(

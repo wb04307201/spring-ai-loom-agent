@@ -394,4 +394,33 @@ public class DefaultKnowledgeMarketService
                         "ORDER BY mk.reviewed_at DESC, mk.submitted_at DESC",
                 this::mapMarketKnowledgeRecord, username);
     }
+
+    /* ===== T10: 公共 access 端点（KB 端独有） ===== */
+
+    /**
+     * 用户访问市场知识库 → 自增 {@code loom_user_knowledge.access_count}。
+     * <p>
+     * 仅在用户已经订阅（{@code loom_user_knowledge} 存在对应行）时才递增计数;
+     * 未订阅则 no-op（rows=0），不会创建 phantom pull 占用
+     * {@code source='MARKET_PULLED'} 配额（{@code pull} 会因 409 拒绝重复行）。
+     * 完整 KB search stat 接线（{@code loom_market_knowledge_stats}）由 T16 落地。
+     *
+     * @return 递增后的 {@code access_count};未订阅时返回 0。
+     * @throws LoomAgentRuntimeException 市场 KB 不存在时抛 404
+     */
+    public long access(String username, String marketKnowledgeId) {
+        MarketKnowledgeRecord mk = getById(marketKnowledgeId);
+        int rows = jdbcTemplate.update(
+                "UPDATE loom_user_knowledge SET access_count = access_count + 1 " +
+                        "WHERE username = ? AND market_knowledge_id = ?",
+                username, mk.id());
+        if (rows == 0) {
+            // 用户未订阅(无 row)→ no-op,不能创建 phantom pull 阻塞后续 pull 端点
+            return 0L;
+        }
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT access_count FROM loom_user_knowledge WHERE username = ? AND market_knowledge_id = ?",
+                Long.class, username, mk.id());
+        return count == null ? 0L : count;
+    }
 }
