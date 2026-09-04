@@ -146,6 +146,59 @@
 
     <!-- 去掉审批拒绝备注 modal -->
 
+    <!-- M0 T19：公告管理模态框 -->
+    <div id="announcement-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 560px">
+        <div class="modal-header">
+          <h3 id="announcement-title-text">管理公告</h3>
+          <div class="close-button" id="announcement-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div class="form-group">
+            <label>公告标题 <span style="color: var(--error-color)">*</span></label>
+            <input
+              type="text"
+              id="ann-title"
+              class="form-input"
+              placeholder="例如：限时特惠"
+            />
+          </div>
+          <div class="form-group">
+            <label>公告正文 <span style="color: var(--error-color)">*</span></label>
+            <textarea
+              id="ann-body"
+              class="form-input"
+              rows="5"
+              placeholder="公告内容（纯文本，不支持 Markdown）"
+            ></textarea>
+          </div>
+          <div id="ann-error" class="error-msg" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="ann-cancel">取消</button>
+          <button class="delete-btn btn-sm" id="ann-delete" style="display: none">撤销公告</button>
+          <button class="primary-btn" id="ann-save">发布</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- M0 T19：评论管理模态框 -->
+    <div id="review-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 640px; max-height: 80vh">
+        <div class="modal-header">
+          <h3 id="review-title-text">用户评价</h3>
+          <div class="close-button" id="review-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px; overflow-y: auto">
+          <div id="review-modal-aggregate"></div>
+          <div id="review-modal-list">加载中...</div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="review-cancel">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 通用确认 -->
     <div id="confirm-modal" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 440px">

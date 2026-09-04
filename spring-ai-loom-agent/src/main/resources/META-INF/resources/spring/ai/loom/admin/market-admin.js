@@ -3,12 +3,18 @@
  *
  * Shared namespace for admin Skill / Knowledge market pages.
  *
- * Declared in M0 Task 11 (forward-decl). Full DOM / modal / render work lands in:
+ * Declared in M0 Task 11 (forward-decl). Full DOM / modal / render work
+ * lands in:
  *   - T12 (admin skill market page)
  *   - T13 (admin knowledge market page)
- *   - T19 (reviewList + approvalBadge real fetches + full render)
+ *   - T19 (form() / reviewList() real impls + announcement banner +
+ *          review submission widget — this file)
  *
- * Exposes: window.MarketAdmin = { list, form, reviewList, approvalBadge }
+ * Exposes: window.MarketAdmin = { list, form, reviewList, approvalBadge,
+ *                                 announcementHtml, getAnnouncement,
+ *                                 setAnnouncement, deleteAnnouncement,
+ *                                 deleteReview, submitReview,
+ *                                 renderStarWidget }
  *
  * Convention: plain JS + template strings (matches existing skills-market.js /
  * knowledge-market.js style). No Vue / React / external deps.
@@ -21,6 +27,22 @@
     SKILL: "/spring/ai/loom/admin/market-skills",
     KNOWLEDGE: "/spring/ai/loom/admin/market-knowledge",
   };
+
+  /** Public read endpoints (used by reviewList / announcement fetch). */
+  const PUBLIC_API = {
+    SKILL: "/spring/ai/loom/market-skills",
+    KNOWLEDGE: "/spring/ai/loom/market-knowledge",
+  };
+
+  /** Admin write endpoints (delete review by username, write announcement). */
+  const ADMIN_REVIEW_API = (kind, id, username) =>
+    `/spring/ai/loom/admin/market-${kind.toLowerCase()}s/${encodeURIComponent(
+      id,
+    )}/reviews/${encodeURIComponent(username)}`;
+  const ADMIN_ANNOUNCEMENT_API = (kind, id) =>
+    `/spring/ai/loom/admin/market-${kind.toLowerCase()}s/${encodeURIComponent(
+      id,
+    )}/announcement`;
 
   /** Human-readable kind label (used in thrown errors). */
   const KIND_LABEL = {
@@ -88,50 +110,326 @@
   /**
    * form(kind, mode, entry) -> Promise<RecordDescriptor | null>
    *
-   * Renders the create / edit / review-edit modal for a market entry.
+   * Renders the create / edit modal for a market entry.
    *   kind  : 'SKILL' | 'KNOWLEDGE'
-   *   mode  : 'create' | 'edit' | 'review-edit'
+   *   mode  : 'create' | 'edit'
    *   entry : existing record (or null when mode === 'create')
    *
-   * Resolves to a record descriptor:
-   *   { name, description, content, category, isOfficial?, featuredRank?,
-   *     rejectReason?, reviewComment? }
-   * Resolves to null if the user cancelled.
+   * Returns a Promise that resolves to a record descriptor:
+   *   { name, description, content, category, isOfficial?, featuredRank? }
+   * on Save (and the PUT to /admin/market-{kind}s/{id} succeeds),
+   * or `null` if the user cancelled.
    *
-   * STUB: T12 (skill) / T13 (knowledge) provide the modal DOM + handlers.
-   * Throwing now gives T12 / T13 a loud failure if they wire UI before replacing this body.
+   * Knowledge entries expose `category`, `isOfficial`, `featuredRank`;
+   * skill entries do not. The function renders the appropriate field set
+   * based on `kind`.
    */
   function form(kind, mode, entry) {
-    return Promise.reject(
-      new Error(
-        "MarketAdmin.form not yet implemented (kind=" +
-          (KIND_LABEL[kind] || kind) +
-          ", mode=" +
-          mode +
-          ", entry=" +
-          (entry ? entry.name || "(unnamed)" : "null") +
-          ")",
-      ),
-    );
+    if (kind !== "SKILL" && kind !== "KNOWLEDGE") {
+      return Promise.reject(
+        new Error("MarketAdmin.form: unknown kind " + JSON.stringify(kind)),
+      );
+    }
+    if (mode !== "create" && mode !== "edit") {
+      return Promise.reject(
+        new Error(
+          "MarketAdmin.form: unsupported mode " +
+            JSON.stringify(mode) +
+            " (expected 'create' or 'edit')",
+        ),
+      );
+    }
+
+    const isEdit = mode === "edit";
+    const isKnowledge = kind === "KNOWLEDGE";
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay market-form-overlay";
+    overlay.style.display = "flex";
+
+    const titleText =
+      (KIND_LABEL[kind] || kind) + (isEdit ? " · 编辑" : " · 新增");
+    const safe = (v) => escapeHtml(v == null ? "" : v);
+    const cur = entry || {};
+    const submitUrl = isEdit
+      ? ADMIN_API[kind] + "/" + encodeURIComponent(cur.id)
+      : ADMIN_API[kind];
+    const submitMethod = isEdit ? "PUT" : "POST";
+
+    const nameField = isEdit
+      ? `<input type="text" id="mf-name" class="form-input" disabled value="${safe(cur.name)}"/>`
+      : `<input type="text" id="mf-name" class="form-input" placeholder="例如：周报生成" value="${safe(cur.name)}"/>`;
+    const contentField = isKnowledge
+      ? ""
+      : `<div class="form-group">
+           <label>内容（Prompt 模板）<span style="color: var(--error-color)">*</span></label>
+           <textarea id="mf-content" class="form-input" rows="14" style="font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.6;" placeholder="支持 {param} 占位符">${safe(cur.content)}</textarea>
+         </div>`;
+    const kbExtraFields = isKnowledge
+      ? `<div class="form-group">
+           <label>分类</label>
+           <input type="text" id="mf-category" class="form-input" placeholder="例如：技术文档" value="${safe(cur.category)}"/>
+         </div>
+         <div class="form-group">
+           <label>精选排序</label>
+           <input type="number" id="mf-featured-rank" class="form-input" min="0" step="1" placeholder="留空表示不设置" value="${cur.featuredRank == null ? "" : safe(cur.featuredRank)}"/>
+         </div>
+         <div class="form-group">
+           <label><input type="checkbox" id="mf-official" ${cur.isOfficial ? "checked" : ""}/> 标记为官方</label>
+         </div>`
+      : "";
+
+    overlay.innerHTML = `
+ <div class="modal-content" style="max-width: 720px; max-height: 85vh;">
+   <div class="modal-header">
+     <h3>${escapeHtml(titleText)}</h3>
+     <div class="close-button" data-role="close">&times;</div>
+   </div>
+   <div class="modal-body" style="padding: 24px 32px; overflow-y: auto; max-height: 70vh;">
+     <div class="form-group">
+       <label>名称 <span style="color: var(--error-color)">*</span></label>
+       ${nameField}
+     </div>
+     <div class="form-group">
+       <label>描述</label>
+       <textarea id="mf-description" class="form-input" rows="3" placeholder="简要描述功能或内容">${safe(cur.description)}</textarea>
+     </div>
+     ${contentField}
+     ${kbExtraFields}
+     <div id="mf-error" class="error-msg" style="display:none"></div>
+   </div>
+   <div class="modal-footer">
+     <button class="secondary-btn" data-role="cancel">取消</button>
+     <button class="primary-btn" data-role="save">保存</button>
+   </div>
+ </div>`;
+
+    document.body.appendChild(overlay);
+
+    return new Promise((resolve) => {
+      const close = (value) => {
+        document.body.removeChild(overlay);
+        document.removeEventListener("keydown", onKey);
+        resolve(value);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") close(null);
+      };
+      document.addEventListener("keydown", onKey);
+      overlay.querySelector('[data-role="close"]').addEventListener(
+        "click",
+        () => close(null),
+      );
+      overlay.querySelector('[data-role="cancel"]').addEventListener(
+        "click",
+        () => close(null),
+      );
+      overlay.addEventListener("click", (ev) => {
+        if (ev.target === overlay) close(null);
+      });
+      overlay.querySelector('[data-role="save"]').addEventListener(
+        "click",
+        async () => {
+          const errEl = overlay.querySelector("#mf-error");
+          errEl.style.display = "none";
+          const name = overlay.querySelector("#mf-name").value.trim();
+          const description = overlay
+            .querySelector("#mf-description")
+            .value.trim();
+          if (!name) {
+            errEl.textContent = "名称不能为空";
+            errEl.style.display = "block";
+            return;
+          }
+          const body = { name, description };
+          if (!isKnowledge) {
+            const content = overlay.querySelector("#mf-content").value;
+            if (!content.trim()) {
+              errEl.textContent = "内容不能为空";
+              errEl.style.display = "block";
+              return;
+            }
+            body.content = content;
+          } else {
+            const category = overlay
+              .querySelector("#mf-category")
+              .value.trim();
+            const rankText = overlay
+              .querySelector("#mf-featured-rank")
+              .value.trim();
+            body.category = category || null;
+            let featuredRank = null;
+            if (rankText !== "") {
+              featuredRank = Number(rankText);
+              if (
+                !Number.isInteger(featuredRank) ||
+                featuredRank < 0
+              ) {
+                errEl.textContent = "精选排序必须是非负整数";
+                errEl.style.display = "block";
+                return;
+              }
+            }
+            body.isOfficial = overlay.querySelector("#mf-official").checked;
+            body.featuredRank = featuredRank;
+          }
+
+          try {
+            const resp = await fetch(submitUrl, {
+              method: submitMethod,
+              credentials: "include",
+              headers: { "Content-Type": "application/json; charset=UTF-8" },
+              body: JSON.stringify(body),
+            });
+            if (!resp.ok) {
+              let t = "";
+              try {
+                t = await resp.text();
+              } catch (_) {
+                t = "";
+              }
+              errEl.textContent =
+                "保存失败：" + (t || "HTTP " + resp.status);
+              errEl.style.display = "block";
+              return;
+            }
+            let saved = null;
+            try {
+              saved = await resp.json();
+            } catch (_) {
+              saved = null;
+            }
+            const descriptor = Object.assign({}, body);
+            if (saved && typeof saved === "object") {
+              if (saved.id != null) descriptor.id = saved.id;
+              if (saved.name) descriptor.name = saved.name;
+            } else if (isEdit && cur.id != null) {
+              descriptor.id = cur.id;
+            }
+            close(descriptor);
+          } catch (e) {
+            errEl.textContent = "网络错误：" + e.message;
+            errEl.style.display = "block";
+          }
+        },
+      );
+    });
   }
 
   /**
-   * reviewList(kind, marketId) -> Promise<Array>
+   * reviewList(kind, marketId) -> Promise<{aggregate, reviews, html}>
    *
-   * Fetches the public review list for a market entry:
-   *   GET /spring/ai/loom/market-{kind}s/{marketId}/reviews
+   * Fetches `GET /spring/ai/loom/market-{kind}s/{id}/reviews` and renders
+   * the public review list as HTML. Also fetches the aggregate (count + avg)
+   * from the same response if available, otherwise computes it client-side.
    *
-   * DEFERRED: the endpoint lands in T18; the render lands in T19.
+   * Returns a Promise resolving to {aggregate, reviews, html} where `html`
+   * is a ready-to-inject HTML string (star widgets + comment items).
+   * Includes a per-item "删除" button when invoked in admin mode (set
+   * `opts.isAdmin = true`) — those buttons do nothing until bound by the
+   * caller (e.g. event delegation on the container).
+   *
+   * Failure modes:
+   *   - unknown kind        -> rejects
+   *   - HTTP non-2xx        -> rejects with descriptive Error
+   *   - 401/403             -> redirects to /index.html (login bounce)
    */
-  function reviewList(kind, marketId) {
-    return Promise.reject(
-      new Error(
-        "MarketAdmin.reviewList not yet implemented (kind=" +
-          (KIND_LABEL[kind] || kind) +
-          ", marketId=" +
-          JSON.stringify(marketId) +
-          ")",
-      ),
+  async function reviewList(kind, marketId, opts) {
+    const urlKind = PUBLIC_API[kind];
+    if (!urlKind) {
+      throw new Error(
+        "MarketAdmin.reviewList: unknown kind " + JSON.stringify(kind),
+      );
+    }
+    const url =
+      urlKind + "/" + encodeURIComponent(marketId) + "/reviews?page=0&size=20";
+    const r = await fetch(url, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+    });
+    if (r.status === 401 || r.status === 403) {
+      window.location.replace("/spring/ai/loom/index.html");
+      return { aggregate: { count: 0, avg: 0 }, reviews: [], html: "" };
+    }
+    if (!r.ok) {
+      let body = "";
+      try {
+        body = await r.text();
+      } catch (_) {
+        body = "";
+      }
+      throw new Error(
+        "reviewList failed: HTTP " + r.status + (body ? " — " + body : ""),
+      );
+    }
+    const data = await r.json();
+    const items = Array.isArray(data) ? data : (data && data.items) || [];
+    let aggregate;
+    if (data && data.aggregate) {
+      aggregate = data.aggregate;
+    } else {
+      const total = items.length;
+      const sum = items.reduce((a, r) => a + (Number(r.rating) || 0), 0);
+      aggregate = { count: total, avg: total ? sum / total : 0 };
+    }
+    const isAdmin = !!(opts && opts.isAdmin);
+    const html = renderReviewListHtml(items, isAdmin);
+    return { aggregate, reviews: items, html };
+  }
+
+  function renderReviewListHtml(items, isAdmin) {
+    if (!items || items.length === 0) {
+      return '<div class="review-empty">还没有评价</div>';
+    }
+    return (
+      '<div class="review-list">' +
+      items
+        .map((rv) => {
+          const stars = renderStarWidget(rv.rating || 0, true);
+          const user = escapeHtml(rv.username || "匿名");
+          const ts = rv.updatedAt || rv.createdAt;
+          const timeStr = ts
+            ? escapeHtml(String(ts).slice(0, 16).replace("T", " "))
+            : "";
+          const cmt = escapeHtml(rv.comment || "");
+          const editTag =
+            rv.editCount && rv.editCount > 0
+              ? '<span class="review-edit-tag">已编辑</span>'
+              : "";
+          const delBtn = isAdmin
+            ? `<button class="delete-btn btn-sm review-del-btn" data-username="${user}" type="button">删除</button>`
+            : "";
+          return (
+            '<div class="review-item">' +
+            `<div class="review-row1">${stars}<span class="review-user">${user}</span><span class="review-time">${timeStr}</span>${editTag}${delBtn}</div>` +
+            (cmt
+              ? `<div class="review-comment">${cmt}</div>`
+              : '<div class="review-comment review-comment-empty">（无评论）</div>') +
+            "</div>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
+  /** Read-only star widget (filled / empty glyphs). */
+  function renderStarWidget(rating, readonly) {
+    const r = Math.max(0, Math.min(5, Math.round(Number(rating) || 0)));
+    const glyphs = ["★", "★", "★", "★", "★"]
+      .map((g, i) =>
+        i < r
+          ? `<span class="star-filled">${g}</span>`
+          : `<span class="star-empty">${g}</span>`,
+      )
+      .join("");
+    return (
+      '<span class="star-rating ' +
+      (readonly ? "star-rating-readonly" : "star-rating-editable") +
+      '" data-rating="' +
+      r +
+      '">' +
+      glyphs +
+      "</span>"
     );
   }
 
@@ -172,10 +470,212 @@
     );
   }
 
+  /**
+   * announcementHtml(kind, id, ann) -> string (HTML)
+   *
+   * Renders a `.market-announcement` banner from a MarketAnnouncement record
+   * `{title, body, createdAt}`. Returns empty string when `ann` is null /
+   * missing. Banner is plain-text only (no markdown) — body is HTML-escaped.
+   */
+  function announcementHtml(ann) {
+    if (!ann || !ann.title || !ann.body) return "";
+    const t = escapeHtml(ann.title);
+    const b = escapeHtml(ann.body);
+    const ts = ann.createdAt
+      ? escapeHtml(String(ann.createdAt).slice(0, 16).replace("T", " "))
+      : "";
+    return (
+      '<div class="market-announcement">' +
+      `<div class="market-announcement-title">📢 ${t}</div>` +
+      `<div class="market-announcement-body">${b}</div>` +
+      (ts
+        ? `<div class="market-announcement-time">${ts}</div>`
+        : "") +
+      "</div>"
+    );
+  }
+
+  /**
+   * getAnnouncement(kind, id) -> Promise<MarketAnnouncement | null>
+   *
+   * Tries the public GET endpoint `/market-{kind}s/{id}/announcement` first.
+   * If unavailable (404 — endpoint pending T18 backend completion), falls
+   * back to the admin endpoint which always exists. Resolves to `null` when
+   * no announcement is set.
+   */
+  async function getAnnouncement(kind, id) {
+    if (!PUBLIC_API[kind]) {
+      throw new Error(
+        "MarketAdmin.getAnnouncement: unknown kind " + JSON.stringify(kind),
+      );
+    }
+    const publicUrl =
+      PUBLIC_API[kind] + "/" + encodeURIComponent(id) + "/announcement";
+    const adminUrl = ADMIN_ANNOUNCEMENT_API(kind, id);
+    // Try public endpoint first (silent on 404).
+    try {
+      const r = await fetch(publicUrl, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data && data.title) return data;
+        return null;
+      }
+      if (r.status === 401 || r.status === 403) {
+        window.location.replace("/spring/ai/loom/index.html");
+        return null;
+      }
+      if (r.status !== 404) {
+        // Try admin endpoint as a fallback for non-404 errors.
+      } else {
+        return null;
+      }
+    } catch (_) {
+      // network error — try admin endpoint
+    }
+    // Fallback: admin endpoint (works for admins; 403 for normal users).
+    try {
+      const r = await fetch(adminUrl, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data && data.title) return data;
+        return null;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * setAnnouncement(kind, id, title, body) -> Promise<MarketAnnouncement>
+   *
+   * Admin-side: PUT /admin/market-{kind}s/{id}/announcement with the body
+   * {title, body}. Returns the saved announcement record.
+   */
+  async function setAnnouncement(kind, id, title, body) {
+    const url = ADMIN_ANNOUNCEMENT_API(kind, id);
+    const resp = await fetch(url, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ title, body }),
+    });
+    if (!resp.ok) {
+      let t = "";
+      try {
+        t = await resp.text();
+      } catch (_) {
+        t = "";
+      }
+      throw new Error(
+        "setAnnouncement failed: HTTP " +
+          resp.status +
+          (t ? " — " + t : ""),
+      );
+    }
+    return await resp.json();
+  }
+
+  /**
+   * deleteAnnouncement(kind, id) -> Promise<true>
+   */
+  async function deleteAnnouncement(kind, id) {
+    const url = ADMIN_ANNOUNCEMENT_API(kind, id);
+    const resp = await fetch(url, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+    });
+    if (!resp.ok) {
+      let t = "";
+      try {
+        t = await resp.text();
+      } catch (_) {
+        t = "";
+      }
+      throw new Error(
+        "deleteAnnouncement failed: HTTP " +
+          resp.status +
+          (t ? " — " + t : ""),
+      );
+    }
+    return true;
+  }
+
+  /**
+   * deleteReview(kind, id, username) -> Promise<true>
+   *
+   * Admin-only: removes a specific user's review.
+   */
+  async function deleteReview(kind, id, username) {
+    const url = ADMIN_REVIEW_API(kind, id, username);
+    const resp = await fetch(url, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+    });
+    if (!resp.ok) {
+      let t = "";
+      try {
+        t = await resp.text();
+      } catch (_) {
+        t = "";
+      }
+      throw new Error(
+        "deleteReview failed: HTTP " +
+          resp.status +
+          (t ? " — " + t : ""),
+      );
+    }
+    return true;
+  }
+
+  /**
+   * submitReview(kind, id, rating, comment) -> Promise<ReviewRow>
+   *
+   * User-side: POST /market-{kind}s/{id}/reviews with {rating, comment}.
+   */
+  async function submitReview(kind, id, rating, comment) {
+    const url = PUBLIC_API[kind] + "/" + encodeURIComponent(id) + "/reviews";
+    const resp = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ rating, comment: comment || null }),
+    });
+    if (!resp.ok) {
+      let t = "";
+      try {
+        t = await resp.text();
+      } catch (_) {
+        t = "";
+      }
+      const err = new Error(
+        "submitReview failed: HTTP " + resp.status + (t ? " — " + t : ""),
+      );
+      err.status = resp.status;
+      throw err;
+    }
+    return await resp.json();
+  }
+
   window.MarketAdmin = {
     list: list,
     form: form,
     reviewList: reviewList,
     approvalBadge: approvalBadge,
+    announcementHtml: announcementHtml,
+    getAnnouncement: getAnnouncement,
+    setAnnouncement: setAnnouncement,
+    deleteAnnouncement: deleteAnnouncement,
+    deleteReview: deleteReview,
+    submitReview: submitReview,
+    renderStarWidget: renderStarWidget,
   };
 })();

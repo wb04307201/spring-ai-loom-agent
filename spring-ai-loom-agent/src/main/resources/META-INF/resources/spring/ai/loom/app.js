@@ -2200,6 +2200,34 @@ const knowledge = {
         return;
       }
       container.innerHTML = "";
+      // T19: top-of-list announcement banner — only rendered when the DTO
+      // embeds `announcementTitle` (T18 join); otherwise silently skipped.
+      const announcementItems = items.filter(
+        (kb) => kb && kb.announcementTitle && kb.announcementBody,
+      );
+      if (announcementItems.length > 0) {
+        for (const kb of announcementItems) {
+          const banner = document.createElement("div");
+          banner.className = "market-announcement market-announcement-list";
+          banner.innerHTML =
+            window.MarketAdmin && window.MarketAdmin.announcementHtml
+              ? window.MarketAdmin.announcementHtml({
+                  title: kb.announcementTitle,
+                  body: kb.announcementBody,
+                  createdAt: kb.announcementCreatedAt || null,
+                })
+              : `<div class="market-announcement-title">📢 ${escapeHtml(
+                  kb.announcementTitle,
+                )}</div><div class="market-announcement-body">${escapeHtml(
+                  kb.announcementBody,
+                )}</div>`;
+          banner.style.cursor = "pointer";
+          banner.addEventListener("click", () =>
+            this._showMarketKbDetail(kb, banner, detail),
+          );
+          container.appendChild(banner);
+        }
+      }
       for (const kb of items) {
         const div = document.createElement("div");
         div.className = "ks-item";
@@ -2234,6 +2262,7 @@ const knowledge = {
       .forEach((i) => i.classList.remove("selected"));
     element.classList.add("selected");
     detail.innerHTML = `
+ <div id="market-announcement-slot"></div>
  <div class="detail-section">
  <div class="detail-section-title">市场元数据</div>
  <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
@@ -2246,6 +2275,10 @@ const knowledge = {
  <div class="detail-section-title">描述</div>
  <div class="detail-section-content">${escapeHtml(marketKb.description || "无")}</div>
  </div>
+ <div class="detail-section">
+ <div class="detail-section-title">评分与评论</div>
+ <div id="market-reviews-slot" class="market-reviews-slot"></div>
+ </div>
  <div style="margin-top: 24px; display: flex; gap: 12px;">
  <button class="send-skill-btn" id="pull-kb-confirm-btn" style="flex: 1;">添加到我的知识库</button>
  </div>
@@ -2253,6 +2286,30 @@ const knowledge = {
     detail
       .querySelector("#pull-kb-confirm-btn")
       .addEventListener("click", () => this._pullMarketKnowledge(marketKb.id));
+
+    // T19: load announcement + review list + submission form.
+    const annSlot = detail.querySelector("#market-announcement-slot");
+    const reviewSlot = detail.querySelector("#market-reviews-slot");
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getAnnouncement === "function"
+    ) {
+      window.MarketAdmin
+        .getAnnouncement("KNOWLEDGE", marketKb.id)
+        .then((ann) => {
+          if (ann && annSlot) annSlot.innerHTML = window.MarketAdmin.announcementHtml(ann);
+        })
+        .catch(() => {});
+    }
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.reviewList === "function"
+    ) {
+      _renderReviewSection("KNOWLEDGE", marketKb.id, reviewSlot);
+    } else {
+      reviewSlot.innerHTML =
+        '<div style="color: var(--text-muted); font-size: 12px;">评分功能暂不可用</div>';
+    }
   },
 
   async _pullMarketKnowledge(id) {
@@ -2406,6 +2463,147 @@ const knowledge = {
     }
   },
 };
+
+/**
+ * _renderReviewSection(kind, marketId, slot) — free helper used by both the
+ * Skill and KB market detail panels. Loads the review list via
+ * window.MarketAdmin.reviewList and renders an aggregate + submission form
+ * + the rendered review list. The submission widget handles the
+ * 403 (KB-without-access) case by showing a guidance message.
+ *
+ * Falls back to a simple "暂不可用" placeholder when window.MarketAdmin is
+ * not loaded.
+ */
+async function _renderReviewSection(kind, marketId, slot) {
+  if (!slot) return;
+  if (
+    !window.MarketAdmin ||
+    typeof window.MarketAdmin.reviewList !== "function"
+  ) {
+    slot.innerHTML =
+      '<div style="color: var(--text-muted); font-size: 12px;">评分功能暂不可用</div>';
+    return;
+  }
+
+  const aggregateBlock = (agg) => {
+    if (!agg || !agg.count)
+      return '<div class="review-aggregate review-aggregate-empty">尚无评分</div>';
+    const avg = Number(agg.avg || 0).toFixed(1);
+    return (
+      '<div class="review-aggregate">' +
+      `<span class="review-aggregate-avg">${avg}</span>` +
+      window.MarketAdmin.renderStarWidget(Math.round(agg.avg || 0), true) +
+      `<span class="review-aggregate-count">${agg.count} 条评价</span>` +
+      "</div>"
+    );
+  };
+
+  const formBlock = () =>
+    '<div class="review-form">' +
+    '<div class="review-form-row">' +
+    '<span style="font-size: 13px; color: var(--text-primary);">你的评分：</span>' +
+    '<span class="star-rating star-rating-editable" data-rating="0">' +
+    ["★", "★", "★", "★", "★"]
+      .map(
+        (_, i) =>
+          `<button type="button" class="star-btn" data-value="${i + 1}">★</button>`,
+      )
+      .join("") +
+    "</span>" +
+    "</div>" +
+    '<textarea class="review-comment-input form-input" rows="3" placeholder="说说你的使用感受（可选）" maxlength="500"></textarea>' +
+    '<div class="review-form-actions">' +
+    '<span class="review-form-msg" style="font-size: 12px;"></span>' +
+    '<button type="button" class="primary-btn review-submit-btn" disabled>提交</button>' +
+    "</div>" +
+    "</div>";
+
+  slot.innerHTML =
+    '<div class="review-loading">加载评价...</div>';
+
+  try {
+    const result = await window.MarketAdmin.reviewList(kind, marketId);
+    slot.innerHTML =
+      aggregateBlock(result.aggregate) +
+      formBlock() +
+      '<div class="review-list-wrap">' +
+      result.html +
+      "</div>";
+
+    const starBox = slot.querySelector(".star-rating-editable");
+    const submitBtn = slot.querySelector(".review-submit-btn");
+    const commentInput = slot.querySelector(".review-comment-input");
+    const msgEl = slot.querySelector(".review-form-msg");
+
+    let chosen = 0;
+    const refreshStars = () => {
+      slot.querySelectorAll(".star-btn").forEach((b) => {
+        const v = Number(b.getAttribute("data-value"));
+        const active = v <= chosen;
+        b.classList.toggle("star-filled", active);
+        b.classList.toggle("star-empty", !active);
+      });
+      submitBtn.disabled = chosen === 0;
+    };
+    starBox.addEventListener("click", (ev) => {
+      const t = ev.target.closest(".star-btn");
+      if (!t) return;
+      chosen = Number(t.getAttribute("data-value")) || 0;
+      refreshStars();
+    });
+    refreshStars();
+
+    submitBtn.addEventListener("click", async () => {
+      if (chosen === 0) return;
+      msgEl.style.color = "var(--text-muted)";
+      msgEl.textContent = "提交中...";
+      submitBtn.disabled = true;
+      try {
+        await window.MarketAdmin.submitReview(
+          kind,
+          marketId,
+          chosen,
+          commentInput.value.trim(),
+        );
+        msgEl.style.color = "#16a34a";
+        msgEl.textContent = "已提交，感谢你的评价！";
+        commentInput.value = "";
+        chosen = 0;
+        refreshStars();
+        // refresh list
+        const fresh = await window.MarketAdmin.reviewList(kind, marketId);
+        const listWrap = slot.querySelector(".review-list-wrap");
+        if (listWrap) listWrap.innerHTML = fresh.html;
+        const aggWrap = slot.querySelector(".review-aggregate");
+        if (aggWrap && aggWrap.parentNode === slot) {
+          aggWrap.outerHTML = aggregateBlock(fresh.aggregate);
+        } else if (aggWrap) {
+          aggWrap.outerHTML = aggregateBlock(fresh.aggregate);
+        } else {
+          slot.insertAdjacentHTML(
+            "afterbegin",
+            aggregateBlock(fresh.aggregate),
+          );
+        }
+      } catch (e) {
+        submitBtn.disabled = false;
+        if (e && e.status === 403) {
+          msgEl.style.color = "var(--error-color)";
+          msgEl.textContent = "请先访问过该知识库再评";
+        } else {
+          msgEl.style.color = "var(--error-color)";
+          msgEl.textContent =
+            "提交失败：" + (e && e.message ? e.message : "未知错误");
+        }
+      }
+    });
+  } catch (e) {
+    slot.innerHTML =
+      '<div style="color: var(--error-color); font-size: 12px;">加载评价失败：' +
+      escapeHtml((e && e.message) || "未知错误") +
+      "</div>";
+  }
+}
 
 // ===================== §8.5 File Manager =====================
 const fileMgr = {
@@ -3801,6 +3999,34 @@ const skills = {
         return;
       }
       container.innerHTML = "";
+      // T19: top-of-list announcement banner — only rendered when the DTO
+      // embeds `announcementTitle` (T18 join); otherwise silently skipped.
+      const announcementItems = items.filter(
+        (m) => m && m.announcementTitle && m.announcementBody,
+      );
+      if (announcementItems.length > 0) {
+        for (const m of announcementItems) {
+          const banner = document.createElement("div");
+          banner.className = "market-announcement market-announcement-list";
+          banner.innerHTML =
+            window.MarketAdmin && window.MarketAdmin.announcementHtml
+              ? window.MarketAdmin.announcementHtml({
+                  title: m.announcementTitle,
+                  body: m.announcementBody,
+                  createdAt: m.announcementCreatedAt || null,
+                })
+              : `<div class="market-announcement-title">📢 ${escapeHtml(
+                  m.announcementTitle,
+                )}</div><div class="market-announcement-body">${escapeHtml(
+                  m.announcementBody,
+                )}</div>`;
+          banner.style.cursor = "pointer";
+          banner.addEventListener("click", () =>
+            this._selectMarketSkill(m, banner),
+          );
+          container.appendChild(banner);
+        }
+      }
       for (const m of items) {
         const item = document.createElement("div");
         item.className = "ks-item";
@@ -3835,6 +4061,7 @@ const skills = {
       marketSkill.name;
     const detail = document.getElementById("skills-detail");
     detail.innerHTML = `
+ <div id="market-announcement-slot"></div>
  <div class="detail-section">
  <div class="detail-section-title">市场元数据</div>
  <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
@@ -3850,6 +4077,10 @@ const skills = {
  <div class="detail-section-title">内容</div>
  <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(marketSkill.content || "")}</div>
  </div>
+ <div class="detail-section">
+ <div class="detail-section-title">评分与评论</div>
+ <div id="market-reviews-slot" class="market-reviews-slot"></div>
+ </div>
  <div style="margin-top: 24px;">
  <button class="send-skill-btn" id="pull-skill-btn" style="flex: 1;">${already ? "已拉取（点击更新）" : "拉取到我的 Skill"}</button>
  <button class="skill-detail-secondary-btn" id="skill-detail-download-btn" title="下载为 .skill.md 文件">⬇ 下载</button>
@@ -3861,6 +4092,30 @@ const skills = {
     const dlBtn = detail.querySelector("#skill-detail-download-btn");
     if (dlBtn)
       dlBtn.addEventListener("click", () => this.handleDownload(marketSkill));
+
+    // T19: load announcement + review list + submission form.
+    const annSlot = detail.querySelector("#market-announcement-slot");
+    const reviewSlot = detail.querySelector("#market-reviews-slot");
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getAnnouncement === "function"
+    ) {
+      window.MarketAdmin
+        .getAnnouncement("SKILL", marketSkill.id)
+        .then((ann) => {
+          if (ann && annSlot) annSlot.innerHTML = window.MarketAdmin.announcementHtml(ann);
+        })
+        .catch(() => {});
+    }
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.reviewList === "function"
+    ) {
+      _renderReviewSection("SKILL", marketSkill.id, reviewSlot);
+    } else {
+      reviewSlot.innerHTML =
+        '<div style="color: var(--text-muted); font-size: 12px;">评分功能暂不可用</div>';
+    }
   },
 
   async handlePull(marketSkill) {
