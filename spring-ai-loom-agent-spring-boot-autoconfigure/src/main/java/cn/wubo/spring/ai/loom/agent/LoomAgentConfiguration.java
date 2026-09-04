@@ -2864,7 +2864,8 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentSkillMarketPublicRouter(
                 cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
                 @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService,
-                @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService skillReviewService) {
+                @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService skillReviewService,
+                @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 9.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
@@ -3075,6 +3076,40 @@ public class LoomAgentConfiguration {
                 body.put("pullCount", row.pullCountOrSearchCount());
                 body.put("lastAt", row.lastAt());
                 return ServerResponse.ok().body(body);
+            });
+
+            // T19 fix-up: 公开读取公告 — 任何已登录用户可查 market_skill 的公告。
+            // 不需要 admin 权限,因为公告是 admin 已发布的内容,纯只读,无敏感字段。
+            // Long.parseLong 失败走 4xx;无公告 row 返回 204 No Content(announcementRepo.findOne
+            // 在 row 不存在时返回 null)。
+            builder.GET("spring/ai/loom/market-skills/{id}/announcement", request -> {
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement ann =
+                            marketAnnouncementRepository.findOne("SKILL", id);
+                    if (ann == null) {
+                        return ServerResponse.noContent().build();
+                    }
+                    // HashMap (not Map.of) — createdAt can be null in pathological rows.
+                    java.util.Map<String, Object> body = new java.util.HashMap<>();
+                    body.put("marketKind", ann.marketKind());
+                    body.put("marketId", ann.marketId());
+                    body.put("title", ann.title());
+                    body.put("body", ann.body());
+                    body.put("createdAt", ann.createdAt());
+                    return ServerResponse.ok().body(body);
+                } catch (RuntimeException ex) {
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("announcement read failed for skill {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
+                }
             });
             return builder.build();
         }
@@ -3511,7 +3546,8 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentMarketKnowledgePublicRouter(
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
-                @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService) {
+                @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
+                @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 10.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
@@ -3748,6 +3784,45 @@ public class LoomAgentConfiguration {
                 body.put("searchCount", row.pullCountOrSearchCount());
                 body.put("lastAt", row.lastAt());
                 return ServerResponse.ok().body(body);
+            });
+
+            // T19 fix-up: 公开读取公告 — 任何已登录用户可查 market_knowledge 的公告。
+            // 不需要 admin 权限,因为公告是 admin 已发布的内容,纯只读,无敏感字段。
+            // Long.parseLong 失败走 4xx;无公告 row 返回 204 No Content(announcementRepo.findOne
+            // 在 row 不存在时返回 null)。与 Skill 端完全镜像,KB id 的 VARCHAR(36) UUID
+            // 解析失败(graceful-degradation)的语义不变。
+            builder.GET("spring/ai/loom/market-knowledge/{id}/announcement", request -> {
+                String idStr = request.pathVariable("id");
+                if (idStr == null || idStr.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                Long id;
+                try {
+                    id = Long.parseLong(idStr);
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + idStr));
+                }
+                try {
+                    cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement ann =
+                            marketAnnouncementRepository.findOne("KNOWLEDGE", id);
+                    if (ann == null) {
+                        return ServerResponse.noContent().build();
+                    }
+                    java.util.Map<String, Object> body = new java.util.HashMap<>();
+                    body.put("marketKind", ann.marketKind());
+                    body.put("marketId", ann.marketId());
+                    body.put("title", ann.title());
+                    body.put("body", ann.body());
+                    body.put("createdAt", ann.createdAt());
+                    return ServerResponse.ok().body(body);
+                } catch (RuntimeException ex) {
+                    String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+                    log.warn("announcement read failed for kb {}: {}", id, msg, ex);
+                    return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(java.util.Map.of("error", msg));
+                }
             });
             return builder.build();
         }

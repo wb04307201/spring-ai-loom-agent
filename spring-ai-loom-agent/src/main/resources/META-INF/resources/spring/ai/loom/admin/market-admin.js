@@ -498,10 +498,14 @@
   /**
    * getAnnouncement(kind, id) -> Promise<MarketAnnouncement | null>
    *
-   * Tries the public GET endpoint `/market-{kind}s/{id}/announcement` first.
-   * If unavailable (404 — endpoint pending T18 backend completion), falls
-   * back to the admin endpoint which always exists. Resolves to `null` when
-   * no announcement is set.
+   * Calls the public read endpoint `GET /market-{kind}s/{id}/announcement`
+   * (any logged-in user; no admin required). Resolves to the announcement
+   * record `{title, body, ...}` when present, or `null` when no announcement
+   * is set (HTTP 204).
+   *
+   * 401/403 → bounces to /index.html (login redirect) since the user has no
+   * session. 404 / 204 / network failure → resolves to `null` so the UI can
+   * silently skip rendering the banner.
    */
   async function getAnnouncement(kind, id) {
     if (!PUBLIC_API[kind]) {
@@ -509,43 +513,27 @@
         "MarketAdmin.getAnnouncement: unknown kind " + JSON.stringify(kind),
       );
     }
-    const publicUrl =
+    const url =
       PUBLIC_API[kind] + "/" + encodeURIComponent(id) + "/announcement";
-    const adminUrl = ADMIN_ANNOUNCEMENT_API(kind, id);
-    // Try public endpoint first (silent on 404).
+    let resp;
     try {
-      const r = await fetch(publicUrl, {
+      resp = await fetch(url, {
         credentials: "include",
         headers: { "Content-Type": "application/json; charset=UTF-8" },
       });
-      if (r.ok) {
-        const data = await r.json();
-        if (data && data.title) return data;
-        return null;
-      }
-      if (r.status === 401 || r.status === 403) {
-        window.location.replace("/spring/ai/loom/index.html");
-        return null;
-      }
-      if (r.status !== 404) {
-        // Try admin endpoint as a fallback for non-404 errors.
-      } else {
-        return null;
-      }
     } catch (_) {
-      // network error — try admin endpoint
+      return null;
     }
-    // Fallback: admin endpoint (works for admins; 403 for normal users).
+    if (resp.status === 401 || resp.status === 403) {
+      window.location.replace("/spring/ai/loom/index.html");
+      return null;
+    }
+    if (resp.status === 204) return null;
+    if (resp.status === 404) return null;
+    if (!resp.ok) return null;
     try {
-      const r = await fetch(adminUrl, {
-        credentials: "include",
-        headers: { "Content-Type": "application/json; charset=UTF-8" },
-      });
-      if (r.ok) {
-        const data = await r.json();
-        if (data && data.title) return data;
-        return null;
-      }
+      const data = await resp.json();
+      if (data && data.title) return data;
       return null;
     } catch (_) {
       return null;
