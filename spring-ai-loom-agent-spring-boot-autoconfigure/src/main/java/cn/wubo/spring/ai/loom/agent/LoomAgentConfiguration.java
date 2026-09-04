@@ -1475,6 +1475,44 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.market.BatchedCounterService batchedCounterService) {
             return new DefaultKnowledgeStatsService(jdbcTemplate, batchedCounterService);
         }
+
+        /**
+         * Skill marketplace review service (T17). Backed by
+         * {@code market_skill_review};MERGE INTO upsert;{@code edit_count}
+         * 1 次修改上限;{@code aggregate} 通过 {@code JOIN user_info} 排除 admin 自评。
+         * 路由器(T18)按名 {@code skillReviewService} 注入。
+         */
+        @ConditionalOnMissingBean(name = "skillReviewService")
+        @Bean("skillReviewService")
+        public cn.wubo.spring.ai.loom.agent.skill.review.DefaultSkillReviewService skillReviewService(
+                JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.skill.review.DefaultSkillReviewService(jdbcTemplate);
+        }
+
+        /**
+         * KB marketplace review service (T17)。在 skill review 基础上额外加
+         * KB 严门槛 ({@code loom_user_knowledge.access_count >= 1}),否则抛 403。
+         * 路由器(T18)按名 {@code kbReviewService} 注入。
+         */
+        @ConditionalOnMissingBean(name = "kbReviewService")
+        @Bean("kbReviewService")
+        public cn.wubo.spring.ai.loom.agent.knowledge.review.DefaultKnowledgeReviewService kbReviewService(
+                JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.knowledge.review.DefaultKnowledgeReviewService(jdbcTemplate);
+        }
+
+        /**
+         * 市场公告仓储 (T17)。面向 {@code market_content_announcement},由
+         * T7/T8 router forward refs 调用 {@code upsert/findOne/listAllForKind/delete},
+         * 真正的 admin 端点由 T18 落地。路由器按名 {@code marketAnnouncementRepository}
+         * 注入。
+         */
+        @ConditionalOnMissingBean(name = "marketAnnouncementRepository")
+        @Bean("marketAnnouncementRepository")
+        public cn.wubo.spring.ai.loom.agent.market.DefaultMarketAnnouncementRepository marketAnnouncementRepository(
+                JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.market.DefaultMarketAnnouncementRepository(jdbcTemplate);
+        }
     }
 
     @Configuration
