@@ -65,4 +65,9 @@ class MarketSchemaTest {
             Integer.class);
         assertEquals(1, idx);
     }
+
+    @Test
+    void userKnowledgeHasAccessCount() {
+        assertTrue(columnExists("loom_user_knowledge", "access_count"));
+    }
 }

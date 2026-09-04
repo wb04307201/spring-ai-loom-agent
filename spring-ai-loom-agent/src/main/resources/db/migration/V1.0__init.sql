@@ -690,4 +690,6 @@ CREATE INDEX idx_market_kb_status_approved    ON loom_market_knowledge(status, i
 CREATE INDEX idx_market_skill_category        ON market_skill(category);
 CREATE INDEX idx_market_kb_category           ON loom_market_knowledge(category);
 
-CREATE INDEX idx_user_knowledge_access_check ON loom_user_knowledge(username, market_knowledge_id);
+ALTER TABLE loom_user_knowledge ADD COLUMN access_count BIGINT NOT NULL DEFAULT 0;
+
+CREATE INDEX idx_user_knowledge_access_check ON loom_user_knowledge(username, market_knowledge_id, access_count);
