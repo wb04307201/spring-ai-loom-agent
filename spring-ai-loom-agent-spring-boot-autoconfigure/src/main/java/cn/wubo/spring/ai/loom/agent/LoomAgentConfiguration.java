@@ -2617,6 +2617,259 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * KB 市场管理 v2 — 走 M0 重构后的 {@link cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService}
+         * 模板（统一的 admin CRUD + 审批/官方/精选/分类）。{@code loomAgentKnowledgeMarketAdminRouter}
+         * 是 v1 旧契约；本 bean 是 v2 新契约，二者并行存在以便灰度切换。
+         * <p>
+         * 与 Skill 端的真实差异：KB 主键 {@code loom_market_knowledge.id} 是
+         * {@code VARCHAR(36)} UUID，而 {@code market_skill.id} 是 {@code BIGINT}。
+         * 因此本 bean 的 path-variable id 保持 {@code String} 形态，service 调用走
+         * {@code DefaultKnowledgeMarketService} 提供的 String 孪生方法
+         * （{@code getById(String)} / {@code update(String, ...)} / {@code delete(String)} /
+         * {@code approve(String, ...)} 等），其 {@code Long} 重载统一抛
+         * {@link UnsupportedOperationException}。不允许把 String id parse 成 Long。
+         * <p>
+         * 由 {@link cn.wubo.spring.ai.loom.agent.user.AuthenticationFilter} 通过
+         * {@code auth.adminPathPatterns=/spring/ai/loom/admin/**} 在 Servlet filter 层做
+         * 管理员二次校验；router 内仍保留 {@code user.isAdmin(...)} 的兜底检查作为防御性
+         * 深度（与 {@code loomAgentMarketSkillAdminRouter} 保持一致）。
+         * <p>
+         * T8 范围：CRUD + approve / reject / setOfficial / setFeaturedRank / setCategory 共 9 个端点，
+         * 与 {@code loomAgentMarketSkillAdminRouter}（T7）1:1 镜像。
+         * {@code /announcement}（PUT/DELETE）和 {@code /reviews/{username}}（DELETE）由 T18 引入，
+         * 需要 {@link cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository} 与
+         * {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService} 的具体实现，
+         * 在 T19/T17 完成之前不能加进 router。
+         * <p>
+         * TODO T8.7 refactor: T7 + T8 router 9 个 handler 高度对称(id 解析 + admin check + try/catch),
+         * 唯一真正差异是 id 类型(String vs Long)与 service 类型。可抽
+         * {@code private static <M, S> RouterFunctions.Builder marketAdminRoutes(
+         *     String prefix, S svc, IMarketAdminOps<M> ops, Function<String, ?> idParser)}
+         * 把两份 router 共享的样板代码收敛。KB / Skill 两端的 service 抽象层接口不统一
+         * (KB 没有显式的 {@code IMarketAdminOps<String>}),需要先在 T7/T8 收敛完毕后再起
+         * T8.7 PR 重构,避免引入跨 bean 的 interface 变更。
+         */
+        @Bean("loomAgentMarketKnowledgeAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentMarketKnowledgeAdminRouter(
+                cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService svc,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+
+            // 8.1 列出所有（含 PENDING / APPROVED / REJECTED，按 MarketFilter 分页 + 排序）
+            builder.GET("spring/ai/loom/admin/market-knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                cn.wubo.spring.ai.loom.agent.market.MarketFilter filter =
+                        new cn.wubo.spring.ai.loom.agent.market.MarketFilter(
+                                parsePageOr(request, "page", 0),
+                                parsePageOr(request, "size", 20),
+                                cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.from(
+                                        request.param("status").orElse(null)),
+                                request.param("category").orElse(null),
+                                request.param("query").orElse(null),
+                                request.param("sortBy").orElse("official_rank"));
+                try {
+                    return ServerResponse.ok().body(svc.listPaged(filter));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.2 直接创建（绕过审批 — admin 走 bypass，默认 PENDING 由 service 落库）
+            builder.POST("spring/ai/loom/admin/market-knowledge", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.create(username, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "字段缺失（name/description 必填）"));
+                }
+            });
+            // 8.3 admin 改任意 KB（name/description/category/isOfficial/featuredRank）
+            // KB 端没有 content 列，service 自动忽略 body.content()。
+            // id 是 VARCHAR(36) UUID —— path-variable 直接传 String,不允许 parseLong。
+            builder.PUT("spring/ai/loom/admin/market-knowledge/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest.class);
+                try {
+                    return ServerResponse.ok().body(svc.update(id, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.4 admin 删
+            builder.DELETE("spring/ai/loom/admin/market-knowledge/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                try {
+                    svc.delete(id);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.5 admin 审批通过：status=APPROVED, reviewed_by/at 由 service 落库
+            builder.POST("spring/ai/loom/admin/market-knowledge/{id}/approve", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.approve(id, username));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.6 admin 拒绝：body.comment 必填（service 抛 IllegalArgumentException → 400）
+            builder.POST("spring/ai/loom/admin/market-knowledge/{id}/reject", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                cn.wubo.spring.ai.loom.agent.market.RejectBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.RejectBody.class);
+                if (body == null || body.comment() == null || body.comment().isBlank()) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "reject 必须填评论(comment 必填)"));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.reject(id, username, body.comment()));
+                } catch (IllegalArgumentException ex) {
+                    // service 抛 IllegalArgumentException("reject 必须填评论(comment 必填)")
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", ex.getMessage()));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.7 标记/取消官方：isOfficial=true 提升到精选排序第一位
+            builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/official", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                cn.wubo.spring.ai.loom.agent.market.OfficialBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.OfficialBody.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    svc.setOfficial(id, body.isOfficial(), username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.8 调整精选排序：rank 越大越靠前（同 rank 内部按 submitted_at DESC）
+            builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/featured-rank", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                cn.wubo.spring.ai.loom.agent.market.FeaturedRankBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.FeaturedRankBody.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    svc.setFeaturedRank(id, body.rank(), username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 8.9 改分类（null/空字符串清空）
+            builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/category", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                String id = request.pathVariable("id");
+                if (id == null || id.isBlank()) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 不能为空"));
+                }
+                cn.wubo.spring.ai.loom.agent.market.CategoryBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.CategoryBody.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    svc.setCategory(id, body.category(), username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // DEFER to T18: /announcement PUT/DELETE（需要 MarketAnnouncementRepository 实现）
+            // DEFER to T18: /reviews/{username} DELETE（需要 IMarketContentReviewService.deleteAsAdmin 实现）
+            return builder.build();
+        }
+
+        /**
          * 解析整数 query 参数 —— 非数字 / 缺失走默认值，不抛 500。
          */
         private static int parsePageOr(
