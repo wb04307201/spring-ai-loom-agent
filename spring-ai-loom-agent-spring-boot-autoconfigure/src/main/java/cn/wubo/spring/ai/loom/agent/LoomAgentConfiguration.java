@@ -2368,6 +2368,272 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * Skill 市场管理 v2 — 走 M0 重构后的 {@link cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService}
+         * 模板（统一的 admin CRUD + 审批/官方/精选/分类）。{@code loomAgentSkillMarketAdminRouter}
+         * 是 v1 旧契约；本 bean 是 v2 新契约，二者并行存在以便灰度切换。
+         * <p>
+         * 由 {@link cn.wubo.spring.ai.loom.agent.user.AuthenticationFilter} 通过
+         * {@code auth.adminPathPatterns=/spring/ai/loom/admin/**} 在 Servlet filter 层做
+         * 管理员二次校验；router 内仍保留 {@code user.isAdmin(...)} 的兜底检查作为防御性
+         * 深度（与 {@code loomAgentSkillMarketAdminRouter} 保持一致）。
+         * <p>
+         * T7 范围：CRUD + approve / reject / setOfficial / setFeaturedRank / setCategory 共 9 个端点。
+         * {@code /announcement}（PUT/DELETE）和 {@code /reviews/{username}}（DELETE）由 T18 引入，
+         * 需要 {@link cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository} 与
+         * {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService} 的具体实现，
+         * 在 T19/T17 完成之前不能加进 router。
+         */
+        @Bean("loomAgentMarketSkillAdminRouter")
+        public RouterFunction<ServerResponse> loomAgentMarketSkillAdminRouter(
+                cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
+                IUser user) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+
+            // 9.1 列出所有（含 PENDING / APPROVED / REJECTED，按 MarketFilter 分页 + 排序）
+            builder.GET("spring/ai/loom/admin/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                cn.wubo.spring.ai.loom.agent.market.MarketFilter filter =
+                        new cn.wubo.spring.ai.loom.agent.market.MarketFilter(
+                                parsePageOr(request, "page", 0),
+                                parsePageOr(request, "size", 20),
+                                cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.from(
+                                        request.param("status").orElse(null)),
+                                request.param("category").orElse(null),
+                                request.param("query").orElse(null),
+                                request.param("sortBy").orElse("official_rank"));
+                try {
+                    return ServerResponse.ok().body(svc.listPaged(filter));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.2 直接创建（绕过审批 — admin 走 bypass，默认 PENDING 由 service 落库）
+            builder.POST("spring/ai/loom/admin/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.create(username, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "字段缺失（name/description/content 必填）"));
+                }
+            });
+            // 9.3 admin 改任意 Skill（name/description/content/category）
+            builder.PUT("spring/ai/loom/admin/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                // id 必须是数字 —— 非数字走 400 而不是 500；service 抛 "Skill 不存在" → 404
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest.class);
+                try {
+                    return ServerResponse.ok().body(svc.update(id, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.4 admin 删
+            builder.DELETE("spring/ai/loom/admin/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    svc.delete(id);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.5 admin 审批通过：status=APPROVED, reviewed_by/at 由 AbstractMarketAdminService#approve 落库
+            builder.POST("spring/ai/loom/admin/market-skills/{id}/approve", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.approve(id, username));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.6 admin 拒绝：body.comment 必填（service 抛 IllegalArgumentException → 400）
+            builder.POST("spring/ai/loom/admin/market-skills/{id}/reject", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                cn.wubo.spring.ai.loom.agent.market.RejectBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.RejectBody.class);
+                if (body == null || body.comment() == null || body.comment().isBlank()) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "reject 必须填评论(comment 必填)"));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.reject(id, username, body.comment()));
+                } catch (IllegalArgumentException ex) {
+                    // service 抛 IllegalArgumentException("reject 必须填评论(comment 必填)")
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", ex.getMessage()));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.7 标记/取消官方：isOfficial=true 提升到精选排序第一位
+            builder.PUT("spring/ai/loom/admin/market-skills/{id}/official", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                cn.wubo.spring.ai.loom.agent.market.OfficialBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.OfficialBody.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    svc.setOfficial(id, body.isOfficial(), username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.8 调整精选排序：rank 越大越靠前（同 rank 内部按 submitted_at DESC）
+            builder.PUT("spring/ai/loom/admin/market-skills/{id}/featured-rank", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                cn.wubo.spring.ai.loom.agent.market.FeaturedRankBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.FeaturedRankBody.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    svc.setFeaturedRank(id, body.rank(), username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // 9.9 改分类（null/空字符串清空）
+            builder.PUT("spring/ai/loom/admin/market-skills/{id}/category", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                if (!user.isAdmin(username))
+                    return ServerResponse.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "无权限"));
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                cn.wubo.spring.ai.loom.agent.market.CategoryBody body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.CategoryBody.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    svc.setCategory(id, body.category(), username);
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+            // DEFER to T18: /announcement PUT/DELETE（需要 MarketAnnouncementRepository 实现）
+            // DEFER to T18: /reviews/{username} DELETE（需要 IMarketContentReviewService.deleteAsAdmin 实现）
+            return builder.build();
+        }
+
+        /**
+         * 解析整数 query 参数 —— 非数字 / 缺失走默认值，不抛 500。
+         */
+        private static int parsePageOr(
+                org.springframework.web.servlet.function.ServerRequest request,
+                String param, int defaultValue) {
+            return request.param(param)
+                    .map(s -> {
+                        try {
+                            return Integer.parseInt(s);
+                        } catch (NumberFormatException e) {
+                            return defaultValue;
+                        }
+                    })
+                    .orElse(defaultValue);
+        }
+
+        /**
          * 角色授权 Skill（仅 admin）
          */
         @Bean("loomAgentSkillRoleAdminRouter")
