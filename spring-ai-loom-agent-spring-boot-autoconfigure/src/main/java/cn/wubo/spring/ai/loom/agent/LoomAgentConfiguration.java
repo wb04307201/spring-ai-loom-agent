@@ -1415,6 +1415,25 @@ public class LoomAgentConfiguration {
                 IFile file, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage) {
             return new cn.wubo.spring.ai.loom.agent.file.DefaultFileDownload(file, fileStorage);
         }
+
+        /**
+         * Generic batched counter for marketplace stats (skill pulls, KB searches,
+         * content views). Buffers increments in memory and flushes via
+         * {@code @Scheduled(fixedDelay = 30s)} + {@code @PreDestroy} drain.
+         * Through {@code @ConditionalOnMissingBean} consumers can swap in a
+         * custom implementation (e.g. with metrics or an outbox table).
+         * <p>
+         * The consumer app must enable Spring scheduling via
+         * {@code @EnableScheduling} for the 30s drain to fire — the test app
+         * already does, production consumers follow the same pattern as
+         * {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionCleanup}.
+         * </p>
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.market.BatchedCounterService.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.market.BatchedCounterService batchedCounterService(JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.market.BatchedCounterService(jdbcTemplate);
+        }
     }
 
     @Configuration
