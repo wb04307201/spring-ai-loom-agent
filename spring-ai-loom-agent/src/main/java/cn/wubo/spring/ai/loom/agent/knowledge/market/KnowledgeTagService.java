@@ -4,6 +4,7 @@ import cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -33,6 +34,7 @@ import java.util.Set;
  * </pre>
  */
 @Component
+@Transactional
 public class KnowledgeTagService {
 
     /**
@@ -102,7 +104,14 @@ public class KnowledgeTagService {
     /**
      * 替换整组 tag —— 先 DELETE 全部,再 INSERT 新集合。原子事务内完成。
      * 用于 admin PUT /tags 端点。
+     * <p>
+     * {@link Transactional} 是必须的:DELETE 是单独的 {@code jdbcTemplate.update(...)} 调用,
+     * 没有事务边界时如果 {@link #addTags} 后续失败 (FK 违反、字段超长等),
+     * DELETE 已经 auto-commit,KB 的 tag 会被静默清零。
+     * 加 {@code @Transactional} 后,任何一步失败都会回滚到调用前的状态 —
+     * admin 看到的错误是真正的失败,而不是表面"OK 但 KB 失去了所有 tag"。
      */
+    @Transactional
     public void replaceTags(String marketKind, String marketId, List<String> tags) {
         Integer exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM loom_market_knowledge WHERE id = ?",

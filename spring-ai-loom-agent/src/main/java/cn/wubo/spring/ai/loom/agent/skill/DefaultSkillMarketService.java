@@ -64,12 +64,21 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Market
     /**
      * 按 id 查询单条 — {@link AbstractMarketAdminService#getById(Long)} 已提供默认实现,
      * 这里显式 override 让 SQL 文案可读且与旧 {@link #get(Long)} 保持一致。
+     * <p>
+     * 行为契约:不存在时抛 {@link LoomAgentRuntimeException} (404),
+     * 与 {@link #get(Long)} 同款 — 这样 {@code AbstractMarketAdminService#approve} /
+     * {@code #reject} / {@link #update} 在 id 不存在时也能落到 router 的
+     * {@code LoomAgentRuntimeException} catch 块里返回 404,而不是 500。
      */
     @Override
     public MarketSkill getById(Long id) {
-        return jdbc.queryForObject(
-                "SELECT * FROM market_skill WHERE id = ?",
-                rowMapper(), id);
+        try {
+            return jdbc.queryForObject(
+                    "SELECT * FROM market_skill WHERE id = ?",
+                    rowMapper(), id);
+        } catch (EmptyResultDataAccessException e) {
+            throw new LoomAgentRuntimeException(404, "Skill 不存在: id=" + id);
+        }
     }
 
     /**
