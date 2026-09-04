@@ -2183,7 +2183,7 @@ const knowledge = {
       const rawItems = (data && data.content) || data || [];
       // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
       // 当前后端 MarketKnowledgeRecord 未暴露 isOfficial/featuredRank，比较退化为 submittedAt。
-      const items = [...rawItems].sort((a, b) => {
+      let items = [...rawItems].sort((a, b) => {
         const ao = a && a.isOfficial ? 1 : 0;
         const bo = b && b.isOfficial ? 1 : 0;
         if (ao !== bo) return bo - ao;
@@ -2208,7 +2208,10 @@ const knowledge = {
         typeof window.MarketAdmin.listWithAnnouncements === "function"
       ) {
         try {
-          await window.MarketAdmin.listWithAnnouncements("KNOWLEDGE");
+          items = await window.MarketAdmin.listWithAnnouncements(
+            "KNOWLEDGE",
+            items,
+          );
         } catch (_) {
           // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
         }
@@ -3988,7 +3991,7 @@ const skills = {
       // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序。后端目前未在 DTO 中
       // 暴露 isOfficial/featuredRank（MarketSkill 仅含 10 个基础字段），所以比较退化为
       // submittedAt 降序；待后端扩展 MarketSkill DTO 后这里会自动生效。
-      const items = [...rawItems].sort((a, b) => {
+      let items = [...rawItems].sort((a, b) => {
         const ao = a && a.isOfficial ? 1 : 0;
         const bo = b && b.isOfficial ? 1 : 0;
         if (ao !== bo) return bo - ao;
@@ -4004,15 +4007,21 @@ const skills = {
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
         return;
       }
-      // T19 fix-up 2: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
-      // (≤50 个 Promise.all) 装饰到 row.announcement。已读取的 row 即可在下方
-      // per-row banner 渲染时直接使用,不再依赖 list DTO embed。
+      // T19 fix-up 2/3: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
+      // (≤50 个 Promise.all) 装饰到 row.announcement。
+      //
+      // T19 fix-up 3: 把已经 sort 过 / 解包过的 `items` 直接传给 listWithAnnouncements,
+      // 让 decoration 与渲染共用同一份 row 对象引用 — listWithAnnouncements 会 in-place
+      // mutate 每个 row 并返回同一个数组(详见 market-admin.js javadoc)。
       if (
         window.MarketAdmin &&
         typeof window.MarketAdmin.listWithAnnouncements === "function"
       ) {
         try {
-          await window.MarketAdmin.listWithAnnouncements("SKILL");
+          items = await window.MarketAdmin.listWithAnnouncements(
+            "SKILL",
+            items,
+          );
         } catch (_) {
           // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
         }

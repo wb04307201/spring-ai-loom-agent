@@ -496,15 +496,32 @@
   }
 
   /**
-   * listWithAnnouncements(kind) -> Promise<Array>
+   * listWithAnnouncements(kind, items?) -> Promise<Array>
    *
-   * Wraps the standard {@link #list} with a parallel fetch of each row's
-   * announcement (uses {@link #getAnnouncement} which hits the public
-   * `/market-{kind}s/{id}/announcement` endpoint). Each item in the returned
-   * array is decorated with an `announcement` field when the public endpoint
-   * returns a non-null record:
+   * Decorates an array of market rows with each row's announcement, fetched
+   * in parallel via {@link #getAnnouncement} (which hits the public
+   * `/market-{kind}s/{id}/announcement` endpoint). Each item is mutated
+   * in place to add an `announcement` field when the public endpoint returns
+   * a non-null record:
    *
    *   { id, name, ..., announcement: { title, body, createdAt } }
+   *
+   * **Mutation contract**: rows are mutated in place. The function returns
+   * the *same array* (same reference) it was given — call sites can either
+   * use the returned reference or keep using the original. Do NOT rely on
+   * the renderer to "see" a separately-fetched array, since `list()` /
+   * `api.listMarketSkills()` produce a fresh array on every call and the
+   * decoration would be applied to a different set of row objects.
+   *
+   * Two calling patterns are supported:
+   *
+   *   // 1) Fetch + decorate in one call:
+   *   const items = await MarketAdmin.listWithAnnouncements("SKILL");
+   *
+   *   // 2) Pass pre-fetched items (preferred when the caller has already
+   *      //    sorted / paged / unwrapped Page.content):
+   *   let items = unwrapAndSort(await api.listMarketSkills(1, 50));
+   *   items = await MarketAdmin.listWithAnnouncements("SKILL", items);
    *
    * For items whose id parses as a Long, the public endpoint will look up
    * the announcement row. For items whose id is a VARCHAR(36) UUID (KB only),
@@ -512,20 +529,20 @@
    * graceful-degradation, no row exists for UUIDs in the BIGINT
    * {@code market_content_announcement.market_id} column anyway.
    *
-   * Items with no announcement are returned unchanged (no `announcement` key).
-   *
-   * Used by the user-side market list renderer so each row with an
-   * announcement can show a per-row banner above it.
+   * Per-row fetch failures are caught silently so the main list is unaffected.
    */
-  async function listWithAnnouncements(kind) {
-    const rows = await list(kind);
+  async function listWithAnnouncements(kind, items) {
+    let rows;
+    if (Array.isArray(items)) {
+      rows = items;
+    } else {
+      rows = await list(kind);
+    }
     if (!Array.isArray(rows) || rows.length === 0) return rows;
     const promises = rows.map((row) =>
       getAnnouncement(kind, row.id)
         .then((ann) => {
           if (ann && ann.title) {
-            // Mutate a shallow copy so caller still sees an Array of plain
-            // objects. (rows already came from JSON.parse → mutable.)
             try {
               row.announcement = ann;
             } catch (_) {
