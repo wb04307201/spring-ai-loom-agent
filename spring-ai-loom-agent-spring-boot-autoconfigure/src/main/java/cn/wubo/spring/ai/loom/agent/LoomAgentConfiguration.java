@@ -2617,6 +2617,145 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * Skill 市场公共路由 v2（M0 重构后的契约）— 任意已登录用户使用,无需 admin 权限。
+         * <p>
+         * {@code loomAgentSkillMarketRouter} 是 v1 旧契约（{@code ISkillMarketService} 上的
+         * {@code listApproved()} / {@code submit()} / {@code pull()} / {@code withdraw()}
+         * 等老方法），直接 SELECT ALL APPROVED；本 bean 是 v2 新契约（{@code listPaged(MarketFilter)}
+         * 支持分页 / 搜索 / 分类 / 排序；submit 走 {@code create(...)} 直接落 {@code PENDING}）。
+         * 二者并行存在以便灰度切换，与 T7/T8 admin router 的 v1/v2 拆分对称。
+         * <p>
+         * 认证由 {@link cn.wubo.spring.ai.loom.agent.user.AuthenticationFilter}（path patterns = /*）
+         * 在 Servlet filter 层拦截,本 router 内不再做 admin 二次校验（5 个端点全部面向普通用户）。
+         * <p>
+         * T9 范围：spec § 6.1 的 5 个公开端点。{@code /reviews} POST/GET/PUT
+         * 三个端点 {@code DEFER to T18}（依赖 {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService}）；
+         * {@code /stats} GET 端点 {@code DEFER to T16}（依赖 {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService}）。
+         */
+        @Bean("loomAgentSkillMarketPublicRouter")
+        public RouterFunction<ServerResponse> loomAgentSkillMarketPublicRouter(
+                cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+
+            // 9.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
+            // 支持分页(page/size)、分类过滤(category)、关键字搜索(query)、排序(sortBy)。
+            builder.GET("spring/ai/loom/market-skills", request -> {
+                cn.wubo.spring.ai.loom.agent.market.MarketFilter filter =
+                        new cn.wubo.spring.ai.loom.agent.market.MarketFilter(
+                                parsePageOr(request, "page", 0),
+                                parsePageOr(request, "size", 20),
+                                cn.wubo.spring.ai.loom.agent.market.MarketContentStatus.APPROVED,
+                                request.param("category").orElse(null),
+                                request.param("query").orElse(null),
+                                request.param("sortBy").orElse("official_rank"));
+                try {
+                    return ServerResponse.ok().body(svc.listPaged(filter));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // 9.2 公开 detail — 任意已登录用户按 id 查(返回 MarketSkill record)
+            builder.GET("spring/ai/loom/market-skills/{id}", request -> {
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.getById(id));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // 9.3 author submit — status=PENDING(DefaultSkillMarketService.create 默认落 PENDING)。
+            // body 走 MarketCreateRequest(name/description/content/category),与 admin create 共享同一 DTO,
+            // 通过 router 层级差异(public vs admin)走不同的 service 方法,行为差异由 service 自身保证。
+            builder.POST("spring/ai/loom/user/market-skills", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest.class);
+                if (body == null) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "请求体不能为空"));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.create(username, body));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "数据约束失败: " + ex.getMostSpecificCause().getMessage()));
+                } catch (NullPointerException npe) {
+                    return ServerResponse.badRequest()
+                            .body(java.util.Map.of("error", "字段缺失（name/description/content 必填）"));
+                }
+            });
+
+            // 9.4 author withdraw — 删除当前用户自己的 market_skill 行。
+            // 走 ISkillMarketService.withdraw(username, id) — service 内部校验 author == username,
+            // 避免 M0 的 delete(id) 无作者校验导致跨用户删除。本端点不接受 admin 删任意条目 —
+            // 那个能力由 loomAgentMarketSkillAdminRouter.DELETE 提供。
+            builder.DELETE("spring/ai/loom/user/market-skills/{id}", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    boolean ok = svc.withdraw(username, id);
+                    if (!ok) {
+                        return ServerResponse.status(HttpStatus.NOT_FOUND)
+                                .body(java.util.Map.of("error", "market_skill 不存在或不属于当前用户"));
+                    }
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // 9.5 pull — 把市场 Skill 拉到当前用户的 user_skill。
+            // 走 ISkillMarketService.pull(username, id) — service 内部处理 USER_CREATED 冲突、
+            // MARKET_PULLED 刷新 content 等语义,M0 抽象层不覆盖此 user-side 行为。
+            builder.POST("spring/ai/loom/market-skills/{id}/pull", request -> {
+                String username = UserContextHolder.getCurrentUser();
+                Long id;
+                try {
+                    id = Long.parseLong(request.pathVariable("id"));
+                } catch (NumberFormatException nfe) {
+                    return ServerResponse.badRequest().body(java.util.Map.of(
+                            "error", "id 必须是数字: " + request.pathVariable("id")));
+                }
+                try {
+                    return ServerResponse.ok().body(svc.pull(username, id));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
+            });
+
+            // DEFER to T18: POST /spring/ai/loom/market-skills/{id}/reviews
+            //   — 需要 IMarketContentReviewService.submitReview(M, R) 实现
+            // DEFER to T18: GET /spring/ai/loom/market-skills/{id}/reviews
+            //   — 需要 IMarketContentReviewService.listReviews(M, int, int) 实现
+            // DEFER to T18: PUT /spring/ai/loom/market-skills/{id}/reviews/me
+            //   — 需要 IMarketContentReviewService.updateOwnReview(M, R) 实现
+            // DEFER to T16: GET /spring/ai/loom/market-skills/{id}/stats
+            //   — 需要 IMarketContentStatsService.getStats(M) 实现
+            return builder.build();
+        }
+
+        /**
          * KB 市场管理 v2 — 走 M0 重构后的 {@link cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService}
          * 模板（统一的 admin CRUD + 审批/官方/精选/分类）。{@code loomAgentKnowledgeMarketAdminRouter}
          * 是 v1 旧契约；本 bean 是 v2 新契约，二者并行存在以便灰度切换。
