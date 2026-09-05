@@ -5,14 +5,16 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 公共抽象基类,实现 {@link IMarketContentReviewService} 中的
  * listReviews / submit / update / deleteAsAdmin / aggregate。
- * 子类只需通过 hook 方法 ({@link #tableName()} / {@link #keyCol()}) 提供
- * 具体表/主键列。
+ * 子类只需通过 hook 方法 ({@link #tableName()} / {@link #keyCol()} /
+ * {@link #readKey(ResultSet)}) 提供具体表/主键列/主键读取方式。
  *
  * <p>面向 {@code market_skill_review} (PK: market_skill_id, username) 与
  * {@code loom_market_knowledge_review} (PK: market_id, username) 两张表:
@@ -26,12 +28,25 @@ import java.util.List;
  *       排除 {@code u.type = 'ADMIN'} 的自评,符合 spec § 9.2 第 5 行。</li>
  * </ul>
  *
- * <p>所有操作使用 {@code Long} 主键 — review 表的 {@code market_*_id} 列是
- * {@code BIGINT}(见 V1.0 schema)。KB 端 {@code loom_market_knowledge.id} 是
- * {@code VARCHAR(36)} UUID — 跨类型 FK 由 H2 静默接受,KB 子类需要在路由/调用方
- * 完成 String→Long 转换,失败时返回 4xx(同 T16 graceful-degradation pattern)。
+ * <h2>类型参数 {@code K}(M3+ T1.7 gap 修复 — R2,镜像 T1.5 stats 模式)</h2>
+ * <p>Generic over the market-id type — {@code Long} for skill reviews
+ * ({@code market_skill_review.market_skill_id} 是 {@code BIGINT}),
+ * {@code String} (UUID) for KB reviews
+ * ({@code loom_market_knowledge_review.market_id} 自 T1.1 迁移后是
+ * {@code VARCHAR(36)})。所有 {@code jdbc.update/query} 直接绑定 {@code K}
+ * (String 绑 VARCHAR(36)、Long 绑 BIGINT,各自类型对齐)—— 彻底消除
+ * "Long 绑 VARCHAR(36)" 的隐式 coercion(H2 在部分 session 状态下
+ * MERGE 写入后同值 SELECT 读不回的 flaky 根因)。</p>
+ *
+ * <p>RowMapper 的主键列读取由子类 {@link #readKey(ResultSet)} hook 提供
+ * (KB 读 {@code rs.getString},Skill 读 {@code rs.getLong}),其余列固定。</p>
+ *
+ * <p>upsert 保留 H2 {@code MERGE INTO}(ADR-T05.3 已裁定 portable-upsert
+ * 延后,不在本任务改 SQL 方言)。</p>
+ *
+ * @param <K> market id 类型:Long for skill,String (UUID) for KB
  */
-public abstract class AbstractMarketReviewService implements IMarketContentReviewService {
+public abstract class AbstractMarketReviewService<K> implements IMarketContentReviewService<K> {
 
     protected final JdbcTemplate jdbc;
 
@@ -45,9 +60,17 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
     /** review 表主键列(指向 market 内容表 id)— {@code market_skill_id} / {@code market_id}。 */
     protected abstract String keyCol();
 
-    /** 共享 {@link ReviewRow} 行映射器:固定列序 — keyCol, username, rating, comment, edit_count, created_at, updated_at。 */
-    private static final RowMapper<ReviewRow> ROW_MAPPER = (rs, n) -> new ReviewRow(
-            rs.getLong(1),
+    /**
+     * 从 {@link ResultSet} 第 1 列读取主键 — Skill 子类返回
+     * {@code rs.getLong(1)},KB 子类返回 {@code rs.getString(1)}
+     * (列类型分别是 BIGINT / VARCHAR(36),必须按真实类型读,否则
+     * UUID 会被 coerce 丢值)。
+     */
+    protected abstract K readKey(ResultSet rs) throws SQLException;
+
+    /** 共享 {@link ReviewRow} 行映射器:固定列序 — keyCol, username, rating, comment, edit_count, created_at, updated_at;主键读取走 {@link #readKey(ResultSet)} hook。 */
+    private final RowMapper<ReviewRow<K>> rowMapper = (rs, n) -> new ReviewRow<>(
+            readKey(rs),
             rs.getString(2),
             rs.getInt(3),
             rs.getString(4),
@@ -57,15 +80,15 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
     );
 
     @Override
-    public Page<ReviewRow> listReviews(Long marketId, int page, int size) {
+    public Page<ReviewRow<K>> listReviews(K marketId, int page, int size) {
         int p = Math.max(page, 0);
         int s = Math.max(size, 1);
         long offset = (long) p * s;
-        List<ReviewRow> rows = jdbc.query(
+        List<ReviewRow<K>> rows = jdbc.query(
                 "SELECT " + keyCol() + ", username, rating, comment, edit_count, created_at, updated_at " +
                         " FROM " + tableName() + " WHERE " + keyCol() + " = ? " +
                         " ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                ROW_MAPPER, marketId, s, offset);
+                rowMapper, marketId, s, offset);
         Long total = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM " + tableName() + " WHERE " + keyCol() + " = ?",
                 Long.class, marketId);
@@ -79,7 +102,7 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
      * <p>首次提交允许 — 不校验 {@code edit_count}。{@code update} 才有 1 次修改上限。
      */
     @Override
-    public ReviewRow submit(Long marketId, String username, ReviewSubmitRequest req) {
+    public ReviewRow<K> submit(K marketId, String username, ReviewSubmitRequest req) {
         jdbc.update(
                 "MERGE INTO " + tableName() + " (" + keyCol() + ", username, rating, comment) " +
                         "KEY(" + keyCol() + ", username) VALUES (?, ?, ?, ?)",
@@ -93,7 +116,7 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
      * 更新成功后 {@code edit_count = edit_count + 1},{@code updated_at = CURRENT_TIMESTAMP}。
      */
     @Override
-    public ReviewRow update(Long marketId, String username, ReviewUpdateRequest req) {
+    public ReviewRow<K> update(K marketId, String username, ReviewUpdateRequest req) {
         Integer editCount;
         try {
             editCount = jdbc.queryForObject(
@@ -134,7 +157,7 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
      * 路由层应在调用前完成 {@code user.isAdmin(...)} 校验。
      */
     @Override
-    public void deleteAsAdmin(Long marketId, String username) {
+    public void deleteAsAdmin(K marketId, String username) {
         jdbc.update(
                 "DELETE FROM " + tableName() +
                         " WHERE " + keyCol() + " = ? AND username = ?",
@@ -149,7 +172,7 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
      * <p>无评价时返回 {@code (0L, 0.0)} — {@code COALESCE} 把空集合的 AVG 抹平为 0。
      */
     @Override
-    public RatingAggregate aggregate(Long marketId) {
+    public RatingAggregate aggregate(K marketId) {
         Long count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM " + tableName() + " r " +
                         " JOIN user_info u ON u.username = r.username " +
@@ -163,13 +186,13 @@ public abstract class AbstractMarketReviewService implements IMarketContentRevie
         return new RatingAggregate(count == null ? 0L : count, avg == null ? 0.0 : avg);
     }
 
-    /** 读回单条 (market_id, username) 的完整 ReviewRow;不存在抛 404。 */
-    protected ReviewRow readBack(Long marketId, String username) {
+    /** 读回单条 (market_id, username) 的完整 ReviewRow;不存在抛 500(upsert 契约失败)。 */
+    protected ReviewRow<K> readBack(K marketId, String username) {
         try {
             return jdbc.queryForObject(
                     "SELECT " + keyCol() + ", username, rating, comment, edit_count, created_at, updated_at" +
                             " FROM " + tableName() + " WHERE " + keyCol() + " = ? AND username = ?",
-                    ROW_MAPPER, marketId, username);
+                    rowMapper, marketId, username);
         } catch (EmptyResultDataAccessException e) {
             throw new LoomAgentRuntimeException(500,
                     "评价 upsert 失败:行未写入 (marketId=" + marketId + ", username=" + username + ")");

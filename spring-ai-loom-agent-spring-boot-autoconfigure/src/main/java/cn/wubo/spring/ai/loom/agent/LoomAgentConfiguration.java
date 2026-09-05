@@ -2533,7 +2533,7 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
                 IUser user,
                 @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService,
-                @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService skillReviewService,
+                @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<Long> skillReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
@@ -2912,7 +2912,7 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentSkillMarketPublicRouter(
                 cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
                 @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService,
-                @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService skillReviewService,
+                @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<Long> skillReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
@@ -3200,12 +3200,13 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
                 IUser user,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
-                @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
+                @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<String> kbReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository,
                 // M3+ T1.4: KB router 走 RouterIdParserKnowledge 把 path-variable 解析为
                 // String(KB 主键是 VARCHAR(36) UUID,不允许 Long.parseLong)。
-                // review/stats/announcement 服务的 String overload 内部再做
-                // Long.parseLong + graceful-degradation(UUID → 404)。
+                // M3+ R2 (T1.7 gap): kbReviewService 已泛型化为 <String> —
+                // raw UUID 直接绑定 VARCHAR(36) review 表,graceful-degradation
+                // 孪生路径(parseMarketIdOrThrow)已删除。
                 cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge kbIdParser) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
@@ -3644,10 +3645,11 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc,
                 cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
-                @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
+                @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<String> kbReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository,
-                // M3+ T1.4: 同 admin router — KB id 是 VARCHAR(36) UUID,
-                // review/stats 服务的 String overload 走 graceful-degradation。
+                // M3+ T1.4: 同 admin router — KB id 是 VARCHAR(36) UUID。
+                // M3+ R2 (T1.7 gap): kbReviewService 已泛型化为 <String> —
+                // raw UUID 直接绑 VARCHAR(36) review 表,graceful-degradation 已删除。
                 cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge kbIdParser) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
@@ -3818,9 +3820,9 @@ public class LoomAgentConfiguration {
             // 抛 LoomAgentRuntimeException(403, "请先访问过该知识库再评")。路由层把 statusCode
             // 原样转发,前端可在 403 时引导用户先去搜/读 KB 再来评。
             //
-            // M3+ T1.4: KB id 经 RouterIdParserKnowledge parse 后直接传 String 给
-            // kbReviewService String overload;UUID → 抛 404 "市场知识库不存在",
-            // numeric id → Long 路径走 submit 业务逻辑(严门槛 / MERGE INTO upsert)。
+            // M3+ R2 (T1.7 gap): kbReviewService 已泛型化为 <String> —
+            // raw UUID path-variable 直接绑定 VARCHAR(36) review 表(真路径);
+            // 旧的 String overload → Long.parseLong → 404 graceful-degradation 已删除。
             builder.POST("spring/ai/loom/market-knowledge/{id}/reviews", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 String rawId = kbIdParser.parse(request.pathVariable("id"));
@@ -3837,9 +3839,9 @@ public class LoomAgentConfiguration {
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 }
             });
-            // T18: 公开评价列表 — KB 端与 Skill 端同款分页契约(Page<ReviewRow>)。
-            // M3+ T1.4: KB id 走 RouterIdParserKnowledge;UUID → 服务抛 LoomAgentRuntimeException(404),
-            // router 必须捕获并映射为 4xx,否则会泄露 5xx 给前端(T1.4 fix-up)。
+            // T18: 公开评价列表 — KB 端与 Skill 端同款分页契约(Page<ReviewRow<String>>)。
+            // M3+ R2 (T1.7 gap): raw UUID 直接查 VARCHAR(36) review 表(真路径);
+            // 保留 LoomAgentRuntimeException → 4xx 兜底(防御性,与兄弟端点对齐)。
             builder.GET("spring/ai/loom/market-knowledge/{id}/reviews", request -> {
                 String rawId = kbIdParser.parse(request.pathVariable("id"));
                 int page = parsePageOr(request, "page", 0);
@@ -3856,7 +3858,7 @@ public class LoomAgentConfiguration {
             // "评价只能修改一次,请删除后重新提交")。KB 端与 Skill 端完全镜像,严门槛只在
             // submit 时生效;update 不需要 access_count 校验(已经 submit 过)。
             //
-            // M3+ T1.4: KB id 走 RouterIdParserKnowledge。
+            // M3+ R2 (T1.7 gap): kbReviewService <String> — raw UUID 直接绑定。
             builder.PUT("spring/ai/loom/market-knowledge/{id}/reviews/me", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 String rawId = kbIdParser.parse(request.pathVariable("id"));

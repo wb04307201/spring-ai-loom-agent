@@ -1,77 +1,38 @@
 package cn.wubo.spring.ai.loom.agent.market;
 
-import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
-
 /**
- * 市场内容 review 接口(M3+ T1.4)。
+ * 市场内容 review 接口(M3+ T1.4 / T1.7 gap 修复 — R2)。
  *
- * <p>保留两套主键形态 — 兼容 skill(BIGINT)与 KB (VARCHAR(36) UUID)两类内容:
+ * <p>类型参数 {@code <K>} 表示 market id 形态,允许两端用各自的主键类型
+ * (镜像 T1.5 的 {@link IMarketContentStatsService} 泛型化模式):
  * <ul>
- *   <li>{@link Long} 主键版本 — skill review 与既有 tests/LoomAgentConfiguration 调用方</li>
- *   <li>{@link String} 主键版本 — M3+ T1.4 新增,KB router 走
- *       {@code RouterIdParserKnowledge#parse} 后直接传 String,不预先
- *       {@code Long.parseLong};UUID/非数字路径走 graceful-degradation
- *       (抛 {@link LoomAgentRuntimeException}(404) — 与 M0 抽象基类对
- *       不存在 KB 的处理对齐)</li>
+ *   <li>{@code Long} — skill review({@code market_skill_review.market_skill_id}
+ *       仍是 {@code BIGINT},沿用历史 Long 路径)</li>
+ *   <li>{@code String} — KB review({@code loom_market_knowledge_review.market_id}
+ *       自 T1.1 schema 迁移后是 {@code VARCHAR(36)} UUID);String 路径<b>走真路径</b>
+ *       —— 真实 KB UUID 可以端到端流入 review 表,<b>不再有
+ *       {@code Long.parseLong} + NFE → 404 的 graceful-degradation 孪生方法</b></li>
  * </ul>
  *
- * <p>String 版本默认实现委托给 Long 版本({@code Long.parseLong + NFE catch});子类
- * 无需重复实现,但若 KB 端想做更细粒度的 UUID-vs-numeric 区分,可 override
- * String 版本直接走 SQL。
+ * <p>对应实现:
+ * <ul>
+ *   <li>{@link cn.wubo.spring.ai.loom.agent.skill.review.DefaultSkillReviewService}
+ *       extends {@code AbstractMarketReviewService<Long>}</li>
+ *   <li>{@link cn.wubo.spring.ai.loom.agent.knowledge.review.DefaultKnowledgeReviewService}
+ *       extends {@code AbstractMarketReviewService<String>}</li>
+ * </ul>
+ *
+ * @param <K> market id 类型:Long for skill,String (UUID) for KB
  */
-public interface IMarketContentReviewService {
+public interface IMarketContentReviewService<K> {
 
-    /* ===== Long 主键版本(skill / 既有调用方) ===== */
+    Page<ReviewRow<K>> listReviews(K marketId, int page, int size);
 
-    Page<ReviewRow> listReviews(Long marketId, int page, int size);
-    ReviewRow submit(Long marketId, String username, ReviewSubmitRequest req);
-    ReviewRow update(Long marketId, String username, ReviewUpdateRequest req);
-    void deleteAsAdmin(Long marketId, String username);
-    RatingAggregate aggregate(Long marketId);
+    ReviewRow<K> submit(K marketId, String username, ReviewSubmitRequest req);
 
-    /* ===== String 主键版本(M3+ T1.4:KB router 用) ===== */
+    ReviewRow<K> update(K marketId, String username, ReviewUpdateRequest req);
 
-    /**
-     * KB router 入口 — 接受 UUID/raw 字符串,内部 {@code Long.parseLong};
-     * NFE 时抛 {@link LoomAgentRuntimeException}(404, "市场知识库不存在: id=...") —
-     * 与 KB 端 {@code getById(String)} 的 404 文案对齐。
-     */
-    default Page<ReviewRow> listReviews(String marketId, int page, int size) {
-        return listReviews(parseMarketIdOrThrow(marketId, "listReviews"), page, size);
-    }
+    void deleteAsAdmin(K marketId, String username);
 
-    default ReviewRow submit(String marketId, String username, ReviewSubmitRequest req) {
-        return submit(parseMarketIdOrThrow(marketId, "submit"), username, req);
-    }
-
-    default ReviewRow update(String marketId, String username, ReviewUpdateRequest req) {
-        return update(parseMarketIdOrThrow(marketId, "update"), username, req);
-    }
-
-    default void deleteAsAdmin(String marketId, String username) {
-        deleteAsAdmin(parseMarketIdOrThrow(marketId, "deleteAsAdmin"), username);
-    }
-
-    default RatingAggregate aggregate(String marketId) {
-        return aggregate(parseMarketIdOrThrow(marketId, "aggregate"));
-    }
-
-    /**
-     * String → Long 解析 — 失败抛 {@link LoomAgentRuntimeException}(404)。
-     * 与既有"router 层 Long.parseLong NFE → 4xx"行为对齐,但错误文案统一为
-     * 404 "市场知识库不存在",避免泄露"id 必须是数字"这种 schema mismatch 信息
-     * 给 KB 真实用户(UUID 本就是合法形态,只是 review/stats 表 PK 是 BIGINT)。
-     */
-    private static Long parseMarketIdOrThrow(String s, String op) {
-        if (s == null || s.isBlank()) {
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + s);
-        }
-        try {
-            return Long.parseLong(s.trim());
-        } catch (NumberFormatException e) {
-            // KB review/stats 表 PK 是 BIGINT 而 KB 主表是 UUID — UUID 永远不会有
-            // 匹配 review/stats row;直接当 KB 不存在处理。
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + s);
-        }
-    }
+    RatingAggregate aggregate(K marketId);
 }

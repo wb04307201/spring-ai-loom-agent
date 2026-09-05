@@ -65,7 +65,7 @@ class DefaultSkillReviewServiceIT {
     @DisplayName("submit 首次 INSERT,edit_count=0")
     void submitFirstTimeInserts() {
         Long skillId = createSkill();
-        ReviewRow row = reviewService.submit(skillId, "alice", new ReviewSubmitRequest(5, "great"));
+        ReviewRow<Long> row = reviewService.submit(skillId, "alice", new ReviewSubmitRequest(5, "great"));
 
         assertNotNull(row);
         assertEquals(skillId, row.marketId());
@@ -87,7 +87,7 @@ class DefaultSkillReviewServiceIT {
     void submitSecondTimeUpdates() {
         Long skillId = createSkill();
         reviewService.submit(skillId, "alice", new ReviewSubmitRequest(3, "first"));
-        ReviewRow second = reviewService.submit(skillId, "alice", new ReviewSubmitRequest(5, "second"));
+        ReviewRow<Long> second = reviewService.submit(skillId, "alice", new ReviewSubmitRequest(5, "second"));
 
         assertEquals(5, second.rating());
         assertEquals("second", second.comment());
@@ -109,13 +109,13 @@ class DefaultSkillReviewServiceIT {
             reviewService.submit(skillId, "user" + i, new ReviewSubmitRequest(i, "comment-" + i));
         }
 
-        Page<ReviewRow> page0 = reviewService.listReviews(skillId, 0, 3);
+        Page<ReviewRow<Long>> page0 = reviewService.listReviews(skillId, 0, 3);
         assertEquals(5L, page0.total());
         assertEquals(3, page0.items().size());
         assertEquals(0, page0.page());
         assertEquals(3, page0.size());
 
-        Page<ReviewRow> page1 = reviewService.listReviews(skillId, 1, 3);
+        Page<ReviewRow<Long>> page1 = reviewService.listReviews(skillId, 1, 3);
         assertEquals(5L, page1.total());
         assertEquals(2, page1.items().size(), "second page should have remaining 2 rows");
     }
@@ -159,7 +159,7 @@ class DefaultSkillReviewServiceIT {
     void updateFirstTimeAllowed() {
         Long skillId = createSkill();
         reviewService.submit(skillId, "alice", new ReviewSubmitRequest(3, "first"));
-        ReviewRow after = reviewService.update(skillId, "alice", new ReviewUpdateRequest(5, "edited"));
+        ReviewRow<Long> after = reviewService.update(skillId, "alice", new ReviewUpdateRequest(5, "edited"));
 
         assertEquals(5, after.rating());
         assertEquals("edited", after.comment());
@@ -208,7 +208,7 @@ class DefaultSkillReviewServiceIT {
         reviewService.deleteAsAdmin(skillId, "alice");
 
         assertEquals(1L, reviewService.listReviews(skillId, 0, 10).total());
-        Page<ReviewRow> remaining = reviewService.listReviews(skillId, 0, 10);
+        Page<ReviewRow<Long>> remaining = reviewService.listReviews(skillId, 0, 10);
         assertEquals("bob", remaining.items().get(0).username());
     }
 

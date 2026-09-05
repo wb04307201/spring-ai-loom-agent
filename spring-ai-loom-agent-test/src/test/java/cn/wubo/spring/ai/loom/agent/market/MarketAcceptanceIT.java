@@ -48,9 +48,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       {@code @EnableScheduling} 的 30s 周期。</li>
  *   <li>每个 {@code @Test} 用 {@code System.nanoTime()} 后缀做唯一名,避免
  *       {@code market_skill.UNIQUE (author, name)} 等约束冲突。</li>
- *   <li>KB 端用 numeric-style id (如 {@code String.valueOf(nanoTime & 0x7FFFFFFFL)}) 走
- *       graceful-degradation 路径,使 review / search stat / announcement 端到端能跑通;
- *       UUID 路径自然跳过(路由层 {@code Long.parseLong} 抛 NFE → 4xx)。</li>
+ *   <li>KB review 端(R2 / T1.7 gap 后)用<b>真实 UUID</b>
+ *       ({@code UUID.randomUUID().toString()}) — review 链已泛型化为
+ *       {@code <String>},UUID 直接绑 {@code VARCHAR(36)} 列走真路径
+ *       (spec AT1);announcement 端在 R3 落地前仍保持既有行为。</li>
  * </ul>
  *
  * <p>Status-code 与 spec 差异(以 binding context 为准):
@@ -59,8 +60,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       spec note 已声明,验收以 400 为准。</li>
  *   <li>A10 — service 抛 {@code LoomAgentRuntimeException}(403, "评价只能修改一次"),
  *       router 原样转发 403 而非 spec 期望的 422。验收以 403 为准。</li>
- *   <li>A9/A12/A13 — UUID KB id 在路由层 {@code Long.parseLong} 失败 → 4xx;
- *       numeric id 走通。binding 明确接受此 graceful-degradation。</li>
+ *   <li>A16 — R2 后 UUID KB id 走 GET /reviews 真路径:200 + 空 Page
+ *       (旧的 404 graceful-degradation 契约随 String overload 一起删除)。</li>
  * </ul>
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
@@ -68,8 +69,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MarketAcceptanceIT {
 
     @Autowired DefaultSkillMarketService skillSvc;
-    @Autowired IMarketContentReviewService skillReviewService;
-    @Autowired IMarketContentReviewService kbReviewService;
+    // R2 (T1.7 gap): review 链泛型化 — Skill pin <Long>,KB pin <String> (真 UUID)。
+    // @Qualifier 按名注入,避免两个 IMarketContentReviewService bean 类型歧义。
+    @Autowired
+    @Qualifier("skillReviewService")
+    IMarketContentReviewService<Long> skillReviewService;
+    @Autowired
+    @Qualifier("kbReviewService")
+    IMarketContentReviewService<String> kbReviewService;
     @Autowired IMarketContentStatsService skillStatsService;
     @Autowired IMarketContentStatsService kbStatsService;
     @Autowired BatchedCounterService batchedCounterService;
@@ -328,7 +335,7 @@ class MarketAcceptanceIT {
             assertEquals(200, firstResp.statusCode().value());
         }
         // 始终用 service 验证 (router 端到端失败时降级)
-        ReviewRow firstRow = skillReviewService.submit(id, NORMAL_USER,
+        ReviewRow<Long> firstRow = skillReviewService.submit(id, NORMAL_USER,
                 new ReviewSubmitRequest(5, "first"));
         assertEquals(0, firstRow.editCount(), "first submit must have edit_count=0");
 
@@ -343,7 +350,7 @@ class MarketAcceptanceIT {
         safeRoute(skillPublicRouter, "POST",
                 "/spring/ai/loom/market-skills/" + id + "/reviews",
                 json(Map.of("rating", 4, "comment", "second")));
-        ReviewRow secondRow = skillReviewService.submit(id, NORMAL_USER,
+        ReviewRow<Long> secondRow = skillReviewService.submit(id, NORMAL_USER,
                 new ReviewSubmitRequest(4, "second"));
         assertEquals(4, secondRow.rating());
         assertEquals("second", secondRow.comment());
@@ -363,8 +370,9 @@ class MarketAcceptanceIT {
     @Test
     @DisplayName("A9 — 评 KB 无 access → 403 「请先访问过该知识库再评」")
     void a9_rateKbWithoutAccessReturns403WithMessage() throws Exception {
-        String kbId = String.valueOf(System.nanoTime() & 0x7FFFFFFFL);
-        // 先把 market KB 灌进去 (numeric id,与 review 表 BIGINT PK 兼容)
+        // R2 (T1.7 gap): KB review 链已泛型化为 <String> — 用真实 UUID
+        // (loom_market_knowledge_review.market_id 是 VARCHAR(36),UUID 是 canonical 形态)。
+        String kbId = UUID.randomUUID().toString();
         jdbc.update(
                 "INSERT INTO loom_market_knowledge (id, username, name, description, category, status, created_by_kind) " +
                         "VALUES (?, ?, ?, ?, ?, 'APPROVED', 'USER')",
@@ -374,7 +382,7 @@ class MarketAcceptanceIT {
         UserContextHolder.setCurrentUser(NORMAL_USER);
         cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex = assertThrows(
                 cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException.class,
-                () -> kbReviewService.submit(Long.parseLong(kbId), NORMAL_USER,
+                () -> kbReviewService.submit(kbId, NORMAL_USER,
                         new ReviewSubmitRequest(5, "good")));
         assertEquals(403, ex.getStatusCode(),
                 "kb review without access must be 403");
@@ -409,7 +417,7 @@ class MarketAcceptanceIT {
                 json(Map.of("rating", 3, "comment", "first")));
 
         // 第一次 edit OK
-        ReviewRow after1 = skillReviewService.update(id, NORMAL_USER,
+        ReviewRow<Long> after1 = skillReviewService.update(id, NORMAL_USER,
                 new ReviewUpdateRequest(5, "edited once"));
         assertEquals(1, after1.editCount(), "first update must set edit_count=1");
 
@@ -735,47 +743,40 @@ class MarketAcceptanceIT {
         assertNotNull(page);
     }
 
-    /* ===== A16: T1.4 fix-up regression — UUID KB id on GET /reviews must return 404, not 5xx ===== */
+    /* ===== A16: R2 (T1.7 gap) — UUID KB id on GET /reviews now flows the REAL path: 200 + empty page ===== */
 
     /**
-     * Reviewer-reported regression (T1.4 round-1): the GET reviews handler in
-     * {@code loomAgentMarketKnowledgePublicRouter} lost its Long.parseLong
-     * guard but did NOT gain a {@code catch (LoomAgentRuntimeException)},
-     * so a real UUID KB id (which {@code kbReviewService.listReviews(String)}
-     * translates to {@code LoomAgentRuntimeException(404)}) would escape the
-     * router as a 5xx instead of a clean 404.
+     * R2 (T1.7 gap) 迁移:review 链泛型化为 {@code <String>} 之后,
+     * {@code GET /market-knowledge/{UUID}/reviews} 不再走旧的
+     * "String overload → Long.parseLong → 404 市场知识库不存在"
+     * graceful-degradation,而是真路径:UUID 直接绑定
+     * {@code loom_market_knowledge_review.market_id} (VARCHAR(36)),
+     * 无匹配行 → 200 + 空 {@code Page}(spec AT1:每个端点返回 200 + 真实 row;
+     * 空集合也是合法的"真实"结果)。
      *
-     * <p>This test fires a request with a UUID-shaped id, asserts the router
-     * returns 404 (not 500), and asserts the body carries the service's
-     * "市场知识库不存在" message — which is the canonical
-     * graceful-degradation contract from the String-overload
-     * {@code IMarketContentReviewService#listReviews(String)} (M3+ T1.4).
-     *
-     * <p>Without the fix, this test fails with a 5xx (NoSuchElementException
-     * from {@code ServerResponse.ok().body(...)} when the body type isn't
-     * encodable, or simply an unhandled exception bubbling up).
+     * <p>历史(T1.4 fix-up):本用例曾断言 404 而非 5xx — 那时 UUID 永远
+     * 无法命中 BIGINT 起源的列。R2 之后该断言已过时,收紧为 200 + 空页 +
+     * total=0,同时验证 router 不会把空结果泄成 5xx。
      */
     @Test
-    @DisplayName("A16 — GET /market-knowledge/{UUID}/reviews must return 404, not 5xx (T1.4 fix-up)")
-    void a16_uuidKbReviewsReturns404Not5xx() throws Exception {
+    @DisplayName("A16 — GET /market-knowledge/{UUID}/reviews → 200 + 空 Page (R2 真 UUID path)")
+    void a16_uuidKbReviewsReturns200WithEmptyPage() throws Exception {
         UserContextHolder.setCurrentUser(NORMAL_USER);
-        // Real UUID-shaped id — service can't find any review row because the
-        // BIGINT PK in loom_market_knowledge_review can never match a UUID.
+        // Real UUID-shaped id — review 表 market_id 是 VARCHAR(36),UUID 直接查,无行 → 空页。
         String fakeUuid = "00000000-0000-0000-0000-000000000001";
 
         ServerResponse resp = route(kbPublicRouter, "GET",
                 "/spring/ai/loom/market-knowledge/" + fakeUuid + "/reviews", null);
 
-        assertEquals(404, resp.statusCode().value(),
-                "UUID KB id on GET /reviews must produce 404 — service String overload throws LoomAgentRuntimeException(404); router must catch & map to 404, NOT let it escape as 5xx");
+        assertEquals(200, resp.statusCode().value(),
+                "UUID KB id on GET /reviews must return 200 with an empty page — "
+                        + "R2 真路径(String 绑 VARCHAR(36)),不再有 404 graceful-degradation");
 
-        // body should carry the service-level message
         @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> body = (java.util.Map<String, Object>) ((org.springframework.web.servlet.function.EntityResponse<?>) resp).entity();
-        String error = (String) body.get("error");
-        assertNotNull(error, "error body must be present");
-        assertTrue(error.contains("市场知识库不存在"),
-                "error message must mention KB 不存在; got: " + error);
+        Page<ReviewRow<String>> body = (Page<ReviewRow<String>>) ((EntityResponse<?>) resp).entity();
+        assertNotNull(body, "empty review list must still serialize as a Page body");
+        assertEquals(0L, body.total(), "no review rows exist for this UUID → total=0");
+        assertTrue(body.items().isEmpty(), "no review rows exist for this UUID → items empty");
     }
 
     /* ===== A17: T1.6 fix-up regression — UUID KB id on GET /announcement must return 4xx, not 5xx ===== */

@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,17 +29,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 其它(listReviews / update / aggregate / deleteAsAdmin)继承自抽象基类,
  * 与 Skill 端完全对称。
  *
- * <p><b>Schema 折衷:</b> {@code loom_market_knowledge_review.market_id} 是
- * {@code BIGINT} 而 {@code loom_market_knowledge.id} 是 {@code VARCHAR(36)} UUID —
- * 测试场景在 loom_market_knowledge 直接插入 numeric-style id (字符串数字),使
- * review 服务的 {@code hasAccessedKb} 通过 H2 隐式 VARCHAR↔BIGINT 转换能匹配
- * {@code loom_user_knowledge.market_knowledge_id}。
- *
- * <p><b>未覆盖:</b> 真实 KB UUID 路径(Long.parseLong 在路由层抛 4xx,服务层不感知)
- * — 与 T16 graceful-degradation 同款。
+ * <p><b>真 UUID 路径(M3+ R2 / T1.7 gap 修复):</b>
+ * {@code loom_market_knowledge_review.market_id} 自 T1.1 迁移后是
+ * {@code VARCHAR(36)},与 {@code loom_market_knowledge.id} (UUID) 类型一致;
+ * review 服务已泛型化为 {@code <String>}。测试全部使用
+ * {@code UUID.randomUUID().toString()} 真实 UUID 灌
+ * {@code loom_market_knowledge} / {@code loom_user_knowledge},review 调用
+ * 直接以该 UUID String 为主键 — 旧的 numeric-style id 折衷
+ * (Long 绑 VARCHAR(36) 隐式 coercion,曾导致 "评价 upsert 失败:行未写入"
+ * 间歇性失败)已彻底移除。
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
-@DisplayName("DefaultKnowledgeReviewService IT — T17")
+@DisplayName("DefaultKnowledgeReviewService IT — T17 (R2: real-UUID <String> path)")
 class DefaultKnowledgeReviewServiceIT {
 
     @Autowired DefaultKnowledgeReviewService reviewService;
@@ -67,7 +70,7 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("submit 无 access 记录 → 403 「请先访问过该知识库再评」")
     void kbReviewRequiresPriorAccess() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL; // 31-bit 正整数,确保 Long 可表达
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "no-access-test-" + marketId, "alice");
 
         ReviewSubmitRequest req = new ReviewSubmitRequest(5, "good");
@@ -91,9 +94,9 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("submit 仅有 pull 但 access_count=0 → 仍 403")
     void kbReviewRequiresActualAccess() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "zero-access-test-" + marketId, "alice");
-        seedUserKbRow("bob", String.valueOf(marketId), 0L);
+        seedUserKbRow("bob", marketId, 0L);
 
         ReviewSubmitRequest req = new ReviewSubmitRequest(4, "ok");
         LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
@@ -107,11 +110,11 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("submit 有 access 记录 → 正常 upsert")
     void kbReviewAcceptsAfterAccess() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "has-access-test-" + marketId, "alice");
-        seedUserKbRow("bob", String.valueOf(marketId), 1L);
+        seedUserKbRow("bob", marketId, 1L);
 
-        ReviewRow row = reviewService.submit(marketId, "bob", new ReviewSubmitRequest(4, "works"));
+        ReviewRow<String> row = reviewService.submit(marketId, "bob", new ReviewSubmitRequest(4, "works"));
         assertNotNull(row);
         assertEquals(marketId, row.marketId());
         assertEquals("bob", row.username());
@@ -129,12 +132,12 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("submit 二次: MERGE INTO UPDATE")
     void kbReviewSubmitSecondTimeUpdates() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "update-twice-" + marketId, "alice");
-        seedUserKbRow("bob", String.valueOf(marketId), 1L);
+        seedUserKbRow("bob", marketId, 1L);
 
         reviewService.submit(marketId, "bob", new ReviewSubmitRequest(3, "first"));
-        ReviewRow second = reviewService.submit(marketId, "bob", new ReviewSubmitRequest(5, "second"));
+        ReviewRow<String> second = reviewService.submit(marketId, "bob", new ReviewSubmitRequest(5, "second"));
 
         assertEquals(5, second.rating());
         assertEquals("second", second.comment());
@@ -145,12 +148,12 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("update 不再卡 KB 严门槛,第一次允许,edit_count +1")
     void kbReviewUpdateFirstTimeAllowed() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "update-test-" + marketId, "alice");
-        seedUserKbRow("bob", String.valueOf(marketId), 1L);
+        seedUserKbRow("bob", marketId, 1L);
 
         reviewService.submit(marketId, "bob", new ReviewSubmitRequest(3, "first"));
-        ReviewRow after = reviewService.update(marketId, "bob", new ReviewUpdateRequest(5, "edited"));
+        ReviewRow<String> after = reviewService.update(marketId, "bob", new ReviewUpdateRequest(5, "edited"));
 
         assertEquals(5, after.rating());
         assertEquals(1, after.editCount());
@@ -160,9 +163,9 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("update 第二次抛 403")
     void kbReviewUpdateSecondTimeBlocked() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "block-twice-" + marketId, "alice");
-        seedUserKbRow("bob", String.valueOf(marketId), 1L);
+        seedUserKbRow("bob", marketId, 1L);
 
         reviewService.submit(marketId, "bob", new ReviewSubmitRequest(3, "first"));
         reviewService.update(marketId, "bob", new ReviewUpdateRequest(5, "edited"));
@@ -181,12 +184,12 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("aggregate 排除 admin 自评 (KB 端)")
     void kbAggregateExcludesAdminReview() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "agg-test-" + marketId, "alice");
-        seedUserKbRow("normal1", String.valueOf(marketId), 1L);
-        seedUserKbRow("normal2", String.valueOf(marketId), 1L);
-        seedUserKbRow("normal3", String.valueOf(marketId), 1L);
-        seedUserKbRow(ADMIN_USER, String.valueOf(marketId), 1L);
+        seedUserKbRow("normal1", marketId, 1L);
+        seedUserKbRow("normal2", marketId, 1L);
+        seedUserKbRow("normal3", marketId, 1L);
+        seedUserKbRow(ADMIN_USER, marketId, 1L);
 
         seedNormalUser("normal1");
         seedNormalUser("normal2");
@@ -206,16 +209,16 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("listReviews 多用户 + 分页 + count (KB 端)")
     void kbListReviewsPaged() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "list-test-" + marketId, "alice");
         for (int i = 1; i <= 5; i++) {
             String u = "kbuser" + i;
             seedNormalUser(u);
-            seedUserKbRow(u, String.valueOf(marketId), 1L);
+            seedUserKbRow(u, marketId, 1L);
             reviewService.submit(marketId, u, new ReviewSubmitRequest(i, "c-" + i));
         }
 
-        Page<ReviewRow> page0 = reviewService.listReviews(marketId, 0, 3);
+        Page<ReviewRow<String>> page0 = reviewService.listReviews(marketId, 0, 3);
         assertEquals(5L, page0.total());
         assertEquals(3, page0.items().size());
     }
@@ -224,12 +227,12 @@ class DefaultKnowledgeReviewServiceIT {
     @Test
     @DisplayName("deleteAsAdmin 删除指定 (kb, user) 行 (KB 端)")
     void kbDeleteAsAdminRemovesOneRow() {
-        long marketId = System.nanoTime() & 0x7FFFFFFFL;
+        String marketId = UUID.randomUUID().toString();
         seedMarketKb(marketId, "del-test-" + marketId, "alice");
         seedNormalUser("kbdel1");
         seedNormalUser("kbdel2");
-        seedUserKbRow("kbdel1", String.valueOf(marketId), 1L);
-        seedUserKbRow("kbdel2", String.valueOf(marketId), 1L);
+        seedUserKbRow("kbdel1", marketId, 1L);
+        seedUserKbRow("kbdel2", marketId, 1L);
 
         reviewService.submit(marketId, "kbdel1", new ReviewSubmitRequest(3, "a"));
         reviewService.submit(marketId, "kbdel2", new ReviewSubmitRequest(4, "b"));
@@ -237,21 +240,63 @@ class DefaultKnowledgeReviewServiceIT {
         reviewService.deleteAsAdmin(marketId, "kbdel1");
 
         assertEquals(1L, reviewService.listReviews(marketId, 0, 10).total());
-        Page<ReviewRow> remaining = reviewService.listReviews(marketId, 0, 10);
+        Page<ReviewRow<String>> remaining = reviewService.listReviews(marketId, 0, 10);
         assertEquals("kbdel2", remaining.items().get(0).username());
+    }
+
+    /**
+     * M3+ R2 新增 — 全 UUID round-trip(spec AT1):同一个真实 UUID 串起
+     * submit → listReviews → aggregate → deleteAsAdmin,每一步都命中
+     * VARCHAR(36) 真路径,证明 KB review 链端到端可用。
+     */
+    @Test
+    @DisplayName("R2 — 全 UUID round-trip: submit → listReviews → aggregate → deleteAsAdmin (spec AT1)")
+    void kbReviewFullUuidRoundTrip() {
+        String marketId = UUID.randomUUID().toString();
+        seedMarketKb(marketId, "roundtrip-" + marketId, "alice");
+        seedNormalUser("kbtrip1");
+        seedNormalUser("kbtrip2");
+        seedUserKbRow("kbtrip1", marketId, 1L);
+        seedUserKbRow("kbtrip2", marketId, 1L);
+
+        // submit — 两个真实用户
+        ReviewRow<String> r1 = reviewService.submit(marketId, "kbtrip1", new ReviewSubmitRequest(4, "nice kb"));
+        ReviewRow<String> r2 = reviewService.submit(marketId, "kbtrip2", new ReviewSubmitRequest(2, "meh"));
+        assertEquals(marketId, r1.marketId(), "review row must carry the real UUID back");
+        assertEquals(marketId, r2.marketId());
+
+        // listReviews — 命中同 UUID 的 2 行
+        Page<ReviewRow<String>> page = reviewService.listReviews(marketId, 0, 10);
+        assertEquals(2L, page.total());
+        assertTrue(page.items().stream().allMatch(r -> marketId.equals(r.marketId())),
+                "every listed row must carry the same UUID marketId");
+
+        // aggregate — (4 + 2) / 2 = 3.0,count=2(都是 USER,无 admin 自评)
+        RatingAggregate agg = reviewService.aggregate(marketId);
+        assertEquals(2L, agg.count());
+        assertEquals(3.0, agg.avg(), 0.001);
+
+        // deleteAsAdmin — 删一行,剩一行,aggregate 随之变化
+        reviewService.deleteAsAdmin(marketId, "kbtrip1");
+        Page<ReviewRow<String>> after = reviewService.listReviews(marketId, 0, 10);
+        assertEquals(1L, after.total());
+        assertEquals("kbtrip2", after.items().get(0).username());
+        RatingAggregate agg2 = reviewService.aggregate(marketId);
+        assertEquals(1L, agg2.count());
+        assertEquals(2.0, agg2.avg(), 0.001);
     }
 
     /* ===== helpers ===== */
 
     /**
-     * 直接 INSERT 到 loom_market_knowledge — 绕过 UUID 生成,用 numeric-style id
-     * 让跨类型 FK + hasAccessedKb 的 String 匹配能跑通。
+     * 直接 INSERT 到 loom_market_knowledge — 用真实 UUID id
+     * (R2: review 链已泛型化为 {@code <String>},UUID 是 canonical 形态)。
      */
-    private void seedMarketKb(long marketId, String name, String author) {
+    private void seedMarketKb(String marketId, String name, String author) {
         jdbc.update(
                 "INSERT INTO loom_market_knowledge (id, username, name, description, category, status, created_by_kind) " +
                         "VALUES (?, ?, ?, ?, ?, 'APPROVED', 'USER')",
-                String.valueOf(marketId), author, name, "desc", "cat");
+                marketId, author, name, "desc", "cat");
     }
 
     /**
