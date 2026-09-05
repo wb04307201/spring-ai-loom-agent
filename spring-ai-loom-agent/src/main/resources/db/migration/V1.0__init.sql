@@ -11,6 +11,27 @@
 -- 2. market_skill 唯一约束改为 (author, name)（原是三元组）
 -- 3. skill / chat_token_usage 等早期表保留（原文 + 兼容）
 -- =============================================================
+--
+-- M3+ T5.1 — 源码组织拆分（policy A）
+-- ---------------------------------
+-- CLAUDE.md 政策：项目只跑全新库；不接受已有实例上增量升级 schema。
+-- 因此本文件保持 V1.0__init.sql 单文件，fresh init 一次跑全。
+-- 拆分靠 SQL 注释段标记，不靠多文件：
+--
+--   § 1  知识库 / 文件 / 用户 / 用户会话 / Token 用量
+--   § 2  Skill 系统（旧 per-user 表，被 Skill 市场取代）
+--   § 3  RBAC + Role / Skill / Knowledge / MCP 关联
+--   § 4  Skill + Knowledge 市场（M0/M1/M2 升级后）
+--   § 5  公告 / Stats / Review / Tag 等市场辅助表
+--   § 6  Schedule / SubTask / File content / Tool call log / Chat reasoning / Chat usage
+--   § 7  M3+ technical debt cleanup（spec §4.1 + §4.2：A12 加 updated_at + B1 market_id BIGINT→VARCHAR(36)）
+--   § 8  清理已废弃的 flex_scheduled_task（原 V12）
+--   § 9  Flyway baseline 标记（仅新装生效）
+--
+-- 各段用 `-- ===== § N: ... =====` 分隔，可读性 + grep 友好。
+-- 若未来政策调整为多文件 Flyway 增量演进，本文件可直接 split；
+-- 当前 §N 标号与未来 V_<n>__<name>.sql 文件名一一对应。
+-- =============================================================
 
 
 -- ============== 知识库 ==============
