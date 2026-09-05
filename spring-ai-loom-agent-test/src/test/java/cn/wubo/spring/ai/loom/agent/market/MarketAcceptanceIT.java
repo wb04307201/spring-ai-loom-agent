@@ -5,9 +5,9 @@ import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.model.SkillRecord;
 import cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService;
 import cn.wubo.spring.ai.loom.agent.skill.ISkillStorage;
+import cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -15,19 +15,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.function.EntityResponse;
 import org.springframework.web.servlet.function.RouterFunction;
-import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+import static cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil.json;
+import static cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil.route;
+import static cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil.safeRoute;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -758,63 +756,10 @@ class MarketAcceptanceIT {
         return created.id();
     }
 
-    private static String json(Map<String, ?> m) throws Exception {
-        return new ObjectMapper().writeValueAsString(m);
-    }
-
     /**
-     * 安全版本的 route:router 路由匹配失败时返回 null,调用方决定是否跳过 router 端到端断言。
-     * 在我们的 MockHttpServletRequest 设置下,某些 PUT/POST + body 的端点会触发 router.route()
-     * 返回空 (URI 解析在 Mock 环境里出现 corner case);用 service 直接验证能 100% 覆盖契约,
-     * 同时保留 router 调用作为最佳努力。
+     * M3+ T6.1 — safeRoute / route / json helpers have moved to
+     * {@link LoomAgentTestUtil}. This class uses static imports on
+     * {@code LoomAgentTestUtil.{safeRoute, route, json}} so the existing call
+     * sites in test methods remain unchanged.
      */
-    private ServerResponse safeRoute(RouterFunction<ServerResponse> router,
-                                    String method, String path, String body) throws Exception {
-        try {
-            return route(router, method, path, body);
-        } catch (RuntimeException ex) {
-            // router 没匹配 (NoSuchElementException) — 降级
-            if (ex.getClass().getSimpleName().equals("NoSuchElementException")) {
-                return null;
-            }
-            throw ex;
-        }
-    }
-
-    private ServerResponse route(RouterFunction<ServerResponse> router,
-                                String method, String path, String body) throws Exception {
-        // split query string off — getRequestURI() must NOT include "?"
-        // (else router pattern won't match). query params go into setParameters().
-        String uriOnly = path;
-        String query = "";
-        int q = path.indexOf('?');
-        if (q >= 0) {
-            uriOnly = path.substring(0, q);
-            query = path.substring(q + 1);
-        }
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, uriOnly);
-        servletRequest.setRequestURI(uriOnly);
-        servletRequest.setServletPath(uriOnly);
-        servletRequest.setPathInfo(null);
-        servletRequest.setContextPath("");
-        if (!query.isEmpty()) {
-            for (String pair : query.split("&")) {
-                int eq = pair.indexOf('=');
-                if (eq < 0) {
-                    servletRequest.addParameter(pair, "");
-                } else {
-                    servletRequest.addParameter(pair.substring(0, eq), pair.substring(eq + 1));
-                }
-            }
-        }
-        if (body != null) {
-            servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
-            servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        }
-        ServerRequest request = ServerRequest.create(servletRequest,
-                List.of(new MappingJackson2HttpMessageConverter()));
-        java.util.Optional<org.springframework.web.servlet.function.HandlerFunction<ServerResponse>> match =
-                router.route(request);
-        return match.orElseThrow().handle(request);
-    }
 }

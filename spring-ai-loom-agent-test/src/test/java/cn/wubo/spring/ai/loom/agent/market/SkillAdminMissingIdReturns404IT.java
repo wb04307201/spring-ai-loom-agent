@@ -1,9 +1,9 @@
 package cn.wubo.spring.ai.loom.agent.market;
 
 import cn.wubo.spring.ai.loom.agent.LoomAgentTestApplication;
+import cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -11,17 +11,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.function.RouterFunction;
-import org.springframework.web.servlet.function.ServerRequest;
 import org.springframework.web.servlet.function.ServerResponse;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import static cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil.json;
+import static cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil.route;
+import static cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil.safeRoute;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -79,7 +77,7 @@ class SkillAdminMissingIdReturns404IT {
     @Test
     @DisplayName("approve — 不存在 id → 404 (not 500)")
     void approveMissingIdReturns404() throws Exception {
-        ServerResponse resp = safeRoute("POST",
+        ServerResponse resp = safeRoute(skillAdminRouter, "POST",
                 "/spring/ai/loom/admin/market-skills/" + MISSING_ID + "/approve", null);
         assertNotNull(resp, "router must match /admin/market-skills/{id}/approve");
         assertEquals(404, resp.statusCode().value(),
@@ -89,7 +87,7 @@ class SkillAdminMissingIdReturns404IT {
     @Test
     @DisplayName("reject — 不存在 id → 404 (not 500)")
     void rejectMissingIdReturns404() throws Exception {
-        ServerResponse resp = route("POST",
+        ServerResponse resp = route(skillAdminRouter, "POST",
                 "/spring/ai/loom/admin/market-skills/" + MISSING_ID + "/reject",
                 json(Map.of("comment", "无效 id 校验")));
         assertNotNull(resp, "router must match /admin/market-skills/{id}/reject");
@@ -102,7 +100,7 @@ class SkillAdminMissingIdReturns404IT {
     void setOfficialMissingIdReturns200() throws Exception {
         // setOfficial 走 jdbc.update 不回读;此处只作为 control — 验证 approve/reject
         // 才是真 bug 现场,setOfficial 是 OK control case。
-        ServerResponse resp = route("PUT",
+        ServerResponse resp = route(skillAdminRouter, "PUT",
                 "/spring/ai/loom/admin/market-skills/" + MISSING_ID + "/official",
                 json(Map.of("isOfficial", true)));
         if (resp != null) {
@@ -113,37 +111,14 @@ class SkillAdminMissingIdReturns404IT {
 
     /* ===== helpers ===== */
 
-    private static String json(Map<String, ?> m) throws Exception {
-        return new ObjectMapper().writeValueAsString(m);
-    }
-
-    private ServerResponse route(String method, String path, String body) throws Exception {
-        MockHttpServletRequest servletRequest = new MockHttpServletRequest(method, path);
-        servletRequest.setRequestURI(path);
-        servletRequest.setServletPath(path);
-        servletRequest.setPathInfo(null);
-        servletRequest.setContextPath("");
-        if (body != null) {
-            servletRequest.setContent(body.getBytes(StandardCharsets.UTF_8));
-            servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        }
-        ServerRequest request = ServerRequest.create(servletRequest,
-                java.util.List.of(new MappingJackson2HttpMessageConverter()));
-        return skillAdminRouter.route(request).orElseThrow().handle(request);
-    }
-
     /**
-     * 路由可能因 MockHttpServletRequest + PUT/POST + body 的 corner case 偶尔不匹配 —
-     * 失败时降级(null),让 caller 决定是否跳过断言。
+     * M3+ T6.1 — safeRoute / route / json helpers have moved to
+     * {@link LoomAgentTestUtil}. This class uses static imports on
+     * {@code LoomAgentTestUtil.{safeRoute, route, json}} so the existing call
+     * sites in test methods remain unchanged.
+     *
+     * <p>Note: the original private {@code route} method here did not strip
+     * the query string; the extracted util version does, which is strictly
+     * more capable and matches the MarketAcceptanceIT semantics.
      */
-    private ServerResponse safeRoute(String method, String path, String body) throws Exception {
-        try {
-            return route(method, path, body);
-        } catch (RuntimeException ex) {
-            if (ex.getClass().getSimpleName().equals("NoSuchElementException")) {
-                return null;
-            }
-            throw ex;
-        }
-    }
 }
