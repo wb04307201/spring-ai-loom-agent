@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "locale": "zh-CN",
+    "scope": "M3+ T4.3 — scoped i18n key extraction (market admin UI only). NOT a full i18n framework; runtime i18n is browser-side only.",
+    "note": "Keys are flat dot.path. Missing key falls back to the key string itself. To add a new key: append here AND in en-US.json with the same path."
+  },
+  "market.admin.title": "市场管理",
+  "market.admin.tab.skill": "Skill 市场",
+  "market.admin.tab.knowledge": "知识库市场",
+  "market.admin.status.pending": "待审核",
+  "market.admin.status.approved": "已通过",
+  "market.admin.status.rejected": "已拒绝",
+  "market.admin.action.approve": "通过",
+  "market.admin.action.reject": "拒绝",
+  "market.admin.action.setOfficial": "设为官方",
+  "market.admin.action.setFeatured": "置顶",
+  "market.admin.announcement.badge": "📢 公告",
+  "market.admin.announcement.empty": "暂无公告",
+  "market.admin.tag.empty": "暂无标签",
+  "market.admin.empty.skill": "市场暂无 Skill",
+  "market.admin.empty.knowledge": "市场暂无知识库",
+  "market.admin.error.network": "网络错误，请稍后重试"
+}

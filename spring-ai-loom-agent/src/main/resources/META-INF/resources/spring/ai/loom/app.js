@@ -2150,6 +2150,9 @@ const knowledge = {
     if (!kb) return;
     const ok = await dialog.confirm({
       title: "共享到知识库市场",
+      // M3+ T4.3 — i18n key extraction; resolution happens at render time
+      // via window.I18N.t (loaded by i18n/i18n.js). Falls back to the key
+      // string itself if dict not yet loaded or key missing.
       message: `确认将「${kb.name}」共享到市场？共享后其他用户可浏览并添加到自己的知识库。`,
       okText: "共享",
     });
@@ -4365,13 +4368,16 @@ const skills = {
   },
 
   _statusLabel(status) {
+    // M3+ T4.3 — text pulled from window.I18N.t when available, falls back
+    // to the Chinese label if the i18n dict hasn't loaded or the key is missing.
+    const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
     switch (status) {
       case "PENDING":
-        return { text: "审核中", bg: "#fef3c7", color: "#92400e" };
+        return { text: t("market.admin.status.pending", "审核中"), bg: "#fef3c7", color: "#92400e" };
       case "APPROVED":
-        return { text: "已通过", bg: "#d1fae5", color: "#065f46" };
+        return { text: t("market.admin.status.approved", "已通过"), bg: "#d1fae5", color: "#065f46" };
       case "REJECTED":
-        return { text: "已拒绝", bg: "#fee2e2", color: "#991b1b" };
+        return { text: t("market.admin.status.rejected", "已拒绝"), bg: "#fee2e2", color: "#991b1b" };
       default:
         return { text: status, bg: "#f1f5f9", color: "#475569" };
     }

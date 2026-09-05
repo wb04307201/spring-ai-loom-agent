@@ -487,7 +487,7 @@
       : "";
     return (
       '<div class="market-announcement">' +
-      `<div class="market-announcement-title">📢 ${t}</div>` +
+      `<div class="market-announcement-title">${window.I18N && window.I18N.t ? window.I18N.t("market.admin.announcement.badge", "📢 公告") : "📢 公告"}</div>` +
       `<div class="market-announcement-body">${b}</div>` +
       (ts
         ? `<div class="market-announcement-time">${ts}</div>`
