@@ -645,6 +645,49 @@ class MarketAcceptanceIT {
         assertNotNull(page);
     }
 
+    /* ===== A16: T1.4 fix-up regression — UUID KB id on GET /reviews must return 404, not 5xx ===== */
+
+    /**
+     * Reviewer-reported regression (T1.4 round-1): the GET reviews handler in
+     * {@code loomAgentMarketKnowledgePublicRouter} lost its Long.parseLong
+     * guard but did NOT gain a {@code catch (LoomAgentRuntimeException)},
+     * so a real UUID KB id (which {@code kbReviewService.listReviews(String)}
+     * translates to {@code LoomAgentRuntimeException(404)}) would escape the
+     * router as a 5xx instead of a clean 404.
+     *
+     * <p>This test fires a request with a UUID-shaped id, asserts the router
+     * returns 404 (not 500), and asserts the body carries the service's
+     * "市场知识库不存在" message — which is the canonical
+     * graceful-degradation contract from the String-overload
+     * {@code IMarketContentReviewService#listReviews(String)} (M3+ T1.4).
+     *
+     * <p>Without the fix, this test fails with a 5xx (NoSuchElementException
+     * from {@code ServerResponse.ok().body(...)} when the body type isn't
+     * encodable, or simply an unhandled exception bubbling up).
+     */
+    @Test
+    @DisplayName("A16 — GET /market-knowledge/{UUID}/reviews must return 404, not 5xx (T1.4 fix-up)")
+    void a16_uuidKbReviewsReturns404Not5xx() throws Exception {
+        UserContextHolder.setCurrentUser(NORMAL_USER);
+        // Real UUID-shaped id — service can't find any review row because the
+        // BIGINT PK in loom_market_knowledge_review can never match a UUID.
+        String fakeUuid = "00000000-0000-0000-0000-000000000001";
+
+        ServerResponse resp = route(kbPublicRouter, "GET",
+                "/spring/ai/loom/market-knowledge/" + fakeUuid + "/reviews", null);
+
+        assertEquals(404, resp.statusCode().value(),
+                "UUID KB id on GET /reviews must produce 404 — service String overload throws LoomAgentRuntimeException(404); router must catch & map to 404, NOT let it escape as 5xx");
+
+        // body should carry the service-level message
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> body = (java.util.Map<String, Object>) ((org.springframework.web.servlet.function.EntityResponse<?>) resp).entity();
+        String error = (String) body.get("error");
+        assertNotNull(error, "error body must be present");
+        assertTrue(error.contains("市场知识库不存在"),
+                "error message must mention KB 不存在; got: " + error);
+    }
+
     /* ===== helpers ===== */
 
     private Long createSkillAdmin(String name, String category) {

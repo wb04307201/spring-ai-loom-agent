@@ -3804,12 +3804,18 @@ public class LoomAgentConfiguration {
                 }
             });
             // T18: 公开评价列表 — KB 端与 Skill 端同款分页契约(Page<ReviewRow>)。
-            // M3+ T1.4: KB id 走 RouterIdParserKnowledge;UUID → 抛 404;numeric id → Long 路径。
+            // M3+ T1.4: KB id 走 RouterIdParserKnowledge;UUID → 服务抛 LoomAgentRuntimeException(404),
+            // router 必须捕获并映射为 4xx,否则会泄露 5xx 给前端(T1.4 fix-up)。
             builder.GET("spring/ai/loom/market-knowledge/{id}/reviews", request -> {
                 String rawId = kbIdParser.parse(request.pathVariable("id"));
                 int page = parsePageOr(request, "page", 0);
                 int size = parsePageOr(request, "size", 20);
-                return ServerResponse.ok().body(kbReviewService.listReviews(rawId, page, size));
+                try {
+                    return ServerResponse.ok().body(kbReviewService.listReviews(rawId, page, size));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
+                }
             });
             // T18: 公开评价更新 — 1 次修改上限由 AbstractMarketReviewService.update
             // 内部校验 edit_count < 1,第二次 update 直接抛 LoomAgentRuntimeException(403,
