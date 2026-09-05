@@ -3884,6 +3884,13 @@ public class LoomAgentConfiguration {
                     body.put("body", ann.body());
                     body.put("createdAt", ann.createdAt());
                     return ServerResponse.ok().body(body);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    // B1 真修后,UUID KB id 经 findOne(String, String) → parseMarketIdOrThrow
+                    // 抛 LoomAgentRuntimeException(404, "市场知识库不存在")。捕获并原样转 4xx
+                    // (与 kb stats / reviews 兄弟端点同款 graceful-degradation 契约 —
+                    // 不让 UUID 路径逃逸成 5xx)。
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 } catch (RuntimeException ex) {
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
                     log.warn("announcement read failed for kb {}: {}", idStr, msg, ex);

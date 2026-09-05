@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 端到端验收:覆盖 spec § 12 A1-A15。
+ * 端到端验收:覆盖 spec § 12 A1-A15 + T1.4 fix-up (A16) + T1.6 fix-up (A17)。
  *
  * <p>实现要点:
  * <ul>
@@ -65,7 +65,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ul>
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
-@DisplayName("Market Acceptance IT — A1-A15 (spec § 12)")
+@DisplayName("Market Acceptance IT — A1-A17 (spec § 12 + T1.4/T1.6 fix-ups)")
 class MarketAcceptanceIT {
 
     @Autowired DefaultSkillMarketService skillSvc;
@@ -678,6 +678,67 @@ class MarketAcceptanceIT {
 
         assertEquals(404, resp.statusCode().value(),
                 "UUID KB id on GET /reviews must produce 404 — service String overload throws LoomAgentRuntimeException(404); router must catch & map to 404, NOT let it escape as 5xx");
+
+        // body should carry the service-level message
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> body = (java.util.Map<String, Object>) ((org.springframework.web.servlet.function.EntityResponse<?>) resp).entity();
+        String error = (String) body.get("error");
+        assertNotNull(error, "error body must be present");
+        assertTrue(error.contains("市场知识库不存在"),
+                "error message must mention KB 不存在; got: " + error);
+    }
+
+    /* ===== A17: T1.6 fix-up regression — UUID KB id on GET /announcement must return 4xx, not 5xx ===== */
+
+    /**
+     * Reviewer-reported regression (T1.6 round-1): after dropping
+     * {@code MarketAnnouncementRepository.findOneByRawId} and switching the
+     * public {@code GET /market-knowledge/{id}/announcement} router to call
+     * {@code findOne("KNOWLEDGE", idStr)}, the router still only had a
+     * generic {@code catch (RuntimeException)} block. For UUID KB ids, the
+     * {@code findOne(String, String)} default delegates to
+     * {@code parseMarketIdOrThrow(idStr)} which throws
+     * {@link cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException}
+     * (a {@code RuntimeException} subclass); the router then mapped it to
+     * 500 instead of the carried 404.
+     *
+     * <p>Mirror of A16 but for the announcement endpoint. Without the
+     * dedicated {@code catch (LoomAgentRuntimeException)} (matching the
+     * sibling {@code /reviews} and {@code /stats} routers' pattern), this
+     * test fires a UUID KB id and asserts the response status is in 2xx
+     * (empty 204 if KB exists with no announcement row, or 404 if service
+     * rejected) or 4xx — but NEVER 5xx.
+     *
+     * <p>The fix: announce route catches {@code LoomAgentRuntimeException}
+     * first, returns its carried status code, matching the established
+     * graceful-degradation pattern.
+     */
+    @Test
+    @DisplayName("A17 — GET /market-knowledge/{UUID}/announcement must return 4xx, not 5xx (T1.6 fix-up)")
+    void a17_uuidKbAnnouncementReturns4xxNot5xx() throws Exception {
+        UserContextHolder.setCurrentUser(NORMAL_USER);
+        // Real UUID-shaped id — findOne(String, String) routes through
+        // parseMarketIdOrThrow → throws LoomAgentRuntimeException(404,
+        // "市场知识库不存在: id=...") because the BIGINT-origin column
+        // can never match a UUID.
+        String fakeUuid = "00000000-0000-0000-0000-000000000002";
+
+        ServerResponse resp = route(kbPublicRouter, "GET",
+                "/spring/ai/loom/market-knowledge/" + fakeUuid + "/announcement", null);
+
+        int status = resp.statusCode().value();
+        assertTrue(status >= 200 && status < 500,
+                "UUID KB id on GET /announcement must produce a 2xx/3xx/4xx — "
+                        + "router must catch LoomAgentRuntimeException and map to 4xx (carried 404), "
+                        + "NOT let it escape as 5xx. got status=" + status);
+
+        // Specifically: the canonical happy path here is 404 (not 5xx).
+        // Tighten the loose range to 4xx since 2xx/3xx are not realistic for
+        // a UUID that can never match the BIGINT-origin column.
+        assertEquals(404, status,
+                "UUID KB id on GET /announcement must produce 404 (service "
+                        + "LoomAgentRuntimeException(404) routed through), not a 2xx/3xx/5xx. "
+                        + "got status=" + status);
 
         // body should carry the service-level message
         @SuppressWarnings("unchecked")
