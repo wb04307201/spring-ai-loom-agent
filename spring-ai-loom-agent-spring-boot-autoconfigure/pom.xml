@@ -39,6 +39,15 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- M3+ T4.2: token-bucket rate limiting on /pull /access /reviews.
+             Per cleanup spec §9 ADR-T08: in-memory bucket, NOT Redis
+             distributed; no horizontal scaling support. -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>8.10.1</version>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 
 </project>

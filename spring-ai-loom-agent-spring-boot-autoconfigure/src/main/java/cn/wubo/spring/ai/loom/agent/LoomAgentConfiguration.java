@@ -1683,6 +1683,27 @@ public class LoomAgentConfiguration {
             return registration;
         }
 
+        /**
+         * M3+ T4.2 — token-bucket rate limiter on the market hot-path
+         * endpoints. Per cleanup spec §9 ADR-T08: in-memory Bucket4j;
+         * NOT Redis distributed. Default 60 req/min per remote IP.
+         * Runs at order 2 (after AuthenticationFilter at order 1) so
+         * rate limiting applies to authenticated + anonymous traffic alike.
+         */
+        @Bean
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnClass(name = "io.github.bucket4j.Bucket")
+        public FilterRegistrationBean<cn.wubo.spring.ai.loom.agent.market.RateLimitFilter> marketRateLimitFilter() {
+            FilterRegistrationBean<cn.wubo.spring.ai.loom.agent.market.RateLimitFilter> registration = new FilterRegistrationBean<>();
+            registration.setFilter(new cn.wubo.spring.ai.loom.agent.market.RateLimitFilter(
+                    java.util.List.of(
+                            "/spring/ai/loom/market-skills/",
+                            "/spring/ai/loom/market-knowledge/"
+                    )));
+            registration.addUrlPatterns("/spring/ai/loom/market-skills/*", "/spring/ai/loom/market-knowledge/*");
+            registration.setOrder(2);
+            return registration;
+        }
+
         @Bean("loomAgentBaseRouter")
         public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties,
                                                                   IUserConversation userConversation,
