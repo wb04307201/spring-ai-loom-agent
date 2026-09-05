@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * 公共抽象基类,实现 {@link IMarketContentAdminService} 中的 admin 方法
  * (approve / reject / setOfficial / setFeaturedRank / setCategory / listPaged / search / delete / getById)。
- * 子类通过 hook 方法 ({@link #tableName()} / {@link #rowMapper()} / {@link #extractId(Object)} /
+ * 子类通过 hook 方法 ({@link #tableName()} / {@link #rowMapper()} /
  * 可选的 {@link #currentStatusImpl(Object)}) 提供具体表/行映射。
  *
  * <p>字段默认状态:
@@ -18,11 +18,20 @@ import java.util.List;
  *   <li>reviewed_at / reviewed_by / review_comment — admin 审核字段</li>
  * </ul>
  *
- * @param <M> 市场条目实体类型 (market_skill / loom_market_knowledge 等)
- * @param <U> 子类专有的 update 请求类型(预留;接口侧使用 {@link MarketUpdateRequest})
- * @param <R> 子类专有的 review 类型(预留)
+ * <p>类型参数 (M3+ T1.2):
+ * <ul>
+ *   <li>{@code K} — 主键类型 ({@link Long} for skill;{@link String} for KB UUID),
+ *       由子类 extends 时具体化</li>
+ *   <li>{@code M} — 市场条目实体类型 (market_skill / loom_market_knowledge 等)</li>
+ *   <li>{@code U} — 子类专有的 update 请求类型(预留;接口侧使用 {@link MarketUpdateRequest})</li>
+ *   <li>{@code R} — 子类专有的 review 类型(预留)</li>
+ * </ul>
+ *
+ * <p>SQL 行为:本抽象基类的所有 admin 方法用 {@code WHERE id=?} 占位符,
+ * 由 JDBC 自动绑定 {@code K} 类型参数 — skill 端为 BIGINT 走 numeric 路径,
+ * KB 端为 VARCHAR(36) UUID 走 string 路径,H2 自动按列类型 coerce。
  */
-public abstract class AbstractMarketAdminService<M, U, R> implements IMarketContentAdminService<M, U, R> {
+public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketContentAdminService<K, M, U, R> {
 
     protected final JdbcTemplate jdbc;
 
@@ -39,11 +48,6 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
      * 行映射器 — 把 {@link java.sql.ResultSet} 转成 M 类型。
      */
     protected abstract RowMapper<M> rowMapper();
-
-    /**
-     * 从条目抽取 id(子类用于自实现 create / update 的回读等场景)。
-     */
-    protected abstract Long extractId(M entry);
 
     /**
      * 取得条目当前审核状态。final:子类必须通过 {@link #currentStatusImpl(Object)} 提供实现,
@@ -67,7 +71,7 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
      * 按 id 查询单条。子类如有额外缓存 / join,可 override。
      */
     @Override
-    public M getById(Long id) {
+    public M getById(K id) {
         return jdbc.queryForObject(
             "SELECT * FROM " + tableName() + " WHERE id=?",
             rowMapper(), id);
@@ -85,7 +89,7 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
      * 默认 update 不实现 — 同 {@link #create(String, MarketCreateRequest)}。
      */
     @Override
-    public M update(Long id, MarketUpdateRequest req) {
+    public M update(K id, MarketUpdateRequest req) {
         throw new UnsupportedOperationException("update must be implemented by subclass");
     }
 
@@ -93,7 +97,7 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
      * approve:置 status='APPROVED',记录 reviewer / reviewed_at,回读最新行。
      */
     @Override
-    public M approve(Long id, String reviewer) {
+    public M approve(K id, String reviewer) {
         jdbc.update(
             "UPDATE " + tableName() + " SET status='APPROVED', reviewed_at=CURRENT_TIMESTAMP, reviewed_by=? WHERE id=?",
             reviewer, id);
@@ -105,7 +109,7 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
      * 置 status='REJECTED',记录 reviewer / comment / reviewed_at,回读最新行。
      */
     @Override
-    public M reject(Long id, String reviewer, String comment) {
+    public M reject(K id, String reviewer, String comment) {
         if (comment == null || comment.isBlank()) {
             throw new IllegalArgumentException("reject 必须填评论(comment 必填)");
         }
@@ -116,17 +120,17 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
     }
 
     @Override
-    public void setOfficial(Long id, boolean isOfficial, String reviewer) {
+    public void setOfficial(K id, boolean isOfficial, String reviewer) {
         jdbc.update("UPDATE " + tableName() + " SET is_official=? WHERE id=?", isOfficial, id);
     }
 
     @Override
-    public void setFeaturedRank(Long id, int rank, String reviewer) {
+    public void setFeaturedRank(K id, int rank, String reviewer) {
         jdbc.update("UPDATE " + tableName() + " SET featured_rank=? WHERE id=?", rank, id);
     }
 
     @Override
-    public void setCategory(Long id, String category, String reviewer) {
+    public void setCategory(K id, String category, String reviewer) {
         jdbc.update("UPDATE " + tableName() + " SET category=? WHERE id=?", category, id);
     }
 
@@ -181,7 +185,7 @@ public abstract class AbstractMarketAdminService<M, U, R> implements IMarketCont
     }
 
     @Override
-    public void delete(Long id) {
+    public void delete(K id) {
         jdbc.update("DELETE FROM " + tableName() + " WHERE id=?", id);
     }
 }

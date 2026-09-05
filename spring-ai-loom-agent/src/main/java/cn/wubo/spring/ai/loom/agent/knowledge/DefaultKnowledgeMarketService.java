@@ -24,33 +24,26 @@ import java.util.UUID;
 /**
  * 知识库市场服务 — 同时实现两套契约(与 {@code DefaultSkillMarketService} 镜像):
  * <ul>
- *   <li>M0 重构后的 {@link AbstractMarketAdminService} (admin CRUD / 审批流)</li>
+ *   <li>M0 重构后的 {@link AbstractMarketAdminService} (admin CRUD / 审批流) —
+ *       M3+ T1.2/T1.3 重构后,主键类型 {@code <String>} (UUID),
+ *       不再有 String/Long 孪生方法,直接走 abstract base 的 {@code K=String} 路径</li>
  *   <li>旧的 {@link IKnowledgeMarketService} (用户侧浏览 / 提交 / 拉取 / 撤回)
  *       — 为 {@code LoomAgentConfiguration} 中已有的路由器 bean 提供向后兼容</li>
  * </ul>
  *
  * <p><b>与 Skill 端的真实对称差异 —— 主键类型</b>:
  * {@code loom_market_knowledge.id} 是 {@code VARCHAR(36)} (UUID),而
- * {@code market_skill.id} 是 {@code BIGINT}。{@link AbstractMarketAdminService} /
- * {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentAdminService} 的
- * admin 方法签名统一使用 {@code Long id},无法表达 UUID 主键。
+ * {@code market_skill.id} 是 {@code BIGINT}。M3+ T1.2 通过 {@code IMarketContentAdminService<K, M, U, R>}
+ * 类型参数化抹平差异 — KB 端 {@code K=String},所有 admin 路径
+ * (approve / reject / setOfficial / setFeaturedRank / setCategory / update / delete)
+ * 直接走 abstract base 的 {@code K=String} 路径,JdbcTemplate 自动按 VARCHAR(36) coerce。
  *
- * <p>处理方式:本类为每个 id 相关的 admin 操作提供 <b>String 主键孪生方法</b>
- * ({@link #approve(String, String)} / {@link #reject(String, String, String)} /
- * {@link #setOfficial(String, boolean, String)} / {@link #setFeaturedRank(String, int, String)} /
- * {@link #setCategory(String, String, String)} / {@link #update(String, MarketUpdateRequest)} /
- * {@link #delete(String)}),这些才是 KB 端的<b>正规入口</b>;
- * 继承自基类的 {@code Long} 重载一律抛
- * {@link UnsupportedOperationException} 并指向对应的 String 版本,避免
- * 「把 Long 强转成字符串后静默匹配不到任何行」的隐性错误。
- * 与 id 无关的基类能力({@code listPaged} / {@code search} / 过滤与分页)照常复用。
- *
- * <p>{@code <MarketKnowledgeRecord, Void, Void>} 中 {@code U} / {@code R} 不参与具体方法签名,
+ * <p>{@code <String, MarketKnowledgeRecord, Void, Void>} 中 {@code U} / {@code R} 不参与具体方法签名,
  * 故用 {@link Void} 占位(review 类尚未存在,见 T17)。
  */
 @Component
 public class DefaultKnowledgeMarketService
-        extends AbstractMarketAdminService<MarketKnowledgeRecord, Void, Void>
+        extends AbstractMarketAdminService<String, MarketKnowledgeRecord, Void, Void>
         implements IKnowledgeMarketService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -81,20 +74,11 @@ public class DefaultKnowledgeMarketService
     }
 
     /**
-     * KB 主键是 {@code VARCHAR(36)} UUID,无法表示为 {@link Long}。
-     * 基类内部从不调用本方法(仅作为子类自用 hook 声明),故此处显式拒绝,
-     * 由 {@link #extractStringId(MarketKnowledgeRecord)} 提供真实实现。
+     * KB 端主键是 VARCHAR(36) UUID。{@code extractId} 从 abstract base 提升到 interface
+     * (M3+ T1.2) 后,override 由 {@code protected} 改为 {@code public} 返回 {@link String}。
      */
     @Override
-    protected Long extractId(MarketKnowledgeRecord entry) {
-        throw new UnsupportedOperationException(
-                "loom_market_knowledge.id 是 VARCHAR(36) UUID,请使用 extractStringId(...)");
-    }
-
-    /**
-     * KB 端的真实 id 抽取入口。
-     */
-    protected String extractStringId(MarketKnowledgeRecord entry) {
+    public String extractId(MarketKnowledgeRecord entry) {
         return entry == null ? null : entry.id();
     }
 
@@ -103,10 +87,10 @@ public class DefaultKnowledgeMarketService
         return MarketContentStatus.from(entry.status());
     }
 
-    /* ===== admin CRUD / 审批流 —— String 主键(KB 正规入口) ===== */
+    /* ===== admin CRUD / 审批流 —— K=String 主键直接走 abstract base (M3+ T1.3 删 twins) ===== */
 
     /**
-     * user 直接创建 → 落 PENDING(admin 之后调 {@link #approve(String, String)})。
+     * user 直接创建 → 落 PENDING(admin 之后调 {@link #approve(Object, String)})。
      * 注意:{@code loom_market_knowledge} 没有 {@code content} 列,
      * {@link MarketCreateRequest#content()} 在 KB 端被忽略。
      */
@@ -122,7 +106,9 @@ public class DefaultKnowledgeMarketService
 
     /**
      * 动态 SET 更新。{@code content} 列在 KB 端不存在,忽略。
+     * Override abstract base 的 {@code update(K, MarketUpdateRequest)} (K=String → UUID 直接传)。
      */
+    @Override
     public MarketKnowledgeRecord update(String id, MarketUpdateRequest req) {
         StringBuilder sql = new StringBuilder("UPDATE loom_market_knowledge SET ");
         List<Object> args = new ArrayList<>();
@@ -157,89 +143,19 @@ public class DefaultKnowledgeMarketService
     }
 
     /**
-     * 审核通过:置 {@code status='APPROVED'},记录 reviewer / reviewed_at。
+     * 按 id 查询单条 — Override abstract base 的 {@code getById(K=String)} 让空 id 抛
+     * {@link LoomAgentRuntimeException} (404) 而非 {@link EmptyResultDataAccessException} (500),
+     * 与 router 的 LoomAgentRuntimeException catch 块对齐。
      */
-    public MarketKnowledgeRecord approve(String id, String reviewer) {
-        jdbcTemplate.update(
-                "UPDATE loom_market_knowledge SET status='APPROVED', reviewed_at=CURRENT_TIMESTAMP, reviewed_by=? WHERE id=?",
-                reviewer, id);
-        return getById(id);
-    }
-
-    /**
-     * 审核驳回:{@code comment} 必填,否则抛 {@link IllegalArgumentException}。
-     */
-    public MarketKnowledgeRecord reject(String id, String reviewer, String comment) {
-        if (comment == null || comment.isBlank()) {
-            throw new IllegalArgumentException("reject 必须填评论(comment 必填)");
+    @Override
+    public MarketKnowledgeRecord getById(String marketKnowledgeId) {
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT * FROM loom_market_knowledge WHERE id = ?",
+                    this::mapMarketKnowledgeRecord, marketKnowledgeId);
+        } catch (EmptyResultDataAccessException e) {
+            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + marketKnowledgeId);
         }
-        jdbcTemplate.update(
-                "UPDATE loom_market_knowledge SET status='REJECTED', reviewed_at=CURRENT_TIMESTAMP, reviewed_by=?, review_comment=? WHERE id=?",
-                reviewer, comment, id);
-        return getById(id);
-    }
-
-    public void setOfficial(String id, boolean isOfficial, String reviewer) {
-        jdbcTemplate.update("UPDATE loom_market_knowledge SET is_official=? WHERE id=?", isOfficial, id);
-    }
-
-    public void setFeaturedRank(String id, int rank, String reviewer) {
-        jdbcTemplate.update("UPDATE loom_market_knowledge SET featured_rank=? WHERE id=?", rank, id);
-    }
-
-    public void setCategory(String id, String category, String reviewer) {
-        jdbcTemplate.update("UPDATE loom_market_knowledge SET category=? WHERE id=?", category, id);
-    }
-
-    public void delete(String id) {
-        jdbcTemplate.update("DELETE FROM loom_market_knowledge WHERE id=?", id);
-    }
-
-    /* ===== admin CRUD —— Long 主键重载:KB 不支持,统一指向 String 孪生方法 ===== */
-
-    private static UnsupportedOperationException longIdUnsupported(String stringVariant) {
-        return new UnsupportedOperationException(
-                "loom_market_knowledge.id 是 VARCHAR(36) UUID,不支持 Long 主键;请改用 " + stringVariant);
-    }
-
-    @Override
-    public MarketKnowledgeRecord getById(Long id) {
-        throw longIdUnsupported("getById(String)");
-    }
-
-    @Override
-    public MarketKnowledgeRecord update(Long id, MarketUpdateRequest req) {
-        throw longIdUnsupported("update(String, MarketUpdateRequest)");
-    }
-
-    @Override
-    public MarketKnowledgeRecord approve(Long id, String reviewer) {
-        throw longIdUnsupported("approve(String, String)");
-    }
-
-    @Override
-    public MarketKnowledgeRecord reject(Long id, String reviewer, String comment) {
-        throw longIdUnsupported("reject(String, String, String)");
-    }
-
-    @Override
-    public void setOfficial(Long id, boolean isOfficial, String reviewer) {
-        throw longIdUnsupported("setOfficial(String, boolean, String)");
-    }
-
-    @Override
-    public void setFeaturedRank(Long id, int rank, String reviewer) {
-        throw longIdUnsupported("setFeaturedRank(String, int, String)");
-    }
-
-    @Override
-    public void setCategory(Long id, String category, String reviewer) {
-        throw longIdUnsupported("setCategory(String, String, String)");
-    }
-
-    @Override
-    public void delete(Long id) {
-        throw longIdUnsupported("delete(String)");
     }
 
     /* ===== 市场浏览 ===== */
@@ -252,17 +168,6 @@ public class DefaultKnowledgeMarketService
         return jdbcTemplate.query(
                 "SELECT * FROM loom_market_knowledge WHERE status = 'APPROVED' ORDER BY reviewed_at DESC, submitted_at DESC LIMIT ? OFFSET ?",
                 this::mapMarketKnowledgeRecord, size, offset);
-    }
-
-    @Override
-    public MarketKnowledgeRecord getById(String marketKnowledgeId) {
-        try {
-            return jdbcTemplate.queryForObject(
-                    "SELECT * FROM loom_market_knowledge WHERE id = ?",
-                    this::mapMarketKnowledgeRecord, marketKnowledgeId);
-        } catch (EmptyResultDataAccessException e) {
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + marketKnowledgeId);
-        }
     }
 
     @Override

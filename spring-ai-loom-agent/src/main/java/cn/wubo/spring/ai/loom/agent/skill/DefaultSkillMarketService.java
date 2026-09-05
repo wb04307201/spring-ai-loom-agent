@@ -29,11 +29,13 @@ import java.util.List;
  *       — 为 {@code LoomAgentConfiguration} 中已有的路由器 bean 提供向后兼容</li>
  * </ul>
  *
- * <p>{@code <MarketSkill, Void, Void>} 中 {@code U} / {@code R} 不参与具体方法签名,
- * 故用 {@link Void} 占位 (review 类尚未存在,见 T17)。
+ * <p>{@code <Long, MarketSkill, Void, Void>} 中 {@code K=Long} (market_skill.id BIGINT),
+ * {@code U} / {@code R} 不参与具体方法签名,故用 {@link Void} 占位
+ * (review 类尚未存在,见 T17)。{@link #extractId(MarketSkill)} 从 abstract base
+ * 提升到 interface 后,此处 override 由 {@code protected} 改为 {@code public} (M3+ T1.2)。
  */
 @Component
-public class DefaultSkillMarketService extends AbstractMarketAdminService<MarketSkill, Void, Void> implements ISkillMarketService {
+public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, MarketSkill, Void, Void> implements ISkillMarketService {
 
     public DefaultSkillMarketService(JdbcTemplate jdbcTemplate) {
         super(jdbcTemplate);
@@ -52,7 +54,7 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Market
     }
 
     @Override
-    protected Long extractId(MarketSkill entry) {
+    public Long extractId(MarketSkill entry) {
         return entry.id();
     }
 
@@ -62,7 +64,7 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Market
     }
 
     /**
-     * 按 id 查询单条 — {@link AbstractMarketAdminService#getById(Long)} 已提供默认实现,
+     * 按 id 查询单条 — {@link AbstractMarketAdminService#getById(Object)} 已提供默认实现,
      * 这里显式 override 让 SQL 文案可读且与旧 {@link #get(Long)} 保持一致。
      * <p>
      * 行为契约:不存在时抛 {@link LoomAgentRuntimeException} (404),

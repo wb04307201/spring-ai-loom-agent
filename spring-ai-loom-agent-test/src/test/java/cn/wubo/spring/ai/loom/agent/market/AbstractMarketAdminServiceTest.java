@@ -36,7 +36,7 @@ class AbstractMarketAdminServiceTest {
     }
 
     /** Minimal concrete subclass exercising the abstract base. */
-    static class TestSvc extends AbstractMarketAdminService<FakeEntry, Void, Void> {
+    static class TestSvc extends AbstractMarketAdminService<Long, FakeEntry, Void, Void> {
         TestSvc(JdbcTemplate jdbc) { super(jdbc); }
 
         @Override
@@ -54,7 +54,7 @@ class AbstractMarketAdminServiceTest {
         }
 
         @Override
-        protected Long extractId(FakeEntry e) {
+        public Long extractId(FakeEntry e) {
             return e.id;
         }
     }
