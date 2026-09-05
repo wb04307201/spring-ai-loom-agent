@@ -100,7 +100,7 @@ class DefaultKnowledgeMarketService extends AbstractMarketAdminService<String, M
 ### 5.2 删除
 
 - `DefaultKnowledgeMarketService` 上的 **String-keyed twin 方法**(`getById(String)` 等),全部改走泛型抽象的 `getById(String)` —— `Long` / `String` 类型的消失让 twin pattern 不再需要。
-- `LoomAgentConfiguration` 内被标记 `// DEFER to T8.7` 的 v1 router bean 路径冲突 —— T3 修后 v2 router 已经完全覆盖,T8.7 不再需要。
+- `LoomAgentConfiguration` 内被标记 `// DEFER to T3.2` 的 v1 router bean 路径冲突 —— T3.2 修后 v2 router 已经完全覆盖,T3.2 不再需要。
 - `MarketAdmin.listWithAnnouncements` / `listWithTags`(前端 in-place mutate helper)—— T2 修后删,前端改读 DTO 嵌入式字段。
 - `MarketAnnouncementRepository.findOneByRawId(String, String)`(T19 round 2 加的 UUID-tolerant workaround)—— T1 修后删,改用 `findOne(String marketKind, K marketId)`。
 - `DefaultKnowledgeMarketService.findOne(String marketId)` 的 `Long.parseLong` graceful-degradation 注释 / 路径 —— T1 修后删。
@@ -125,7 +125,7 @@ public class KnowledgeRouterIdParser implements RouterIdParser<String> {
 }
 ```
 
-T3 refactor 时抽出来(T8.7 parked 项目顺道做)。
+T3 refactor 时抽出来(T3.2 parked 项目顺道做)。
 
 ### 5.4 LLM 工具集成
 
@@ -201,6 +201,67 @@ T3 refactor 时抽出来(T8.7 parked 项目顺道做)。
 12. ADR-T04:N+1 修 = 后端 DTO embed
 13. ADR-T05:spec drift A3/A10 422 → 403(spec 跟代码对齐)
 14. ADR-T06:Skill tag 不做(M4 候选)
+
+### §10.1 Ruling Classification (4-bucket)
+
+| Bucket | 含义 | 已识别条目 |
+|---|---|---|
+| **Planned** | plan T0–T6 + T7.1 有 task label | T1.1 / T1.3 / T1.4 / T1.5 / T1.6 / T2.1 / T2.2 / T3.1 / T3.2 / T4.1 / T4.2 / T4.3 / T5.1 / T5.2 / T5.3 / T6.1 / T6.2 / T7.1 |
+| **Pre-fixed** | M3 plan 起草前已修复,无 plan task | Ruling #2 admin-exclusion SQL (`aaadff7`); Ruling #3 `edit_count < 1` 校验 (`aaadff7`); Ruling #4 access_count / index / columnExists (`fdb80bf`); Ruling #8 Skill missing-id 404 (`dceaddc`); Ruling #9 KB tag @Transactional rollback (`dceaddc`) |
+| **M4 defer** | spec §3 / §7 显式延期 | B4 Skill tag(spec 写明 "本期不做, M4 候选") |
+| **Untracked** | 进程级约束,无 code task | Ruling #5 测试数据源 wipe(plan §24 process constraint) |
+
+注:本表分类基于 dev 分支 commit 证据 + spec 文本交叉推断,非权威。Ruling #1 / #6 / #7 / #10–#14 待逐条复核后归类。
+
+---
+
+## § Verification (T7.1)
+
+M3+ cleanup 的最终验证由本节定义。E2E 验收复用 [`docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md`](2026-09-04-skill-knowledge-market-design.md) §12 A1–A15,本节定义 cleanup-specific 的 AT1–AT5。
+
+### AT1: VARCHAR(36) UUID 真路径 E2E
+
+- 触发:KB review / stats / announcement 端点用 UUID 入参
+- 期望:每个端点返回 200 + 真实 row(review / stats / announcement 均非 null)
+- 验证位置:`MarketAcceptanceIT` A12 / A16 / A17 正向 UUID 断言(T1.7)
+
+### AT2: N+1 修复(list + announcement + tags 一次 GET)
+
+- 触发:`GET /market-skills` 或 `/market-knowledge`
+- 期望:response DTO 包含 `announcementTitle` / `announcementBody` / `tags` 字段;前端不再二次 GET
+- 验证位置:`MarketAcceptanceIT` + `market-admin.js` 行为(T2.1 / T2.2)
+
+### AT3: v1 service shim 兼容
+
+- 触发:`ISkillMarketService` / `IKnowledgeMarketService` 旧 API 调用
+- 期望:1 个 minor version 期间仍可工作;新代码全部走 v2
+- 验证:grep `ISkillMarketService` 引用计数随 release notes 下降;最终 = 0 才删除 shim(T3.1)
+
+### AT4: Micrometer counter / timer 增量
+
+- 触发:`/admin/market-*` 端点被调用
+- 期望:`/actuator/metrics/...` 显示 counter / timer 增量
+- 验证位置:`MarketAcceptanceIT` 检查 metrics endpoint(T4.1)
+
+### AT5: Bucket4j in-memory 限流
+
+- 触发:`/pull` / `/access` / `/reviews` 高频请求
+- 期望:超阈值返回 429 + Retry-After header
+- 验证位置:`MarketAcceptanceIT`(T4.2)
+
+### 回归门(完整)
+
+- `mvn test` 全绿(IT + unit)
+- A1–A15(design spec §12)全部通过
+- AT1–AT5 全部通过
+
+### Defer / out-of-scope(T7.1 不验证)
+
+- B4 Skill tag — M4 候选
+- 完整 i18n framework / Prometheus / OTel / Redis 分布式限流 — 显式 out-of-scope
+- v1 service 完全删除 — 等 AT3 引用计数归零(>1 minor version)
+- KB 物理文件 versioning(ADR-002)— M4 defer
+- LOOM_VOICE banner 集成 — spec §17 第 4 问已显式删除
 
 ---
 

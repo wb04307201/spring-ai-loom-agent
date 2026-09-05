@@ -44,9 +44,9 @@ mvn clean deploy
 
 The v1.2.0 cycle (commits `26834b0..dceaddc`, M0 + M1 + M2 milestones) introduced a unified Skill + Knowledge Base market: full CRUD via admin UI, PENDING/APPROVED/REJECTED approval flow, `is_official / featured_rank / category` columns on both `market_skill` and `loom_market_knowledge`, `BatchedCounterService` for stat tracking, 5-star reviews with an `edit_count` gate, per-row announcements, and a KB tag system with filter UI. See [`docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md`](docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md) for the design, and `CHANGELOG.md` for the v1.2.0 entry.
 
-### M3+ Technical Debt (24 items)
+### M3+ Technical Debt (named inventory)
 
-v1.2.0 left 24 known tech-debt items (`BIGINT` vs `VARCHAR(36)` schema drift in B1, String-keyed twins, `Long.parseLong` graceful-degradation fallbacks, `findOneByRawId` workarounds, N+1 list DTOs, v1 service shims, missing metrics / rate-limit / i18n, spec drift A3/A10 422→403, portable upsert, etc.) — full catalogue in [`docs/superpowers/specs/2026-09-05-market-tech-debt-cleanup.md`](docs/superpowers/specs/2026-09-05-market-tech-debt-cleanup.md) and task breakdown in [`docs/superpowers/plans/2026-09-05-market-tech-debt-cleanup.md`](docs/superpowers/plans/2026-09-05-market-tech-debt-cleanup.md). Cleanup is staged across 7 phases (T0–T6 + verification, ~8–12 weeks); each item lands in its own commit (`feat:` / `fix:` / `refactor:` / `docs:` / `test:` prefix) with an IT regression gate at every phase boundary.
+v1.2.0 left a tech-debt inventory (named categories `A12 / B1 / B2 / B3 / B4 / B8` + §10 rulings; not a numbered 24-row catalogue) — spec at [`docs/superpowers/specs/2026-09-05-market-tech-debt-cleanup.md`](docs/superpowers/specs/2026-09-05-market-tech-debt-cleanup.md) and task breakdown at [`docs/superpowers/plans/2026-09-05-market-tech-debt-cleanup.md`](docs/superpowers/plans/2026-09-05-market-tech-debt-cleanup.md). Cleanup is staged across 7 phases (T0–T6 + verification, ~8–12 weeks); each task lands in its own commit (`feat:` / `fix:` / `refactor:` / `docs:` / `test:` prefix) with an IT regression gate at every phase boundary. Task T1.2 / T1.3 share a single commit per plan line 214.
 
 | Phase | Scope |
 |-------|-------|
@@ -55,7 +55,7 @@ v1.2.0 left 24 known tech-debt items (`BIGINT` vs `VARCHAR(36)` schema drift in 
 | T2 | **N+1 fix** — list DTO embed announcement / tags; drop frontend `listWithAnnouncements` / `listWithTags` helpers |
 | T3 | **Architecture cleanup** — v1 service shim policy (1 minor version); `buildAdminMarketRoutes` helper extraction |
 | T4 | **Observability / security** — Micrometer counters + timers; rate-limit on `/pull` / `/access` / `/reviews`; i18n key extraction |
-| T5 | **Portability / spec drift** — split Flyway V1.0 → V1.2 / V1.3 for revertability; spec drift A3/A10 422→403; portable upsert |
+| T5 | **Portability / spec drift** — Flyway source-organization split (policy A: keep V1.0 single fresh-init file, segment by SQL comment); spec drift A3/A10 422→403; portable upsert |
 | T6 | **Test cleanup** — extract `LoomAgentTestUtil.safeRoute`; cover async batched flush path |
 
 ## Architecture

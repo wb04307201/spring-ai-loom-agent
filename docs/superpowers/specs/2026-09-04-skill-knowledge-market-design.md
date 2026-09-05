@@ -491,14 +491,14 @@ approvalBadge({ status, reviewer, reviewedAt, comment });
 |---|---|---|
 | A1 | user 在聊天 UI 投新 skill | market_skill 行 status=PENDING,admin UI 列表角标 +1 |
 | A2 | admin approve 该 skill | market_skill.status=APPROVED + reviewed_by + reviewed_at;前端市场 Tab 出现 |
-| A3 | admin reject without comment | 422 + "拒绝必须填评论" |
+| A3 | admin reject without comment | 403 + "拒绝必须填评论" |
 | A4 | admin reject with comment | market_skill.status=REJECTED + review_comment;作者详情页可见 |
 | A5 | admin 标记某 skill is_official | 市场列表顶部 + 🏛️ 徽章 |
 | A6 | admin 调整 featured_rank | MARKET list 排序按权重倒序生效 |
 | A7 | admin 改 category | 市场列表可按 category 筛选 |
 | A8 | user 评 skill | 评分生效;再次评 → 自动覆盖之前的(走 updateReview 而不是 insert);`updated_at` 刷新 |
 | A9 | user 评 KB 但无 access | 403 + "请先访问过该知识库再评" |
-| A10 | user 编辑自己的评论 | 第 1 次 OK;第 2 次 422 + "评论只能编辑一次" |
+| A10 | user 编辑自己的评论 | 第 1 次 OK;第 2 次 403 + "评论只能编辑一次" |
 | A11 | skill pull +1 触发 stat | market_skill_stats.pull_count 在 30s 内聚合 +1 |
 | A12 | KB search 触发 stat(高 QPS) | 不锁表,≤ 30s 聚合到 DB |
 | A13 | admin 上公告 | 公告行置顶于市场列表顶部,标题 / 正文展示 |
@@ -584,8 +584,8 @@ approvalBadge({ status, reviewer, reviewedAt, comment });
 ## 17. 开放问题(M3+)
 
 1. KB 的 `default_loaded` 是否由 admin 控制?(目前每个 role 自己控制)
-2. KB 文件(物理)的版本化(本期不做,M3+ 用 git LFS 风格存 object?)
+2. ~~KB 文件(物理)的版本化~~ — **本期不做,登记 M4 候选**(decision: ADR-002)
 3. 是否加 `verified` 二级官方认证(需要在 ② 之上加列)
-4. 公告是否对 `LOOM_VOICE` banner 集成?
+4. ~~公告是否对 `LOOM_VOICE` banner 集成?~~ — **已删除**(decision: 仓库内无 LOOM_VOICE 产品定义,显式移除该 open question)
 
 —— END ——
