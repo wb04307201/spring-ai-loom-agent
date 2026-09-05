@@ -30,6 +30,15 @@
             <artifactId>spring-boot-autoconfigure-processor</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- M3+ T4.1: Micrometer counter / timer backing for MarketMetrics.
+             spring-boot-starter-actuator transitively brings micrometer-core
+             and a default SimpleMeterRegistry. Per cleanup spec §9 ADR-T07:
+             Micrometer + Spring Boot Actuator; explicitly NOT Prometheus / OTel. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 
 </project>

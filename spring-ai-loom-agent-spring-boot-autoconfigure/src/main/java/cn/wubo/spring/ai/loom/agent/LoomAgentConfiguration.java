@@ -398,6 +398,19 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * M3+ T4.1 — Micrometer-backed metrics for the market subsystem.
+         * Wired as a top-level bean so any service can autowire
+         * {@link cn.wubo.spring.ai.loom.agent.market.MarketMetrics} and
+         * increment counters / record timers without depending on the
+         * actuator runtime classpath at compile time.
+         */
+        @Bean
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnClass(io.micrometer.core.instrument.MeterRegistry.class)
+        public cn.wubo.spring.ai.loom.agent.market.MarketMetrics marketMetrics(io.micrometer.core.instrument.MeterRegistry registry) {
+            return new cn.wubo.spring.ai.loom.agent.market.MarketMetrics(registry);
+        }
+
+        /**
          * 放宽 Spring AI 内部 {@code JsonParser} 使用的 ObjectMapper，
          * 允许 JS 风格注释（{@code //}、{@code /* *}{@code /}）和单引号。
          * <p>
