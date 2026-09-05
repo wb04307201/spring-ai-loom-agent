@@ -50,6 +50,13 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
     protected abstract RowMapper<M> rowMapper();
 
     /**
+     * 市场条目种类 — 决定 {@link #listPaged} 用什么值关联
+     * {@code market_content_announcement.market_kind} 列。
+     * 返回 {@code "SKILL"} 或 {@code "KB"}。
+     */
+    protected abstract String marketKind();
+
+    /**
      * 取得条目当前审核状态。final:子类必须通过 {@link #currentStatusImpl(Object)} 提供实现,
      * 不能直接覆盖 {@code currentStatus} 以保留接口契约。
      */
@@ -137,16 +144,26 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
     /**
      * 通用分页查询 — 按 {@link MarketFilter} 拼 WHERE / ORDER BY / LIMIT / OFFSET。
      * sortBy 支持 {@code "official_rank"} (默认) 和 {@code "submitted_at"}。
+     *
+     * <p>M3+ T2.1 — SQL 用 LEFT JOIN 一次性把 {@code market_content_announcement}
+     * 的 title / body 拉过来,rowMapper 通过列别名 {@code announcement_title} /
+     * {@code announcement_body} 填充到 M record 的对应字段;无需 N+1 二次 GET。
+     * Subclass 可重写本方法追加额外的 enrichment(例如 KB 的 tags 批量补齐)。
      */
     @Override
     public Page<M> listPaged(MarketFilter filter) {
-        StringBuilder sql = new StringBuilder("SELECT * FROM ").append(tableName());
-        appendCommonFilters(sql, filter);
+        StringBuilder sql = new StringBuilder("SELECT m.*")
+                .append(", a.title AS announcement_title, a.body AS announcement_body")
+                .append(" FROM ").append(tableName()).append(" m")
+                .append(" LEFT JOIN market_content_announcement a")
+                .append("   ON a.market_kind = '").append(marketKind()).append("'")
+                .append("  AND a.market_id = m.id");
+        appendCommonFiltersForM(sql, filter);
         sql.append(" ORDER BY ");
         switch (filter.sortBy()) {
-            case "official_rank" -> sql.append("is_official DESC, featured_rank DESC, submitted_at DESC");
-            case "submitted_at"  -> sql.append("submitted_at DESC");
-            default              -> sql.append("is_official DESC, featured_rank DESC, submitted_at DESC");
+            case "official_rank" -> sql.append("m.is_official DESC, m.featured_rank DESC, m.submitted_at DESC");
+            case "submitted_at"  -> sql.append("m.submitted_at DESC");
+            default              -> sql.append("m.is_official DESC, m.featured_rank DESC, m.submitted_at DESC");
         }
         sql.append(" LIMIT ").append(filter.size()).append(" OFFSET ").append(filter.page() * filter.size());
         List<M> rows = jdbc.query(sql.toString(), rowMapper());
@@ -165,6 +182,24 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
         if (filter.query() != null && !filter.query().isBlank()) {
             String q = "%" + filter.query().replace("'", "''") + "%";
             sql.append(" AND (name LIKE '").append(q).append("' OR description LIKE '").append(q).append("')");
+        }
+    }
+
+    /**
+     * Same as {@link #appendCommonFilters} but uses {@code m.} table alias
+     * to be compatible with the LEFT JOIN listPaged SQL (T2.1).
+     */
+    private void appendCommonFiltersForM(StringBuilder sql, MarketFilter filter) {
+        sql.append(" WHERE 1=1");
+        if (filter.status() != null) {
+            sql.append(" AND m.status='").append(filter.status().name()).append("'");
+        }
+        if (filter.category() != null && !filter.category().isBlank()) {
+            sql.append(" AND m.category='").append(filter.category().replace("'", "''")).append("'");
+        }
+        if (filter.query() != null && !filter.query().isBlank()) {
+            String q = "%" + filter.query().replace("'", "''") + "%";
+            sql.append(" AND (m.name LIKE '").append(q).append("' OR m.description LIKE '").append(q).append("')");
         }
     }
 

@@ -142,6 +142,9 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
                 submittedAt == null ? null : submittedAt.toLocalDateTime(),
                 reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
                 rs.getString("reviewed_by"),
-                rs.getString("review_comment"));
+                rs.getString("review_comment"),
+                null,
+                null,
+                null);
     }
 }

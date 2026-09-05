@@ -69,6 +69,11 @@ public class DefaultKnowledgeMarketService
     }
 
     @Override
+    protected String marketKind() {
+        return "KB";
+    }
+
+    @Override
     protected RowMapper<MarketKnowledgeRecord> rowMapper() {
         return (rs, n) -> MarketKnowledgeRecord.from(rs);
     }

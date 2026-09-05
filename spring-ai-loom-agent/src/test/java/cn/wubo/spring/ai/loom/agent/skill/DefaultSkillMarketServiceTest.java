@@ -83,16 +83,16 @@ class DefaultSkillMarketServiceTest {
  1L, "Skill A", "描述A", "内容A",
  "testuser", MarketSkill.STATUS_APPROVED,
  LocalDateTime.now().minusDays(2), LocalDateTime.now().minusDays(1),
- "alice", "OK");
+ "alice", "OK", null, null);
  MarketSkill s2 = new MarketSkill(
  2L, "Skill B", "描述B", "内容B",
  "testuser", MarketSkill.STATUS_APPROVED,
  LocalDateTime.now().minusDays(1), LocalDateTime.now().minusDays(1),
- "alice", null);
+ "alice", null, null, null);
  MarketSkill s3 = new MarketSkill(
  3L, "Skill C", "描述C", "内容C",
  "testuser", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "alice", "OK");
+ LocalDateTime.now(), LocalDateTime.now(), "alice", "OK", null, null);
 
  when(jdbcTemplate.mock.query(anyString(), any(RowMapper.class), any(Object[].class)))
  .thenReturn(List.of(s1, s2, s3));
@@ -166,7 +166,7 @@ class DefaultSkillMarketServiceTest {
  MarketSkill stub = new MarketSkill(
  100L, "my-skill", "desc", "content",
  "alice", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "alice", null);
+ LocalDateTime.now(), LocalDateTime.now(), "alice", null, null, null);
  // SELECT id 默认抛 EmptyResultDataAccessException → 走 INSERT 分支
  // SELECT MAX(id) 返回 100L（让 marketId 有值）
  doReturn(100L).when(jdbcTemplate.mock).queryForObject(
@@ -198,7 +198,7 @@ class DefaultSkillMarketServiceTest {
  MarketSkill stub = new MarketSkill(
  7L, "my-skill", "new-desc", "new-content",
  "alice", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "alice", null);
+ LocalDateTime.now(), LocalDateTime.now(), "alice", null, null, null);
  doReturn(stub).when(jdbcTemplate.mock).queryForObject(
  argThat((String s) -> s.contains("FROM market_skill WHERE id = ?")),
  any(RowMapper.class), any(Object[].class));
@@ -221,7 +221,7 @@ class DefaultSkillMarketServiceTest {
  MarketSkill legacy = new MarketSkill(
  1L, "legacy", "d", "c",
  "alice", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "alice", null);
+ LocalDateTime.now(), LocalDateTime.now(), "alice", null, null, null);
  doReturn(legacy).when(jdbcTemplate.mock).queryForObject(
  argThat((String s) -> s.contains("FROM market_skill WHERE id = ?")),
  any(RowMapper.class), any(Object[].class));
@@ -243,7 +243,7 @@ class DefaultSkillMarketServiceTest {
  MarketSkill mkt = new MarketSkill(
  1L, "shared", "d", "market content",
  "other-user", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "admin", null);
+ LocalDateTime.now(), LocalDateTime.now(), "admin", null, null, null);
  doReturn(mkt).when(jdbcTemplate.mock).queryForObject(
  argThat((String s) -> s.contains("FROM market_skill WHERE id = ?")),
  any(RowMapper.class), any(Object[].class));

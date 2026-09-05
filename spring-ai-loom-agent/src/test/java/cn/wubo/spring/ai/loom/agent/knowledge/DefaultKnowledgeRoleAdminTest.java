@@ -95,7 +95,7 @@ class DefaultKnowledgeRoleAdminTest {
  @DisplayName("listRoleKnowledges 返回完整信息")
  void testListRoleKnowledges_returnsFullInfo() {
  List<MarketKnowledgeRecord> kbs = List.of(
- new MarketKnowledgeRecord("mk-1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null));
+ new MarketKnowledgeRecord("mk-1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null, null, null, null));
  when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(kbs);
 
  List<MarketKnowledgeRecord> result = roleAdmin.listRoleKnowledges("ADMIN");

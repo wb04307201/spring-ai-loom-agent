@@ -49,6 +49,11 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
     }
 
     @Override
+    protected String marketKind() {
+        return "SKILL";
+    }
+
+    @Override
     protected RowMapper<MarketSkill> rowMapper() {
         return (rs, n) -> MarketSkill.from(rs);
     }

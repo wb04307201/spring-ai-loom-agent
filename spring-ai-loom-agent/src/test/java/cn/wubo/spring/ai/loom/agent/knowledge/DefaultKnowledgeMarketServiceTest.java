@@ -88,7 +88,7 @@ class DefaultKnowledgeMarketServiceTest {
 
  MarketKnowledgeRecord result = new MarketKnowledgeRecord(
  "market-001", "testuser", "测试知识库", "描述",
- "APPROVED", null, null, "testuser", null);
+ "APPROVED", null, null, "testuser", null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
 
  MarketKnowledgeRecord returned = marketService.submit(kbId);
@@ -113,7 +113,7 @@ class DefaultKnowledgeMarketServiceTest {
  // getById → 返回 stub
  MarketKnowledgeRecord stub = new MarketKnowledgeRecord(
  "existing-market-id", "testuser", "测试知识库", "新描述",
- "APPROVED", null, null, "testuser", null);
+ "APPROVED", null, null, "testuser", null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(stub);
 
  MarketKnowledgeRecord returned = marketService.submit(kbId);
@@ -144,7 +144,7 @@ class DefaultKnowledgeMarketServiceTest {
  void testWithdraw_userOwnSubmission() {
  MarketKnowledgeRecord existing = new MarketKnowledgeRecord(
  "market-001", "testuser", "测试知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(existing);
  when(user.isAdmin("testuser")).thenReturn(false);
 
@@ -163,7 +163,7 @@ class DefaultKnowledgeMarketServiceTest {
  void testWithdraw_adminCanDeleteAny() {
  MarketKnowledgeRecord existing = new MarketKnowledgeRecord(
  "market-001", "otheruser", "其他人的知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(existing);
  when(user.isAdmin("testuser")).thenReturn(true);
 
@@ -175,7 +175,7 @@ class DefaultKnowledgeMarketServiceTest {
  void testWithdraw_cannotWithdrawOthers() {
  MarketKnowledgeRecord existing = new MarketKnowledgeRecord(
  "market-001", "otheruser", "其他人的知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(existing);
  when(user.isAdmin("testuser")).thenReturn(false);
 
@@ -190,8 +190,8 @@ class DefaultKnowledgeMarketServiceTest {
  @DisplayName("listApproved 列出已审批的市场知识库")
  void testListApproved_returnsApprovedOnly() {
  List<MarketKnowledgeRecord> approved = List.of(
- new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null),
- new MarketKnowledgeRecord("m2", "user2", "KB2", "desc2", "APPROVED", null, null, null, null));
+ new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null, null, null, null),
+ new MarketKnowledgeRecord("m2", "user2", "KB2", "desc2", "APPROVED", null, null, null, null, null, null, null));
  when(jdbcTemplate.mock.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
 
  List<MarketKnowledgeRecord> result = marketService.listApproved(1, 20);
@@ -204,7 +204,7 @@ class DefaultKnowledgeMarketServiceTest {
  @DisplayName("listMyPulled 列出用户订阅列表")
  void testListMyPulled_returnsSubscribed() {
  List<MarketKnowledgeRecord> pulled = List.of(
- new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null));
+ new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null, null, null, null));
  when(jdbcTemplate.mock.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(pulled);
 
  List<MarketKnowledgeRecord> result = marketService.listMyPulled("testuser");
@@ -220,7 +220,7 @@ class DefaultKnowledgeMarketServiceTest {
  void testPull_subscribes() {
  MarketKnowledgeRecord approved = new MarketKnowledgeRecord(
  "market-001", "author1", "公共知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
  // No existing subscription
  when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
@@ -238,7 +238,7 @@ class DefaultKnowledgeMarketServiceTest {
  void testPull_duplicateSubscription() {
  MarketKnowledgeRecord approved = new MarketKnowledgeRecord(
  "market-001", "author1", "公共知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
  when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(1);
 

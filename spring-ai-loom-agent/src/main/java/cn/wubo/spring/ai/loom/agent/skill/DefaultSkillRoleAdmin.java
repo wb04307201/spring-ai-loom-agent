@@ -39,7 +39,9 @@ public class DefaultSkillRoleAdmin implements ISkillRoleAdmin {
                         rs.getTimestamp("submitted_at").toLocalDateTime(),
                         rs.getTimestamp("reviewed_at") == null ? null : rs.getTimestamp("reviewed_at").toLocalDateTime(),
                         rs.getString("reviewed_by"),
-                        rs.getString("review_comment")),
+                        rs.getString("review_comment"),
+                        null,
+                        null),
                 roleCode);
     }
 
