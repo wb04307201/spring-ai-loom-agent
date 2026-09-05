@@ -3863,10 +3863,8 @@ public class LoomAgentConfiguration {
 
             // T19 fix-up: 公开读取公告 — 任何已登录用户可查 market_knowledge 的公告。
             // 不需要 admin 权限,因为公告是 admin 已发布的内容,纯只读,无敏感字段。
-            // KB id 在 V1.0 schema 是 VARCHAR(36) UUID,market_content_announcement.market_id
-            // 是 BIGINT — UUIDs 永远不会有匹配 row。通过 findOneByRawId 把 UUID 字符串
-            // 走 graceful-degradation 返回 null (204),而不是 4xx。Numeric id (测试用)
-            // 走 Long 路径正常查表。
+            // B1 真修后:market_content_announcement.market_id 是 VARCHAR(36),与 KB id
+            // (UUID) 类型一致 — 直接 findOne(String, String) 查表;不存在的 row 返 null → 204。
             builder.GET("spring/ai/loom/market-knowledge/{id}/announcement", request -> {
                 String idStr = request.pathVariable("id");
                 if (idStr == null || idStr.isBlank()) {
@@ -3875,7 +3873,7 @@ public class LoomAgentConfiguration {
                 }
                 try {
                     cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement ann =
-                            marketAnnouncementRepository.findOneByRawId("KNOWLEDGE", idStr);
+                            marketAnnouncementRepository.findOne("KNOWLEDGE", idStr);
                     if (ann == null) {
                         return ServerResponse.noContent().build();
                     }

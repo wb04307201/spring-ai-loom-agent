@@ -79,24 +79,6 @@ public class DefaultMarketAnnouncementRepository implements MarketAnnouncementRe
         }
     }
 
-    /**
-     * @see MarketAnnouncementRepository#findOneByRawId(String, String)
-     */
-    @Override
-    public MarketAnnouncement findOneByRawId(String marketKind, String rawMarketId) {
-        if (rawMarketId == null || rawMarketId.isBlank()) return null;
-        Long id;
-        try {
-            id = Long.parseLong(rawMarketId);
-        } catch (NumberFormatException nfe) {
-            // V1.0 schema: market_content_announcement.market_id is BIGINT;
-            // VARCHAR(36) UUID KB ids can never be stored here. Return null
-            // without touching the DB to keep graceful-degradation intact.
-            return null;
-        }
-        return findOne(marketKind, id);
-    }
-
     @Override
     public Page<MarketAnnouncement> listAllForKind(String marketKind, int page, int size) {
         int p = Math.max(page, 0);

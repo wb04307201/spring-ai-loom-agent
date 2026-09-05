@@ -2262,9 +2262,9 @@ const knowledge = {
         return;
       }
       // T19 fix-up 2: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
-      // 装饰到 row.announcement。KB 是 VARCHAR(36) UUID,findOneByRawId 对 UUID
-      // 走 graceful-degradation 返回 null (204),所以 UUID KB row 不会有 banner —
-      // 与「V1.0 schema 不支持 UUID 公告」的现状一致,不报错。
+      // 装饰到 row.announcement。KB 是 VARCHAR(36) UUID — B1 真修后
+      // market_content_announcement.market_id 也是 VARCHAR(36),直接查表,
+      // UUID KB 没公告时返 null → 204。
       if (
         window.MarketAdmin &&
         typeof window.MarketAdmin.listWithAnnouncements === "function"
