@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.skill;
 
+import cn.wubo.spring.ai.loom.agent.market.IMarketContentAdminService;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest;
@@ -7,6 +8,16 @@ import cn.wubo.spring.ai.loom.agent.model.UserSkill;
 
 import java.util.List;
 
+/**
+ * M3+ T3.1 — v1 skill market service interface. <b>Deprecated</b>: the generic
+ * {@link IMarketContentAdminService}<code>&lt;Long, MarketSkill, ...&gt;</code>
+ * (implemented by {@code DefaultSkillMarketService}) is the v2 path. This
+ * interface remains as a shim for 1 minor version per ADR-T03; once the
+ * call-site grep {@code ISkillMarketService} drops to 0, delete this file.
+ *
+ * @deprecated use {@link IMarketContentAdminService} via {@code DefaultSkillMarketService}
+ */
+@Deprecated
 public interface ISkillMarketService {
 
     /* ===== 市场浏览 ===== */

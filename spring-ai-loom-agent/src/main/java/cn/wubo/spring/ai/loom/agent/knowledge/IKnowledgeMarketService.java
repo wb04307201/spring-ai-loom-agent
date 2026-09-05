@@ -1,12 +1,20 @@
 package cn.wubo.spring.ai.loom.agent.knowledge;
 
+import cn.wubo.spring.ai.loom.agent.market.IMarketContentAdminService;
 import cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord;
 
 import java.util.List;
 
 /**
- * 知识库市场服务：起无审批流，提交即上架
+ * M3+ T3.1 — v1 knowledge market service interface. <b>Deprecated</b>: the
+ * generic {@link IMarketContentAdminService}<code>&lt;String, MarketKnowledgeRecord, ...&gt;</code>
+ * (implemented by {@code DefaultKnowledgeMarketService}) is the v2 path. This
+ * interface remains as a shim for 1 minor version per ADR-T03; once the
+ * call-site grep {@code IKnowledgeMarketService} drops to 0, delete this file.
+ *
+ * @deprecated use {@link IMarketContentAdminService} via {@code DefaultKnowledgeMarketService}
  */
+@Deprecated
 public interface IKnowledgeMarketService {
 
     /* ===== 市场浏览 ===== */
