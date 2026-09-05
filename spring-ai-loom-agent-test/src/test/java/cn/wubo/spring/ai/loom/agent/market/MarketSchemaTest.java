@@ -135,4 +135,27 @@ class MarketSchemaTest {
         assertNotNull(size);
         assertTrue(size >= 36);
     }
+
+    // Regression guard: ensure exactly 1 FK on market_id, no duplicate.
+    // The T1.1 first pass silently added a 2nd FK because DROP CONSTRAINT
+    // targeted the wrong name (CONSTRAINT_F is unrelated PK). Removing the
+    // unnecessary DROP/ADD block restores the original single FK.
+
+    @Test
+    void loomMarketKnowledgeStatsHasExactlyOneMarketIdFk() {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS " +
+            "WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_STATS' AND CONSTRAINT_TYPE='FOREIGN KEY'",
+            Integer.class);
+        assertEquals(1, n);
+    }
+
+    @Test
+    void loomMarketKnowledgeReviewHasExactlyOneMarketIdFk() {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS " +
+            "WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_REVIEW' AND CONSTRAINT_TYPE='FOREIGN KEY'",
+            Integer.class);
+        assertEquals(1, n);
+    }
 }
