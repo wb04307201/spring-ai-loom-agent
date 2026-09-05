@@ -457,6 +457,69 @@ class MarketAcceptanceIT {
                 "successful pull must increment pull_count; got " + count);
     }
 
+    /* ===== A11_async: scheduled flush path (no manual flush()) ===== */
+
+    /**
+     * M3+ T6.2 — verifies that {@code @Scheduled(fixedDelay = 30_000)} on
+     * {@link cn.wubo.spring.ai.loom.agent.market.BatchedCounterService#scheduledFlush()}
+     * actually drains pending increments to the DB within the 30s window.
+     *
+     * <p>Unlike A11 (which calls {@code batchedCounterService.flush()}
+     * manually for test determinism), this test deliberately <b>does not</b>
+     * invoke {@code flush()}; it relies on the scheduler thread to fire on
+     * its 30s tick. The test polls the DB every 1s for up to 40s and
+     * passes as soon as the row materializes.
+     *
+     * <p>Cost: up to ~40s added to the suite on the first invocation
+     * (subsequent runs reuse the application context and finish sooner
+     * if the scheduled tick already fired).
+     *
+     * <p>Disabled by default to keep the suite fast; enable with
+     * {@code -Dloom.async-flush.it=true}.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(
+            named = "LOOM_ASYNC_FLUSH_IT", matches = "true")
+    @DisplayName("A11_async — pull 触发 stat 并由 @Scheduled flush 落库 (无手动 flush)")
+    void a11_async_pullTriggersStatCounterAndScheduledFlushPersists() throws Exception {
+        String name = "a11-async-skill-" + System.nanoTime();
+        UserContextHolder.setCurrentUser(ADMIN_USER);
+        Long id = createSkillAdmin(name, null);
+        skillSvc.approve(id, ADMIN_USER);
+
+        // 起:无 stats row
+        Integer before = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM market_skill_stats WHERE market_skill_id = ?",
+                Integer.class, id);
+        assertEquals(0, before);
+
+        // 普通用户 pull — 触发 BatchedCounterService.increment(...)
+        UserContextHolder.setCurrentUser(NORMAL_USER);
+        ServerResponse pullResp = route(skillPublicRouter, "POST",
+                "/spring/ai/loom/market-skills/" + id + "/pull", null);
+        assertEquals(200, pullResp.statusCode().value());
+
+        // 不调 flush() — 等 @Scheduled tick 触发落库。
+        // schedule fixedDelay=30s,留 10s buffer → 最多等 40s。
+        Long count = null;
+        long deadline = System.currentTimeMillis() + 40_000L;
+        while (System.currentTimeMillis() < deadline) {
+            count = jdbc.query(
+                    "SELECT pull_count FROM market_skill_stats WHERE market_skill_id = ?",
+                    ps -> ps.setLong(1, id),
+                    rs -> rs.next() ? rs.getLong(1) : null);
+            if (count != null && count >= 1L) {
+                break;
+            }
+            Thread.sleep(1_000L);
+        }
+        assertNotNull(count,
+                "scheduled flush must persist pending increment within 40s; "
+                        + "row never materialized for market_skill_id=" + id);
+        assertTrue(count >= 1L,
+                "scheduled flush must yield pull_count >= 1; got " + count);
+    }
+
     /* ===== A12: KB search 触发 stat (高 QPS 不锁) ===== */
 
     @Test
