@@ -2785,10 +2785,26 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("error", "title 与 body 必填且不能为空"));
                 }
                 try {
-                    marketAnnouncementRepository.upsert("SKILL", id, body.title(), body.body());
+                    // R3: announcement repo 是 String-native(market_id 列 VARCHAR(36))—
+                    // skill 端仍解析 Long id(setFeaturedRank / skill service 保持 Long),
+                    // 仅公告仓储参数走 String.valueOf(id)。
+                    marketAnnouncementRepository.upsert("SKILL", String.valueOf(id), body.title(), body.body());
                     // 钉到顶部 — 999 让 list 排序自然把带公告的 Skill 置顶
                     svc.setFeaturedRank(id, 999, username);
-                    return ServerResponse.ok().body(marketAnnouncementRepository.findOne("SKILL", id));
+                    // R3 (a13): upsert 成功后必须确定性 200 — 不再 body(findOne(...)),
+                    // findOne 可能因并发/清理返回 null 导致 body(null) NPE → 500。
+                    // 回读命中则返回完整行(含 createdAt),否则用刚写入的值兜底。
+                    cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement saved =
+                            marketAnnouncementRepository.findOne("SKILL", String.valueOf(id));
+                    java.util.Map<String, Object> respBody = new java.util.HashMap<>();
+                    respBody.put("marketKind", "SKILL");
+                    respBody.put("marketId", String.valueOf(id));
+                    respBody.put("title", saved != null ? saved.title() : body.title());
+                    respBody.put("body", saved != null ? saved.body() : body.body());
+                    if (saved != null) {
+                        respBody.put("createdAt", saved.createdAt());
+                    }
+                    return ServerResponse.ok().body(respBody);
                 } catch (RuntimeException ex) {
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
                     log.warn("announcement upsert failed for skill {}: {}", id, msg, ex);
@@ -2812,7 +2828,7 @@ public class LoomAgentConfiguration {
                             "error", "id 必须是数字: " + request.pathVariable("id")));
                 }
                 try {
-                    marketAnnouncementRepository.delete("SKILL", id);
+                    marketAnnouncementRepository.delete("SKILL", String.valueOf(id));
                     svc.setFeaturedRank(id, 0, username);
                     return ServerResponse.ok().body(true);
                 } catch (RuntimeException ex) {
@@ -3140,7 +3156,7 @@ public class LoomAgentConfiguration {
                 }
                 try {
                     cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement ann =
-                            marketAnnouncementRepository.findOne("SKILL", id);
+                            marketAnnouncementRepository.findOne("SKILL", String.valueOf(id));
                     if (ann == null) {
                         return ServerResponse.noContent().build();
                     }
@@ -3423,10 +3439,10 @@ public class LoomAgentConfiguration {
             // （KB 端排序同样走 is_official DESC, featured_rank DESC, submitted_at DESC,
             // 999 让带公告的 KB 自然置顶）。
             //
-            // M3+ T1.4:KB id 是 VARCHAR(36) UUID,经 {@link cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge}
-            // parse 后直接传 String 给 announcementRepo 的 String overload;String overload
-            // 内部 Long.parseLong + NFE→404 graceful-degradation(UUID 永远不在 BIGINT
-            // announcement 表中)。删除 router 层的 Long.parseLong,真实 UUID 可达 service。
+            // M3+ T1.4 / R3:KB id 是 VARCHAR(36) UUID,经 {@link cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge}
+            // parse 后直接传 String 给 announcementRepo(String-native 单一 API,
+            // market_id 列 VARCHAR(36) — R3 删除了旧的 Long overload +
+            // parseMarketIdOrThrow graceful-degradation,UUID 是一等公民)。
             builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/announcement", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username))
@@ -3444,7 +3460,20 @@ public class LoomAgentConfiguration {
                     marketAnnouncementRepository.upsert("KNOWLEDGE", rawId, body.title(), body.body());
                     // KB 端 setFeaturedRank 接受 String(与 KB 的 VARCHAR(36) UUID 主键对齐)
                     svc.setFeaturedRank(rawId, 999, username);
-                    return ServerResponse.ok().body(marketAnnouncementRepository.findOne("KNOWLEDGE", rawId));
+                    // R3 (a13 对称): upsert 成功后必须确定性 200 — 不再 body(findOne(...)),
+                    // findOne 可能返回 null 导致 body(null) NPE → 500。回读命中则返回完整行,
+                    // 否则用刚写入的值兜底。
+                    cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement saved =
+                            marketAnnouncementRepository.findOne("KNOWLEDGE", rawId);
+                    java.util.Map<String, Object> respBody = new java.util.HashMap<>();
+                    respBody.put("marketKind", "KNOWLEDGE");
+                    respBody.put("marketId", rawId);
+                    respBody.put("title", saved != null ? saved.title() : body.title());
+                    respBody.put("body", saved != null ? saved.body() : body.body());
+                    if (saved != null) {
+                        respBody.put("createdAt", saved.createdAt());
+                    }
+                    return ServerResponse.ok().body(respBody);
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
@@ -3921,10 +3950,10 @@ public class LoomAgentConfiguration {
                     body.put("createdAt", ann.createdAt());
                     return ServerResponse.ok().body(body);
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
-                    // B1 真修后,UUID KB id 经 findOne(String, String) → parseMarketIdOrThrow
-                    // 抛 LoomAgentRuntimeException(404, "市场知识库不存在")。捕获并原样转 4xx
+                    // R3 后 findOne(String, String) 是 String-native 直查(UUID 一等公民),
+                    // 不再经 parseMarketIdOrThrow 抛 404 — 本 catch 保留为防御性兜底
                     // (与 kb stats / reviews 兄弟端点同款 graceful-degradation 契约 —
-                    // 不让 UUID 路径逃逸成 5xx)。
+                    // 不让 service 层 LoomAgentRuntimeException 逃逸成 5xx)。
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 } catch (RuntimeException ex) {

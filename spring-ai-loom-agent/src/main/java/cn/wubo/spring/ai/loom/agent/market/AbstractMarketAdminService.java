@@ -149,6 +149,13 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
      * 的 title / body 拉过来,rowMapper 通过列别名 {@code announcement_title} /
      * {@code announcement_body} 填充到 M record 的对应字段;无需 N+1 二次 GET。
      * Subclass 可重写本方法追加额外的 enrichment(例如 KB 的 tags 批量补齐)。
+     *
+     * <p>M3+ R3 — JOIN 条件用 {@code a.market_id = CAST(m.id AS VARCHAR(36))}:
+     * {@code market_content_announcement.market_id} 是 VARCHAR(36)(B1 真修),
+     * 而 SKILL 的 {@code m.id} 是 BIGINT。若直接 {@code a.market_id = m.id},H2
+     * 会把 VARCHAR 侧强转 BIGINT — 共享表里任何一条 KNOWLEDGE UUID 公告行都会
+     * 让 SKILL 的 list 查询抛 conversion error(跨 kind 打挂)。CAST 后两侧
+     * VARCHAR↔VARCHAR 比较,UUID 行天然不匹配 SKILL 的十进制 id,安全跳过。
      */
     @Override
     public Page<M> listPaged(MarketFilter filter) {
@@ -157,7 +164,7 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
                 .append(" FROM ").append(tableName()).append(" m")
                 .append(" LEFT JOIN market_content_announcement a")
                 .append("   ON a.market_kind = '").append(marketKind()).append("'")
-                .append("  AND a.market_id = m.id");
+                .append("  AND a.market_id = CAST(m.id AS VARCHAR(36))");
         appendCommonFiltersForM(sql, filter);
         sql.append(" ORDER BY ");
         switch (filter.sortBy()) {

@@ -7,19 +7,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * 集成测试: {@link DefaultMarketAnnouncementRepository} (T17)。
+ * 集成测试: {@link DefaultMarketAnnouncementRepository} (T17; M3+ R3 迁移)。
  * <p>
  * T3 声明 {@link MarketAnnouncementRepository} 接口,T7/T8 router 写了 forward refs
  * (由 T18 端点接入)。T17 给出具体实现 — 这套测试覆盖仓储层核心 4 方法:
  * upsert / findOne / delete / listAllForKind。
+ * <p>
+ * R3: 仓储是 String-native({@code market_id} 列 VARCHAR(36))— 所有 id 用
+ * String(十进制字符串模拟 skill,真 UUID 模拟 KB)。
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
-@DisplayName("DefaultMarketAnnouncementRepository IT — T17")
+@DisplayName("DefaultMarketAnnouncementRepository IT — T17 (R3 String-native)")
 class DefaultMarketAnnouncementRepositoryIT {
 
     @Autowired DefaultMarketAnnouncementRepository repo;
@@ -29,7 +34,7 @@ class DefaultMarketAnnouncementRepositoryIT {
     @Test
     @DisplayName("upsert 首次 INSERT + findOne 命中")
     void upsertThenFindOne() {
-        long id = 1001L;
+        String id = "1001";
         repo.upsert("SKILL", id, "title-A", "body-A");
         MarketAnnouncement one = repo.findOne("SKILL", id);
 
@@ -45,7 +50,7 @@ class DefaultMarketAnnouncementRepositoryIT {
     @Test
     @DisplayName("upsert 二次 UPDATE title/body,created_at 保留原值")
     void upsertSecondTimeUpdates() {
-        long id = 1002L;
+        String id = "1002";
         repo.upsert("SKILL", id, "v1", "v1-body");
         MarketAnnouncement first = repo.findOne("SKILL", id);
         assertNotNull(first);
@@ -63,8 +68,8 @@ class DefaultMarketAnnouncementRepositoryIT {
     @Test
     @DisplayName("upsert 不同 id 各自独立")
     void upsertDifferentIdsAreIndependent() {
-        long id1 = 1003L;
-        long id2 = 1004L;
+        String id1 = "1003";
+        String id2 = "1004";
         repo.upsert("SKILL", id1, "t1", "b1");
         repo.upsert("SKILL", id2, "t2", "b2");
 
@@ -76,7 +81,7 @@ class DefaultMarketAnnouncementRepositoryIT {
     @Test
     @DisplayName("upsert 不同 kind 同 id 各自独立 (PK = market_kind + market_id)")
     void upsertDifferentKindsAreIndependent() {
-        long id = 1005L;
+        String id = "1005";
         repo.upsert("SKILL", id, "sk-title", "sk-body");
         repo.upsert("KNOWLEDGE", id, "kb-title", "kb-body");
 
@@ -90,19 +95,36 @@ class DefaultMarketAnnouncementRepositoryIT {
         assertEquals("kb-title", kb.title());
     }
 
+    /** R3: KNOWLEDGE 真 UUID market_id — String-native 仓储一等公民路径。 */
+    @Test
+    @DisplayName("upsert/findOne KNOWLEDGE 真 UUID market_id (R3 String-native)")
+    void upsertKnowledgeUuid() {
+        String uuid = UUID.randomUUID().toString();
+        repo.upsert("KNOWLEDGE", uuid, "kb-uuid-title", "kb-uuid-body");
+
+        MarketAnnouncement one = repo.findOne("KNOWLEDGE", uuid);
+        assertNotNull(one);
+        assertEquals("KNOWLEDGE", one.marketKind());
+        assertEquals(uuid, one.marketId());
+        assertEquals("kb-uuid-title", one.title());
+
+        repo.delete("KNOWLEDGE", uuid);
+        assertNull(repo.findOne("KNOWLEDGE", uuid));
+    }
+
     /** findOne 不存在的 (kind, id) — 返回 null (Repository 风格,非 Optional)。 */
     @Test
     @DisplayName("findOne 不存在 → null")
     void findOneReturnsNullForMissing() {
-        assertNull(repo.findOne("SKILL", 99999999L));
+        assertNull(repo.findOne("SKILL", "99999999"));
     }
 
     /** delete — 删后 findOne 返回 null,不影响同 kind 其它行。 */
     @Test
     @DisplayName("delete 删除单行,不影响其它行")
     void deleteRemovesOnlyOneRow() {
-        long id1 = 1010L;
-        long id2 = 1011L;
+        String id1 = "1010";
+        String id2 = "1011";
         repo.upsert("SKILL", id1, "t1", "b1");
         repo.upsert("SKILL", id2, "t2", "b2");
 
@@ -126,9 +148,9 @@ class DefaultMarketAnnouncementRepositoryIT {
 
         long base = 2000L;
         for (int i = 0; i < 4; i++) {
-            repo.upsert(myKind, base + i, "sk-" + i, "body-" + i);
+            repo.upsert(myKind, String.valueOf(base + i), "sk-" + i, "body-" + i);
         }
-        repo.upsert(otherKind, base + 100, "kb-x", "kb-body");
+        repo.upsert(otherKind, String.valueOf(base + 100), "kb-x", "kb-body");
 
         Page<MarketAnnouncement> page = repo.listAllForKind(myKind, 0, 10);
         assertEquals(4L, page.total(), "total must equal my-kind row count exactly");
@@ -147,7 +169,7 @@ class DefaultMarketAnnouncementRepositoryIT {
 
         long base = 3000L;
         for (int i = 0; i < 5; i++) {
-            repo.upsert(myKind, base + i, "kb-" + i, "b-" + i);
+            repo.upsert(myKind, String.valueOf(base + i), "kb-" + i, "b-" + i);
         }
 
         Page<MarketAnnouncement> page = repo.listAllForKind(myKind, 0, 2);
@@ -161,7 +183,7 @@ class DefaultMarketAnnouncementRepositoryIT {
     @Test
     @DisplayName("闭环: upsert → findOne → listAllForKind 包含 → delete → findOne null")
     void fullLifecycleRoundTrip() {
-        long id = 9000L;
+        String id = "9000";
         repo.upsert("SKILL", id, "lifecycle", "end-to-end");
 
         MarketAnnouncement one = repo.findOne("SKILL", id);
@@ -169,7 +191,7 @@ class DefaultMarketAnnouncementRepositoryIT {
         assertEquals("lifecycle", one.title());
 
         Page<MarketAnnouncement> all = repo.listAllForKind("SKILL", 0, 100);
-        boolean found = all.items().stream().anyMatch(a -> id == a.marketId());
+        boolean found = all.items().stream().anyMatch(a -> id.equals(a.marketId()));
         assertEquals(true, found);
 
         repo.delete("SKILL", id);

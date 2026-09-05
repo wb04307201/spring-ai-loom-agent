@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 端到端验收:覆盖 spec § 12 A1-A15 + T1.4 fix-up (A16) + T1.6 fix-up (A17)。
+ * 端到端验收:覆盖 spec § 12 A1-A15 + T1.4 fix-up (A16) + T1.6 fix-up (A17, R3 迁移) + R3 跨 kind 回归 (A18)。
  *
  * <p>实现要点:
  * <ul>
@@ -51,7 +51,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>KB review 端(R2 / T1.7 gap 后)用<b>真实 UUID</b>
  *       ({@code UUID.randomUUID().toString()}) — review 链已泛型化为
  *       {@code <String>},UUID 直接绑 {@code VARCHAR(36)} 列走真路径
- *       (spec AT1);announcement 端在 R3 落地前仍保持既有行为。</li>
+ *       (spec AT1);announcement 端 R3 后同为 String-native 真路径(A17 迁移为
+ *       204,A18 覆盖跨 kind CAST join 回归)。</li>
  * </ul>
  *
  * <p>Status-code 与 spec 差异(以 binding context 为准):
@@ -65,7 +66,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ul>
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
-@DisplayName("Market Acceptance IT — A1-A17 (spec § 12 + T1.4/T1.6 fix-ups)")
+@DisplayName("Market Acceptance IT — A1-A18 (spec § 12 + T1.4/T1.6 fix-ups + R3)")
 class MarketAcceptanceIT {
 
     @Autowired DefaultSkillMarketService skillSvc;
@@ -620,11 +621,12 @@ class MarketAcceptanceIT {
             assertEquals(200, resp.statusCode().value());
         }
         // 兜底:直接 upsert 保证 DB 一定有行 (binding context 接受 router 偶发跳过)
-        annRepo.upsert("SKILL", id, "重要通知", "公告正文");
+        // R3: announcement repo 是 String-native(market_id VARCHAR(36))→ String.valueOf(id)
+        annRepo.upsert("SKILL", String.valueOf(id), "重要通知", "公告正文");
         skillSvc.setFeaturedRank(id, 999, ADMIN_USER);
 
         // announcement 行存在
-        MarketAnnouncement ann = annRepo.findOne("SKILL", id);
+        MarketAnnouncement ann = annRepo.findOne("SKILL", String.valueOf(id));
         assertNotNull(ann, "announcement row must be persisted");
         assertEquals("重要通知", ann.title());
 
@@ -779,65 +781,106 @@ class MarketAcceptanceIT {
         assertTrue(body.items().isEmpty(), "no review rows exist for this UUID → items empty");
     }
 
-    /* ===== A17: T1.6 fix-up regression — UUID KB id on GET /announcement must return 4xx, not 5xx ===== */
+    /* ===== A17: R3 迁移 — UUID KB id on GET /announcement flows the REAL String-native path: 204 ===== */
 
     /**
-     * Reviewer-reported regression (T1.6 round-1): after dropping
-     * {@code MarketAnnouncementRepository.findOneByRawId} and switching the
-     * public {@code GET /market-knowledge/{id}/announcement} router to call
-     * {@code findOne("KNOWLEDGE", idStr)}, the router still only had a
-     * generic {@code catch (RuntimeException)} block. For UUID KB ids, the
-     * {@code findOne(String, String)} default delegates to
-     * {@code parseMarketIdOrThrow(idStr)} which throws
-     * {@link cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException}
-     * (a {@code RuntimeException} subclass); the router then mapped it to
-     * 500 instead of the carried 404.
+     * R3 迁移:announcement 仓储 String-native 化之后(旧
+     * {@code findOneByRawId} / {@code parseMarketIdOrThrow} graceful-degradation
+     * 已删除),public {@code GET /market-knowledge/{UUID}/announcement} 直接
+     * {@code findOne("KNOWLEDGE", idStr)} 绑 VARCHAR(36) 列 — UUID 是一等公民。
+     * 无匹配公告行 → {@code null} → 路由返回 204 No Content(既有契约,brief
+     * 要求保持不变)。
      *
-     * <p>Mirror of A16 but for the announcement endpoint. Without the
-     * dedicated {@code catch (LoomAgentRuntimeException)} (matching the
-     * sibling {@code /reviews} and {@code /stats} routers' pattern), this
-     * test fires a UUID KB id and asserts the response status is in 2xx
-     * (empty 204 if KB exists with no announcement row, or 404 if service
-     * rejected) or 4xx — but NEVER 5xx.
-     *
-     * <p>The fix: announce route catches {@code LoomAgentRuntimeException}
-     * first, returns its carried status code, matching the established
-     * graceful-degradation pattern.
+     * <p>历史:T1.6 fix-up 时本用例断言 404("市场知识库不存在")— 那时
+     * String overload 内部 Long.parseLong 对 UUID 必炸。R3 之后该断言已过时,
+     * 迁移为 204(与 A16 的 R2 迁移同款),同时保留"NEVER 5xx"的核心守卫。
      */
     @Test
-    @DisplayName("A17 — GET /market-knowledge/{UUID}/announcement must return 4xx, not 5xx (T1.6 fix-up)")
-    void a17_uuidKbAnnouncementReturns4xxNot5xx() throws Exception {
+    @DisplayName("A17 — GET /market-knowledge/{UUID}/announcement → 204 (R3 String-native 真路径, never 5xx)")
+    void a17_uuidKbAnnouncementReturns204Not5xx() throws Exception {
         UserContextHolder.setCurrentUser(NORMAL_USER);
-        // Real UUID-shaped id — findOne(String, String) routes through
-        // parseMarketIdOrThrow → throws LoomAgentRuntimeException(404,
-        // "市场知识库不存在: id=...") because the BIGINT-origin column
-        // can never match a UUID.
+        // Real UUID-shaped id — market_id 列是 VARCHAR(36),UUID 直接查,无行 → null → 204。
         String fakeUuid = "00000000-0000-0000-0000-000000000002";
 
         ServerResponse resp = route(kbPublicRouter, "GET",
                 "/spring/ai/loom/market-knowledge/" + fakeUuid + "/announcement", null);
 
         int status = resp.statusCode().value();
-        assertTrue(status >= 200 && status < 500,
-                "UUID KB id on GET /announcement must produce a 2xx/3xx/4xx — "
-                        + "router must catch LoomAgentRuntimeException and map to 4xx (carried 404), "
-                        + "NOT let it escape as 5xx. got status=" + status);
+        assertTrue(status < 500,
+                "UUID KB id on GET /announcement must NEVER produce 5xx — "
+                        + "R3 String-native findOne 直查 VARCHAR(36),不再有 Long 强转。got status=" + status);
 
-        // Specifically: the canonical happy path here is 404 (not 5xx).
-        // Tighten the loose range to 4xx since 2xx/3xx are not realistic for
-        // a UUID that can never match the BIGINT-origin column.
-        assertEquals(404, status,
-                "UUID KB id on GET /announcement must produce 404 (service "
-                        + "LoomAgentRuntimeException(404) routed through), not a 2xx/3xx/5xx. "
-                        + "got status=" + status);
+        // Specifically: the canonical path is 204 No Content (findOne → null → noContent(),
+        // 既有 public-GET 契约,brief 要求保持不变)。
+        assertEquals(204, status,
+                "UUID KB id with no announcement row must produce 204 No Content "
+                        + "(findOne null → noContent()), not 4xx/5xx. got status=" + status);
+    }
 
-        // body should carry the service-level message
-        @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> body = (java.util.Map<String, Object>) ((org.springframework.web.servlet.function.EntityResponse<?>) resp).entity();
-        String error = (String) body.get("error");
-        assertNotNull(error, "error body must be present");
-        assertTrue(error.contains("市场知识库不存在"),
-                "error message must mention KB 不存在; got: " + error);
+    /* ===== A18: R3 跨 kind JOIN 回归 — KB UUID 公告行存在时 SKILL listPaged/search 不得炸 ===== */
+
+    /**
+     * R3 回归(spec AT2):{@code market_content_announcement} 是 SKILL / KNOWLEDGE
+     * 共享表,{@code market_id} 列 VARCHAR(36)。R3 前
+     * {@code AbstractMarketAdminService.listPaged} 的 LEFT JOIN 用
+     * {@code a.market_id = m.id} — SKILL 端 m.id 是 BIGINT,H2 把 VARCHAR 侧强转
+     * BIGINT,表里只要有一条 KNOWLEDGE UUID 公告行,SKILL 的 list 查询就抛
+     * conversion error(跨 kind 打挂)。R3 改成
+     * {@code a.market_id = CAST(m.id AS VARCHAR(36))},VARCHAR↔VARCHAR 比较,
+     * UUID 行安全跳过。
+     *
+     * <p>本用例:先 upsert 一条真 UUID 的 KNOWLEDGE 公告行,再跑 SKILL
+     * {@code listPaged} + {@code search}(admin 路由 GET list 也验 200),断言:
+     * <ol>
+     *   <li>不抛异常、返回 rows(无 conversion error);</li>
+     *   <li>带 SKILL 公告的 skill 行仍然内嵌 announcement_title / announcement_body
+     *       (T2.1 LEFT JOIN embed 不受 CAST 改动影响)。</li>
+     * </ol>
+     */
+    @Test
+    @DisplayName("A18 — KB UUID 公告行在场时 SKILL listPaged/search 200 + SKILL 公告仍内嵌 (R3 CAST join)")
+    void a18_crossKindUuidAnnouncementRowDoesNotBreakSkillListPaged() throws Exception {
+        UserContextHolder.setCurrentUser(ADMIN_USER);
+
+        // 1. 跨 kind 干扰行:真 UUID 的 KNOWLEDGE 公告(R3 前会让 SKILL join 抛
+        //    VARCHAR→BIGINT conversion error)
+        String kbUuid = UUID.randomUUID().toString();
+        annRepo.upsert("KNOWLEDGE", kbUuid, "kb-干扰公告", "kb-cross-kind-body");
+
+        // 2. 一条带 SKILL 公告的 skill 行
+        String name = "a18-skill-" + System.nanoTime();
+        Long id = createSkillAdmin(name, null);
+        skillSvc.approve(id, ADMIN_USER);
+        annRepo.upsert("SKILL", String.valueOf(id), "a18-公告标题", "a18-公告正文");
+
+        // 3. SKILL listPaged — 必须不抛异常且包含两行验证点
+        Page<MarketSkill> page = skillSvc.listPaged(new MarketFilter(
+                0, 200, MarketContentStatus.APPROVED, null, null, "official_rank"));
+        assertNotNull(page, "listPaged must not throw with a KB UUID announcement row present (R3 CAST join)");
+        MarketSkill row = page.items().stream()
+                .filter(s -> id.equals(s.id()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(row, "the approved a18 skill must be present in listPaged rows");
+        assertEquals("a18-公告标题", row.announcementTitle(),
+                "SKILL announcement must still embed via LEFT JOIN (T2.1) after the CAST change");
+        assertEquals("a18-公告正文", row.announcementBody());
+
+        // 4. search 同路径(listPaged 的 APPROVED wrapper)— 也不得炸
+        Page<MarketSkill> searched = skillSvc.search(name, null, 0, 50);
+        assertNotNull(searched);
+        assertTrue(searched.items().stream().anyMatch(s -> id.equals(s.id())),
+                "search must still find the a18 skill with the KB UUID row present");
+
+        // 5. admin 路由端到端 GET list → 200
+        ServerResponse listResp = route(skillAdminRouter, "GET",
+                "/spring/ai/loom/admin/market-skills?page=0&size=100", null);
+        assertEquals(200, listResp.statusCode().value(),
+                "admin SKILL list route must return 200 with a KB UUID announcement row in the shared table");
+
+        // cleanup:删掉干扰行,避免影响其它用例的 listAllForKind 计数
+        annRepo.delete("KNOWLEDGE", kbUuid);
+        annRepo.delete("SKILL", String.valueOf(id));
     }
 
     /* ===== helpers ===== */

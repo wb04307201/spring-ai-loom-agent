@@ -1,54 +1,27 @@
 package cn.wubo.spring.ai.loom.agent.market;
 
-import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
-
 /**
- * 市场内容公告仓储(M3+ T1.4)。
+ * 市场内容公告仓储(M3+ T1.4 / R3)。
  *
- * <p>保留两套主键形态 — 兼容 skill(BIGINT)与 KB (VARCHAR(36) UUID)两类内容:
- * <ul>
- *   <li>{@link Long} 主键版本 — skill 端既有调用方</li>
- *   <li>{@link String} 主键版本 — M3+ T1.4 新增,KB router 走
- *       {@code RouterIdParserKnowledge#parse} 后直接传 String,不预先
- *       {@code Long.parseLong};UUID 路径走 graceful-degradation
- *       (抛 {@link LoomAgentRuntimeException}(404))</li>
- * </ul>
+ * <p>R3 起本接口是 <b>String-native 单一 API</b>:B1 真修后
+ * {@code market_content_announcement.market_id} 列是 VARCHAR(36),SKILL
+ * (BIGINT 起源,以十进制字符串写入)与 KNOWLEDGE(UUID)共用同一列类型。
+ * 旧的 {@code Long} 主键 overload 与 {@code parseMarketIdOrThrow}
+ * graceful-degradation 全部删除 — 不再存在 Long↔VARCHAR 强转路径
+ * (AT2:跨 kind 行不会互相打挂;R3 修 a13 间歇 500 的根因)。
  *
- * <p>注意:本接口的 {@code market_id} 列是 BIGINT,KB 端 UUID 永远不会有匹配 row
- * — String 版本对 UUID 抛 404,与 review/stats 服务的 graceful-degradation 对齐。
+ * <p>SKILL 端调用方(router / service)仍持有 {@code Long id},在调用处
+ * {@code String.valueOf(id)} 转换后传入;skill 业务服务(setFeaturedRank 等)
+ * 保持 Long 主键不变。
  */
 public interface MarketAnnouncementRepository {
 
-    /* ===== Long 主键版本(skill / 既有调用方) ===== */
+    void upsert(String marketKind, String marketId, String title, String body);
 
-    void upsert(String marketKind, Long marketId, String title, String body);
-    void delete(String marketKind, Long marketId);
-    MarketAnnouncement findOne(String marketKind, Long marketId);
+    void delete(String marketKind, String marketId);
+
+    /** 找不到时返回 {@code null} — 调用方决定 404 / 204 / 默认值。 */
+    MarketAnnouncement findOne(String marketKind, String marketId);
 
     Page<MarketAnnouncement> listAllForKind(String marketKind, int page, int size);
-
-    /* ===== String 主键版本(M3+ T1.4:KB router 用) ===== */
-
-    default void upsert(String marketKind, String marketId, String title, String body) {
-        upsert(marketKind, parseMarketIdOrThrow(marketId), title, body);
-    }
-
-    default void delete(String marketKind, String marketId) {
-        delete(marketKind, parseMarketIdOrThrow(marketId));
-    }
-
-    default MarketAnnouncement findOne(String marketKind, String marketId) {
-        return findOne(marketKind, parseMarketIdOrThrow(marketId));
-    }
-
-    private static Long parseMarketIdOrThrow(String s) {
-        if (s == null || s.isBlank()) {
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + s);
-        }
-        try {
-            return Long.parseLong(s.trim());
-        } catch (NumberFormatException e) {
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + s);
-        }
-    }
 }

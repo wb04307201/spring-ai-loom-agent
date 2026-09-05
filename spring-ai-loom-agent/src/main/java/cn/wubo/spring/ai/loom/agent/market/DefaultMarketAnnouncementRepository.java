@@ -9,9 +9,13 @@ import java.util.List;
 /**
  * 市场公告仓储 — 面向 {@code market_content_announcement} (PK: market_kind, market_id)。
  *
- * <p>字段固定 — market_kind (VARCHAR(16), 'SKILL'|'KNOWLEDGE')、market_id (BIGINT)、
+ * <p>字段固定 — market_kind (VARCHAR(16), 'SKILL'|'KNOWLEDGE')、market_id (VARCHAR(36))、
  * title (VARCHAR(128))、body (TEXT)、created_at (TIMESTAMP)。upsert 用 H2
  * {@code MERGE INTO} (同 T16 / T17 review 的 upsert 风格),保持幂等。
+ *
+ * <p><b>M3+ R3 — String-native:</b> B1 真修后 {@code market_id} 列是 VARCHAR(36)
+ * (SKILL 十进制字符串 / KNOWLEDGE UUID 共用),绑定与读取一律走 String,
+ * 不再有 Long↔VARCHAR 强转(修 a13 间歇 500 + 跨 kind JOIN 强转炸裂的根因)。
  *
  * <p><b>findOne 返回 null:</b> 与 {@code Optional<...>} 不同,repository 直接返回
  * {@code null} 让调用方做存在性判断;不需要引入 {@code Optional}。{@code listAllForKind}
@@ -33,7 +37,7 @@ public class DefaultMarketAnnouncementRepository implements MarketAnnouncementRe
     /** 与 schema 字段顺序对齐 — market_kind, market_id, title, body, created_at。 */
     private static final RowMapper<MarketAnnouncement> ROW_MAPPER = (rs, n) -> new MarketAnnouncement(
             rs.getString(1),
-            rs.getLong(2),
+            rs.getString(2),
             rs.getString(3),
             rs.getString(4),
             rs.getTimestamp(5).toLocalDateTime()
@@ -52,7 +56,7 @@ public class DefaultMarketAnnouncementRepository implements MarketAnnouncementRe
      * schema DEFAULT {@code CURRENT_TIMESTAMP}。
      */
     @Override
-    public void upsert(String marketKind, Long marketId, String title, String body) {
+    public void upsert(String marketKind, String marketId, String title, String body) {
         jdbc.update(
                 "MERGE INTO " + TABLE + " (market_kind, market_id, title, body) " +
                         "KEY(market_kind, market_id) VALUES (?, ?, ?, ?)",
@@ -60,7 +64,7 @@ public class DefaultMarketAnnouncementRepository implements MarketAnnouncementRe
     }
 
     @Override
-    public void delete(String marketKind, Long marketId) {
+    public void delete(String marketKind, String marketId) {
         jdbc.update(
                 "DELETE FROM " + TABLE + " WHERE market_kind = ? AND market_id = ?",
                 marketKind, marketId);
@@ -68,7 +72,7 @@ public class DefaultMarketAnnouncementRepository implements MarketAnnouncementRe
 
     /** 找不到时返回 {@code null} — 调用方决定 404 vs 默认值。 */
     @Override
-    public MarketAnnouncement findOne(String marketKind, Long marketId) {
+    public MarketAnnouncement findOne(String marketKind, String marketId) {
         try {
             return jdbc.queryForObject(
                     "SELECT market_kind, market_id, title, body, created_at FROM " + TABLE +
