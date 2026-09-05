@@ -50,6 +50,18 @@ public record MarketSkill(
     public static MarketSkill from(ResultSet rs) throws SQLException {
         Timestamp submittedAt = rs.getTimestamp("submitted_at");
         Timestamp reviewedAt = rs.getTimestamp("reviewed_at");
+        // M3+ T2.1 — announcementTitle / announcementBody may be absent
+        // when the SELECT did not LEFT JOIN market_content_announcement
+        // (e.g. {@code getById} which reads the main table only). Probe
+        // via findColumn in a try/catch so the helper works for both
+        // joined and un-joined queries.
+        boolean annPresent;
+        try {
+            rs.findColumn("announcement_title");
+            annPresent = true;
+        } catch (java.sql.SQLException notFound) {
+            annPresent = false;
+        }
         return new MarketSkill(
                 rs.getLong("id"),
                 rs.getString("name"),
@@ -61,8 +73,8 @@ public record MarketSkill(
                 reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
                 rs.getString("reviewed_by"),
                 rs.getString("review_comment"),
-                rs.getString("announcement_title"),
-                rs.getString("announcement_body")
+                annPresent ? rs.getString("announcement_title") : null,
+                annPresent ? rs.getString("announcement_body") : null
         );
     }
 }

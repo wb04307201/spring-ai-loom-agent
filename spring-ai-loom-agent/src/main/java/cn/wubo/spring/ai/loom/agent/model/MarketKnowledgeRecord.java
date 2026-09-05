@@ -56,6 +56,19 @@ public record MarketKnowledgeRecord(
     public static MarketKnowledgeRecord from(ResultSet rs) throws SQLException {
         Timestamp submittedAt = rs.getTimestamp("submitted_at");
         Timestamp reviewedAt = rs.getTimestamp("reviewed_at");
+        // M3+ T2.1 — announcement fields present only when the SELECT
+        // LEFT JOINed market_content_announcement; tags is currently
+        // always null from this factory and is filled by listPaged's
+        // batch SELECT follow-up. Use findColumn to detect the joined
+        // columns so the helper works for both joined and un-joined
+        // queries.
+        boolean annPresent;
+        try {
+            rs.findColumn("announcement_title");
+            annPresent = true;
+        } catch (java.sql.SQLException notFound) {
+            annPresent = false;
+        }
         return new MarketKnowledgeRecord(
                 rs.getString("id"),
                 rs.getString("username"),
@@ -66,8 +79,8 @@ public record MarketKnowledgeRecord(
                 reviewedAt == null ? null : reviewedAt.toLocalDateTime(),
                 rs.getString("reviewed_by"),
                 rs.getString("review_comment"),
-                rs.getString("announcement_title"),
-                rs.getString("announcement_body"),
+                annPresent ? rs.getString("announcement_title") : null,
+                annPresent ? rs.getString("announcement_body") : null,
                 null);
     }
 }

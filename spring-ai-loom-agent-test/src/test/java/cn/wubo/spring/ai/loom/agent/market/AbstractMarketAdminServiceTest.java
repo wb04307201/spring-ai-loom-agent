@@ -45,6 +45,11 @@ class AbstractMarketAdminServiceTest {
         }
 
         @Override
+        protected String marketKind() {
+            return "SKILL";
+        }
+
+        @Override
         protected RowMapper<FakeEntry> rowMapper() {
             return (rs, n) -> new FakeEntry(
                 rs.getLong("id"),
