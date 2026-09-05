@@ -83,4 +83,18 @@ public record MarketKnowledgeRecord(
                 annPresent ? rs.getString("announcement_body") : null,
                 null);
     }
+
+    /**
+     * M3+ R4 (AT2 follow-up, change 1) — copy-helper:返回一个仅 {@code tags}
+     * 字段不同的新 record,其余 11 个字段原样保留。
+     * {@code DefaultKnowledgeMarketService.listPaged} 用它把批量 tag SELECT
+     * 的结果写回页面行(空 tag 时传 {@code List.of()},不允许 null)。
+     */
+    public MarketKnowledgeRecord withTags(List<String> newTags) {
+        return new MarketKnowledgeRecord(
+                id, username, name, description, status,
+                submittedAt, reviewedAt, reviewedBy, reviewComment,
+                announcementTitle, announcementBody,
+                newTags == null ? List.of() : List.copyOf(newTags));
+    }
 }

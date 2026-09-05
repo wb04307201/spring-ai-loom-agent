@@ -167,6 +167,18 @@ class KnowledgeMarketIntegrationTest {
                 PRIMARY KEY (role_code, market_knowledge_id)
                 )
                 """);
+
+        // M3+ R4: DefaultKnowledgeMarketService.listApproved / listPaged now embed
+        // tags via one batch SELECT on loom_market_knowledge_tag — mirror the real
+        // V1.0 schema table so this hand-built test schema stays complete.
+        jdbcTemplate.execute("""
+                CREATE TABLE loom_market_knowledge_tag (
+                market_id VARCHAR(36) NOT NULL,
+                tag VARCHAR(64) NOT NULL,
+                PRIMARY KEY (market_id, tag),
+                FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+                )
+                """);
     }
 
     // ===== Main Flow Test =====

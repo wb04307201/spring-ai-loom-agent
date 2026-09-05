@@ -52,7 +52,9 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
     /**
      * 市场条目种类 — 决定 {@link #listPaged} 用什么值关联
      * {@code market_content_announcement.market_kind} 列。
-     * 返回 {@code "SKILL"} 或 {@code "KB"}。
+     * 返回 canonical 值 {@code "SKILL"} 或 {@code "KNOWLEDGE"}
+     * (M3+ R4:必须与 announcement 写入端使用的 kind 字符串完全一致 —
+     * 历史 KB 端返回 {@code "KB"} 导致 join 永不匹配,已修)。
      */
     protected abstract String marketKind();
 

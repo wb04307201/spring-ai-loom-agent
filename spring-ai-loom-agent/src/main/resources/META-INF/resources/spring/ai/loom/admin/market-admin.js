@@ -706,11 +706,10 @@
   /**
    * M3+ T2.2 — listWithTags has been removed for the same reason as
    * listWithAnnouncements: KB list DTO embeds `tags: string[]` from
-   * the batch tag SELECT (T2.1 follow-up). Call sites should read
-   * `row.tags` directly from the list response. For now the
-   * MarketKnowledgeRecord.tags field is null until the batch tag
-   * SELECT is wired (separate task); frontend should treat
-   * `row.tags` as an optional array.
+   * the batch tag SELECT (M3+ R4 / AT2 follow-up — now wired in
+   * DefaultKnowledgeMarketService.listPaged). Call sites should read
+   * `row.tags` directly from the list response (v2 listPaged/search
+   * routes); it is an empty array — never null — for KBs without tags.
    */
 
   /**

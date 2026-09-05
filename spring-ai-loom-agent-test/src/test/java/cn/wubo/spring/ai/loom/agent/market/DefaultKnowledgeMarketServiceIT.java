@@ -2,10 +2,14 @@ package cn.wubo.spring.ai.loom.agent.market;
 
 import cn.wubo.spring.ai.loom.agent.LoomAgentTestApplication;
 import cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService;
+import cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService;
+import cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -20,6 +24,8 @@ class DefaultKnowledgeMarketServiceIT {
 
     @Autowired DefaultKnowledgeMarketService svc;
     @Autowired JdbcTemplate jdbc;
+    @Autowired MarketAnnouncementRepository annRepo;
+    @Autowired KnowledgeTagService tagService;
 
     @Test
     void createAppendsRowToMarketKnowledge() {
@@ -63,5 +69,131 @@ class DefaultKnowledgeMarketServiceIT {
         svc.setOfficial(id, true, "admin1");
         Boolean official = jdbc.queryForObject("SELECT is_official FROM loom_market_knowledge WHERE id=?", Boolean.class, id);
         assertEquals(true, official);
+    }
+
+    /* ===== M3+ R4 (AT2 follow-up): announcement embed (change 0) + tags embed (change 1) ===== */
+
+    /**
+     * RED-GREEN for change 0 (marketKind() "KB" → "KNOWLEDGE").
+     * Seeds a KB (real UUID) via the service, upserts an announcement with the
+     * canonical kind "KNOWLEDGE" (same as the KB announcement routers use), then
+     * calls listPaged. Before the fix, the join filter a.market_kind='KB' never
+     * matches the 'KNOWLEDGE' row → announcementTitle/Body are null → FAIL.
+     * After the fix → PASS.
+     */
+    @Test
+    void listPagedEmbedsAnnouncementForKnowledgeKind() {
+        String category = "r4-ann-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(
+            "r4-ann-" + System.nanoTime(), "d", "c", category
+        )).id();
+        annRepo.upsert("KNOWLEDGE", id, "r4-title", "r4-body");
+
+        MarketKnowledgeRecord row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row, "seeded KB must appear in listPaged page");
+        assertEquals("r4-title", row.announcementTitle());
+        assertEquals("r4-body", row.announcementBody());
+    }
+
+    /** Change 1: tags embedded via ONE batch SELECT — exact match, stable order. */
+    @Test
+    void listPagedEmbedsTagsExactly() {
+        String category = "r4-tags-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(
+            "r4-tags-" + System.nanoTime(), "d", "c", category
+        )).id();
+        tagService.replaceTags(KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id,
+            List.of("spring", "java", "rag"));
+
+        MarketKnowledgeRecord row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row);
+        // KnowledgeTagService.listTags orders by tag ASC — embed must be consistent
+        assertEquals(List.of("java", "rag", "spring"), row.tags());
+        assertEquals(tagService.listTags(KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id), row.tags());
+    }
+
+    /** Change 1: a KB with NO tags returns tags() == empty list, NOT null. */
+    @Test
+    void listPagedReturnsEmptyTagListWhenNoTags() {
+        String category = "r4-notags-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(
+            "r4-notags-" + System.nanoTime(), "d", "c", category
+        )).id();
+
+        MarketKnowledgeRecord row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row);
+        assertNotNull(row.tags(), "tags must be empty list, never null");
+        assertTrue(row.tags().isEmpty());
+    }
+
+    /** Change 0 + 1 coexist: one KB row carries announcement AND tags after listPaged. */
+    @Test
+    void listPagedEmbedsAnnouncementAndTagsInSameRow() {
+        String category = "r4-both-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(
+            "r4-both-" + System.nanoTime(), "d", "c", category
+        )).id();
+        annRepo.upsert("KNOWLEDGE", id, "both-title", "both-body");
+        tagService.replaceTags(KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id,
+            List.of("kb", "market"));
+
+        MarketKnowledgeRecord row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row);
+        assertEquals("both-title", row.announcementTitle());
+        assertEquals("both-body", row.announcementBody());
+        assertEquals(List.of("kb", "market"), row.tags());
+    }
+
+    /** search() delegates to listPaged in the base — override must cover it too. */
+    @Test
+    void searchEmbedsTagsAndAnnouncement() {
+        String name = "r4-search-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(name, "d", "c", null)).id();
+        svc.approve(id, "admin1");
+        annRepo.upsert("KNOWLEDGE", id, "s-title", "s-body");
+        tagService.replaceTags(KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id, List.of("search-tag"));
+
+        MarketKnowledgeRecord row = findInPage(svc.search(name, null, 0, 50), id);
+
+        assertNotNull(row);
+        assertEquals("s-title", row.announcementTitle());
+        assertEquals(List.of("search-tag"), row.tags());
+    }
+
+    /**
+     * Change 2: the user chat market tab (app.js _renderMarketTab) reads
+     * v1 GET /api/knowledge-market → listApproved, and renders row.tags —
+     * so listApproved must embed tags too (single batch SELECT, same helper).
+     */
+    @Test
+    void listApprovedEmbedsTags() {
+        String name = "r4-appr-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(name, "d", "c", null)).id();
+        svc.approve(id, "admin1");
+        tagService.replaceTags(KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id,
+            List.of("v1-tag-b", "v1-tag-a"));
+
+        MarketKnowledgeRecord row = svc.listApproved(1, 100).stream()
+            .filter(r -> id.equals(r.id()))
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(row, "approved KB must appear in listApproved");
+        assertEquals(List.of("v1-tag-a", "v1-tag-b"), row.tags());
+    }
+
+    private static MarketKnowledgeRecord findInPage(Page<MarketKnowledgeRecord> page, String id) {
+        return page.items().stream()
+            .filter(r -> id.equals(r.id()))
+            .findFirst()
+            .orElse(null);
     }
 }

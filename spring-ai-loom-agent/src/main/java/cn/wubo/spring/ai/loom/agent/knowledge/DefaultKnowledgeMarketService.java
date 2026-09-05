@@ -4,7 +4,9 @@ import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService;
 import cn.wubo.spring.ai.loom.agent.market.MarketContentStatus;
 import cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest;
+import cn.wubo.spring.ai.loom.agent.market.MarketFilter;
 import cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest;
+import cn.wubo.spring.ai.loom.agent.market.Page;
 import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.model.MarketKnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.user.IUser;
@@ -18,7 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -68,9 +73,17 @@ public class DefaultKnowledgeMarketService
         return "loom_market_knowledge";
     }
 
+    /**
+     * M3+ R4 (AT2 follow-up, change 0) — 返回 canonical kind {@code "KNOWLEDGE"}
+     * (与 KB announcement router 写入 {@code market_content_announcement.market_kind}
+     * 的值、以及 {@link cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService#MARKET_KIND_KNOWLEDGE}
+     * 一致)。历史值 {@code "KB"} 让 {@code listPaged} 的 JOIN 过滤
+     * {@code a.market_kind='KB'} 永远匹配不到 {@code 'KNOWLEDGE'} 公告行 —
+     * KB 列表 DTO 从未嵌入过公告。Skill 端 {@code "SKILL"} 一直正确,未动。
+     */
     @Override
     protected String marketKind() {
-        return "KB";
+        return "KNOWLEDGE";
     }
 
     @Override
@@ -165,14 +178,85 @@ public class DefaultKnowledgeMarketService
 
     /* ===== 市场浏览 ===== */
 
+    /**
+     * M3+ R4 (AT2 follow-up, change 1) — override 基类 {@code listPaged},在
+     * announcement LEFT JOIN(基类 T2.1/R3)之上再补齐 {@code tags}:对当前页的
+     * 全部 id 做 <b>单次批量 SELECT</b>(NOT per-row N+1),Java 侧按
+     * {@code market_id} 分组成 {@code Map<String, List<String>>},然后用
+     * {@link MarketKnowledgeRecord#withTags(List)} 重建每行 — 无 tag 的 KB 得到
+     * {@code List.of()}(永远非 null)。
+     *
+     * <p>tag 排序 {@code ORDER BY tag ASC} 与
+     * {@link cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService#listTags}
+     * (per-id 端点)一致,保证列表嵌入与详情端点展示相同顺序。
+     * H2 无 GROUP_CONCAT/LISTAGG 可移植写法 → 不用 SQL 聚合。
+     *
+     * <p>基类 {@code search(query, category, page, size)} 委派到 {@code listPaged}
+     * (见 {@link AbstractMarketAdminService#search}),故本 override 同时覆盖
+     * admin 列表、公开列表与搜索三条路径。分页元数据(total/page/size)原样保留。
+     *
+     * <p>wiring:直接用已注入的 {@code jdbcTemplate}(brief 首选路线)— 避免为
+     * {@code KnowledgeTagService} 增加构造器依赖与 LoomAgentConfiguration bean
+     * 接线变更。tag 表 {@code loom_market_knowledge_tag(market_id, tag)} 本身就是
+     * KB 专属(无 market_kind 列),无需 kind 过滤。
+     */
+    @Override
+    public Page<MarketKnowledgeRecord> listPaged(MarketFilter filter) {
+        Page<MarketKnowledgeRecord> page = super.listPaged(filter);
+        return new Page<>(embedTags(page.items()), page.total(), page.page(), page.size());
+    }
+
+    /**
+     * M3+ R4 (change 2) — 单次批量 tag SELECT + Java 侧分组 +
+     * {@link MarketKnowledgeRecord#withTags(List)} 重建,供 {@link #listPaged}
+     * 与 {@link #listApproved} 共用。无 tag 的行得到空 list(非 null)。
+     * 空输入 / 全 null id 时原样返回,不发 SQL。
+     */
+    private List<MarketKnowledgeRecord> embedTags(List<MarketKnowledgeRecord> rows) {
+        List<String> ids = rows.stream()
+                .map(MarketKnowledgeRecord::id)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (ids.isEmpty()) {
+            return rows;
+        }
+        String placeholders = String.join(", ", Collections.nCopies(ids.size(), "?"));
+        List<Object> args = new ArrayList<>(ids);
+        Map<String, List<String>> tagsById = new LinkedHashMap<>();
+        jdbcTemplate.query(
+                "SELECT market_id, tag FROM loom_market_knowledge_tag " +
+                        "WHERE market_id IN (" + placeholders + ") " +
+                        "ORDER BY market_id ASC, tag ASC",
+                rs -> {
+                    tagsById.computeIfAbsent(rs.getString("market_id"), k -> new ArrayList<>())
+                            .add(rs.getString("tag"));
+                },
+                args.toArray());
+        return rows.stream()
+                .map(r -> r.withTags(tagsById.getOrDefault(r.id(), List.of())))
+                .toList();
+    }
+
+    /**
+     * M3+ R4 (change 2) — 用户端聊天面板的「知识库市场」tab(app.js
+     * {@code _renderMarketTab})实际调用的是本 v1 端点
+     * ({@code GET /spring/ai/loom/api/knowledge-market}),且读取
+     * {@code row.tags} 渲染 tag chips / 聚合过滤栏 — 按 brief 的条件分支
+     * ("do NOT add tags there unless the market tab demonstrably reads one of
+     * them")在此也嵌入 tags。仍然是单次批量 SELECT(embedTags),无 N+1。
+     * <p>
+     * announcement 字段在 v1 bare {@code SELECT *} 下保持 null(v1 契约遗留,
+     * admin/公开 v2 路由走 listPaged 已带公告);listMySubmitted / listMyPulled /
+     * listAllForAdmin 未动(market tab 不读取其 tags)。
+     */
     @Override
     public List<MarketKnowledgeRecord> listApproved(int page, int size) {
         if (page < 1) page = 1;
         if (size < 1) size = 20;
         int offset = (page - 1) * size;
-        return jdbcTemplate.query(
+        return embedTags(jdbcTemplate.query(
                 "SELECT * FROM loom_market_knowledge WHERE status = 'APPROVED' ORDER BY reviewed_at DESC, submitted_at DESC LIMIT ? OFFSET ?",
-                this::mapMarketKnowledgeRecord, size, offset);
+                this::mapMarketKnowledgeRecord, size, offset));
     }
 
     @Override
