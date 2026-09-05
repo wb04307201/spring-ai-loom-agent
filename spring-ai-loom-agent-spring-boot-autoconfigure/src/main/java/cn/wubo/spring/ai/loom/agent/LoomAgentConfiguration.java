@@ -3152,7 +3152,7 @@ public class LoomAgentConfiguration {
          * 和 {@code /reviews/{username}}（DELETE — 走 {@link cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService}），
          * 共 3 个端点。
          * <p>
-         * TODO T8.7 refactor: T7 + T8 router 9 个 handler 高度对称(id 解析 + admin check + try/catch),
+         * TODO T8.7 refactor (M3+ plan T3.2): T7 + T8 router 9 个 handler 高度对称(id 解析 + admin check + try/catch),
          * 唯一真正差异是 id 类型(String vs Long)与 service 类型。可抽
          * {@code private static <M, S> RouterFunctions.Builder marketAdminRoutes(
          *     String prefix, S svc, IMarketAdminOps<M> ops, Function<String, ?> idParser)}
