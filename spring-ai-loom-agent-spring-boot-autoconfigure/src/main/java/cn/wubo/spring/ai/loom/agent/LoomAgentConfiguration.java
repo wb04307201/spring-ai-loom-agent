@@ -3167,7 +3167,12 @@ public class LoomAgentConfiguration {
                 IUser user,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
-                @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
+                @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository,
+                // M3+ T1.4: KB router 走 RouterIdParserKnowledge 把 path-variable 解析为
+                // String(KB 主键是 VARCHAR(36) UUID,不允许 Long.parseLong)。
+                // review/stats/announcement 服务的 String overload 内部再做
+                // Long.parseLong + graceful-degradation(UUID → 404)。
+                cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge kbIdParser) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 8.1 列出所有（含 PENDING / APPROVED / REJECTED，按 MarketFilter 分页 + 排序）
@@ -3381,27 +3386,18 @@ public class LoomAgentConfiguration {
             });
             // T18: admin 写入/覆盖公告 — announcement upsert + 把 featured_rank 钉到 999
             // （KB 端排序同样走 is_official DESC, featured_rank DESC, submitted_at DESC,
-            // 999 让带公告的 KB 自然置顶）。KB id 是 VARCHAR(36) UUID,但
-            // announcementRepo.upsert 取 Long marketId — 走 graceful-degradation pattern:
-            // Long.parseLong(UUID) 抛 NFE → 返回 4xx,真实 KB UUID 永远到不了 service。
-            // 仅"可解析为数字"的测试 KB id 才能拿到公告能力。
+            // 999 让带公告的 KB 自然置顶）。
+            //
+            // M3+ T1.4:KB id 是 VARCHAR(36) UUID,经 {@link cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge}
+            // parse 后直接传 String 给 announcementRepo 的 String overload;String overload
+            // 内部 Long.parseLong + NFE→404 graceful-degradation(UUID 永远不在 BIGINT
+            // announcement 表中)。删除 router 层的 Long.parseLong,真实 UUID 可达 service。
             builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/announcement", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username))
                     return ServerResponse.status(HttpStatus.FORBIDDEN)
                             .body(java.util.Map.of("error", "无权限"));
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 cn.wubo.spring.ai.loom.agent.market.AnnouncementBody body =
                         request.body(cn.wubo.spring.ai.loom.agent.market.AnnouncementBody.class);
                 if (body == null || body.title() == null || body.title().isBlank()
@@ -3410,13 +3406,16 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("error", "title 与 body 必填且不能为空"));
                 }
                 try {
-                    marketAnnouncementRepository.upsert("KNOWLEDGE", id, body.title(), body.body());
+                    marketAnnouncementRepository.upsert("KNOWLEDGE", rawId, body.title(), body.body());
                     // KB 端 setFeaturedRank 接受 String(与 KB 的 VARCHAR(36) UUID 主键对齐)
-                    svc.setFeaturedRank(idStr, 999, username);
-                    return ServerResponse.ok().body(marketAnnouncementRepository.findOne("KNOWLEDGE", id));
+                    svc.setFeaturedRank(rawId, 999, username);
+                    return ServerResponse.ok().body(marketAnnouncementRepository.findOne("KNOWLEDGE", rawId));
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 } catch (RuntimeException ex) {
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
-                    log.warn("announcement upsert failed for kb {}: {}", idStr, msg, ex);
+                    log.warn("announcement upsert failed for kb {}: {}", rawId, msg, ex);
                     return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(java.util.Map.of("error", msg));
                 }
@@ -3428,25 +3427,17 @@ public class LoomAgentConfiguration {
                 if (!user.isAdmin(username))
                     return ServerResponse.status(HttpStatus.FORBIDDEN)
                             .body(java.util.Map.of("error", "无权限"));
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
-                try {
-                    marketAnnouncementRepository.delete("KNOWLEDGE", id);
-                    svc.setFeaturedRank(idStr, 0, username);
+                    marketAnnouncementRepository.delete("KNOWLEDGE", rawId);
+                    svc.setFeaturedRank(rawId, 0, username);
                     return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 } catch (RuntimeException ex) {
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
-                    log.warn("announcement delete failed for kb {}: {}", idStr, msg, ex);
+                    log.warn("announcement delete failed for kb {}: {}", rawId, msg, ex);
                     return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(java.util.Map.of("error", msg));
                 }
@@ -3458,25 +3449,14 @@ public class LoomAgentConfiguration {
                 if (!user.isAdmin(admin))
                     return ServerResponse.status(HttpStatus.FORBIDDEN)
                             .body(java.util.Map.of("error", "无权限"));
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 String targetUser = request.pathVariable("username");
                 if (targetUser == null || targetUser.isBlank()) {
                     return ServerResponse.badRequest()
                             .body(java.util.Map.of("error", "username 路径变量不能为空"));
                 }
                 try {
-                    kbReviewService.deleteAsAdmin(id, targetUser);
+                    kbReviewService.deleteAsAdmin(rawId, targetUser);
                     return ServerResponse.ok().body(true);
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
@@ -3485,43 +3465,37 @@ public class LoomAgentConfiguration {
             });
 
             // T16: admin 重置 market_knowledge 的 search_count / last_searched_at。
-            // 与 Skill 端 stats-reset 镜像;id 是 VARCHAR(36) UUID 但 stats PK 是 BIGINT
-            // (V1.0 schema mismatch),所以 path-variable 解析成 Long 与 stats 表 PK 对齐。
+            // 与 Skill 端 stats-reset 镜像。
+            // M3+ T1.4:KB id 经 RouterIdParserKnowledge parse 后直接传 String 给
+            // kbStatsService String overload;UUID 路径走 graceful-degradation
+            // (抛 404 — stats 表 BIGINT PK 与 KB UUID 不兼容)。
             builder.PUT("spring/ai/loom/admin/market-knowledge/{id}/stats-reset", request -> {
                 String username = UserContextHolder.getCurrentUser();
                 if (!user.isAdmin(username))
                     return ServerResponse.status(HttpStatus.FORBIDDEN)
                             .body(java.util.Map.of("error", "无权限"));
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 java.util.Map<String, Object> body = request.body(java.util.Map.class);
                 long newCount = 0L;
                 if (body != null && body.get("count") instanceof Number n) {
                     newCount = n.longValue();
                 }
                 try {
-                    kbStatsService.resetStats(id, newCount, null);
-                    cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(id);
+                    kbStatsService.resetStats(rawId, newCount, null);
+                    cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(rawId);
                     // HashMap (not Map.of) — lastAt can be null after reset.
                     java.util.Map<String, Object> statsBody = new java.util.HashMap<>();
                     statsBody.put("id", row.marketId());
                     statsBody.put("searchCount", row.pullCountOrSearchCount());
                     statsBody.put("lastAt", row.lastAt());
                     return ServerResponse.ok().body(statsBody);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 } catch (RuntimeException ex) {
                     // null-safe: getMessage() can be null, and Map.of rejects null values.
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
-                    log.warn("stats-reset failed for kb {}: {}", id, msg, ex);
+                    log.warn("stats-reset failed for kb {}: {}", rawId, msg, ex);
                     return ServerResponse.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(java.util.Map.of("error", msg));
                 }
@@ -3637,7 +3611,10 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService kbReviewService,
-                @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
+                @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository,
+                // M3+ T1.4: 同 admin router — KB id 是 VARCHAR(36) UUID,
+                // review/stats 服务的 String overload 走 graceful-degradation。
+                cn.wubo.spring.ai.loom.agent.knowledge.RouterIdParserKnowledge kbIdParser) {
             RouterFunctions.Builder builder = RouterFunctions.route();
 
             // 10.1 公开 list(APPROVED only) — MarketFilter.status 强制 APPROVED,防止 leak PENDING/REJECTED。
@@ -3778,25 +3755,18 @@ public class LoomAgentConfiguration {
             // (rows=0 → 返回 0),不创建 phantom pull 占用 source='MARKET_PULLED' 配额。
             // 完整 KB search stat(loom_market_knowledge_stats)由 T16 接线。
             //
-            // T16 接线 (fix-up B1): access 成功后,把 KB id 试 parseLong 自增 search_count。
-            // 由于 V1.0 schema 里 loom_market_knowledge.id 是 VARCHAR(36) UUID 而 stats 表 PK
-            // 是 BIGINT (详见 DefaultKnowledgeStatsService),String id 大概率 parse 失败 —
-            // 此时 incrementStat 内部 NumberFormatException 会被 catch,只 log WARN 不上抛,
-            // access 主路径不受影响。schema migration 落地后这条会自然开始计数。
+            // M3+ T1.4:access 成功后把 KB id 走 RouterIdParserKnowledge + kbStatsService.incrementStat(String);
+            // UUID 路径由 String overload 内部静默跳过(no-op,best-effort),access 主路径不受影响。
+            // 删掉 router 层的 Long.parseLong + try/catch 样板代码,语义不变。
             builder.POST("spring/ai/loom/market-knowledge/{id}/access", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                String id = request.pathVariable("id");
-                if (id == null || id.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of("error", "id 不能为空"));
-                }
+                String id = kbIdParser.parse(request.pathVariable("id"));
                 try {
                     long newCount = kbSvc.access(username, id);
-                    // KB search stat 接线:parse + increment 必须不阻塞主路径 — 失败仅 WARN,不重抛
+                    // KB search stat 接线:String overload 内部 UUID 静默跳过,异常仍上抛
+                    // 但不会阻塞主路径(原 try/catch RuntimeException 保留)。
                     try {
-                        Long marketId = Long.parseLong(id);
-                        kbStatsService.incrementStat(marketId, "SEARCH");
-                    } catch (NumberFormatException nfe) {
-                        log.debug("KB access stats skipped — id={} is not a Long market_id", id);
+                        kbStatsService.incrementStat(id, "SEARCH");
                     } catch (RuntimeException statEx) {
                         log.warn("KB access stats increment failed for kb {}: {}", id, statEx.getMessage());
                     }
@@ -3813,23 +3783,13 @@ public class LoomAgentConfiguration {
             // 该 KB(loom_user_knowledge.access_count >= 1),否则由 kbReviewService.submit
             // 抛 LoomAgentRuntimeException(403, "请先访问过该知识库再评")。路由层把 statusCode
             // 原样转发,前端可在 403 时引导用户先去搜/读 KB 再来评。
-            // KB id 是 VARCHAR(36) UUID,但 kbReviewService.submit 接受 Long marketId;
-            // 走 graceful-degradation:Long.parseLong(UUID) 抛 NFE → 4xx,真实 UUID 进不到
-            // service。仅"可解析为数字"的测试 KB id 能走通 submit 路径。
+            //
+            // M3+ T1.4: KB id 经 RouterIdParserKnowledge parse 后直接传 String 给
+            // kbReviewService String overload;UUID → 抛 404 "市场知识库不存在",
+            // numeric id → Long 路径走 submit 业务逻辑(严门槛 / MERGE INTO upsert)。
             builder.POST("spring/ai/loom/market-knowledge/{id}/reviews", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 cn.wubo.spring.ai.loom.agent.market.ReviewSubmitRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.market.ReviewSubmitRequest.class);
                 if (body == null) {
@@ -3837,49 +3797,29 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("error", "请求体不能为空"));
                 }
                 try {
-                    return ServerResponse.ok().body(kbReviewService.submit(id, username, body));
+                    return ServerResponse.ok().body(kbReviewService.submit(rawId, username, body));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 }
             });
             // T18: 公开评价列表 — KB 端与 Skill 端同款分页契约(Page<ReviewRow>)。
-            // Long.parseLong 失败仍走 4xx;返回 items=[] 不代表 KB 不存在(可能只是没评价)。
+            // M3+ T1.4: KB id 走 RouterIdParserKnowledge;UUID → 抛 404;numeric id → Long 路径。
             builder.GET("spring/ai/loom/market-knowledge/{id}/reviews", request -> {
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 int page = parsePageOr(request, "page", 0);
                 int size = parsePageOr(request, "size", 20);
-                return ServerResponse.ok().body(kbReviewService.listReviews(id, page, size));
+                return ServerResponse.ok().body(kbReviewService.listReviews(rawId, page, size));
             });
             // T18: 公开评价更新 — 1 次修改上限由 AbstractMarketReviewService.update
             // 内部校验 edit_count < 1,第二次 update 直接抛 LoomAgentRuntimeException(403,
             // "评价只能修改一次,请删除后重新提交")。KB 端与 Skill 端完全镜像,严门槛只在
             // submit 时生效;update 不需要 access_count 校验(已经 submit 过)。
+            //
+            // M3+ T1.4: KB id 走 RouterIdParserKnowledge。
             builder.PUT("spring/ai/loom/market-knowledge/{id}/reviews/me", request -> {
                 String username = UserContextHolder.getCurrentUser();
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
-                try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 必须是数字: " + idStr));
-                }
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 cn.wubo.spring.ai.loom.agent.market.ReviewUpdateRequest body =
                         request.body(cn.wubo.spring.ai.loom.agent.market.ReviewUpdateRequest.class);
                 if (body == null) {
@@ -3887,7 +3827,7 @@ public class LoomAgentConfiguration {
                             .body(java.util.Map.of("error", "请求体不能为空"));
                 }
                 try {
-                    return ServerResponse.ok().body(kbReviewService.update(id, username, body));
+                    return ServerResponse.ok().body(kbReviewService.update(rawId, username, body));
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.BAD_REQUEST.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
@@ -3896,36 +3836,23 @@ public class LoomAgentConfiguration {
 
             // T16: 公开 stats — 任意已登录用户可查 market_knowledge 的 search_count / last_searched_at。
             // 返回 { id, searchCount, lastAt };首次访问(无 row)返回 count=0, lastAt=null。
-            // 注意:loom_market_knowledge.id 是 VARCHAR(36) UUID,但 stats 表 PK 是 BIGINT
-            // (V1.0 schema mismatch,详见 DefaultKnowledgeStatsService)。
             //
-            // T19 fix-up 2: UUID 字符串走 graceful-degradation 返回 {id=null, searchCount=0,
-            // lastAt=null} 而不是 4xx,与 /announcement /reviews 端点对齐。Numeric id
-            // (测试用)走 Long 路径正常查表。
+            // M3+ T1.4: KB id 走 RouterIdParserKnowledge → kbStatsService.getStats(String);
+            // UUID 走 String overload 抛 404;numeric id → Long 路径正常查表。
             builder.GET("spring/ai/loom/market-knowledge/{id}/stats", request -> {
-                String idStr = request.pathVariable("id");
-                if (idStr == null || idStr.isBlank()) {
-                    return ServerResponse.badRequest().body(java.util.Map.of(
-                            "error", "id 不能为空"));
-                }
-                Long id;
+                String rawId = kbIdParser.parse(request.pathVariable("id"));
                 try {
-                    id = Long.parseLong(idStr);
-                } catch (NumberFormatException nfe) {
-                    // UUID KB id — schema mismatch; return empty stats.
+                    cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(rawId);
+                    // HashMap (not Map.of) — lastAt can be null, and Map.of forbids null values.
                     java.util.Map<String, Object> body = new java.util.HashMap<>();
-                    body.put("id", null);
-                    body.put("searchCount", 0);
-                    body.put("lastAt", null);
+                    body.put("id", row.marketId());
+                    body.put("searchCount", row.pullCountOrSearchCount());
+                    body.put("lastAt", row.lastAt());
                     return ServerResponse.ok().body(body);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
+                    int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
+                    return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
                 }
-                cn.wubo.spring.ai.loom.agent.market.StatsRow row = kbStatsService.getStats(id);
-                // HashMap (not Map.of) — lastAt can be null, and Map.of forbids null values.
-                java.util.Map<String, Object> body = new java.util.HashMap<>();
-                body.put("id", row.marketId());
-                body.put("searchCount", row.pullCountOrSearchCount());
-                body.put("lastAt", row.lastAt());
-                return ServerResponse.ok().body(body);
             });
 
             // T19 fix-up: 公开读取公告 — 任何已登录用户可查 market_knowledge 的公告。
