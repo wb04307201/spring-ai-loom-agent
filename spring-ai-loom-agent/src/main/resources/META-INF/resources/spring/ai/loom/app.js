@@ -2240,17 +2240,8 @@ const knowledge = {
         const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
         return bd - ad;
       });
-      // M2 T21: 并行 fetch 每条记录的 tag,装饰到 row.tags;失败行保持 []。
-      if (
-        window.MarketAdmin &&
-        typeof window.MarketAdmin.listWithTags === "function"
-      ) {
-        try {
-          items = await window.MarketAdmin.listWithTags("KNOWLEDGE", items);
-        } catch (_) {
-          // 静默失败 — 列表仍可显示,只是没 tag
-        }
-      }
+      // M3+ T2.2: listWithTags helper removed — tags (when backend embeds via
+      // T2.1 follow-up batch SELECT) are read directly from row.tags.
       if (!items || items.length === 0) {
         const empty = tagFilter
           ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
@@ -2261,23 +2252,9 @@ const knowledge = {
         this._bindKbTagFilterBar(container, detail);
         return;
       }
-      // T19 fix-up 2: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
-      // 装饰到 row.announcement。KB 是 VARCHAR(36) UUID — B1 真修后
-      // market_content_announcement.market_id 也是 VARCHAR(36),直接查表,
-      // UUID KB 没公告时返 null → 204。
-      if (
-        window.MarketAdmin &&
-        typeof window.MarketAdmin.listWithAnnouncements === "function"
-      ) {
-        try {
-          items = await window.MarketAdmin.listWithAnnouncements(
-            "KNOWLEDGE",
-            items,
-          );
-        } catch (_) {
-          // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
-        }
-      }
+      // M3+ T2.2: listWithAnnouncements helper removed — announcement data
+      // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
+      // via T2.1 LEFT JOIN market_content_announcement).
       // M2 T21: 客户端聚合当前页所有 unique tag,渲染成可点击的过滤 chip
       const aggregatedTags = [];
       const seen = new Set();
@@ -2298,19 +2275,23 @@ const knowledge = {
         this._renderKbTagFilterBar(aggregatedTags, tagFilter),
       );
       this._bindKbTagFilterBar(container, detail);
-      // T19 fix-up 2: per-row announcement banner — 当 row.announcement 存在时,
+      // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
       // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
       for (const kb of items) {
-        if (kb && kb.announcement && kb.announcement.title) {
+        if (kb && kb.announcementTitle) {
+          const annView = {
+            title: kb.announcementTitle,
+            body: kb.announcementBody || "",
+          };
           const banner = document.createElement("div");
           banner.className = "market-announcement market-announcement-list";
           banner.innerHTML =
             window.MarketAdmin && window.MarketAdmin.announcementHtml
-              ? window.MarketAdmin.announcementHtml(kb.announcement)
+              ? window.MarketAdmin.announcementHtml(annView)
               : `<div class="market-announcement-title">📢 ${escapeHtml(
-                  kb.announcement.title,
+                  annView.title,
                 )}</div><div class="market-announcement-body">${escapeHtml(
-                  kb.announcement.body || "",
+                  annView.body,
                 )}</div>`;
           banner.style.cursor = "pointer";
           banner.addEventListener("click", () => {
@@ -4207,39 +4188,27 @@ const skills = {
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
         return;
       }
-      // T19 fix-up 2/3: 公共 GET announcement 端点存在后,并行 fetch 每条记录的公告
-      // (≤50 个 Promise.all) 装饰到 row.announcement。
-      //
-      // T19 fix-up 3: 把已经 sort 过 / 解包过的 `items` 直接传给 listWithAnnouncements,
-      // 让 decoration 与渲染共用同一份 row 对象引用 — listWithAnnouncements 会 in-place
-      // mutate 每个 row 并返回同一个数组(详见 market-admin.js javadoc)。
-      if (
-        window.MarketAdmin &&
-        typeof window.MarketAdmin.listWithAnnouncements === "function"
-      ) {
-        try {
-          items = await window.MarketAdmin.listWithAnnouncements(
-            "SKILL",
-            items,
-          );
-        } catch (_) {
-          // listWithAnnouncements 失败不影响主列表 — 静默跳过即可
-        }
-      }
+      // M3+ T2.2: listWithAnnouncements helper removed — announcement data
+      // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
+      // via T2.1 LEFT JOIN). Render reads row.announcementTitle below.
       container.innerHTML = "";
-      // T19 fix-up 2: per-row announcement banner — 当 row.announcement 存在时,
+      // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
       // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
       for (const m of items) {
-        if (m && m.announcement && m.announcement.title) {
+        if (m && m.announcementTitle) {
+          const annView = {
+            title: m.announcementTitle,
+            body: m.announcementBody || "",
+          };
           const banner = document.createElement("div");
           banner.className = "market-announcement market-announcement-list";
           banner.innerHTML =
             window.MarketAdmin && window.MarketAdmin.announcementHtml
-              ? window.MarketAdmin.announcementHtml(m.announcement)
+              ? window.MarketAdmin.announcementHtml(annView)
               : `<div class="market-announcement-title">📢 ${escapeHtml(
-                  m.announcement.title,
+                  annView.title,
                 )}</div><div class="market-announcement-body">${escapeHtml(
-                  m.announcement.body || "",
+                  annView.body,
                 )}</div>`;
           banner.style.cursor = "pointer";
           // 点击 banner 时 banner 自身不是 list item — 暂时用 placeholder,

@@ -15,7 +15,7 @@
  *                                 setAnnouncement, deleteAnnouncement,
  *                                 deleteReview, submitReview,
  *                                 renderStarWidget,
- *                                 getMarketTags, listWithTags, updateMarketTags }
+ *                                 getMarketTags, updateMarketTags }
  *
  * Convention: plain JS + template strings (matches existing skills-market.js /
  * knowledge-market.js style). No Vue / React / external deps.
@@ -497,66 +497,13 @@
   }
 
   /**
-   * listWithAnnouncements(kind, items?) -> Promise<Array>
-   *
-   * Decorates an array of market rows with each row's announcement, fetched
-   * in parallel via {@link #getAnnouncement} (which hits the public
-   * `/market-{kind}s/{id}/announcement` endpoint). Each item is mutated
-   * in place to add an `announcement` field when the public endpoint returns
-   * a non-null record:
-   *
-   *   { id, name, ..., announcement: { title, body, createdAt } }
-   *
-   * **Mutation contract**: rows are mutated in place. The function returns
-   * the *same array* (same reference) it was given — call sites can either
-   * use the returned reference or keep using the original. Do NOT rely on
-   * the renderer to "see" a separately-fetched array, since `list()` /
-   * `api.listMarketSkills()` produce a fresh array on every call and the
-   * decoration would be applied to a different set of row objects.
-   *
-   * Two calling patterns are supported:
-   *
-   *   // 1) Fetch + decorate in one call:
-   *   const items = await MarketAdmin.listWithAnnouncements("SKILL");
-   *
-   *   // 2) Pass pre-fetched items (preferred when the caller has already
-   *      //    sorted / paged / unwrapped Page.content):
-   *   let items = unwrapAndSort(await api.listMarketSkills(1, 50));
-   *   items = await MarketAdmin.listWithAnnouncements("SKILL", items);
-   *
-   * For items whose id parses as a Long, the public endpoint will look up
-   * the announcement row. For items whose id is a VARCHAR(36) UUID (KB only),
-   * the endpoint returns 204 and `announcement` stays `undefined` —
-   * graceful-degradation, no row exists for UUIDs in the BIGINT
-   * {@code market_content_announcement.market_id} column anyway.
-   *
-   * Per-row fetch failures are caught silently so the main list is unaffected.
+   * M3+ T2.2 — listWithAnnouncements has been removed. The backend list DTO
+   * (MarketSkill / MarketKnowledgeRecord, post T2.1) now embeds
+   * announcementTitle / announcementBody directly via LEFT JOIN, so the
+   * frontend does not need per-row secondary GETs. Call sites should
+   * read `row.announcementTitle` / `row.announcementBody` directly from
+   * the list response.
    */
-  async function listWithAnnouncements(kind, items) {
-    let rows;
-    if (Array.isArray(items)) {
-      rows = items;
-    } else {
-      rows = await list(kind);
-    }
-    if (!Array.isArray(rows) || rows.length === 0) return rows;
-    const promises = rows.map((row) =>
-      getAnnouncement(kind, row.id)
-        .then((ann) => {
-          if (ann && ann.title) {
-            try {
-              row.announcement = ann;
-            } catch (_) {
-              // defensive — row frozen in some envs
-            }
-          }
-          return row;
-        })
-        .catch(() => row),
-    );
-    await Promise.all(promises);
-    return rows;
-  }
 
   /**
    * getAnnouncement(kind, id) -> Promise<MarketAnnouncement | null>
@@ -757,50 +704,14 @@
   }
 
   /**
-   * listWithTags(kind, items?) -> Promise<Array>
-   *
-   * Mirrors {@link #listWithAnnouncements} for tags. Fetches per-row tags
-   * via {@link #getMarketTags} in parallel and decorates each row with a
-   * `tags: string[]` field. Rows are mutated in place; the same array
-   * reference is returned. Calling patterns match listWithAnnouncements:
-   *
-   *   // 1) fetch + decorate
-   *   const items = await MarketAdmin.listWithTags("KNOWLEDGE");
-   *
-   *   // 2) pass pre-fetched items (preferred when sorted/filtered upstream)
-   *   let items = unwrapAndSort(await api.listMarketKnowledge(1, 50));
-   *   items = await MarketAdmin.listWithTags("KNOWLEDGE", items);
-   *
-   * Per-row fetch failures yield `tags = []` (graceful degradation).
+   * M3+ T2.2 — listWithTags has been removed for the same reason as
+   * listWithAnnouncements: KB list DTO embeds `tags: string[]` from
+   * the batch tag SELECT (T2.1 follow-up). Call sites should read
+   * `row.tags` directly from the list response. For now the
+   * MarketKnowledgeRecord.tags field is null until the batch tag
+   * SELECT is wired (separate task); frontend should treat
+   * `row.tags` as an optional array.
    */
-  async function listWithTags(kind, items) {
-    let rows;
-    if (Array.isArray(items)) {
-      rows = items;
-    } else {
-      rows = await list(kind);
-    }
-    if (!Array.isArray(rows) || rows.length === 0) return rows;
-    const promises = rows.map((row) =>
-      getMarketTags(kind, row.id)
-        .then((tags) => {
-          try {
-            row.tags = Array.isArray(tags) ? tags : [];
-          } catch (_) {
-            // defensive — row frozen in some envs
-          }
-          return row;
-        })
-        .catch(() => {
-          try {
-            row.tags = [];
-          } catch (_) {}
-          return row;
-        }),
-    );
-    await Promise.all(promises);
-    return rows;
-  }
 
   /**
    * updateMarketTags(kind, id, tags) -> Promise<string[]>
@@ -846,7 +757,6 @@
 
   window.MarketAdmin = {
     list: list,
-    listWithAnnouncements: listWithAnnouncements,
     form: form,
     reviewList: reviewList,
     approvalBadge: approvalBadge,
@@ -858,7 +768,6 @@
     submitReview: submitReview,
     renderStarWidget: renderStarWidget,
     getMarketTags: getMarketTags,
-    listWithTags: listWithTags,
     updateMarketTags: updateMarketTags,
   };
 })();
