@@ -704,3 +704,32 @@ CREATE TABLE loom_market_knowledge_tag (
   FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_market_kb_tag ON loom_market_knowledge_tag(tag);
+
+-- =============================================================
+-- ==== M3+ technical debt cleanup (spec § 4.1 + § 4.2) ====
+-- B1 真修:market_content_announcement / loom_market_knowledge_stats /
+--          loom_market_knowledge_review 三张表的 market_id 历史定义成 BIGINT,
+--          与 loom_market_knowledge.id (VARCHAR(36) UUID) 类型不一致。
+--          统一为 VARCHAR(36),先 DROP FK 再改类型再 ADD FK。
+-- A12 列错位:market_skill / loom_user_knowledge 缺 updated_at 时间戳。
+-- =============================================================
+
+-- A12: 添加 updated_at 列
+ALTER TABLE market_skill        ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE loom_user_knowledge ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- B1: market_id 类型对齐 VARCHAR(36)
+-- 1) market_content_announcement — 没有 FK 到 loom_market_knowledge,直接改
+ALTER TABLE market_content_announcement ALTER COLUMN market_id VARCHAR(36);
+
+-- 2) loom_market_knowledge_stats — PK + FK → loom_market_knowledge(id)
+ALTER TABLE loom_market_knowledge_stats DROP CONSTRAINT IF EXISTS CONSTRAINT_F;
+ALTER TABLE loom_market_knowledge_stats ALTER COLUMN market_id VARCHAR(36);
+ALTER TABLE loom_market_knowledge_stats ADD CONSTRAINT loom_market_knowledge_stats_fk
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE;
+
+-- 3) loom_market_knowledge_review — 复合 PK + FK → loom_market_knowledge(id)
+ALTER TABLE loom_market_knowledge_review DROP CONSTRAINT IF EXISTS CONSTRAINT_F;
+ALTER TABLE loom_market_knowledge_review ALTER COLUMN market_id VARCHAR(36);
+ALTER TABLE loom_market_knowledge_review ADD CONSTRAINT loom_market_knowledge_review_fk
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE;

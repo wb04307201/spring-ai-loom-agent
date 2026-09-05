@@ -78,4 +78,61 @@ class MarketSchemaTest {
             Integer.class);
         assertEquals(1, t);
     }
+
+    // ==== M3+ technical debt cleanup (spec § 4.1 + § 4.2) ====
+
+    @Test
+    void marketSkillHasUpdatedAt() {
+        assertTrue(columnExists("market_skill", "updated_at"));
+    }
+
+    @Test
+    void loomUserKnowledgeHasUpdatedAt() {
+        assertTrue(columnExists("loom_user_knowledge", "updated_at"));
+    }
+
+    @Test
+    void marketContentAnnouncementMarketIdIsVarchar() {
+        String type = jdbc.queryForObject(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME)='MARKET_CONTENT_ANNOUNCEMENT' AND UPPER(COLUMN_NAME)='MARKET_ID'",
+            String.class);
+        assertEquals("CHARACTER VARYING", type);
+        Integer size = jdbc.queryForObject(
+            "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME)='MARKET_CONTENT_ANNOUNCEMENT' AND UPPER(COLUMN_NAME)='MARKET_ID'",
+            Integer.class);
+        assertNotNull(size);
+        assertTrue(size >= 36);
+    }
+
+    @Test
+    void loomMarketKnowledgeStatsMarketIdIsVarchar() {
+        String type = jdbc.queryForObject(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_STATS' AND UPPER(COLUMN_NAME)='MARKET_ID'",
+            String.class);
+        assertEquals("CHARACTER VARYING", type);
+        Integer size = jdbc.queryForObject(
+            "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_STATS' AND UPPER(COLUMN_NAME)='MARKET_ID'",
+            Integer.class);
+        assertNotNull(size);
+        assertTrue(size >= 36);
+    }
+
+    @Test
+    void loomMarketKnowledgeReviewMarketIdIsVarchar() {
+        String type = jdbc.queryForObject(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_REVIEW' AND UPPER(COLUMN_NAME)='MARKET_ID'",
+            String.class);
+        assertEquals("CHARACTER VARYING", type);
+        Integer size = jdbc.queryForObject(
+            "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME)='LOOM_MARKET_KNOWLEDGE_REVIEW' AND UPPER(COLUMN_NAME)='MARKET_ID'",
+            Integer.class);
+        assertNotNull(size);
+        assertTrue(size >= 36);
+    }
 }
