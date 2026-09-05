@@ -75,6 +75,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.HttpStatus;
@@ -1312,6 +1313,7 @@ public class LoomAgentConfiguration {
     }
 
     @Configuration
+    @EnableScheduling
     static class StorageConfiguration {
 
         @ConditionalOnMissingBean(IUser.class)
@@ -1441,9 +1443,10 @@ public class LoomAgentConfiguration {
          * Through {@code @ConditionalOnMissingBean} consumers can swap in a
          * custom implementation (e.g. with metrics or an outbox table).
          * <p>
-         * The consumer app must enable Spring scheduling via
-         * {@code @EnableScheduling} for the 30s drain to fire — the test app
-         * already does, production consumers follow the same pattern as
+         * The 30s scheduler fires automatically because
+         * {@link StorageConfiguration} is annotated with
+         * {@code @EnableScheduling} (M3+ T0.2) — consumers do not need to
+         * add it themselves, and the same declaration also covers
          * {@link cn.wubo.spring.ai.loom.agent.schedule.ScheduleExecutionCleanup}.
          * </p>
          */

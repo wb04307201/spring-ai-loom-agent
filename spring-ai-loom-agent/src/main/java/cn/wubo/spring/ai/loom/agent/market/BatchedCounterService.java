@@ -15,55 +15,81 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Generic, table-agnostic counter batcher.
+ * 通用、table-agnostic 计数器批处理器(skill / KB 市场统计、聊天 usage 等)。
  * <p>
- * Hot-path callers (skill pulls, KB searches, content views) call
- * {@link #increment(String, String, Long, String, String)} on every event;
- * this service buffers the deltas in memory and periodically flushes them as
- * one {@code UPDATE <table> SET <cntCol> = <cntCol> + ?, <lastCol> = CURRENT_TIMESTAMP
- * WHERE <keyCol> = ?} per distinct (table, keyCol, key, cntCol) tuple —
- * drastically reducing write pressure on tables like
- * {@code market_skill_stats} / {@code market_knowledge_stats} that get hit on
- * every marketplace interaction.
+ * 热路径调用方(技能拉取、KB 搜索、内容浏览)在每次事件上调用
+ * {@link #increment(String, String, Long, String, String)};本 service 把增量
+ * 缓存在内存里,定时 flush 成一次 {@code UPDATE <table> SET <cntCol> = <cntCol>
+ * + ?, <lastCol> = CURRENT_TIMESTAMP WHERE <keyCol> = ?} —— 把
+ * {@code market_skill_stats} / {@code loom_market_knowledge_stats} 这种
+ * 高频写入表的写压力大幅压低。
  * </p>
  *
- * <h2>Design</h2>
+ * <h2>设计要点</h2>
  * <ul>
- *   <li><b>Buffer</b>: a {@link ConcurrentHashMap} keyed by
- *       {@code "<table>:<keyCol>:<key>:<cntCol>"} so concurrent increments to
- *       the same row dedup into one {@link AtomicLong} delta — no lost
- *       updates, no per-event allocation.</li>
- *   <li><b>Schedule</b>: a separate {@link Scheduled @Scheduled} method
- *       ({@code fixedDelay = 30s}) calls {@link #flush()} so direct test
- *       invocation can drive the buffer without waiting on Spring's scheduler.</li>
- *   <li><b>Shutdown drain</b>: {@link PreDestroy @PreDestroy} calls
- *       {@link #flush()} one last time so in-flight increments are not lost
- *       when the container tears down.</li>
- *   <li><b>Failure policy</b>: if the executor fails we log WARN and retry
- *       exactly once. A second failure drops the batch — there's no outbox
- *       table; this is a best-effort, eventually-consistent counter, and the
- *       marketplace stats are not authoritative. (The binding context
- *       explicitly accepts this trade-off — see task brief.)</li>
- *   <li><b>Identifer trust</b>: table/column names are concatenated into SQL,
- *       not parameterised. {@link JdbcTemplate} only parameterises values, not
- *       identifiers. Callers are trusted loom-agent code paths with fixed
- *       schemas — user input never reaches this method.</li>
+ *   <li><b>Buffer</b>:{@link ConcurrentHashMap} key 是
+ *       {@code "<table>:<keyCol>:<key>:<cntCol>"},同一行的并发
+ *       {@code increment} 合并到一个 {@link AtomicLong} delta ——
+ *       无丢更新、无 per-event 分配。</li>
+ *   <li><b>Schedule</b>:独立的 {@link Scheduled @Scheduled} 方法
+ *       ({@code fixedDelay = 30s}) 调用 {@link #flush()},便于测试绕过
+ *       Spring scheduler 直接驱动。</li>
+ *   <li><b>Shutdown drain</b>:{@link PreDestroy @PreDestroy} 收尾时再调一次
+ *       {@link #flush()},保证容器关闭时在飞的增量不丢。</li>
+ *   <li><b>Failure policy</b>:执行器失败 WARN 重试一次,二次仍失败直接丢弃
+ *       —— 无 outbox 表,best-effort / eventually-consistent,统计本身不要求
+ *       强一致(任务简报里已明确接受该 trade-off)。</li>
+ *   <li><b>Identifier trust</b>:table / column 名直接拼 SQL,不做参数化
+ *       ({@link JdbcTemplate} 只参数化值,不参数化标识符)。调用方都是
+ *       loom-agent 内部固定 schema 路径,用户输入永远到不了这里。</li>
+ *   <li><b>Dedicated discard</b>:{@link #discard(String, String, Long, String)}
+ *       允许 {@code AbstractMarketStatsService#resetStats} 等 admin "重置"
+ *       路径精准丢弃某个 (table, keyCol, key, cntCol) tuple 的在飞 delta,
+ *       不影响其他行。</li>
  * </ul>
  *
- * <h2>Wiring</h2>
+ * <h2>协作者 contract</h2>
+ * <ul>
+ *   <li>{@code @EnableScheduling} 必须存在于某 configuration 类上,
+ *       否则 {@link #scheduledFlush()} 的 30s 定时器不触发 —— 消费者项目
+ *       只能依赖 {@link PreDestroy} / shutdown hook,丢数据窗口
+ *       显著放大。</li>
+ *   <li>当前 loom-agent 的
+ *       {@code LoomAgentConfiguration.StorageConfiguration} 已
+ *       自动声明 {@code @EnableScheduling}(M3+ T0.2 加入),开箱即用,
+ *       消费者无需重复声明;自定义 {@code StorageConfiguration} 子类时
+ *       请保留该注解或自行 {@code @Import}。</li>
+ *   <li>{@link PreDestroy}:容器销毁时同步阻塞调用
+ *       {@link #flush()},尽力把最后一窗增量写盘;若 JVM 被 SIGKILL
+ *       或 OOM kill 则该次兜底失效,丢数不可避免。</li>
+ * </ul>
+ *
+ * <h2>已知限制</h2>
+ * <ul>
+ *   <li><b>非 cluster-shared</b>:Buffer 是进程内 in-memory state,集群部署
+ *       下每个 JVM 实例独立累计、各自 flush,不会跨节点合并 —— 这是
+ *       best-effort 设计取舍,集群节点数变化不影响可用性。</li>
+ *   <li><b>重启即丢</b>:重启后 buffer 为空,定时器与 {@code @PreDestroy}
+ *       触发前不在内存中的增量不会"补 flush"。当前数据库累计行计数即
+ *       重启时的基线。</li>
+ *   <li><b>不参与事务</b>:flush 是独立的 {@code jdbcTemplate.update} 序列,
+ *       不绑定业务事务;若业务事务回滚,统计增量不会被撤回(同样 best-effort)。</li>
+ *   <li><b>drop 是 silent</b>:二次执行器失败的 batch 仅打 WARN 日志,不抛
+ *       异常 —— 调用方与上游请求都看不到丢失。</li>
+ * </ul>
+ *
+ * <h2>注册方式</h2>
  * <p>
- * Registered as a Spring {@code @Bean} in
- * {@code LoomAgentConfiguration}; the consumer application must have
- * {@code @EnableScheduling} on a configuration class for the
- * {@link Scheduled} drain to fire (the test app already does).
+ * 在 {@code LoomAgentConfiguration.StorageConfiguration} 注册为
+ * {@code @Bean}(带 {@code @ConditionalOnMissingBean}),消费者可通过
+ * 自定义实现替换(例如加上 Micrometer 指标或 outbox 表)。
  * </p>
  *
- * <h2>Testing</h2>
+ * <h2>测试</h2>
  * <p>
- * Constructed with a fake {@link FlushExecutor} in unit tests — no Spring
- * context, no Flyway, no real DB. See
- * {@code BatchedCounterServiceTest} in the {@code spring-ai-loom-agent-test}
- * module.
+ * 单元测试用 fake {@link FlushExecutor} 构造,无 Spring context / Flyway /
+ * 真实 DB。参见 {@code spring-ai-loom-agent-test} 模块下的
+ * {@code BatchedCounterServiceTest}。
  * </p>
  */
 public class BatchedCounterService {
