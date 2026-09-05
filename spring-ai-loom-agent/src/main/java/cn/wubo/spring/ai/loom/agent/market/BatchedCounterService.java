@@ -18,7 +18,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * 通用、table-agnostic 计数器批处理器(skill / KB 市场统计、聊天 usage 等)。
  * <p>
  * 热路径调用方(技能拉取、KB 搜索、内容浏览)在每次事件上调用
- * {@link #increment(String, String, Long, String, String)};本 service 把增量
+ * {@link #increment(String, String, Long, String, String)} 或
+ * {@link #increment(String, String, String, String, String)};本 service 把增量
  * 缓存在内存里,定时 flush 成一次 {@code UPDATE <table> SET <cntCol> = <cntCol>
  * + ?, <lastCol> = CURRENT_TIMESTAMP WHERE <keyCol> = ?} —— 把
  * {@code market_skill_stats} / {@code loom_market_knowledge_stats} 这种
@@ -43,10 +44,21 @@ import java.util.concurrent.atomic.AtomicLong;
  *       ({@link JdbcTemplate} 只参数化值,不参数化标识符)。调用方都是
  *       loom-agent 内部固定 schema 路径,用户输入永远到不了这里。</li>
  *   <li><b>Dedicated discard</b>:{@link #discard(String, String, Long, String)}
- *       允许 {@code AbstractMarketStatsService#resetStats} 等 admin "重置"
- *       路径精准丢弃某个 (table, keyCol, key, cntCol) tuple 的在飞 delta,
- *       不影响其他行。</li>
+ *       与 {@link #discard(String, String, String, String)} 允许
+ *       {@code AbstractMarketStatsService#resetStats} 等 admin "重置"路径精准
+ *       丢弃某个 (table, keyCol, key, cntCol) tuple 的在飞 delta,不影响其他行。</li>
  * </ul>
+ *
+ * <h2>Key 类型</h2>
+ * <p>支持两种主键类型,后端表 PK 列类型决定:
+ * <ul>
+ *   <li>{@code Long} — skill stats(PK 是 BIGINT);走 {@code increment(... Long ...)} overload,
+ *       内部用 {@code Long.parseLong} 重建 buffer key string。</li>
+ *   <li>{@code String} — KB stats(PK 是 VARCHAR(36) UUID,T1.1 schema 迁移后);
+ *       走 {@code increment(... String ...)} overload,buffer key 直接拼 toString。</li>
+ * </ul>
+ * <p>两种 overload 共享同一个 in-memory buffer:buffer entry 持有原始 key
+ * ({@link Object}),drain 时直接带回 executor 端,不依赖 String parse。</p>
  *
  * <h2>协作者 contract</h2>
  * <ul>
@@ -99,20 +111,33 @@ public class BatchedCounterService {
     /**
      * Per-row buffered delta + the {@code lastCol} constant needed to build
      * the {@code UPDATE ... SET lastCol = CURRENT_TIMESTAMP} on flush.
+     *
+     * <p>{@code key} holds the original key value (Long or String) so the
+     * drain path can return it to the executor without reparsing the
+     * buffer key string. This is what lets the Long and String overloads
+     * share one buffer.</p>
      */
     private static final class BufferEntry {
         final AtomicLong delta = new AtomicLong();
         final String lastCol;
+        final Object key;
 
-        BufferEntry(String lastCol) {
+        BufferEntry(Object key, String lastCol) {
+            this.key = key;
             this.lastCol = lastCol;
         }
     }
 
     /**
      * One row to update on flush. Immutable snapshot of (table, key, columns, delta).
+     *
+     * <p>{@code key} is typed as {@code Object} (per T1.5: "擦除为 Object") so
+     * both {@code Long}-keyed (skill stats) and {@code String}-keyed (KB stats)
+     * paths can flow through one record type and one executor. Concrete type
+     * is preserved at the call-site — {@code jdbcTemplate.update(sql, key)}
+     * picks the right JDBC type binding from the runtime class.</p>
      */
-    public record Update(String table, String keyCol, Long key, String cntCol, Long delta, String lastCol) {
+    public record Update(String table, String keyCol, Object key, String cntCol, Long delta, String lastCol) {
     }
 
     /**
@@ -174,62 +199,105 @@ public class BatchedCounterService {
     }
 
     /**
-     * Buffer one increment. Safe to call from any thread; concurrent calls
-     * against the same {@code (table, keyCol, key, cntCol)} tuple accumulate
-     * into a single buffered delta.
+     * Buffer one increment with a {@code Long} key (skill stats, BIGINT PK).
+     * Safe to call from any thread; concurrent calls against the same
+     * {@code (table, keyCol, key, cntCol)} tuple accumulate into a single
+     * buffered delta.
      *
      * @param table   table name (e.g. {@code market_skill_stats})
      * @param keyCol  key column (e.g. {@code market_skill_id})
-     * @param key     the row's primary key value
+     * @param key     the row's primary key value (Long)
      * @param cntCol  counter column to increment (e.g. {@code pull_count})
      * @param lastCol timestamp column to set to {@code CURRENT_TIMESTAMP}
      *                (e.g. {@code last_pulled_at})
      */
     public void increment(String table, String keyCol, Long key, String cntCol, String lastCol) {
-        String bk = table + ":" + keyCol + ":" + key + ":" + cntCol;
-        // Single compute() holds the bin lock for the WHOLE read-modify-write:
-        // 1. If the entry exists, reuse it.
-        // 2. Otherwise create a fresh one.
-        // 3. AtomicLong.incrementAndGet on its delta.
-        // 4. Return the entry so it stays in the buffer.
-        //
-        // Why NOT computeIfAbsent + incrementAndGet? The two-step version
-        // has a race window: computeIfAbsent releases the bin lock after
-        // returning the entry, so a concurrent flush's compute(K) can
-        // detach the entry BEFORE our incrementAndGet lands. The
-        // increment would then update a BufferEntry that's no longer in
-        // the buffer — the delta is silently dropped. Combining into one
-        // compute() makes the create-or-reuse + increment atomic with
-        // respect to drainBuffer's detach-and-snapshot.
+        incrementInternal(table, keyCol, key, cntCol, lastCol);
+    }
+
+    /**
+     * Buffer one increment with a {@code String} key (KB stats, VARCHAR(36) UUID PK;
+     * post-T1.1 schema migration). Same semantics as the {@code Long}-key
+     * overload; both share the same in-memory buffer via a common
+     * {@code incrementInternal} entrypoint.
+     *
+     * <p>String-key vs Long-key differentiation lives ONLY in the call-site
+     * (so {@code jdbcTemplate.update} picks the right JDBC binding); inside
+     * the buffer both flavors are opaque {@code Object} keys.</p>
+     *
+     * @param table   table name (e.g. {@code loom_market_knowledge_stats})
+     * @param keyCol  key column (e.g. {@code market_id})
+     * @param key     the row's primary key value (UUID string)
+     * @param cntCol  counter column to increment (e.g. {@code search_count})
+     * @param lastCol timestamp column to set to {@code CURRENT_TIMESTAMP}
+     *                (e.g. {@code last_searched_at})
+     */
+    public void increment(String table, String keyCol, String key, String cntCol, String lastCol) {
+        incrementInternal(table, keyCol, key, cntCol, lastCol);
+    }
+
+    /**
+     * Common entrypoint — both public overloads funnel here so the buffer-key
+     * composition and {@code compute()} atomicity guarantees live in one place.
+     *
+     * <p>Why NOT {@code computeIfAbsent + incrementAndGet}? The two-step
+     * version has a race window: {@code computeIfAbsent} releases the bin
+     * lock after returning the entry, so a concurrent flush's {@code compute(K)}
+     * can detach the entry BEFORE our {@code incrementAndGet} lands. The
+     * increment would then update a {@link BufferEntry} that's no longer in
+     * the buffer — the delta is silently dropped. Combining into one
+     * {@code compute()} makes the create-or-reuse + increment atomic with
+     * respect to {@code drainBuffer}'s detach-and-snapshot.</p>
+     */
+    private void incrementInternal(String table, String keyCol, Object key, String cntCol, String lastCol) {
+        String bk = bufferKey(table, keyCol, key, cntCol);
         buffer.compute(bk, (k, v) -> {
-            BufferEntry entry = (v != null) ? v : new BufferEntry(lastCol);
+            BufferEntry entry = (v != null) ? v : new BufferEntry(key, lastCol);
             entry.delta.incrementAndGet();
             return entry;
         });
     }
 
+    /** Compose the {@code (table:keyCol:key:cntCol)} buffer key in a single place. */
+    private static String bufferKey(String table, String keyCol, Object key, String cntCol) {
+        return table + ":" + keyCol + ":" + key + ":" + cntCol;
+    }
+
     /**
      * Discard the buffered delta for a specific {@code (table, keyCol, key,
-     * cntCol)} tuple without flushing it to the DB. Used by
-     * {@link AbstractMarketStatsService#resetStats(Long, long, java.time.LocalDateTime)}
+     * cntCol)} tuple (Long-keyed) without flushing it to the DB. Used by
+     * {@link AbstractMarketStatsService#resetStats(Object, long, java.time.LocalDateTime)}
      * so an admin "reset" wipes both the persisted count and any in-flight
      * increments that haven't been flushed yet — without nuking other rows
      * in the same buffer.
-     * <p>
-     * Concurrent-safety mirrors {@link #increment}: a single {@code compute()}
-     * holds the bin lock for the whole detach, so a concurrent
-     * {@code increment()} on the same key blocks until our lambda returns
-     * {@code null} (detach succeeds) or returns the original entry (nothing
-     * to discard). Either way, the discard is atomic with respect to
-     * concurrent increments on the same key.
-     * </p>
      *
      * @return {@code true} if a buffered delta was discarded; {@code false}
      *         if the key was not in the buffer (already flushed, never
      *         incremented, or different cntCol).
      */
     public boolean discard(String table, String keyCol, Long key, String cntCol) {
-        String bk = table + ":" + keyCol + ":" + key + ":" + cntCol;
+        return discardInternal(table, keyCol, key, cntCol);
+    }
+
+    /**
+     * String-keyed variant of {@link #discard(String, String, Long, String)}
+     * for KB stats — mirrors the {@code String}-key overload of
+     * {@link #increment(String, String, String, String, String)}.
+     */
+    public boolean discard(String table, String keyCol, String key, String cntCol) {
+        return discardInternal(table, keyCol, key, cntCol);
+    }
+
+    /**
+     * Common discard path. Concurrent-safety mirrors {@link #incrementInternal}:
+     * a single {@code compute()} holds the bin lock for the whole detach,
+     * so a concurrent {@code increment()} on the same key blocks until our
+     * lambda returns {@code null} (detach succeeds) or returns the original
+     * entry (nothing to discard). Either way, the discard is atomic with
+     * respect to concurrent increments on the same key.
+     */
+    private boolean discardInternal(String table, String keyCol, Object key, String cntCol) {
+        String bk = bufferKey(table, keyCol, key, cntCol);
         AtomicBoolean discarded = new AtomicBoolean(false);
         buffer.compute(bk, (k, v) -> {
             if (v == null) {
@@ -308,6 +376,10 @@ public class BatchedCounterService {
      * lambda returns {@code null}, at which point the increment sees a
      * missing entry and creates a fresh one via {@code computeIfAbsent}.
      * The atomic read-modify-write is what guarantees no delta is lost.</p>
+     *
+     * <p>The original key (Long or String) is taken from the {@link BufferEntry}
+     * itself rather than reparsing the buffer-key string — this is what
+     * lets Long and String keys coexist in one buffer map.</p>
      */
     private List<Update> drainBuffer() {
         List<Update> updates = new ArrayList<>();
@@ -325,14 +397,14 @@ public class BatchedCounterService {
                     return null;
                 }
                 String[] parts = k.split(":", 4);
-                // parts = [table, keyCol, key, cntCol]; lastCol lives in the entry.
-                // Atomic read of delta is safe here: the bin lock is held,
-                // so no concurrent increment() can land between our read and
-                // our return-null (which detaches the entry).
+                // parts = [table, keyCol, keyString, cntCol]; key (Long/String) and
+                // lastCol live in the entry. Atomic read of delta is safe here:
+                // the bin lock is held, so no concurrent increment() can land
+                // between our read and our return-null (which detaches the entry).
                 updates.add(new Update(
                         parts[0],
                         parts[1],
-                        Long.parseLong(parts[2]),
+                        v.key,
                         parts[3],
                         v.delta.get(),
                         v.lastCol

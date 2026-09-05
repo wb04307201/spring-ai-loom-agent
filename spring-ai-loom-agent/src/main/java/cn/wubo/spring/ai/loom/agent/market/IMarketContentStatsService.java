@@ -1,96 +1,73 @@
 package cn.wubo.spring.ai.loom.agent.market;
 
-import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
-
 import java.time.LocalDateTime;
 
 /**
- * 市场内容 stats 接口(M3+ T1.4)。
+ * 市场内容 stats 接口(M3+ T1.4 + T1.5)。
  *
- * <p>保留两套主键形态 — 兼容 skill(BIGINT)与 KB (VARCHAR(36) UUID)两类内容:
+ * <p>类型参数 {@code <K>} 表示 market id 形态,允许两端用各自的主键类型:
  * <ul>
- *   <li>{@link Long} 主键版本 — skill stats 与既有 tests/LoomAgentConfiguration 调用方</li>
- *   <li>{@link String} 主键版本 — M3+ T1.4 新增,KB router 走
- *       {@code RouterIdParserKnowledge#parse} 后直接传 String,不预先
- *       {@code Long.parseLong}</li>
+ *   <li>{@code Long} — skill stats(BIGINT 主键,沿用历史 Long 路径)</li>
+ *   <li>{@code String} — KB stats(VARCHAR(36) UUID 主键,T1.1 schema 迁移后),
+ *       String 路径<b>走真路径</b>——直接传给 {@link BatchedCounterService} 的
+ *       String-key overload,<b>不再有 Long.parseLong 静默 no-op</b></li>
  * </ul>
  *
- * <p>String 版本按方法语义区分降级:
+ * <p>对应实现:
  * <ul>
- *   <li>{@link #resetStats(String, long, LocalDateTime)} — 严格操作,UUID 抛 404
- *       (admin 行为,真实 UUID 不可能存在于 BIGINT stats 表)</li>
- *   <li>{@link #getStats(String)} — 读取操作,UUID 抛 404(KB 不存在语义)</li>
- *   <li>{@link #incrementStat(String, String)} — best-effort,UUID 静默跳过
- *       (与既有 {@code DefaultKnowledgeTool.searchKnowledge} 的 try/catch 模式对齐,
- *       失败不阻塞主路径)</li>
+ *   <li>{@link cn.wubo.spring.ai.loom.agent.skill.stats.DefaultSkillStatsService}
+ *       implements {@code IMarketContentStatsService<Long>}</li>
+ *   <li>{@link cn.wubo.spring.ai.loom.agent.knowledge.stats.DefaultKnowledgeStatsService}
+ *       implements {@code IMarketContentStatsService<String>}</li>
  * </ul>
+ *
+ * <p>{@link #incrementStat(K, String)} 的 {@code kind} 参数是 documentation-only:
+ * 每个实现只对应一个 counter 列(skill {@code pull_count} / KB {@code search_count}),
+ * 调用方应传 canonical 常量({@code "PULL"} / {@code "SEARCH"})以便日志 grep。
+ *
+ * @param <K> market id 类型:Long for skill,String (UUID) for KB
  */
-public interface IMarketContentStatsService {
+public interface IMarketContentStatsService<K> {
 
-    /* ===== Long 主键版本(skill / 既有调用方) ===== */
+    /**
+     * Increment the counter for {@code marketId}. The {@code kind} parameter is
+     * documentation-only — the column is hard-coded by the implementation.
+     *
+     * <p>Side effects (delegated to {@link AbstractMarketStatsService}):
+     * <ul>
+     *   <li>Synchronously ensures a stats row exists (H2 {@code MERGE INTO}).</li>
+     *   <li>Buffers a delta of +1 in {@link BatchedCounterService}; the actual
+     *       UPDATE is flushed every 30s (or on shutdown).</li>
+     * </ul>
+     *
+     * <p>Best-effort by contract: implementation MUST NOT propagate exceptions
+     * to the caller (stats bookkeeping must never break the main path).
+     */
+    void incrementStat(K marketId, String kind);
 
-    void incrementStat(Long marketId, String kind);
-    StatsRow getStats(Long marketId);
+    /**
+     * Read the current stats row. If no row exists yet, returns a zero
+     * {@link StatsRow} with {@code lastAt=null} — the lazy-upsert path
+     * guarantees a row will exist after the first {@link #incrementStat},
+     * but reads before the first increment are valid (no row → no traffic).
+     *
+     * <p>For UUID-backed (KB) stats: {@code marketId} in the returned row is
+     * the String UUID as stored (post-T1.1 schema migration).
+     */
+    StatsRow<K> getStats(K marketId);
 
     /**
      * Reset the counter for {@code marketId} to a specific value (admin use).
      * Implementations should ensure the stats row exists (lazy-upsert) before
      * updating it, so an admin can reset a market-content item even if no
-     * increment has ever landed yet.
+     * increment has ever landed yet. Also discards any buffered in-flight
+     * delta for this {@code (table, keyCol, key, cntCol)} tuple so the admin
+     * reset is not silently overwritten by the next scheduled flush.
      *
-     * @param marketId the market-content id
-     * @param newCount the new counter value (admin typically passes 0)
+     * @param marketId  the market-content id
+     * @param newCount  the new counter value (admin typically passes 0)
      * @param newLastAt timestamp to record for the most-recent event; pass
-     *                 {@code null} for canonical "reset" semantics
+     *                  {@code null} for canonical "reset" semantics
      */
-    void resetStats(Long marketId, long newCount, LocalDateTime newLastAt);
-
-    /* ===== String 主键版本(M3+ T1.4:KB router 用) ===== */
-
-    /**
-     * Best-effort increment — UUID/非数字静默跳过,与既有
-     * {@code DefaultKnowledgeTool.searchKnowledge} 内
-     * {@code try { Long.parseLong } catch NFE log.debug} 同款语义,
-     * 不抛异常上抛到主路径。
-     */
-    default void incrementStat(String marketId, String kind) {
-        Long parsed = parseMarketIdOrNull(marketId);
-        if (parsed == null) return; // UUID → best-effort no-op
-        incrementStat(parsed, kind);
-    }
-
-    /**
-     * 读取 — UUID 抛 404(KB 不存在语义,与既有
-     * {@code DefaultKnowledgeStatsService#getStats} 对 numeric 返回空 row、
-     * 但 router 端已有 UUID graceful-degradation 分支对齐)。
-     */
-    default StatsRow getStats(String marketId) {
-        Long parsed = parseMarketIdOrThrow(marketId);
-        return getStats(parsed);
-    }
-
-    /**
-     * Admin 重置 — 严格,UUID 抛 404。
-     */
-    default void resetStats(String marketId, long newCount, LocalDateTime newLastAt) {
-        Long parsed = parseMarketIdOrThrow(marketId);
-        resetStats(parsed, newCount, newLastAt);
-    }
-
-    private static Long parseMarketIdOrNull(String s) {
-        if (s == null || s.isBlank()) return null;
-        try { return Long.parseLong(s.trim()); }
-        catch (NumberFormatException e) { return null; }
-    }
-
-    private static Long parseMarketIdOrThrow(String s) {
-        if (s == null || s.isBlank()) {
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + s);
-        }
-        try {
-            return Long.parseLong(s.trim());
-        } catch (NumberFormatException e) {
-            throw new LoomAgentRuntimeException(404, "市场知识库不存在: id=" + s);
-        }
-    }
+    void resetStats(K marketId, long newCount, LocalDateTime newLastAt);
 }

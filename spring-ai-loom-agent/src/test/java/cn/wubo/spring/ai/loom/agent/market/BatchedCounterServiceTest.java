@@ -77,7 +77,9 @@ class BatchedCounterServiceTest {
         List<BatchedCounterService.Update> updates = captured.get();
         assertNotNull(updates);
         assertEquals(2, updates.size(), "distinct keys must produce distinct updates");
-        long keys = updates.stream().mapToLong(BatchedCounterService.Update::key).sum();
+        // Update.key() is Object (T1.5: Long and String share one Update record),
+        // so we cast each entry to Long before summing.
+        long keys = updates.stream().mapToLong(u -> ((Long) u.key())).sum();
         assertEquals(3L, keys);
     }
 

@@ -87,18 +87,15 @@ public class DefaultKnowledgeTool implements IKnowledgeTool {
         // T16: increment loom_market_knowledge_stats.search_count for this KB.
         // Counts every successful search call (including zero-result ones)
         // — mirrors how T10's loom_user_knowledge.access_count is wired
-        // regardless of whether content was returned. The stats table PK is
-        // BIGINT while loom_market_knowledge.id is VARCHAR(36) UUID (see
-        // V1.0 schema mismatch note in DefaultKnowledgeStatsService); we
-        // attempt the conversion and gracefully skip the stat if the id
-        // isn't a numeric Long — the search itself still succeeds.
+        // regardless of whether content was returned.
+        //
+        // M3+ T1.5: kbStatsService is now IMarketContentStatsService<String>
+        // (K = String UUID). The String path is the canonical path — no
+        // Long.parseLong graceful-degradation. The stats service buffers
+        // directly via BatchedCounterService.increment(String, ...).
         if (kbStatsService != null) {
             try {
-                Long marketId = Long.parseLong(knowledgeId);
-                kbStatsService.incrementStat(marketId, "SEARCH");
-            } catch (NumberFormatException nfe) {
-                log.debug("searchKnowledge: knowledgeId={} is not a Long market_id; skipping stats increment",
-                        knowledgeId);
+                kbStatsService.incrementStat(knowledgeId, "SEARCH");
             } catch (RuntimeException ex) {
                 // Stats are best-effort; never let stat bookkeeping fail the search.
                 log.warn("searchKnowledge: stats increment failed for knowledgeId={}: {}",

@@ -15,21 +15,33 @@ import java.time.LocalDateTime;
  * <h2>Two responsibilities</h2>
  * <ol>
  *   <li><b>Buffered write</b> via {@link BatchedCounterService}: hot-path callers
- *       (skill pulls, KB searches) call {@link #incrementStat(Long, String)}
+ *       (skill pulls, KB searches) call {@link #incrementStat(Object, String)}
  *       and the delta is added to an in-memory {@code BufferEntry} keyed by
  *       {@code (table, keyCol, key, cntCol)}. The scheduler flushes the buffer
  *       every 30s, drastically reducing write pressure on
  *       {@code market_skill_stats} / {@code loom_market_knowledge_stats} during
  *       chat bursts.</li>
- *   <li><b>Synchronous read</b> via {@link JdbcTemplate}: {@link #getStats(Long)}
- *       queries the row directly. Reads are infrequent (one per UI render) so
- *       no buffering is warranted — see the latest flushed state.</li>
+ *   <li><b>Synchronous read</b> via {@link JdbcTemplate}:
+ *       {@link #getStats(Object)} queries the row directly. Reads are
+ *       infrequent (one per UI render) so no buffering is warranted —
+ *       see the latest flushed state.</li>
  * </ol>
+ *
+ * <h2>Type parameter {@code K}</h2>
+ * <p>Generic over the market-id type — {@code Long} for skill stats (PK is
+ * {@code BIGINT}), {@code String} (UUID) for KB stats (PK is {@code VARCHAR(36)}
+ * post-T1.1 schema migration). Subclasses pin the type and implement the
+ * typed abstract helpers ({@link #ensureStatsRowExists(Object)},
+ * {@link #bufferIncrement(Object)}, {@link #readStatsRow(Object)},
+ * {@link #emptyStatsRow(Object)}, {@link #discardBuffer(Object)},
+ * {@link #writeReset(Object, long, Timestamp)}) — those methods take the
+ * concrete {@code K}, while the shared flow here operates on {@code K} as a
+ * black box.</p>
  *
  * <h2>The "kind" parameter is documentation-only</h2>
  * Each subclass owns exactly ONE counter column (e.g. {@code pull_count} for
  * Skill, {@code search_count} for KB). The {@code kind} parameter on
- * {@link #incrementStat(Long, String)} is accepted for API symmetry with
+ * {@link #incrementStat(Object, String)} is accepted for API symmetry with
  * {@link IMarketContentStatsService} but ignored by the implementation —
  * subclass templates pin the column. Callers should pass the canonical
  * constant ({@code "PULL"} / {@code "SEARCH"}) for clarity in logs.
@@ -52,17 +64,10 @@ import java.time.LocalDateTime;
  * the future), unlike MySQL-specific
  * {@code INSERT ... ON DUPLICATE KEY UPDATE}.</p>
  *
- * <p>Subclasses can override {@link #ensureStatsRowExists(Long)} if a future
- * schema uses a composite PK or wants a non-keyed upsert — the default
- * implementation is sufficient for {@code market_skill_stats} (PK on
- * {@code market_skill_id}) and {@code loom_market_knowledge_stats} (PK on
- * {@code market_id}).</p>
- *
- * @param <M> market-content id type — Long for Skill, Long for KB (despite
- *            {@code loom_market_knowledge.id} being VARCHAR(36), the stats
- *            table uses BIGINT — see schema).
+ * @param <K> market-content id type — {@code Long} for Skill,
+ *            {@code String} (UUID) for KB (post-T1.1 schema migration)
  */
-public abstract class AbstractMarketStatsService<M> implements IMarketContentStatsService {
+public abstract class AbstractMarketStatsService<K> implements IMarketContentStatsService<K> {
 
     protected final Logger log = LoggerFactory.getLogger(getClass());
 
@@ -87,6 +92,34 @@ public abstract class AbstractMarketStatsService<M> implements IMarketContentSta
     protected abstract String lastCol();
 
     /**
+     * Buffer a delta of +1 for {@code marketId} via {@link BatchedCounterService}.
+     * Subclasses dispatch to the appropriate {@code increment(...)} overload
+     * based on the concrete {@code K} type (Long / String).
+     */
+    protected abstract void bufferIncrement(K marketId);
+
+    /**
+     * H2 {@code MERGE INTO} lazy-upsert keyed on the PK column. When the row
+     * exists, the {@code (keyCol)} column is "set" to its current value
+     * (no-op) and the other columns are left untouched. When the row is
+     * missing, all columns take their schema defaults
+     * ({@code count=0}, {@code last=NULL}).
+     */
+    protected abstract void ensureStatsRowExists(K marketId);
+
+    /** Read the existing stats row from the DB; throw {@link org.springframework.dao.EmptyResultDataAccessException} if no row. */
+    protected abstract StatsRow<K> readStatsRow(K marketId);
+
+    /** Return the "no row yet" sentinel for {@link #getStats(Object)} on empty reads. */
+    protected abstract StatsRow<K> emptyStatsRow(K marketId);
+
+    /** Discard any pending buffered delta for {@code marketId}. */
+    protected abstract void discardBuffer(K marketId);
+
+    /** Direct {@code UPDATE ... SET count = ?, last = ?} for the admin reset path. */
+    protected abstract void writeReset(K marketId, long newCount, Timestamp ts);
+
+    /**
      * Increment the counter for {@code marketId}. The {@code kind} parameter is
      * documentation-only — the column is hard-coded by the subclass.
      * <p>
@@ -98,7 +131,7 @@ public abstract class AbstractMarketStatsService<M> implements IMarketContentSta
      * </ul>
      */
     @Override
-    public void incrementStat(Long marketId, String kind) {
+    public void incrementStat(K marketId, String kind) {
         if (marketId == null) {
             return;
         }
@@ -115,7 +148,7 @@ public abstract class AbstractMarketStatsService<M> implements IMarketContentSta
         // Document the kind for grep-ability; column is hard-coded by subclass.
         log.debug("{}: buffer +1 kind={} {}={} (col={})",
                 getClass().getSimpleName(), kind, tableName(), marketId, countCol());
-        batchedCounterService.increment(tableName(), keyCol(), marketId, countCol(), lastCol());
+        bufferIncrement(marketId);
     }
 
     /**
@@ -125,23 +158,14 @@ public abstract class AbstractMarketStatsService<M> implements IMarketContentSta
      * but reads before the first increment are valid (no row → no traffic).
      */
     @Override
-    public StatsRow getStats(Long marketId) {
+    public StatsRow<K> getStats(K marketId) {
         if (marketId == null) {
-            return new StatsRow(null, 0L, null);
+            return emptyStatsRow(null);
         }
         try {
-            return jdbc.queryForObject(
-                    "SELECT " + keyCol() + ", " + countCol() + ", " + lastCol()
-                            + " FROM " + tableName() + " WHERE " + keyCol() + " = ?",
-                    (rs, n) -> {
-                        Timestamp ts = rs.getTimestamp(lastCol());
-                        LocalDateTime lastAt = (ts == null) ? null : ts.toLocalDateTime();
-                        long count = rs.getLong(countCol());
-                        return new StatsRow(rs.getLong(keyCol()), count, lastAt);
-                    },
-                    marketId);
+            return readStatsRow(marketId);
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
-            return new StatsRow(marketId, 0L, null);
+            return emptyStatsRow(marketId);
         }
     }
 
@@ -157,48 +181,20 @@ public abstract class AbstractMarketStatsService<M> implements IMarketContentSta
      * Otherwise an admin "reset" call could be silently overwritten 0–30s
      * later when the {@link BatchedCounterService#scheduledFlush()} drains
      * pending increments — the admin's request would appear to be a no-op
-     * even though it succeeded. We use
-     * {@link BatchedCounterService#discard} (single-key) instead of
-     * {@link BatchedCounterService#flush()} (whole buffer) so unrelated
-     * counters in the same buffer keep their queued increments.</p>
+     * even though it succeeded. We use the single-key discard path so
+     * unrelated counters in the same buffer keep their queued increments.</p>
      */
-    public void resetStats(Long marketId, long newCount, LocalDateTime newLastAt) {
+    @Override
+    public void resetStats(K marketId, long newCount, LocalDateTime newLastAt) {
         if (marketId == null) {
             return;
         }
         // Drop pending buffered deltas for this exact tuple — the direct
         // UPDATE below will overwrite whatever the flush would have written,
         // so leaving the buffer would corrupt the admin's intent.
-        boolean discarded = batchedCounterService.discard(tableName(), keyCol(), marketId, countCol());
-        if (discarded) {
-            log.debug("{}: discarded buffered delta before reset for {}={}",
-                    getClass().getSimpleName(), tableName(), marketId);
-        }
+        discardBuffer(marketId);
         ensureStatsRowExists(marketId);
         Timestamp ts = (newLastAt == null) ? null : Timestamp.valueOf(newLastAt);
-        jdbc.update(
-                "UPDATE " + tableName()
-                        + " SET " + countCol() + " = ?, " + lastCol() + " = ?"
-                        + " WHERE " + keyCol() + " = ?",
-                newCount, ts, marketId);
-    }
-
-    /**
-     * Default upsert — H2 {@code MERGE INTO} keyed on the PK column. When
-     * the row exists, the {@code (keyCol)} column is "set" to its current
-     * value (no-op) and the other columns are left untouched. When the row
-     * is missing, all columns take their schema defaults
-     * ({@code count=0}, {@code last=NULL}).
-     */
-    protected void ensureStatsRowExists(Long marketId) {
-        // SQL identifier concatenation is intentional — these come from trusted
-        // loom-agent code paths with fixed schemas; parameter binding only
-        // covers the value. Mirrors the same rationale in
-        // BatchedCounterService's JdbcFlushExecutor.
-        String sql = "MERGE INTO " + tableName()
-                + " (" + keyCol() + ")"
-                + " KEY(" + keyCol() + ")"
-                + " VALUES (?)";
-        jdbc.update(sql, marketId);
+        writeReset(marketId, newCount, ts);
     }
 }
