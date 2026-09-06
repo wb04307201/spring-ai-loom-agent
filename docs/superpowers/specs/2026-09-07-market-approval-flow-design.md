@@ -81,7 +81,7 @@ CREATE TABLE loom_market_knowledge_archive (
 ### 4.3 `AbstractMarketAdminService` / v2 `create()`
 
 - `approve/reject/setOfficial/setFeaturedRank/setCategory` **零改动**(已实现,reject comment 必填已强制)。
-- v2 admin `create()` 语义改为 APPROVED:skill 侧 v2 router 改调 `adminCreate`(或 `create()` 参数化 status——**取前者**,避免动接口签名);KB 侧 `DefaultKnowledgeMarketService.create()` 直接改 SQL 落 APPROVED(该方法唯一调用方就是 v2 admin router)。
+- v2 admin `create()` 语义改为 APPROVED:**实施修正(写 plan 时核实)**——`create()`→PENDING 被 `DefaultSkillMarketServiceIT.createAppendsRowToMarketSkill` 锁定,且 KB `create()` 有第二个调用方(v2 `POST /user/market-knowledge` L3922,spec 原稿"唯一调用方是 admin router"的前提有误)。故**不改 `create()`**,而是两侧新增 `createApproved(adminUsername, req)`(落 APPROVED + created_by_kind='ADMIN' + reviewed_at/by),v2 admin POST 改调它;KB v2 `POST /user/market-knowledge` 腿退役(前端零调用)。skill 侧不复用 v1 `adminCreate`(它吃 `MarketSkillUpsertRequest`,与 v2 `MarketCreateRequest` 形态不同);v1 `adminCreate/adminUpdate/adminDelete` 随 v1 admin router 退役标 @Deprecated 保留(ADR-T03 shim 政策)。
 
 ### 4.4 v2 admin `DELETE` → 级联
 
@@ -93,10 +93,10 @@ CREATE TABLE loom_market_knowledge_archive (
 
 | v1 router bean | 退役的注册 | 保留者 |
 |---|---|---|
-| `loomAgentSkillMarketRouter`(L2357-2440 一带) | `POST /user/market-skills`(L2394)、`GET /user/market-skills`(L2414)、`DELETE /user/market-skills/{id}`(L2419)、`GET /market-skills/{id}`(L2360)、`POST /market-skills/{id}/pull`(L2377) | v2 `loomAgentMarketSkillRouter`(L3052-3330)对应腿;v2 若无 listMySubmitted 腿则**补注册**(GET/DELETE /user/market-skills 指向同一 service 方法) |
-| `loomAgentSkillMarketAdminRouter`(L2446-2520) | 整个 bean(POST L2455 / PUT L2477 / DELETE L2499) | v2 `loomAgentMarketSkillAdminRouter`(L2573-3021);v2 POST 改调 `adminCreate`(§4.3);v2 DELETE 经级联模板(§4.4) |
-| `loomAgentKnowledgeMarketAdminRouter`(L4580-4607) | 整个 bean(GET L4586 / DELETE L4593) | v2 `loomAgentMarketKnowledgeAdminRouter`(L3374-3793) |
-| KB v1 user/public 路由(`/api/knowledge-market` 系,L4492-4574)+ `/api/knowledge/{id}/submit` | **精确退役,只删有 v2 等价物且前端已不调的腿**(已核实 app.js L61-67:list 已走 v2;`pull` / `my-submitted` / `withdraw` / `/api/knowledge/{id}/submit` 四条 **app.js 仍在调** → 保留注册,但其底层 `submit()`/`pull()` service 语义已被 §4.2 改为 PENDING/校验,自动受益) | v2 `loomAgentMarketKnowledgePublicRouter`(L3795+,含 `POST/DELETE /user/market-knowledge`、`/market-knowledge/{id}/pull`);**v2 `POST /user/market-knowledge`(L3913,调 `kbSvc.create`)语义与聊天侧分享不同**(要 name/description body;聊天分享只传 knowledgeId 走 v1 `/api/knowledge/{id}/submit`)→ 保留双腿,v2 腿的 `create()` 已被 §4.3 改为 admin 直发 APPROVED,**注意**:v2 user submit 腿若调同一 `create()` 会把"作者投稿"也变 APPROVED —— 实施时该腿必须改调 `kbSvc.submit(knowledgeId)`(PENDING 路径)或退役该腿(前端零调用,倾向退役并记 follow-up) |
+| `loomAgentSkillMarketRouter`(L2357-2440 一带,整 bean) | `POST /user/market-skills`(L2394)、`GET /user/market-skills`(L2414)、`DELETE /user/market-skills/{id}`(L2419)、`GET /market-skills/{id}`(L2360)、`POST /market-skills/{id}/pull`(L2377) | v2 `loomAgentMarketSkillRouter`(L3052-3330)对应腿;**关键修正**:v2 user `POST /user/market-skills`(L3135)当前调 `svc.create()`(无 UPSERT/归档/backlink),退役 v1 后 v2 成唯一赢家会丢 backlink → **v2 该腿必须改调 `svc.submit()`**(把 `MarketCreateRequest` 映射成 `MarketSkillSubmitRequest`);v2 缺 `GET /user/market-skills`(listMySubmitted,前端 app.js L46 依赖、要求裸 ARRAY)→ **v2 补注册**再删 v1 |
+| `loomAgentSkillMarketAdminRouter`(L2446-2520) | 整个 bean(POST L2455 / PUT L2477 / DELETE L2499) | v2 `loomAgentMarketSkillAdminRouter`(L2573-3021);v2 admin POST 改调 `createApproved()`(§4.3);v2 DELETE 经级联模板(§4.4) |
+| `loomAgentKnowledgeMarketAdminRouter`(L4580-4607) | 整个 bean(GET L4586 / DELETE L4593) | v2 `loomAgentMarketKnowledgeAdminRouter`(L3374-3793);v2 admin POST 改调 `createApproved()`(§4.3) |
+| KB v1 user/public 路由(`/api/knowledge-market` 系,L4492-4574)+ `/api/knowledge/{id}/submit` | **精确退役,只删有 v2 等价物且前端已不调的腿**(已核实 app.js L61-67:list 已走 v2;`pull` / `my-submitted` / `withdraw` / `/api/knowledge/{id}/submit` 四条 **app.js 仍在调** → 保留注册,但其底层 `submit()`/`pull()` service 语义已被 §4.2 改为 PENDING/校验,自动受益) | v2 `loomAgentMarketKnowledgePublicRouter`(L3795+,含 `POST/DELETE /user/market-knowledge`、`/market-knowledge/{id}/pull`);**v2 `POST /user/market-knowledge`(L3913,调 `kbSvc.create`)语义与聊天侧分享不同**(要 name/description body;聊天分享只传 knowledgeId 走 v1 `/api/knowledge/{id}/submit`)→ **退役 v2 该腿**(前端零调用),记 follow-up;聊天侧投稿继续走保留的 v1 `/api/knowledge/{id}/submit`(→submit()→PENDING) |
 
 v2 `PUT /admin/market-*/{id}`:确认 `MarketUpdateRequest` **无 status 字段**(已是),update 永不改 status——状态只走 approve/reject。
 
