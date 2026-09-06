@@ -1279,6 +1279,16 @@ textarea::placeholder {
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
 }
 
+/* 未授权 / 不可用的能力项（capability 列表 enabled=false 时追加 .disabled） */
+.skill-item.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.skill-item.disabled:hover {
+  transform: none;
+  border-color: var(--border-color);
+}
+
 .skill-item-name {
   font-weight: 600;
   font-size: 14px;
@@ -1472,7 +1482,9 @@ textarea::placeholder {
   overflow: hidden;
 }
 
-.ks-sidebar {
+/* 知识空间模态框侧栏（index.html 实际类名是 ks-sidebar-list；旧选择器 .ks-sidebar
+   从未被任何元素使用 — 2026-09-06 样式检测发现此失配，容器因此丢失宽度/边框/滚动） */
+.ks-sidebar-list {
   width: 200px;
   border-right: 1px solid var(--border-color);
   overflow-y: auto;

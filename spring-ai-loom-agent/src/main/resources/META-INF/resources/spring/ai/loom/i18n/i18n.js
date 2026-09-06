@@ -52,25 +52,41 @@
   }
 
   /**
-   * Translate a dot.path key. Returns the key itself if neither locale
-   * has it (so unreplaced strings show as literals — easier to spot).
+   * Translate a dot.path key.
+   *
+   * `fallbackOrLocale` is overloaded for caller ergonomics:
+   *   - a SUPPORTED locale string ("zh-CN" / "en-US") → translate in that locale
+   *   - anything else (a non-empty string) → used as FALLBACK TEXT when the key
+   *     is absent from the dictionaries. Existing callers (app.js `_statusLabel`,
+   *     market-admin.js announcement badge) pass their intended fallback here.
+   *
+   * Resolution order: dict[loc] → dict[FALLBACK] → fallbackText → the key itself
+   * (the key is returned last so genuinely-untranslated strings are still
+   * visible as dot.path literals).
    *
    * @param {string} key e.g. "market.admin.title"
-   * @param {string} [locale] override locale (defaults to document.documentElement.lang or FALLBACK)
+   * @param {string} [fallbackOrLocale] fallback text OR locale override
    * @returns {string}
    */
-  function t(key, locale) {
+  function t(key, fallbackOrLocale) {
+    const isLocale =
+      typeof fallbackOrLocale === "string" && SUPPORTED.includes(fallbackOrLocale);
     const loc =
-      locale ||
-      (typeof document !== "undefined" &&
-        document.documentElement &&
-        document.documentElement.lang) ||
-      FALLBACK;
+      (isLocale
+        ? fallbackOrLocale
+        : (typeof document !== "undefined" &&
+            document.documentElement &&
+            document.documentElement.lang)) || FALLBACK;
+    const fallbackText =
+      !isLocale && typeof fallbackOrLocale === "string" && fallbackOrLocale !== ""
+        ? fallbackOrLocale
+        : null;
     const dict = cache[loc] || {};
     const fallbackDict = loc === FALLBACK ? {} : cache[FALLBACK] || {};
     if (Object.prototype.hasOwnProperty.call(dict, key)) return dict[key];
     if (Object.prototype.hasOwnProperty.call(fallbackDict, key))
       return fallbackDict[key];
+    if (fallbackText !== null) return fallbackText;
     return key;
   }
 
@@ -83,4 +99,12 @@
   }
 
   window.I18N = { t, ready, SUPPORTED, FALLBACK };
+
+  // Kick off dict loading as soon as this script is parsed (fire-and-forget).
+  // Previously nothing invoked ready(), so the caches stayed empty and every
+  // render that ran before a manual ready() echoed raw dot.path keys (e.g. the
+  // market announcement badge showed "market.admin.announcement.badge").
+  // Callers that must not race can still await I18N.ready(); with the fallback
+  // support in t(), a pre-ready render degrades to readable fallback text.
+  ready();
 })();

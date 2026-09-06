@@ -4188,46 +4188,100 @@ const skills = {
       });
       if (!items || items.length === 0) {
         container.innerHTML =
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+          '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无技能</div>';
         return;
       }
       // M3+ T2.2: listWithAnnouncements helper removed — announcement data
       // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
       // via T2.1 LEFT JOIN). Render reads row.announcementTitle below.
+      // 技能市场搜索（与知识空间市场 Tab 对称）：后端技能公开 list 走 v1 listApproved
+      // (不支持 query)，且技能无 tag 体系（B4 defer），故采用客户端关键词过滤
+      // name/description/author。搜索栏复用 kb-tag-filter-bar/input（已在 style.css 共享层）。
+      this._skillMarketAll = items;
       container.innerHTML = "";
-      // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
-      // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
-      for (const m of items) {
-        if (m && m.announcementTitle) {
-          const annView = {
-            title: m.announcementTitle,
-            body: m.announcementBody || "",
-          };
-          const banner = document.createElement("div");
-          banner.className = "market-announcement market-announcement-list";
-          banner.innerHTML =
-            window.MarketAdmin && window.MarketAdmin.announcementHtml
-              ? window.MarketAdmin.announcementHtml(annView)
-              : `<div class="market-announcement-title">📢 ${escapeHtml(
-                  annView.title,
-                )}</div><div class="market-announcement-body">${escapeHtml(
-                  annView.body,
-                )}</div>`;
-          banner.style.cursor = "pointer";
-          // 点击 banner 时 banner 自身不是 list item — 暂时用 placeholder,
-          // 真正选中由下面 row 的 click 处理。
-          banner.addEventListener("click", () => {
-            const rowEl = banner.nextElementSibling;
-            if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
-          });
-          container.appendChild(banner);
-        }
-        const item = document.createElement("div");
-        item.className = "ks-item";
-        const officialBadge = m && m.isOfficial
-          ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
-          : "";
-        item.innerHTML = `
+      const bar = document.createElement("div");
+      bar.className = "kb-tag-filter-bar";
+      bar.innerHTML =
+        '<span class="kb-tag-filter-bar-label">搜索：</span>' +
+        '<div class="kb-tag-filter-input-row">' +
+        '<input type="text" id="skill-market-search" class="kb-tag-filter-input" ' +
+        'placeholder="搜索技能（名称 / 描述 / 作者）"/>' +
+        "</div>";
+      container.appendChild(bar);
+      const rowsWrap = document.createElement("div");
+      container.appendChild(rowsWrap);
+      const searchInput = bar.querySelector("#skill-market-search");
+      searchInput.addEventListener("input", () =>
+        this._renderSkillMarketRows(rowsWrap, searchInput.value),
+      );
+      this._renderSkillMarketRows(rowsWrap, "");
+    } catch (e) {
+      container.innerHTML =
+        '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+        escapeHtml(e.message) +
+        "</div>";
+    }
+  },
+
+  _renderSkillMarketRows(rowsWrap, keyword) {
+    const all = this._skillMarketAll || [];
+    const kw = (keyword || "").trim().toLowerCase();
+    const items = kw
+      ? all.filter(
+          (m) =>
+            m &&
+            (
+              (m.name || "") +
+              " " +
+              (m.description || "") +
+              " " +
+              (m.author || "")
+            )
+              .toLowerCase()
+              .includes(kw),
+        )
+      : all;
+    rowsWrap.innerHTML = "";
+    if (items.length === 0) {
+      rowsWrap.innerHTML =
+        '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配「' +
+        escapeHtml(keyword || "") +
+        '」的技能</div>';
+      return;
+    }
+    // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
+    // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
+    for (const m of items) {
+      if (m && m.announcementTitle) {
+        const annView = {
+          title: m.announcementTitle,
+          body: m.announcementBody || "",
+        };
+        const banner = document.createElement("div");
+        banner.className = "market-announcement market-announcement-list";
+        banner.innerHTML =
+          window.MarketAdmin && window.MarketAdmin.announcementHtml
+            ? window.MarketAdmin.announcementHtml(annView)
+            : `<div class="market-announcement-title">📢 ${escapeHtml(
+                annView.title,
+              )}</div><div class="market-announcement-body">${escapeHtml(
+                annView.body,
+              )}</div>`;
+        banner.style.cursor = "pointer";
+        // 点击 banner 时 banner 自身不是 list item — 暂时用 placeholder,
+        // 真正选中由下面 row 的 click 处理。
+        banner.addEventListener("click", () => {
+          const rowEl = banner.nextElementSibling;
+          if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
+        });
+        rowsWrap.appendChild(banner);
+      }
+      const item = document.createElement("div");
+      item.className = "ks-item";
+      const officialBadge = m && m.isOfficial
+        ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
+        : "";
+      item.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
  <span class="ks-item-name">${escapeHtml(m.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
@@ -4235,14 +4289,8 @@ const skills = {
  <span class="ks-item-desc">by ${escapeHtml(m.author || "")} · ${escapeHtml(m.description || "")}</span>
  </div>
  `;
-        item.addEventListener("click", () => this._selectMarketSkill(m, item));
-        container.appendChild(item);
-      }
-    } catch (e) {
-      container.innerHTML =
-        '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
-        escapeHtml(e.message) +
-        "</div>";
+      item.addEventListener("click", () => this._selectMarketSkill(m, item));
+      rowsWrap.appendChild(item);
     }
   },
 
