@@ -188,4 +188,31 @@ class MarketApprovalFlowIT {
             cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
         }
     }
+
+    @Test
+    void adminDeleteCascadesSkillRefs() {
+        long id = skillSvc.createApproved("admin1", new MarketCreateRequest(
+            "del-" + System.nanoTime(), "d", "c", null)).id();
+        // 造一个 user_skill 引用该 market_skill_id
+        jdbc.update("INSERT INTO user_skill (username, name, description, content, source, market_skill_id, default_loaded, locked) " +
+            "VALUES ('bob', 'del-ref', 'd', 'c', 'MARKET_PULLED', ?, TRUE, FALSE)", id);
+        skillSvc.delete(id);
+        Integer remaining = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM user_skill WHERE market_skill_id=?", Integer.class, id);
+        assertEquals(0, remaining, "delete 应级联清 user_skill 引用");
+        Integer main = jdbc.queryForObject("SELECT COUNT(*) FROM market_skill WHERE id=?", Integer.class, id);
+        assertEquals(0, main);
+    }
+
+    @Test
+    void adminDeleteCascadesKbRefs() {
+        String id = kbSvc.createApproved("admin1", new MarketCreateRequest(
+            "delkb-" + System.nanoTime(), "d", null, null)).id();
+        jdbc.update("INSERT INTO loom_user_knowledge (username, market_knowledge_id, source, locked) " +
+            "VALUES ('bob', ?, 'MARKET_PULLED', FALSE)", id);
+        kbSvc.delete(id);
+        Integer remaining = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM loom_user_knowledge WHERE market_knowledge_id=?", Integer.class, id);
+        assertEquals(0, remaining);
+    }
 }

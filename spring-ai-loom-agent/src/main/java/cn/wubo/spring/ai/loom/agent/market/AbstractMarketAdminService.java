@@ -275,8 +275,12 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
         return listPaged(new MarketFilter(page, size, MarketContentStatus.APPROVED, category, query, "official_rank"));
     }
 
+    /** 子类实现:删主表前清理 user_ 与 role_ 引用表(级联)。 */
+    protected abstract void cascadeCleanup(K id);
+
     @Override
     public void delete(K id) {
+        cascadeCleanup(id);
         jdbc.update("DELETE FROM " + tableName() + " WHERE id=?", id);
     }
 }

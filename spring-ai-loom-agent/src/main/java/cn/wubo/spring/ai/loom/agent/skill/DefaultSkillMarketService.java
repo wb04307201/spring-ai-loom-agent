@@ -419,6 +419,12 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         if (n == 0) throw new LoomAgentRuntimeException("Skill 不存在: id=" + id);
     }
 
+    @Override
+    protected void cascadeCleanup(Long id) {
+        jdbc.update("DELETE FROM user_skill WHERE market_skill_id=?", id);
+        jdbc.update("DELETE FROM role_skill WHERE market_skill_id=?", id);
+    }
+
     /* ===== ISkillMarketService — 用户拉取 ===== */
 
     @Override

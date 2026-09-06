@@ -72,6 +72,11 @@ class AbstractMarketAdminServiceTest {
         public Long extractId(FakeEntry e) {
             return e.id;
         }
+
+        @Override
+        protected void cascadeCleanup(Long id) {
+            // no-op — unit-test fake has no user_*/role_* reference tables
+        }
     }
 
     JdbcTemplate jdbc;

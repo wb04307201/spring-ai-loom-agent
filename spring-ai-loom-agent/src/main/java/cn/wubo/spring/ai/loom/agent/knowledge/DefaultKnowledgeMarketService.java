@@ -395,6 +395,12 @@ public class DefaultKnowledgeMarketService
         }
     }
 
+    @Override
+    protected void cascadeCleanup(String id) {
+        jdbcTemplate.update("DELETE FROM loom_user_knowledge WHERE market_knowledge_id=?", id);
+        jdbcTemplate.update("DELETE FROM loom_role_knowledge WHERE market_knowledge_id=?", id);
+    }
+
     /* ===== 用户拉取（仅 APPROVED 可拉取，镜像 Skill 端 pull 403 校验） ===== */
 
     @Override
