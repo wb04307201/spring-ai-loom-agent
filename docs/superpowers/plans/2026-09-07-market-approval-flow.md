@@ -733,13 +733,17 @@ grep -nE "market-skills|market-knowledge|api/knowledge-market|api/knowledge/.*su
 ```
 记录每条前端调用的路径 + 方法。**已知事实**(调研):app.js 仍调 v1 `pull`(L64)、`my-submitted`(L66)、`withdraw`(L67)、`/api/knowledge/{id}/submit`(submitToMarket L65)→ **这 4 条 v1 腿保留注册**(其底层 service 语义已被 Task 3/4 改为 PENDING/校验,自动受益)。
 
-- [ ] **Step 2: 写失败测试(admin POST→APPROVED)**
+- [ ] **Step 2: 写失败测试(admin POST → createApproved 唯一赢家)**
+
+**关键**:现状 v1 `adminCreate`(声明在前)胜出,POST 已返回 APPROVED 但 `created_by_kind='USER'`(adminCreate INSERT 不含该列→走 DEFAULT 'USER');v2 `create()` 则落 PENDING。三者唯一可靠区分信号 = **`created_by_kind`**:v1 adminCreate→'USER'、v2 create→PENDING、目标 createApproved→**'ADMIN'**。故测试断言 created_by_kind='ADMIN'(响应 JSON 不含该字段,需查 DB —— SkillListDispatchIT 加 `@Autowired JdbcTemplate jdbc;`)。
 
 `SkillListDispatchIT.java` 追加(harness 已核实:`TestRestTemplate` + `authHeaders` cookie,`@BeforeEach loginAsAdmin()` 以 wb04307201/123456 登录,L60-78):
 
 ```java
+    @Autowired JdbcTemplate jdbc;
+
     @Test
-    @DisplayName("POST /admin/market-skills → 200 + status=APPROVED (admin 直发,v2 createApproved)")
+    @DisplayName("POST /admin/market-skills → 200 + APPROVED + created_by_kind=ADMIN (v2 createApproved 唯一赢家)")
     void adminPostSkillCreatesApproved() throws Exception {
         HttpHeaders h = new HttpHeaders();
         h.add(HttpHeaders.COOKIE, authHeaders.getFirst(HttpHeaders.COOKIE));
@@ -753,7 +757,12 @@ grep -nE "market-skills|market-knowledge|api/knowledge-market|api/knowledge/.*su
                 "admin create must return 200; got " + resp.getStatusCode() + " body=" + resp.getBody());
         JsonNode body = MAPPER.readTree(resp.getBody());
         assertEquals("APPROVED", body.get("status").asText(),
-                "admin create must land APPROVED (createApproved), not PENDING");
+                "admin create must land APPROVED");
+        long id = body.get("id").asLong();
+        String kind = jdbc.queryForObject(
+                "SELECT created_by_kind FROM market_skill WHERE id=?", String.class, id);
+        assertEquals("ADMIN", kind,
+                "must be createApproved (created_by_kind=ADMIN), not v1 adminCreate (USER) nor v2 create (PENDING)");
     }
 ```
 
@@ -829,15 +838,49 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ### Task 7: admin 前端 —— 新增按钮 + approve/reject + 技能编辑补字段
 
 **Files:**
+- Modify: `spring-ai-loom-agent/src/main/java/cn/wubo/spring/ai/loom/agent/skill/DefaultSkillMarketService.java`(`update()` 补 isOfficial/featuredRank —— Step 0)
 - Modify: `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/admin/market-admin.js`(加共享 `approve()`/`reject()`)
 - Modify: `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/admin/market-skills.js`(新增按钮、approve/reject 按钮、编辑弹窗补字段)
 - Modify: `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/admin/market-skills.html`(工具栏加新增按钮、删失真文案、编辑弹窗加 category/official/rank 字段)
 - Modify: `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/admin/knowledge-market.js` + `knowledge-market.html`(新增按钮、approve/reject 按钮;KB 编辑弹窗已有 category/official/rank)
 - Modify: i18n `zh-CN.json` / `en-US.json`(启用已备键 + 新增 reject.commentRequired)
+- Test: `MarketApprovalFlowIT.java`(加 skillUpdatePersistsOfficialRank 测试)
 
 **Interfaces:**
-- Consumes: v2 admin 端点 `POST /admin/market-{kind}s`(createApproved)、`POST /admin/market-{kind}s/{id}/approve`、`POST .../reject`(body `{comment}`)、`PUT /admin/market-{kind}s/{id}`(MarketUpdateRequest)、`MarketAdmin.form(kind,'create',null)`。
-- Produces: `window.MarketAdmin.approve(kind, id)` / `window.MarketAdmin.reject(kind, id, comment)` 共享方法(镜像 `updateMarketTags` L745-778 范式:401/403 跳登录、错误抛出)。
+- Consumes: v2 admin 端点 `POST /admin/market-{kind}s`(createApproved)、`POST /admin/market-{kind}s/{id}/approve`、`POST .../reject`(body `RejectBody{comment}`,已核实)、`PUT /admin/market-{kind}s/{id}`(MarketUpdateRequest)、`MarketAdmin.form(kind,'create',null)`。
+- Produces: `window.MarketAdmin.approve(kind, id)` / `window.MarketAdmin.reject(kind, id, comment)` 共享方法(镜像 `updateMarketTags` L745-778 范式:401/403 跳登录、错误抛出);`DefaultSkillMarketService.update()` 持久化 isOfficial/featuredRank(镜像 KB update)。
+
+- [ ] **Step 0: 后端 —— skill update() 补 isOfficial/featuredRank(镜像 KB,TDD)**
+
+预扫描发现:`DefaultSkillMarketService.update()`(L122-145)只动态 SET name/description/content/category,**忽略 isOfficial/featuredRank**;而 KB `update()`(DefaultKnowledgeMarketService L158-165)处理这两个字段。技能编辑弹窗要镜像 KB 持久化 official/rank,必须先补后端。
+
+先写失败测试(`MarketApprovalFlowIT.java` 追加):
+```java
+    @Test
+    void skillUpdatePersistsOfficialRank() {
+        long id = skillSvc.createApproved("admin1", new MarketCreateRequest(
+            "upd-" + System.nanoTime(), "d", "c", null)).id();
+        skillSvc.update(id, new MarketUpdateRequest(null, null, null, null, true, 7));
+        Boolean official = jdbc.queryForObject("SELECT is_official FROM market_skill WHERE id=?", Boolean.class, id);
+        Integer rank = jdbc.queryForObject("SELECT featured_rank FROM market_skill WHERE id=?", Integer.class, id);
+        assertEquals(true, official);
+        assertEquals(7, rank);
+    }
+```
+跑 `mvn test -pl spring-ai-loom-agent-test -Dtest='MarketApprovalFlowIT#skillUpdatePersistsOfficialRank' -Dsurefire.failIfNoSpecifiedTests=false`(先 `mvn clean install` 库三模块)→ FAIL(official 仍 false / rank 仍 null)。
+
+改 `DefaultSkillMarketService.update()`:在 category 分支后、`sql.append(" WHERE id=?")` 前插入(镜像 KB update L158-165):
+```java
+        if (req.isOfficial() != null) {
+            sql.append(", is_official=?");
+            args.add(req.isOfficial());
+        }
+        if (req.featuredRank() != null) {
+            sql.append(", featured_rank=?");
+            args.add(req.featuredRank());
+        }
+```
+重跑 → PASS。
 
 - [ ] **Step 1: market-admin.js 加 approve/reject 共享方法**
 
@@ -892,7 +935,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
 在文件末尾 `window.MarketAdmin = {...}`(L780-794)导出对象里加 `approve, reject,`。
 
-> reject body 的字段名(`comment`)以 v2 reject handler(L2695 / L3497)实际解析的为准 —— 实施时先 Read 这两个 handler 确认 body record 字段名(可能是 `RejectRequest{comment}` 或裸 `{comment}`),对齐之。
+> reject body 已核实:两侧 v2 reject handler(skill L2708 / KB L3507)解析 `cn.wubo.spring.ai.loom.agent.market.RejectBody(String comment)` → body 发 `{"comment":"..."}` 正确;handler 层已有"comment 空 → 400"防线,前端拦截是第二道保险。
 
 - [ ] **Step 2: market-skills.html 工具栏加新增按钮 + 删失真文案**
 
