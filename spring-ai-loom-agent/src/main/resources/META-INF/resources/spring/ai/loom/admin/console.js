@@ -187,16 +187,24 @@
     const counts = await Promise.all(
       endpoints.map(async (url) => {
         try {
-          const r = await fetch(url, {
+          // M4 (FU-4 follow-on): v2 admin list 默认 size=20，客户端过滤会漏数。
+          // 改为服务端 status=PENDING + size=1，直接读 Page.total（精确，>100 也对）；
+          // 兼容 v1 裸 ARRAY 形态（退化为客户端计数）。
+          const r = await fetch(`${url}?status=PENDING&page=0&size=1`, {
             credentials: "include",
             headers: { "Content-Type": "application/json; charset=UTF-8" },
           });
           if (!r.ok) return 0;
           const data = await r.json();
           // 兼容 v1 (List<...>) 与 v2 (Page<...>) 两种返回结构
-          const rows = Array.isArray(data)
-            ? data
-            : data && Array.isArray(data.items)
+          if (Array.isArray(data)) {
+            return data.filter(
+              (m) => String((m && m.status) || "").toUpperCase() === "PENDING",
+            ).length;
+          }
+          if (data && typeof data.total === "number") return data.total;
+          const rows =
+            data && Array.isArray(data.items)
               ? data.items
               : data && Array.isArray(data.content)
                 ? data.content

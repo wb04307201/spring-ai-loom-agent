@@ -678,7 +678,9 @@
 
   async function loadMarketApproved() {
     try {
-      const r = await fetch(API.marketApproved, { credentials: "include" });
+      // M4 (FU-4 follow-on): public list 现为 v2 Page，默认 size=20 → 必须显式取大页，
+      // 否则角色授权下拉只显示前 20 条已审批技能。
+      const r = await fetch(`${API.marketApproved}?page=0&size=100`, { credentials: "include" });
       if (!r.ok) return [];
       // FU-4: 双向兼容 v1 (ARRAY) 与 v2 (Page{items}) 两种返回结构
       const data = await r.json();

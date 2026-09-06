@@ -86,34 +86,49 @@
           " (expected 'SKILL' or 'KNOWLEDGE')",
       );
     }
-    const r = await fetch(url, {
-      credentials: "include",
-      headers: { "Content-Type": "application/json; charset=UTF-8" },
-    });
-    if (r.status === 401 || r.status === 403) {
-      // Session expired — bounce to login, matching skills-market.js convention.
-      window.location.replace("/spring/ai/loom/index.html");
-      return [];
-    }
-    if (!r.ok) {
-      let body = "";
-      try {
-        body = await r.text();
-      } catch (_) {
-        body = "";
+    // M4 (FU-4 follow-on): the v2 admin list returns a Page{items,total,page,size}
+    // with a default size of 20. Admin tables must show EVERY row (no silent
+    // truncation), so fetch a large page and loop until items.length >= total.
+    // Still tolerant of a bare ARRAY (v1 shape) for safety. Hard cap 10 pages
+    // (= 1000 rows) so a runaway total can never loop forever.
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 10;
+    const acc = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const sep = url.includes("?") ? "&" : "?";
+      const r = await fetch(`${url}${sep}page=${page}&size=${PAGE_SIZE}`, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+      });
+      if (r.status === 401 || r.status === 403) {
+        // Session expired — bounce to login, matching skills-market.js convention.
+        window.location.replace("/spring/ai/loom/index.html");
+        return [];
       }
-      throw new Error(
-        "MarketAdmin.list(" +
-          (KIND_LABEL[kind] || kind) +
-          ") failed: HTTP " +
-          r.status +
-          (body ? " — " + body : ""),
-      );
+      if (!r.ok) {
+        let body = "";
+        try {
+          body = await r.text();
+        } catch (_) {
+          body = "";
+        }
+        throw new Error(
+          "MarketAdmin.list(" +
+            (KIND_LABEL[kind] || kind) +
+            ") failed: HTTP " +
+            r.status +
+            (body ? " — " + body : ""),
+        );
+      }
+      const p = await r.json();
+      // v1 bare ARRAY → take it whole, done.
+      if (Array.isArray(p)) return p;
+      const items = p && Array.isArray(p.items) ? p.items : p && Array.isArray(p.content) ? p.content : [];
+      acc.push(...items);
+      const total = p && typeof p.total === "number" ? p.total : acc.length;
+      if (items.length < PAGE_SIZE || acc.length >= total) break;
     }
-    // FU-4: 双向兼容 v1 (ARRAY) 与 v2 (Page{items}) 两种返回结构
-    // (镜像 knowledge-market.js:107-111 listItems 范式)
-    const p = await r.json();
-    return Array.isArray(p) ? p : (p && Array.isArray(p.items) ? p.items : []);
+    return acc;
   }
 
   /**
