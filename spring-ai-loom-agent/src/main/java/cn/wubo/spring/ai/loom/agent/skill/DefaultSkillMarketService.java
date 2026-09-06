@@ -4,7 +4,9 @@ import cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException;
 import cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService;
 import cn.wubo.spring.ai.loom.agent.market.MarketContentStatus;
 import cn.wubo.spring.ai.loom.agent.market.MarketCreateRequest;
+import cn.wubo.spring.ai.loom.agent.market.MarketFilter;
 import cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest;
+import cn.wubo.spring.ai.loom.agent.market.Page;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest;
@@ -165,6 +167,108 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         return jdbc.query(
                 "SELECT * FROM market_skill ORDER BY author, name",
                 rowMapper());
+    }
+
+    /* ===== M4 T4: tags embed (镜像 DefaultKnowledgeMarketService R4) ===== */
+
+    /**
+     * M4 T4 — override 基类 {@code listPaged},在 announcement + review-aggregate
+     * LEFT JOIN(基类 T2.1/R3/T3)之上再补齐 {@code tags}:对当前页的全部 id 做
+     * <b>单次批量 SELECT</b>(NOT per-row N+1),Java 侧按 {@code market_skill_id}
+     * 分组成 {@code Map<Long, List<String>>},然后用 {@link MarketSkill#withTags(List)}
+     * 重建每行 — 无 tag 的 skill 得到 {@code List.of()}(永远非 null)。
+     *
+     * <p>tag 排序 {@code ORDER BY tag ASC} 与
+     * {@link cn.wubo.spring.ai.loom.agent.skill.market.SkillTagService#listTags}
+     * (per-id 端点)一致,保证列表嵌入与详情端点展示相同顺序。
+     * H2 无 GROUP_CONCAT/LISTAGG 可移植写法 → 不用 SQL 聚合。
+     *
+     * <p>基类 {@code search(query, category, page, size)} 委派到 {@code listPaged},
+     * 故本 override 同时覆盖 admin 列表、公开列表与搜索三条路径。分页元数据
+     * (total/page/size)原样保留。
+     */
+    @Override
+    public Page<MarketSkill> listPaged(MarketFilter filter) {
+        Page<MarketSkill> page = super.listPaged(filter);
+        return new Page<>(embedTags(page.items()), page.total(), page.page(), page.size());
+    }
+
+    /**
+     * M4 T4 — 单次批量 tag SELECT + Java 侧分组 + {@link MarketSkill#withTags(List)}
+     * 重建,供 {@link #listPaged} 与 {@link #enrich(List)} 共用。无 tag 的行得到
+     * 空 list(非 null)。空输入 / 全 null id 时原样返回,不发 SQL。
+     */
+    private List<MarketSkill> embedTags(List<MarketSkill> rows) {
+        List<Long> ids = rows.stream()
+                .map(MarketSkill::id)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (ids.isEmpty()) {
+            return rows;
+        }
+        String placeholders = String.join(", ", java.util.Collections.nCopies(ids.size(), "?"));
+        List<Object> args = new java.util.ArrayList<>(ids);
+        java.util.Map<Long, List<String>> tagsById = new java.util.LinkedHashMap<>();
+        jdbc.query(
+                "SELECT market_skill_id, tag FROM market_skill_tag " +
+                        "WHERE market_skill_id IN (" + placeholders + ") " +
+                        "ORDER BY market_skill_id ASC, tag ASC",
+                rs -> {
+                    tagsById.computeIfAbsent(rs.getLong("market_skill_id"), k -> new java.util.ArrayList<>())
+                            .add(rs.getString("tag"));
+                },
+                args.toArray());
+        return rows.stream()
+                .map(r -> r.withTags(tagsById.getOrDefault(r.id(), List.of())))
+                .toList();
+    }
+
+    /**
+     * M4 T4 — 富化 {@code ?tag=} 路径(tag 交集查询)返回的行:先用单次批量 SELECT
+     * 补齐 announcement(title/body),再 {@link #embedTags(List)} 补齐 tags。
+     * <p>
+     * tag 路径的 {@code SELECT m.*} 不带 announcement LEFT JOIN,故 announcement 字段
+     * 为 null;本方法从 {@code market_content_announcement}(kind='SKILL')批量回读并
+     * 用 {@link MarketSkill#withAnnouncement(String, String)} 重建。注意
+     * {@code market_content_announcement.market_id} 是 VARCHAR(36),skill id 是 BIGINT,
+     * 用 {@code String.valueOf(id)} 绑定(与 {@code listPaged} 的 CAST join 语义一致,
+     * 跨 kind UUID 公告行天然不匹配十进制 id)。
+     * <p>
+     * 单次批量 announcement SELECT + 单次批量 tag SELECT — 无 N+1。供
+     * {@code loomAgentSkillMarketPublicRouter} 的 {@code ?tag=} 分支复用。
+     */
+    public List<MarketSkill> enrich(List<MarketSkill> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return rows == null ? List.of() : rows;
+        }
+        List<String> idStrings = rows.stream()
+                .map(MarketSkill::id)
+                .filter(java.util.Objects::nonNull)
+                .map(String::valueOf)
+                .toList();
+        List<MarketSkill> withAnnouncement;
+        if (idStrings.isEmpty()) {
+            withAnnouncement = rows;
+        } else {
+            String placeholders = String.join(", ", java.util.Collections.nCopies(idStrings.size(), "?"));
+            List<Object> args = new java.util.ArrayList<>(idStrings);
+            java.util.Map<String, String[]> annById = new java.util.LinkedHashMap<>();
+            jdbc.query(
+                    "SELECT market_id, title, body FROM market_content_announcement " +
+                            "WHERE market_kind = 'SKILL' AND market_id IN (" + placeholders + ")",
+                    rs -> {
+                        annById.put(rs.getString("market_id"),
+                                new String[]{rs.getString("title"), rs.getString("body")});
+                    },
+                    args.toArray());
+            withAnnouncement = rows.stream()
+                    .map(r -> {
+                        String[] ann = r.id() == null ? null : annById.get(String.valueOf(r.id()));
+                        return ann == null ? r : r.withAnnouncement(ann[0], ann[1]);
+                    })
+                    .toList();
+        }
+        return embedTags(withAnnouncement);
     }
 
     /* ===== ISkillMarketService — 用户提交 ===== */

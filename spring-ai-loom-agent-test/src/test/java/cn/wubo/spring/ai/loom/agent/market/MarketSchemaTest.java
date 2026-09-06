@@ -79,6 +79,35 @@ class MarketSchemaTest {
         assertEquals(1, t);
     }
 
+    // ==== M4 T4: skill tag system (mirror of the KB tag table) ====
+
+    @Test
+    void marketSkillTagTableExists() {
+        Integer t = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE UPPER(TABLE_NAME)='MARKET_SKILL_TAG'",
+            Integer.class);
+        assertEquals(1, t);
+        assertTrue(columnExists("market_skill_tag", "market_skill_id"));
+        assertTrue(columnExists("market_skill_tag", "tag"));
+    }
+
+    @Test
+    void marketSkillTagIndexExists() {
+        Integer idx = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES WHERE UPPER(TABLE_NAME)='MARKET_SKILL_TAG' AND UPPER(INDEX_NAME)='IDX_MARKET_SKILL_TAG'",
+            Integer.class);
+        assertEquals(1, idx);
+    }
+
+    @Test
+    void marketSkillTagHasExactlyOneFk() {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS " +
+            "WHERE UPPER(TABLE_NAME)='MARKET_SKILL_TAG' AND CONSTRAINT_TYPE='FOREIGN KEY'",
+            Integer.class);
+        assertEquals(1, n);
+    }
+
     // ==== M3+ technical debt cleanup (spec § 4.1 + § 4.2) ====
 
     @Test

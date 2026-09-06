@@ -744,3 +744,17 @@ ALTER TABLE loom_user_knowledge ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT
 ALTER TABLE market_content_announcement   ALTER COLUMN market_id VARCHAR(36);
 ALTER TABLE loom_market_knowledge_stats  ALTER COLUMN market_id VARCHAR(36);
 ALTER TABLE loom_market_knowledge_review ALTER COLUMN market_id VARCHAR(36);
+
+-- =============================================================
+-- ==== M4 market enhancements (T4: skill tag system) ====
+-- M4: 技能多对多 tag —— 镜像 loom_market_knowledge_tag(列名随 skill 附表约定 market_skill_id)。
+-- market_skill_id 与 market_skill.id 对齐(BIGINT,NOT VARCHAR)。
+-- 删除 skill 时通过 FK ON DELETE CASCADE 自动清理 tag 行。
+-- =============================================================
+CREATE TABLE market_skill_tag (
+  market_skill_id BIGINT NOT NULL,
+  tag             VARCHAR(64) NOT NULL,
+  PRIMARY KEY (market_skill_id, tag),
+  FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_skill_tag ON market_skill_tag(tag);

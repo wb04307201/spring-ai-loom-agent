@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (M4 T4, 2026-09-06)
+- Skill tag system — mirrors the v1.2.0 KB tag system on the skill side: `market_skill_tag` table (BIGINT `market_skill_id` FK → `market_skill(id)` ON DELETE CASCADE + `idx_market_skill_tag`), `SkillTagService` (`addTags`/`removeTag`/`replaceTags` with transactional rollback + `listTags` + `findByTag`/`findByAllTags` AND-intersection queries), admin `PUT`/`GET /spring/ai/loom/admin/market-skills/{id}/tags`, public `GET /spring/ai/loom/market-skills/{id}/tags`, and repeatable `?tag=` filter on the public skill list. `DefaultSkillMarketService.listPaged` now embeds `tags` (single batch SELECT, no N+1), and the `?tag=` path returns rows enriched with **both** tags and announcement via the new `enrich()` — fixing the FU-1-style degradation on the skill side (the KB `?tag=` FU-1 remains open)
+
 ### Added (M4 T3, 2026-09-06)
 - Market admin/public v2 list endpoints (`listPaged`) now support `sortBy=rating` — orders by review aggregate (NULL-rated rows last), excluding ADMIN self-reviews (same rule as `aggregate()`); the review-aggregate LEFT JOIN is unconditional, so every `listPaged` row now carries `avgRating` / `ratingCount` / `isOfficial` / `featuredRank`
 

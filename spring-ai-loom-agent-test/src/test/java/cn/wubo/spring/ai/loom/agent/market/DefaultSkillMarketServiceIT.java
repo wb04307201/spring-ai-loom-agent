@@ -3,7 +3,7 @@ package cn.wubo.spring.ai.loom.agent.market;
 import cn.wubo.spring.ai.loom.agent.LoomAgentTestApplication;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService;
-import cn.wubo.spring.ai.loom.agent.user.IUser;
+import cn.wubo.spring.ai.loom.agent.skill.market.SkillTagService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,7 +18,8 @@ class DefaultSkillMarketServiceIT {
 
     @Autowired DefaultSkillMarketService svc;
     @Autowired JdbcTemplate jdbc;
-    @Autowired IUser user;
+    @Autowired SkillTagService tagService;
+    @Autowired MarketAnnouncementRepository annRepo;
 
     @Test
     void createAppendsRowToMarketSkill() {
@@ -61,6 +62,102 @@ class DefaultSkillMarketServiceIT {
         svc.setOfficial(id, true, "admin1");
         Boolean official = jdbc.queryForObject("SELECT is_official FROM market_skill WHERE id=?", Boolean.class, id);
         assertEquals(true, official);
+    }
+
+    /* ===== M4 T4: tags embed (镜像 DefaultKnowledgeMarketServiceIT R4 块) ===== */
+
+    /** tags embedded via ONE batch SELECT — exact match, stable order (tag ASC). */
+    @Test
+    void listPagedEmbedsTagsExactly() {
+        String category = "t4-tags-" + System.nanoTime();
+        long id = createApproved("t4-tags-" + System.nanoTime(), category);
+        tagService.replaceTags(SkillTagService.MARKET_KIND_SKILL, id,
+            List.of("spring", "java", "rag"));
+
+        MarketSkill row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row);
+        // SkillTagService.listTags orders by tag ASC — embed must be consistent
+        assertEquals(List.of("java", "rag", "spring"), row.tags());
+        assertEquals(tagService.listTags(SkillTagService.MARKET_KIND_SKILL, id), row.tags());
+    }
+
+    /** A skill with NO tags returns tags() == empty list, NOT null. */
+    @Test
+    void listPagedReturnsEmptyTagListWhenNoTags() {
+        String category = "t4-notags-" + System.nanoTime();
+        long id = createApproved("t4-notags-" + System.nanoTime(), category);
+
+        MarketSkill row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row);
+        assertNotNull(row.tags(), "tags must be empty list, never null");
+        assertTrue(row.tags().isEmpty());
+    }
+
+    /** announcement + tags coexist: one skill row carries both after listPaged. */
+    @Test
+    void listPagedEmbedsAnnouncementAndTagsInSameRow() {
+        String category = "t4-both-" + System.nanoTime();
+        long id = createApproved("t4-both-" + System.nanoTime(), category);
+        annRepo.upsert("SKILL", String.valueOf(id), "t4-both-title", "t4-both-body");
+        tagService.replaceTags(SkillTagService.MARKET_KIND_SKILL, id,
+            List.of("skill", "market"));
+
+        MarketSkill row = findInPage(svc.listPaged(
+            new MarketFilter(0, 50, null, category, null, "official_rank")), id);
+
+        assertNotNull(row);
+        assertEquals("t4-both-title", row.announcementTitle());
+        assertEquals("t4-both-body", row.announcementBody());
+        assertEquals(List.of("market", "skill"), row.tags());
+    }
+
+    /** search() delegates to listPaged in the base — override must cover it too. */
+    @Test
+    void searchEmbedsTagsAndAnnouncement() {
+        String name = "t4-search-" + System.nanoTime();
+        long id = svc.create("alice", new MarketCreateRequest(name, "d", "c", null)).id();
+        svc.approve(id, "admin1");
+        annRepo.upsert("SKILL", String.valueOf(id), "t4-s-title", "t4-s-body");
+        tagService.replaceTags(SkillTagService.MARKET_KIND_SKILL, id, List.of("search-tag"));
+
+        MarketSkill row = findInPage(svc.search(name, null, 0, 50), id);
+
+        assertNotNull(row);
+        assertEquals("t4-s-title", row.announcementTitle());
+        assertEquals(List.of("search-tag"), row.tags());
+    }
+
+    /**
+     * v1 语义保留:skill 端 {@code listApproved()}(无参,v1 裸 SELECT *)
+     * <b>不</b> embed tags —— KB 端 v1 listApproved(page,size) embed 是因为聊天面板
+     * market tab 读取 row.tags;skill market tab 不读取,brief 明确 v1 语义不动。
+     */
+    @Test
+    void listApprovedDoesNotEmbedTags() {
+        String name = "t4-appr-" + System.nanoTime();
+        long id = svc.create("alice", new MarketCreateRequest(name, "d", "c", null)).id();
+        svc.approve(id, "admin1");
+        tagService.replaceTags(SkillTagService.MARKET_KIND_SKILL, id,
+            List.of("v1-no-embed"));
+
+        MarketSkill row = svc.listApproved().stream()
+            .filter(r -> Long.valueOf(id).equals(r.id()))
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(row, "approved skill must appear in listApproved");
+        assertNull(row.tags(), "v1 listApproved 路径保持不 embed(tags=null)");
+    }
+
+    private static MarketSkill findInPage(Page<MarketSkill> page, long id) {
+        return page.items().stream()
+            .filter(r -> Long.valueOf(id).equals(r.id()))
+            .findFirst()
+            .orElse(null);
     }
 
     /* ===== M4 T3: sortBy=rating via review-aggregate LEFT JOIN ===== */

@@ -131,4 +131,21 @@ public record MarketSkill(
                 avgRating, ratingCount, isOfficial, featuredRank,
                 newTags == null ? java.util.List.of() : java.util.List.copyOf(newTags));
     }
+
+    /**
+     * M4 T4 — copy-helper mirroring {@link #withTags(java.util.List)} for the
+     * announcement pair: returns a new record differing only in
+     * {@code announcementTitle} / {@code announcementBody}; all other
+     * components preserved (including {@code tags} as-is). Used by
+     * {@code DefaultSkillMarketService.enrich} to batch-fill announcements on
+     * rows loaded via the tag-query path (whose {@code SELECT m.*} has no
+     * announcement LEFT JOIN).
+     */
+    public MarketSkill withAnnouncement(String newTitle, String newBody) {
+        return new MarketSkill(
+                id, name, description, content, author, status,
+                submittedAt, reviewedAt, reviewedBy, reviewComment,
+                newTitle, newBody,
+                avgRating, ratingCount, isOfficial, featuredRank, tags);
+    }
 }
