@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (2026-09-06, found by full Chrome UI test) `market-admin.js` admin write-endpoint builders pluralized `market-${kind}s` → KB admin "发布公告"/"删除评价" hit `/admin/market-knowledges/...` and 404'd (backend KB routes are singular `market-knowledge`); builders now derive from the existing `ADMIN_API[kind]` map — spec FU-6
 - (2026-09-06, found by full Chrome UI test) `i18n/i18n.js` fetched dicts via document-relative `../i18n/*.json`, which 404s from `index.html` (sits beside `i18n/`, not one level down like `admin/*.html`) → dictionaries never loaded on the main page and announcement banners rendered the raw key `market.admin.announcement.badge`; dict URLs now resolve relative to the script's own location — spec FU-7
 
+### Added (2026-09-06, round-2 Chrome UI test)
+- Skill modal market tab gains a keyword **search** bar (filters by name/description/author), mirroring the knowledge-space market tab. Client-side filtering, since the public skill list runs the v1 `listApproved()` twin (FU-4, ignores `?query=`) and skills have no tag system (B4 deferred). Reuses the shared `kb-tag-filter-bar`/`-input` classes so no new CSS was required.
+
+### Fixed (2026-09-06, round-2 Chrome UI + style-detection test)
+- Shared market-UI CSS (announcement banner / review widget / star rating / tag filter / form primitives `primary-btn`/`form-input`/`type-badge`/`modal-footer`) was defined only in `admin/console.css`, which `index.html` never loads → the knowledge-space modal's market tab rendered **completely unstyled** in the chat page. Moved these blocks to the shared base `style.css` (loaded by both `index.html` and admin pages); `console.css` keeps admin-only chrome (sidebar/tables/layout/`secondary`+`delete`-btn/`btn-sm`/`tag-edit`/`approval`/`pending-chip`). Relative rule order preserved so the admin cascade is unchanged.
+- Authored rules that existed in **no** stylesheet: file-manager tree (`file-tree`/`tree-*`), `detail-section-content`, `market-reviews-slot`, `review-list-wrap`, `delete-skill-btn`, `mcp-checkbox`/`mcp-item-text`.
+- Style-detection (runtime unstyled-class scan) found 3 latent gaps: `.ks-sidebar-list` (CSS defined only `.ks-sidebar`, never matched → KB sidebar lost width/border/scroll), `.skill-item.disabled` (unauthorized capability items had no dim/not-allowed styling), `.conv-state-label` (added nowrap).
+- `i18n/i18n.js`: `I18N.t(key, fallback)` — the 2nd arg is now treated as fallback text when it isn't a supported locale (callers pass their intended fallback; previously `t()` echoed the raw key when dicts were empty). Also `ready()` is now invoked at parse time — nothing called it before, so dict caches stayed empty and any early render showed raw `dot.path` keys (e.g. the announcement badge). With fallback support, a pre-ready render degrades to readable text.
+- Skill market empty-state copy fixed from "市场暂无知识库" to "市场暂无技能".
+
 ## [v1.2.0] - 2026-09-04
 
 ### Added
