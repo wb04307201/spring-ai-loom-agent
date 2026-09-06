@@ -108,4 +108,84 @@ class MarketApprovalFlowIT {
         String content = jdbc.queryForObject("SELECT content FROM market_skill WHERE id=?", String.class, id2);
         assertEquals("c2", content, "内容应已就地更新");
     }
+
+    @Autowired cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge knowledge;
+
+    private String newKb(String user) {
+        cn.wubo.spring.ai.loom.agent.user.UserContextHolder.setCurrentUser(user);
+        try {
+            // 已核实 IKnowledge.insert(name, description) 为 2 参,返回 KnowledgeRecord(.id())
+            return knowledge.insert("kb-" + System.nanoTime(), "desc").id();
+        } finally {
+            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
+        }
+    }
+
+    @Test
+    void kbSubmitLandsPending() {
+        String user = "alice";
+        String kbId = newKb(user);
+        cn.wubo.spring.ai.loom.agent.user.UserContextHolder.setCurrentUser(user);
+        try {
+            String mid = kbSvc.submit(kbId).id();
+            String status = jdbc.queryForObject(
+                "SELECT status FROM loom_market_knowledge WHERE id=?", String.class, mid);
+            assertEquals("PENDING", status);
+        } finally {
+            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
+        }
+    }
+
+    @Test
+    void kbPullRejectsNonApproved() {
+        String user = "alice";
+        String kbId = newKb(user);
+        cn.wubo.spring.ai.loom.agent.user.UserContextHolder.setCurrentUser(user);
+        String mid;
+        try { mid = kbSvc.submit(kbId).id(); }
+        finally { cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear(); }
+        var ex = assertThrows(cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException.class,
+            () -> kbSvc.pull("bob", mid));
+        assertEquals(403, ex.getStatusCode());
+    }
+
+    @Test
+    void kbResubmitRejectedArchivesOldRow() {
+        String user = "alice";
+        String kbId = newKb(user);
+        cn.wubo.spring.ai.loom.agent.user.UserContextHolder.setCurrentUser(user);
+        try {
+            String mid1 = kbSvc.submit(kbId).id();
+            kbSvc.reject(mid1, "admin1", "不合规");
+            String mid2 = kbSvc.submit(kbId).id();   // 同 KB(同 name)重投
+            assertNotEquals(mid1, mid2);
+            Integer archived = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM loom_market_knowledge_archive WHERE id=?", Integer.class, mid1);
+            assertEquals(1, archived);
+        } finally {
+            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
+        }
+    }
+
+    @Test
+    void kbResubmitApprovedKeepsApprovedNoDemotion() {
+        // T3 Ruling 的 KB 镜像:spec §2 APPROVED→PENDING 禁止 → 重投 APPROVED 行 = 同 id 就地更新 description
+        String user = "alice";
+        String kbId = newKb(user);
+        cn.wubo.spring.ai.loom.agent.user.UserContextHolder.setCurrentUser(user);
+        try {
+            String mid1 = kbSvc.submit(kbId).id();
+            kbSvc.approve(mid1, "admin1");
+            String mid2 = kbSvc.submit(kbId).id();
+            assertEquals(mid1, mid2, "APPROVED 重投 = 同 id 就地更新");
+            String status = jdbc.queryForObject(
+                "SELECT status FROM loom_market_knowledge WHERE id=?", String.class, mid2);
+            assertEquals("APPROVED", status);
+            String reviewedBy = jdbc.queryForObject(
+                "SELECT reviewed_by FROM loom_market_knowledge WHERE id=?", String.class, mid2);
+            assertEquals("admin1", reviewedBy, "审核字段不得被清空");
+        } finally {
+            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
+        }
+    }
 }

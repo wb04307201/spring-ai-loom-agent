@@ -292,13 +292,13 @@ public class DefaultKnowledgeMarketService
 
     @Override
     public List<MarketKnowledgeRecord> listAllForAdmin() {
-        // 无审批流，所有条目都是 APPROVED；按上架时间倒序
+        // admin 视角:全状态列出(PENDING/APPROVED/REJECTED);按审核/上架时间倒序
         return jdbcTemplate.query(
                 "SELECT * FROM loom_market_knowledge ORDER BY reviewed_at DESC, submitted_at DESC",
                 this::mapMarketKnowledgeRecord);
     }
 
-    /* ===== 用户提交（直接 APPROVED，UPSERT 同一 username+name） ===== */
+    /* ===== 用户提交（进 PENDING 审批流；REJECTED 重投归档旧行） ===== */
 
     @Override
     @Transactional
@@ -315,30 +315,46 @@ public class DefaultKnowledgeMarketService
                 .findFirst()
                 .orElseThrow(() -> new LoomAgentRuntimeException(404, "知识库不存在或不属于当前用户: " + knowledgeId));
 
-        // UPSERT（同一 username+name 不限 status，只保留一行）
+        // 查同名旧行(可能不存在)
         String existingId = null;
+        String existingStatus = null;
         try {
             existingId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM loom_market_knowledge WHERE username = ? AND name = ? LIMIT 1",
+                    "SELECT id FROM loom_market_knowledge WHERE username=? AND name=? LIMIT 1",
                     String.class, username, kb.name());
+            existingStatus = jdbcTemplate.queryForObject(
+                    "SELECT status FROM loom_market_knowledge WHERE id=?", String.class, existingId);
         } catch (EmptyResultDataAccessException ignored) {
         }
 
         String marketId;
-        if (existingId != null) {
-            // 已存在 → UPDATE description + status='APPROVED' + 重置 reviewed_at
+        if (existingId != null && "REJECTED".equals(existingStatus)) {
+            // REJECTED 重投:旧行整行归档 → 主表删 → 新建 PENDING 行(新 id)
             jdbcTemplate.update(
-                    "UPDATE loom_market_knowledge SET description = ?, status = 'APPROVED', " +
-                            "reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?, review_comment = NULL WHERE id = ?",
-                    kb.description(), username, existingId);
-            marketId = existingId;
-        } else {
-            // 不存在 → INSERT 全新行（直接 APPROVED）
+                    "INSERT INTO loom_market_knowledge_archive (id, username, name, description, status, " +
+                            "submitted_at, reviewed_at, reviewed_by, review_comment) " +
+                            "SELECT id, username, name, description, status, submitted_at, reviewed_at, " +
+                            "reviewed_by, review_comment FROM loom_market_knowledge WHERE id=?", existingId);
+            jdbcTemplate.update("DELETE FROM loom_market_knowledge WHERE id=?", existingId);
             marketId = UUID.randomUUID().toString();
             jdbcTemplate.update(
-                    "INSERT INTO loom_market_knowledge (id, username, name, description, status, reviewed_at, reviewed_by) " +
-                            "VALUES (?, ?, ?, ?, 'APPROVED', CURRENT_TIMESTAMP, ?)",
-                    marketId, username, kb.name(), kb.description(), username);
+                    "INSERT INTO loom_market_knowledge (id, username, name, description, status, created_by_kind) " +
+                            "VALUES (?, ?, ?, ?, 'PENDING', 'USER')",
+                    marketId, username, kb.name(), kb.description());
+        } else if (existingId != null) {
+            // 非 REJECTED 同名行(PENDING/APPROVED)→ 仅更新内容,状态与审核字段不动
+            // (spec §2: APPROVED→PENDING 禁止;T3 Ruling 已定,KB 镜像同语义)
+            jdbcTemplate.update(
+                    "UPDATE loom_market_knowledge SET description=? WHERE id=?",
+                    kb.description(), existingId);
+            marketId = existingId;
+        } else {
+            // 全新 INSERT → PENDING(等 admin approve)
+            marketId = UUID.randomUUID().toString();
+            jdbcTemplate.update(
+                    "INSERT INTO loom_market_knowledge (id, username, name, description, status, created_by_kind) " +
+                            "VALUES (?, ?, ?, ?, 'PENDING', 'USER')",
+                    marketId, username, kb.name(), kb.description());
         }
         return getById(marketId);
     }
@@ -379,13 +395,15 @@ public class DefaultKnowledgeMarketService
         }
     }
 
-    /* ===== 用户拉取（不再校验 status='APPROVED'，提交即上架） ===== */
+    /* ===== 用户拉取（仅 APPROVED 可拉取，镜像 Skill 端 pull 403 校验） ===== */
 
     @Override
     @Transactional
     public void pull(String username, String marketKnowledgeId) {
         MarketKnowledgeRecord mk = getById(marketKnowledgeId);
-        // 去掉 status='APPROVED' 校验（永远 APPROVED）
+        if (!MarketKnowledgeRecord.STATUS_APPROVED.equals(mk.status())) {
+            throw new LoomAgentRuntimeException(403, "该知识库未通过审批,暂不可拉取(status=" + mk.status() + ")");
+        }
 
         // 检查是否已存在
         Integer existingCount = jdbcTemplate.queryForObject(
