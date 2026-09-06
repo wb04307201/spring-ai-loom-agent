@@ -86,6 +86,18 @@ public class DefaultKnowledgeMarketService
         return "KNOWLEDGE";
     }
 
+    /** M4 T3 — KB review 表(代码常量,注入安全)。 */
+    @Override
+    protected String reviewTable() {
+        return "loom_market_knowledge_review";
+    }
+
+    /** M4 T3 — KB review 表指向 loom_market_knowledge.id (VARCHAR(36)) 的列。 */
+    @Override
+    protected String reviewIdColumn() {
+        return "market_id";
+    }
+
     @Override
     protected RowMapper<MarketKnowledgeRecord> rowMapper() {
         return (rs, n) -> MarketKnowledgeRecord.from(rs);

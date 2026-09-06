@@ -145,6 +145,10 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
                 rs.getString("review_comment"),
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
                 null);
     }
 }

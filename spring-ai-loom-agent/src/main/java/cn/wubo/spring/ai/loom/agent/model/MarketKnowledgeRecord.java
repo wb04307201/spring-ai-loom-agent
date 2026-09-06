@@ -21,6 +21,12 @@ import java.util.List;
  * {@code embedTags} 批量 SELECT);{@code announcementTitle} / {@code announcementBody}
  * 仅由 {@code listPaged} 的 LEFT JOIN announcement 填充({@code listApproved}
  * 的 SELECT 不 JOIN 公告表)。Skill 端无 tags 字段。
+ *
+ * <p>M4 T3 — 末尾 4 个字段 {@code avgRating} / {@code ratingCount} /
+ * {@code isOfficial} / {@code featuredRank} 由
+ * {@link cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService#listPaged}
+ * 的 review-aggregate LEFT JOIN + {@code m.*} 列填充;非 listPaged 路径经
+ * findColumn 探针读到 null/默认值。
  */
 public record MarketKnowledgeRecord(
         String id,
@@ -34,7 +40,11 @@ public record MarketKnowledgeRecord(
         String reviewComment,
         String announcementTitle,
         String announcementBody,
-        List<String> tags
+        List<String> tags,
+        Double avgRating,
+        Long ratingCount,
+        Boolean isOfficial,
+        Integer featuredRank
 ) {
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_APPROVED = "APPROVED";
@@ -49,10 +59,10 @@ public record MarketKnowledgeRecord(
      * ({@code embedTags})补齐(R4-deferred #2 修正:旧 doc 只提 listPaged),
      * 以避免 H2 不支持的 GROUP_CONCAT 聚合。
      *
-     * <p>M0 升级新增的 {@code is_official} / {@code featured_rank} / {@code category} /
-     * {@code created_by_kind} 4 列在此不读取(record 上没有对应字段);
-     * 它们由 {@code setOfficial} / {@code setFeaturedRank} / {@code setCategory}
-     * 等单字段 update 操作维护 —— 与 {@link MarketSkill#from(ResultSet)} 的处理一致。
+     * <p>M4 T3 — {@code avg_rating} / {@code rating_count}(review-aggregate LEFT JOIN
+     * 列别名)与 {@code is_official} / {@code featured_rank}({@code m.*} 列)经
+     * findColumn 探针读取,列缺失时落 null/0 默认值;{@code category} /
+     * {@code created_by_kind} 列仍不读取(record 上没有对应字段)。
      *
      * @param rs 已定位到当前行的 {@link ResultSet}
      * @return 填充后的 {@link MarketKnowledgeRecord} 实例(tags 字段为 null,
@@ -67,12 +77,22 @@ public record MarketKnowledgeRecord(
         // batch SELECT follow-up. Use findColumn to detect the joined
         // columns so the helper works for both joined and un-joined
         // queries.
-        boolean annPresent;
-        try {
-            rs.findColumn("announcement_title");
-            annPresent = true;
-        } catch (java.sql.SQLException notFound) {
-            annPresent = false;
+        boolean annPresent = hasColumn(rs, "announcement_title");
+        // M4 T3 — avg_rating / rating_count only present when the SELECT
+        // LEFT JOINed the review aggregate (listPaged); is_official /
+        // featured_rank come from m.* on market-table queries but probe
+        // anyway so the helper stays safe for any caller (getById /
+        // listApproved / role join queries pass through here too).
+        boolean ratingPresent = hasColumn(rs, "avg_rating");
+        boolean officialPresent = hasColumn(rs, "is_official");
+        boolean rankPresent = hasColumn(rs, "featured_rank");
+        Double avgRating = null;
+        Long ratingCount = null;
+        if (ratingPresent) {
+            double avg = rs.getDouble("avg_rating");
+            avgRating = rs.wasNull() ? null : avg;
+            long cnt = rs.getLong("rating_count");
+            ratingCount = rs.wasNull() ? 0L : cnt;
         }
         return new MarketKnowledgeRecord(
                 rs.getString("id"),
@@ -86,12 +106,28 @@ public record MarketKnowledgeRecord(
                 rs.getString("review_comment"),
                 annPresent ? rs.getString("announcement_title") : null,
                 annPresent ? rs.getString("announcement_body") : null,
-                null);
+                null,
+                avgRating,
+                ratingCount,
+                officialPresent && rs.getBoolean("is_official"),
+                rankPresent ? rs.getInt("featured_rank") : 0);
+    }
+
+    /** findColumn probe — true when the column label exists on this ResultSet. */
+    private static boolean hasColumn(ResultSet rs, String label) {
+        try {
+            rs.findColumn(label);
+            return true;
+        } catch (SQLException notFound) {
+            return false;
+        }
     }
 
     /**
      * M3+ R4 (AT2 follow-up, change 1) — copy-helper:返回一个仅 {@code tags}
-     * 字段不同的新 record,其余 11 个字段原样保留。
+     * 字段不同的新 record,其余字段原样保留(M4 T3:含新增的
+     * {@code avgRating} / {@code ratingCount} / {@code isOfficial} /
+     * {@code featuredRank} 4 个组件)。
      * {@code DefaultKnowledgeMarketService.listPaged} 用它把批量 tag SELECT
      * 的结果写回页面行(空 tag 时传 {@code List.of()},不允许 null)。
      */
@@ -100,6 +136,7 @@ public record MarketKnowledgeRecord(
                 id, username, name, description, status,
                 submittedAt, reviewedAt, reviewedBy, reviewComment,
                 announcementTitle, announcementBody,
-                newTags == null ? List.of() : List.copyOf(newTags));
+                newTags == null ? List.of() : List.copyOf(newTags),
+                avgRating, ratingCount, isOfficial, featuredRank);
     }
 }

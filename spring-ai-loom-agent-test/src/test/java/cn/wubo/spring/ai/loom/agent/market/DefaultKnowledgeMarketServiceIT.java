@@ -196,4 +196,45 @@ class DefaultKnowledgeMarketServiceIT {
             .findFirst()
             .orElse(null);
     }
+
+    /* ===== M4 T3: sortBy=rating — VARCHAR(36) review-aggregate LEFT JOIN ===== */
+
+    /**
+     * M4 T3 — KB 端 review-aggregate JOIN 走 {@code loom_market_knowledge_review.market_id}
+     * (VARCHAR(36)) ↔ {@code loom_market_knowledge.id} (VARCHAR(36)) 直接等值(无 CAST)。
+     * 播种 1 条 USER 评价(avg 4.0)+ 1 条 ADMIN 评价(必须排除),sortBy=rating
+     * 的 listPaged 必须返回 avgRating=4.0 / ratingCount=1,且 tags 嵌入不受影响。
+     */
+    @Test
+    void listPagedSortByRatingWorksOnVarcharUuidJoin() {
+        String category = "t3-kb-rating-" + System.nanoTime();
+        String id = svc.create("alice", new MarketCreateRequest(
+            "t3-kb-" + System.nanoTime(), "d", "c", category
+        )).id();
+        svc.approve(id, "admin1");
+
+        String user = "t3kbu-" + System.nanoTime();
+        String admin = "t3kba-" + System.nanoTime();
+        jdbc.update("INSERT INTO user_info (username, nickname, password, type) VALUES (?, ?, ?, ?)",
+            user, user, "pwd-" + user, "USER");
+        jdbc.update("INSERT INTO user_info (username, nickname, password, type) VALUES (?, ?, ?, ?)",
+            admin, admin, "pwd-" + admin, "ADMIN");
+        jdbc.update("MERGE INTO loom_market_knowledge_review (market_id, username, rating, comment) " +
+            "KEY(market_id, username) VALUES (?, ?, ?, ?)", id, user, 4, "kb-good");
+        jdbc.update("MERGE INTO loom_market_knowledge_review (market_id, username, rating, comment) " +
+            "KEY(market_id, username) VALUES (?, ?, ?, ?)", id, admin, 5, "kb-admin-self");
+
+        tagService.replaceTags(KnowledgeTagService.MARKET_KIND_KNOWLEDGE, id, List.of("rating"));
+
+        Page<MarketKnowledgeRecord> page = svc.listPaged(new MarketFilter(
+            0, 50, null, category, null, "rating"));
+
+        MarketKnowledgeRecord row = findInPage(page, id);
+        assertNotNull(row, "seeded KB must appear in sortBy=rating page");
+        assertEquals(4.0, row.avgRating(), 0.001, "ADMIN review must be excluded → avg 4.0");
+        assertEquals(1L, row.ratingCount());
+        assertEquals(Boolean.FALSE, row.isOfficial());
+        assertEquals(0, row.featuredRank());
+        assertEquals(List.of("rating"), row.tags(), "tags embed must survive withTags copying the new components");
+    }
 }

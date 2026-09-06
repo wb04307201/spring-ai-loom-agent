@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (M4 T3, 2026-09-06)
+- Market admin/public v2 list endpoints (`listPaged`) now support `sortBy=rating` — orders by review aggregate (NULL-rated rows last), excluding ADMIN self-reviews (same rule as `aggregate()`); the review-aggregate LEFT JOIN is unconditional, so every `listPaged` row now carries `avgRating` / `ratingCount` / `isOfficial` / `featuredRank`
+
+### Changed (M4 T3, 2026-09-06 — API-visible)
+- `MarketSkill` record gains 5 components (`avgRating`, `ratingCount`, `isOfficial`, `featuredRank`, `tags`) and `MarketKnowledgeRecord` gains 4 (`avgRating`, `ratingCount`, `isOfficial`, `featuredRank`) — **source-breaking** for external constructor call sites of these `@ConditionalOnMissingBean`-adjacent DTOs (same precedent as the `IMarketContentReviewService<K>` entry above); JSON serialization impact is additive (new nullable fields)
+- `AbstractMarketAdminService` gains two abstract hooks `reviewTable()` / `reviewIdColumn()` (code constants only — injection-safe); external subclasses must implement them (same precedent as T1.2/T1.5)
+
 ### Changed (M3+ residual closure, 2026-09-06 — API-visible)
 - `IMarketContentReviewService` is now generic `IMarketContentReviewService<K>` (Skill = `Long`, KB = `String` UUID); the String/Long twin overloads and `parseMarketIdOrThrow` are removed — **source-breaking** for external implementers of this `@ConditionalOnMissingBean` extension point (same precedent as T1.2/T1.5 in v1.2.0)
 - `ReviewRow` is now `ReviewRow<K>` (`marketId` typed by `K`)

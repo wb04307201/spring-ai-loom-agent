@@ -59,6 +59,28 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
     protected abstract String marketKind();
 
     /**
+     * M4 T3 — review 表名,例如 {@code "market_skill_review"} /
+     * {@code "loom_market_knowledge_review"}。供 {@link #listPaged} 的
+     * review-aggregate LEFT JOIN 使用。
+     *
+     * <p><b>注入安全性</b>:表名 / 列名只能来自子类代码常量(本 hook 与
+     * {@link #reviewIdColumn()}),不接受任何用户输入 — 与既有
+     * {@link #tableName()} 契约一致。
+     */
+    protected abstract String reviewTable();
+
+    /**
+     * M4 T3 — review 表中指向市场内容表 id 的列名,例如
+     * {@code "market_skill_id"} (skill, BIGINT) /
+     * {@code "market_id"} (KB, VARCHAR(36))。
+     * 类型对齐:skill 端 {@code m.id} BIGINT 与 rid BIGINT 直接等值;
+     * KB 端 {@code m.id} VARCHAR(36) 与 rid VARCHAR(36) 直接等值 — 无需 CAST。
+     *
+     * <p><b>注入安全性</b>:见 {@link #reviewTable()} — 只允许代码常量。
+     */
+    protected abstract String reviewIdColumn();
+
+    /**
      * 取得条目当前审核状态。final:子类必须通过 {@link #currentStatusImpl(Object)} 提供实现,
      * 不能直接覆盖 {@code currentStatus} 以保留接口契约。
      */
@@ -145,7 +167,8 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
 
     /**
      * 通用分页查询 — 按 {@link MarketFilter} 拼 WHERE / ORDER BY / LIMIT / OFFSET。
-     * sortBy 支持 {@code "official_rank"} (默认) 和 {@code "submitted_at"}。
+     * sortBy 支持 {@code "official_rank"} (默认)、{@code "submitted_at"} 和
+     * {@code "rating"} (M4 T3)。
      *
      * <p>M3+ T2.1 — SQL 用 LEFT JOIN 一次性把 {@code market_content_announcement}
      * 的 title / body 拉过来,rowMapper 通过列别名 {@code announcement_title} /
@@ -158,20 +181,39 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
      * 会把 VARCHAR 侧强转 BIGINT — 共享表里任何一条 KNOWLEDGE UUID 公告行都会
      * 让 SKILL 的 list 查询抛 conversion error(跨 kind 打挂)。CAST 后两侧
      * VARCHAR↔VARCHAR 比较,UUID 行天然不匹配 SKILL 的十进制 id,安全跳过。
+     *
+     * <p>M4 T3 — review-aggregate LEFT JOIN(无条件,不受 sortBy 影响):
+     * 派生表 {@code rr} 按 {@link #reviewTable()} / {@link #reviewIdColumn()}
+     * (子类代码常量,注入安全)聚合非 ADMIN 用户评分(镜像
+     * {@link AbstractMarketReviewService#aggregate} 的 {@code u.type <> 'ADMIN'}
+     * 排除规则),SELECT 增 {@code rr.avg_rating, rr.rating_count} — DTO 的
+     * {@code avgRating} / {@code ratingCount} / {@code isOfficial} /
+     * {@code featuredRank} 由此填充。类型对齐:skill 端 m.id BIGINT ↔ rid
+     * BIGINT,KB 端 m.id VARCHAR(36) ↔ rid VARCHAR(36),直接等值无需 CAST。
+     * {@code countWith} 不带本 JOIN — 聚合 / 排序不影响计数语义。
      */
     @Override
     public Page<M> listPaged(MarketFilter filter) {
         StringBuilder sql = new StringBuilder("SELECT m.*")
                 .append(", a.title AS announcement_title, a.body AS announcement_body")
+                .append(", rr.avg_rating, rr.rating_count")
                 .append(" FROM ").append(tableName()).append(" m")
                 .append(" LEFT JOIN market_content_announcement a")
                 .append("   ON a.market_kind = '").append(marketKind()).append("'")
-                .append("  AND a.market_id = CAST(m.id AS VARCHAR(36))");
+                .append("  AND a.market_id = CAST(m.id AS VARCHAR(36))")
+                .append(" LEFT JOIN (SELECT r.").append(reviewIdColumn()).append(" AS rid,")
+                .append(" AVG(r.rating) AS avg_rating, COUNT(*) AS rating_count")
+                .append(" FROM ").append(reviewTable()).append(" r")
+                .append(" JOIN user_info u ON r.username = u.username")
+                .append(" WHERE u.type <> 'ADMIN'")
+                .append(" GROUP BY r.").append(reviewIdColumn()).append(") rr")
+                .append("   ON rr.rid = m.id");
         appendCommonFiltersForM(sql, filter);
         sql.append(" ORDER BY ");
         switch (filter.sortBy()) {
             case "official_rank" -> sql.append("m.is_official DESC, m.featured_rank DESC, m.submitted_at DESC");
             case "submitted_at"  -> sql.append("m.submitted_at DESC");
+            case "rating"        -> sql.append("(rr.avg_rating IS NULL), rr.avg_rating DESC, m.is_official DESC, m.featured_rank DESC, m.submitted_at DESC");
             default              -> sql.append("m.is_official DESC, m.featured_rank DESC, m.submitted_at DESC");
         }
         sql.append(" LIMIT ").append(filter.size()).append(" OFFSET ").append(filter.page() * filter.size());

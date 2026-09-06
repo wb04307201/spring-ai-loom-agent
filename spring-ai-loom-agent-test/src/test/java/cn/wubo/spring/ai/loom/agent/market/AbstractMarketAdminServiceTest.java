@@ -50,6 +50,16 @@ class AbstractMarketAdminServiceTest {
         }
 
         @Override
+        protected String reviewTable() {
+            return "market_skill_review";
+        }
+
+        @Override
+        protected String reviewIdColumn() {
+            return "market_skill_id";
+        }
+
+        @Override
         protected RowMapper<FakeEntry> rowMapper() {
             return (rs, n) -> new FakeEntry(
                 rs.getLong("id"),

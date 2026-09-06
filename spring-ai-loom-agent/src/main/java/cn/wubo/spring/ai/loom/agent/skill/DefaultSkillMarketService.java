@@ -53,6 +53,18 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         return "SKILL";
     }
 
+    /** M4 T3 — skill review 表(代码常量,注入安全)。 */
+    @Override
+    protected String reviewTable() {
+        return "market_skill_review";
+    }
+
+    /** M4 T3 — skill review 表指向 market_skill.id (BIGINT) 的列。 */
+    @Override
+    protected String reviewIdColumn() {
+        return "market_skill_id";
+    }
+
     @Override
     protected RowMapper<MarketSkill> rowMapper() {
         return (rs, n) -> MarketSkill.from(rs);

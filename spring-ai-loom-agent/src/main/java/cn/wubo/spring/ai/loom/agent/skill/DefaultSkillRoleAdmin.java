@@ -41,6 +41,11 @@ public class DefaultSkillRoleAdmin implements ISkillRoleAdmin {
                         rs.getString("reviewed_by"),
                         rs.getString("review_comment"),
                         null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
                         null),
                 roleCode);
     }
