@@ -217,19 +217,22 @@ T3 refactor 时抽出来(T3.2 parked 项目顺道做)。
 
 ## § Verification (T7.1)
 
+> **状态(2026-09-06):Pass。** T7.1 初验为 partial(ADR-T07.1);3 项 residual 已由 R2 `699c1a1` / R3 `c0df007` / R4 `cb8178b` / fix wave `376454d` 关闭,AT1、AT2 升级至 Pass。最终 gate:`-Dtest='*IT'` ×3 连续 80/0/0(3 env-gated skip)+ 默认全套 380/0/0,全部 BUILD SUCCESS。详见 ADR-T07.1 closure 节。
+
 M3+ cleanup 的最终验证由本节定义。E2E 验收复用 [`docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md`](2026-09-04-skill-knowledge-market-design.md) §12 A1–A15,本节定义 cleanup-specific 的 AT1–AT5。
 
-### AT1: VARCHAR(36) UUID 真路径 E2E
+### AT1: VARCHAR(36) UUID 真路径 E2E — **Pass(2026-09-06)**
 
 - 触发:KB review / stats / announcement 端点用 UUID 入参
-- 期望:每个端点返回 200 + 真实 row(review / stats / announcement 均非 null)
-- 验证位置:`MarketAcceptanceIT` A12 / A16 / A17 正向 UUID 断言(T1.7)
+- 期望:端点返回 2xx + 真实结果。**措辞修正(2026-09-06,final-review Minor #6)**:对 spec 点名的验证 UUID(A16/A17 用**不存在**的 UUID),合法结果是 200 + 空 page / 204——"真实 row 非 null"仅适用于**已 seed 数据**的正向用例(a13kb / a16b / a17b / kbReviewFullUuidRoundTrip,fix wave 376454d 补齐)
+- 验证位置:`MarketAcceptanceIT` A12 / A16 / A16b / A17 / A17b / A18 + `DefaultKnowledgeReviewServiceIT`(全真 UUID)
 
-### AT2: N+1 修复(list + announcement + tags 一次 GET)
+### AT2: N+1 修复(list + announcement + tags 一次 GET)— **Pass(规范路径,2026-09-06)**
 
 - 触发:`GET /market-skills` 或 `/market-knowledge`
 - 期望:response DTO 包含 `announcementTitle` / `announcementBody` / `tags` 字段;前端不再二次 GET
-- 验证位置:`MarketAcceptanceIT` + `market-admin.js` 行为(T2.1 / T2.2)
+- 状态:v2 `listPaged`/`search`(T2.1 announcement LEFT JOIN + R4 tags 批量 SELECT + R4 `marketKind()` "KB"→"KNOWLEDGE" join 修复)与 v1 `listApproved`(R4 tags embed)均满足。**遗留:`?tag=` 过滤路径绕过 enrichment → FU-1**
+- 验证位置:`MarketAcceptanceIT`(A18 + embed 断言)+ `DefaultKnowledgeMarketServiceIT`(announcement/tags/coexist 用例)+ `market-admin.js` / `app.js` 行为(T2.2)
 
 ### AT3: v1 service shim 兼容
 
@@ -251,7 +254,7 @@ M3+ cleanup 的最终验证由本节定义。E2E 验收复用 [`docs/superpowers
 
 ### 回归门(完整)
 
-- `mvn test` 全绿(IT + unit)
+- `mvn test` 全绿(IT + unit)。**方法学修正(2026-09-06)**:默认 `mvn test -pl spring-ai-loom-agent-test`(surefire 默认 include,无 failsafe)只跑 `*Test` 类(380 个),**不跑任何 `*IT` 类**;IT gate 必须显式 `-Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false`(当前 80 个,3 个 env-gated skip),且运行前清空 `~/.loom/datasource` + `target/test-ds` + `target/surefire-reports`(陈旧 report 会伪装成覆盖)。flaky 类残留的关闭标准 = ×3 连续绿
 - A1–A15(design spec §12)全部通过
 - AT1–AT5 全部通过
 
@@ -262,6 +265,16 @@ M3+ cleanup 的最终验证由本节定义。E2E 验收复用 [`docs/superpowers
 - v1 service 完全删除 — 等 AT3 引用计数归零(>1 minor version)
 - KB 物理文件 versioning(ADR-002)— M4 defer
 - LOOM_VOICE banner 集成 — spec §17 第 4 问已显式删除
+
+### § Follow-ups(post-M3+,登记于 2026-09-06 final whole-branch review)
+
+| ID | 内容 | 严重度 | 备注 |
+|---|---|---|---|
+| FU-1 | `?tag=` 过滤路径(`KnowledgeTagService.findByTag` / `findByAllTags`)直接 `SELECT mk.*`,绕过 listPaged/listApproved enrichment → 返回记录 tags=null 且 announcement=null。前端 null-safe(Array.isArray guard + detail 面板单独 fetch),纯观感降级(过滤视图无 chips/banner)。候选方案:让 tag 过滤走 `listPaged`(`MarketFilter` 加 tag 维度)或把 `embedTags` 暴露给 tag service;一并考虑 v1 `listApproved` 的 announcement 对称性 | Minor / 非阻塞 | R4 concern 1 + final review R4(1) triage |
+| FU-2 | 分页 size 无上限 → `embedTags` IN-list 无界(`parsePageOr` 不 clamp;`findByAllTags` 有 100 上限)。候选:routers 或 `MarketFilter` clamp size ≤100/200 | Minor / pre-existing 放大 | final review Minor #5 |
+| FU-3 | 杂项:deferred minors 汇总 —— `DefaultKnowledgeTool` field/ctor + `LoomAgentToolAutoConfigTest` mock 仍 raw `IMarketContentStatsService`(public 构造器签名,API 面);A18/a13kb/a16b seeded 行不清理(计数断言全部 UUID-scoped,良性);`MarketKnowledgeRecord.from()` 体内注释仍说 listPaged-only;KnowledgeMarketIntegrationTest 缺 idx_market_kb_tag;readBack 500 消息含 marketId | Minor | SDD ledger triage 全部 OK-TO-DEFER |
+| FU-4 | v1/v2 admin 路由重复注册(灰度设计,v2 按 bean order 生效)— T3.2 `MarketAdminRoutesHelper` 全量化时退役 v1 twin | Minor / 架构 | R4 concern 2 + T3.2 pattern-only 遗留 |
+| FU-5 | CHANGELOG 已记录本轮 API 可见变更(Unreleased 节);发版时随 release notes 发布 | 流程 | final review Minor #3 |
 
 ---
 
