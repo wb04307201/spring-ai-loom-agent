@@ -196,9 +196,11 @@
           // 兼容 v1 (List<...>) 与 v2 (Page<...>) 两种返回结构
           const rows = Array.isArray(data)
             ? data
-            : data && Array.isArray(data.content)
-              ? data.content
-              : [];
+            : data && Array.isArray(data.items)
+              ? data.items
+              : data && Array.isArray(data.content)
+                ? data.content
+                : [];
           return rows.filter(
             (m) => String((m && m.status) || "").toUpperCase() === "PENDING",
           ).length;

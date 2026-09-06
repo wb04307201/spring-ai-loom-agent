@@ -110,7 +110,10 @@
           (body ? " — " + body : ""),
       );
     }
-    return await r.json();
+    // FU-4: 双向兼容 v1 (ARRAY) 与 v2 (Page{items}) 两种返回结构
+    // (镜像 knowledge-market.js:107-111 listItems 范式)
+    const p = await r.json();
+    return Array.isArray(p) ? p : (p && Array.isArray(p.items) ? p.items : []);
   }
 
   /**

@@ -680,7 +680,9 @@
     try {
       const r = await fetch(API.marketApproved, { credentials: "include" });
       if (!r.ok) return [];
-      return await r.json();
+      // FU-4: 双向兼容 v1 (ARRAY) 与 v2 (Page{items}) 两种返回结构
+      const data = await r.json();
+      return Array.isArray(data) ? data : (data && Array.isArray(data.items) ? data.items : []);
     } catch (e) {
       return [];
     }

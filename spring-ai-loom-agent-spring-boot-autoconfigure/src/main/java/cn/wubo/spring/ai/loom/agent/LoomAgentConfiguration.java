@@ -2343,8 +2343,8 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.skill.ISkillMarketService marketService,
                 IUser user) {
             RouterFunctions.Builder builder = RouterFunctions.route();
-            // 任意用户：列出所有 APPROVED
-            builder.GET("spring/ai/loom/market-skills", request -> ServerResponse.ok().body(marketService.listApproved()));
+            // FU-4 外科式退役: v1 GET /market-skills LIST 已删除;
+            // v2 handler 由 loomAgentSkillMarketPublicRouter (line ~2963) 提供 Page 形态。
             // 任意用户：按 id 查
             builder.GET("spring/ai/loom/market-skills/{id}", request -> {
                 // id 必须是数字——非数字走 400 而不是 500；service 抛 "Skill 不存在" → 404 而不是 500
@@ -2437,13 +2437,8 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.skill.ISkillMarketService marketService,
                 IUser user) {
             RouterFunctions.Builder builder = RouterFunctions.route();
-            // 列出所有（含 PENDING/REJECTED）
-            builder.GET("spring/ai/loom/admin/market-skills", request -> {
-                String username = UserContextHolder.getCurrentUser();
-                if (!user.isAdmin(username))
-                    return ServerResponse.status(403).body(java.util.Map.of("error", "无权限"));
-                return ServerResponse.ok().body(marketService.listAllForAdmin());
-            });
+            // FU-4 外科式退役: v1 GET /admin/market-skills LIST 已删除;
+            // v2 handler 由 loomAgentMarketSkillAdminRouter (line ~2577) 提供 Page 形态。
             // 去掉 listPending 路由（无审批流，没有 PENDING 状态）
             // admin 直接新增（绕过审批）
             builder.POST("spring/ai/loom/admin/market-skills", request -> {

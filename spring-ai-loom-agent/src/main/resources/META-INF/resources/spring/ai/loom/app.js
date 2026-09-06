@@ -4171,7 +4171,7 @@ const skills = {
       '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
     try {
       const list = await api.listMarketSkills(1, 50);
-      const rawItems = (list && list.content) || list || [];
+      const rawItems = (list && (list.items || list.content)) || list || [];
       // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序。后端目前未在 DTO 中
       // 暴露 isOfficial/featuredRank（MarketSkill 仅含 10 个基础字段），所以比较退化为
       // submittedAt 降序；待后端扩展 MarketSkill DTO 后这里会自动生效。
