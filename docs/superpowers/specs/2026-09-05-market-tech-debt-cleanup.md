@@ -32,7 +32,7 @@
 | B1 接口方向 | `<K>` 参数化抽象类 | 一致性 / 编译时清晰(Long 与 String 行为不可混) |
 | B3 v1 服务清理 | **保留旧接口作为 shim,新功能全部走 v2**,观察 1 个小版本后视引用计数删除 | 兼容性优先,避免回归 |
 | B2 N+1 修方向 | **后端 list SQL 加 LEFT JOIN,DTO 带 `announcementTitle` / `announcementBody` / `tags`** | 1 次 GET 替代 N 次小请求,符合 spec § 6.3 注释 |
-| B4 Skill tag | **本期不做**,登记为 M4 候选 | spec § M2 只要求 KB tag |
+| B4 Skill tag | **本期不做**,登记为 M4 候选(已实现 M4 2026-09-06, T4) | spec § M2 只要求 KB tag |
 | B8 i18n / metrics / rate-limit | **小修**(T0 抽 i18n key 占位 + T4 上 metrics + rate-limit) | 三者独立、可独立 ship |
 | 阶段切分 | **T0 = doc 小补**,T1 = B1 真修,T2–T6 = 性能 / 架构 / 可观测 / 可移植 / 测试 | 风险递进 |
 
@@ -142,14 +142,14 @@ T3 refactor 时抽出来(T3.2 parked 项目顺道做)。
 | KB stats | `GET /market-knowledge/{id}/stats` | 修前:`{id: null, searchCount: 0}` (UUID)。修后:`真实 row`。 |
 | KB review | `POST /market-knowledge/{id}/reviews` | 修前:`500` (PK 类型不匹配)。修后:`201` 实际写入。 |
 | list N+1 | `GET /market-skills` / `/market-knowledge` | 修前:List DTO 无 announcement / tags 字段,前端发 N 次附加 GET。修后:DTO 嵌入式,1 次搞定。 |
-| Skill tag | — | **本期不做**,登记 M4 候选。 |
+| Skill tag | — | **本期不做**,登记 M4 候选。(已实现 M4 2026-09-06, T4:`market_skill_tag` + `SkillTagService` + admin/public 路由 + list embed + `?tag=` 过滤) |
 | old `ISkillMarketService` 接口 | — | shim 保留 1 个小版本。 |
 
 ---
 
 ## 7. 非目标(本期不做)
 
-- Skill tag(虽然镜像一 KB tag 表可做,但本期聚焦清理债,不做新功能)
+- Skill tag(虽然镜像一 KB tag 表可做,但本期聚焦清理债,不做新功能)(已实现 M4 2026-09-06, T4)
 - B1 之外的真实 schema 改动(如 `loom_role_*` cascade review、file content BLOB cleanup)
 - v3 ≥ 新功能(skill 推荐系统、KB 知识图谱、跨市场搜索 dashboard)
 - 完整的可观测性栈(只有 Micrometer exporter + rate-limit bucket;tracing 不在本期)
@@ -176,7 +176,7 @@ T3 refactor 时抽出来(T3.2 parked 项目顺道做)。
 | ADR-T03 | v1 service 路径 | shim 保留 1 小版本,观察期后删。 |
 | ADR-T04 | N+1 修方式 | 后端 DTO embed + 前端不再 per-row parallel fetch。 |
 | ADR-T05 | spec drift(A3/A10) | spec 改 422 → 403(代码已返 403,落后于 spec)。 |
-| ADR-T06 | Skill tag | **不做**,M4 候选。 |
+| ADR-T06 | Skill tag | **不做**,M4 候选。(已实现 M4 2026-09-06, T4) |
 | ADR-T07 | Metric 栈 | Micrometer + Spring Boot Actuator,**不做** Prometheus / OTel tracing。 |
 | ADR-T08 | Rate-limit | in-memory bucket(Bucket4j),不是 Redis 分布式;**不**支持横向扩展限速。 |
 
@@ -200,7 +200,7 @@ T3 refactor 时抽出来(T3.2 parked 项目顺道做)。
 11. ADR-T03:v1 service 保留 shim 1 小版本
 12. ADR-T04:N+1 修 = 后端 DTO embed
 13. ADR-T05:spec drift A3/A10 422 → 403(spec 跟代码对齐)
-14. ADR-T06:Skill tag 不做(M4 候选)
+14. ADR-T06:Skill tag 不做(M4 候选;已实现 M4 2026-09-06, T4)
 
 ### §10.1 Ruling Classification (4-bucket)
 
@@ -208,7 +208,7 @@ T3 refactor 时抽出来(T3.2 parked 项目顺道做)。
 |---|---|---|
 | **Planned** | plan T0–T6 + T7.1 有 task label | T1.1 / T1.3 / T1.4 / T1.5 / T1.6 / T2.1 / T2.2 / T3.1 / T3.2 / T4.1 / T4.2 / T4.3 / T5.1 / T5.2 / T5.3 / T6.1 / T6.2 / T7.1 |
 | **Pre-fixed** | M3 plan 起草前已修复,无 plan task | Ruling #2 admin-exclusion SQL (`aaadff7`); Ruling #3 `edit_count < 1` 校验 (`aaadff7`); Ruling #4 access_count / index / columnExists (`fdb80bf`); Ruling #8 Skill missing-id 404 (`dceaddc`); Ruling #9 KB tag @Transactional rollback (`dceaddc`) |
-| **M4 defer** | spec §3 / §7 显式延期 | B4 Skill tag(spec 写明 "本期不做, M4 候选") |
+| **M4 defer** | spec §3 / §7 显式延期 | B4 Skill tag(spec 写明 "本期不做, M4 候选")(已实现 M4 2026-09-06, T4) |
 | **Untracked** | 进程级约束,无 code task | Ruling #5 测试数据源 wipe(plan §24 process constraint) |
 
 注:本表分类基于 dev 分支 commit 证据 + spec 文本交叉推断,非权威。Ruling #1 / #6 / #7 / #10–#14 待逐条复核后归类。
@@ -260,7 +260,7 @@ M3+ cleanup 的最终验证由本节定义。E2E 验收复用 [`docs/superpowers
 
 ### Defer / out-of-scope(T7.1 不验证)
 
-- B4 Skill tag — M4 候选
+- B4 Skill tag — M4 候选(已实现 M4 2026-09-06, T4)
 - 完整 i18n framework / Prometheus / OTel / Redis 分布式限流 — 显式 out-of-scope
 - v1 service 完全删除 — 等 AT3 引用计数归零(>1 minor version)
 - KB 物理文件 versioning(ADR-002)— M4 defer
@@ -270,15 +270,15 @@ M3+ cleanup 的最终验证由本节定义。E2E 验收复用 [`docs/superpowers
 
 | ID | 内容 | 严重度 | 备注 |
 |---|---|---|---|
-| FU-1 | `?tag=` 过滤路径(`KnowledgeTagService.findByTag` / `findByAllTags`)直接 `SELECT mk.*`,绕过 listPaged/listApproved enrichment → 返回记录 tags=null 且 announcement=null。前端 null-safe(Array.isArray guard + detail 面板单独 fetch),纯观感降级(过滤视图无 chips/banner)。候选方案:让 tag 过滤走 `listPaged`(`MarketFilter` 加 tag 维度)或把 `embedTags` 暴露给 tag service;一并考虑 v1 `listApproved` 的 announcement 对称性 | Minor / 非阻塞 | R4 concern 1 + final review R4(1) triage |
+| FU-1 | `?tag=` 过滤路径(`KnowledgeTagService.findByTag` / `findByAllTags`)直接 `SELECT mk.*`,绕过 listPaged/listApproved enrichment → 返回记录 tags=null 且 announcement=null。前端 null-safe(Array.isArray guard + detail 面板单独 fetch),纯观感降级(过滤视图无 chips/banner)。候选方案:让 tag 过滤走 `listPaged`(`MarketFilter` 加 tag 维度)或把 `embedTags` 暴露给 tag service;一并考虑 v1 `listApproved` 的 announcement 对称性。**部分修复(2026-09-06 M4 T4):skill `?tag=` 已修(`DefaultSkillMarketService` 的 `?tag=` 路径走新 public `enrich()`,返回 rows embed tags+announcement;v1 `listApproved()` 有意保持 v1 语义不 embed);KB `?tag=` 仍开放** | Minor / 非阻塞 | R4 concern 1 + final review R4(1) triage |
 | FU-2 | 分页 size 无上限 → `embedTags` IN-list 无界(`parsePageOr` 不 clamp;`findByAllTags` 有 100 上限)。候选:routers 或 `MarketFilter` clamp size ≤100/200 | Minor / pre-existing 放大 | final review Minor #5 |
 | FU-3 | 杂项:deferred minors 汇总 —— `DefaultKnowledgeTool` field/ctor + `LoomAgentToolAutoConfigTest` mock 仍 raw `IMarketContentStatsService`(public 构造器签名,API 面);A18/a13kb/a16b seeded 行不清理(计数断言全部 UUID-scoped,良性);`MarketKnowledgeRecord.from()` 体内注释仍说 listPaged-only;KnowledgeMarketIntegrationTest 缺 idx_market_kb_tag;readBack 500 消息含 marketId | Minor | SDD ledger triage 全部 OK-TO-DEFER |
-| FU-4 | v1/v2 admin 路由重复注册(灰度设计,v2 按 bean order 生效)— T3.2 `MarketAdminRoutesHelper` 全量化时退役 v1 twin。**2026-09-06 Chrome UI 全链路测试确认运行时表现**:skill 端 GET list 由 **v1 router 胜出**(返回 ARRAY 形状、`announcementTitle` 恒 null、无 `featuredRank` 字段);KB 端返回 **v2 Page 形状**(`{items,total,page,size}`,tags+announcement embed 生效)。两侧不对称但无用户可见功能损失(前端 detail 面板单独 fetch `/announcement`,banner 正常)。退役 v1 twin 时一并消除 | Minor / 架构 | R4 concern 2 + T3.2 pattern-only 遗留;2026-09-06 Chrome UI 测试实测证据(skill ARRAY vs KB Page) |
+| FU-4 | v1/v2 admin 路由重复注册(灰度设计,v2 按 bean order 生效)— T3.2 `MarketAdminRoutesHelper` 全量化时退役 v1 twin。**2026-09-06 Chrome UI 全链路测试确认运行时表现**:skill 端 GET list 由 **v1 router 胜出**(返回 ARRAY 形状、`announcementTitle` 恒 null、无 `featuredRank` 字段);KB 端返回 **v2 Page 形状**(`{items,total,page,size}`,tags+announcement embed 生效)。两侧不对称但无用户可见功能损失(前端 detail 面板单独 fetch `/announcement`,banner 正常)。退役 v1 twin 时一并消除。**2026-09-06 M4 T1:list 路由已外科式退役(v2 Page 胜出)— `GET /spring/ai/loom/market-skills`(public)+ `GET /spring/ai/loom/admin/market-skills`(admin)的 v1 ARRAY 路由注册从 `LoomAgentConfiguration` 删除,v2 `Page{items,total,page,size}` handlers 成为唯一注册;submit(auto-APPROVED)/pull/admin POST·PUT·DELETE-cascade/`GET /user/market-skills`(listMySubmitted,仍是裸 ARRAY)/`GET /{id}` 等其余 v1 路由保留,完整退役仍待后续** | Minor / 架构 | R4 concern 2 + T3.2 pattern-only 遗留;2026-09-06 Chrome UI 测试实测证据(skill ARRAY vs KB Page) |
 | FU-5 | CHANGELOG 已记录本轮 API 可见变更(Unreleased 节);发版时随 release notes 发布 | 流程 | final review Minor #3 |
 | FU-6 | **已修复(2026-09-06)** — `market-admin.js` 的 `ADMIN_ANNOUNCEMENT_API` / `ADMIN_REVIEW_API` 用 `market-${kind}s` 模板拼路径:SKILL→`market-skills`(对),KNOWLEDGE→`market-knowledges`(**错**,后端 KB admin 路由是单数 `market-knowledge`)→ admin UI 对 KB "发布公告"/"删除评价"均 404。修复:两个 builder 改从既有 `ADMIN_API[kind]` map 派生。UI 测试发现(Chrome P4/P6 阶段 reqid=130/142 404),修复后 live 复验 PUT/DELETE 均 200 | Minor(admin-only 写路径)/ 既有(ed176e0,M1 T19)| 非 M3+ 残留关闭回归;后端 canonical 路径一直正常 |
 | FU-7 | **已修复(2026-09-06)** — `i18n/i18n.js` 的 `loadDict` 用相对路径 `fetch('../i18n/${locale}.json')`:相对**文档 URL** 解析,从 `admin/*.html`(下一层)正确,但从 `index.html`(与 i18n/ 同层)解析到 `/spring/ai/i18n/` → 404 → 字典永不加载 → `I18N.t()` 回显原始 key(市场公告 banner 徽章渲染成 `market.admin.announcement.badge` 而非 "📢 公告")。修复:改用 `document.currentScript.src` 派生脚本自身目录作 BASE。UI 测试发现(Chrome P5/P7),修复后 live 复验 index.html 徽章 = "📢 公告"(zh)/"📢 Announcement"(en)| Minor / 观感 / 既有(27f1d24,M3+ T4.3)| 非残留关闭回归;admin 页 i18n 一直正常。**Round-2(2026-09-06)补全两处遗留**:① 无人调用 `I18N.ready()` → 字典 cache 恒空、早于 ready 的渲染回显原始 key,现 i18n.js 在 parse 时自启 `ready()`;② `t(key, fallback)` 第二参被当作 locale 覆盖导致回显原始 key,现将非受支持 locale 的第二参视为 fallback 文本 |
 | FU-8 | **已修复(2026-09-06,round-2)** — 共享市场 UI 组件 CSS(公告 banner / 评价 / 星级 / tag 筛选 / `primary-btn`·`form-input`·`type-badge`·`modal-footer`)只定义在 `admin/console.css`,而 `index.html` 仅加载 `style.css` → 聊天页知识空间模态框的市场 tab **整块裸奔无样式**。修复:把这些块迁入两页共用的基础层 `style.css`(保持相对顺序 → admin 级联不变),`console.css` 只留 admin 专属版式;另新写从未定义的文件树 `tree-*` / `detail-section-content` / `market-reviews-slot` / `review-list-wrap` / `delete-skill-btn` / `mcp-*`。运行时"无样式类扫描"另查出 3 处隐性缺口:`.ks-sidebar-list`(CSS 只写 `.ks-sidebar` 从不匹配 → 侧栏丢宽度/边框/滚动)、`.skill-item.disabled`、`.conv-state-label` | Minor / 观感 / 既有(M2 市场 UI)| 非残留关闭回归。修复后 index.html 无样式类扫描 = 0、admin 级联无回归 |
-| FU-9 | **已实现(2026-09-06,round-2)** — 技能模态框市场 tab 补搜索框(与知识空间市场 tab 对称)。后端公开技能 list 走 v1 `listApproved()` twin(FU-4,忽略 `?query=`)、技能无 tag 体系(B4 defer),故采客户端关键词过滤(name/description/author);复用共享 `kb-tag-filter-bar`/`-input` 类,无需新 CSS,re-filter 保持输入焦点 | 特性补齐 / 既有不对称 | 待 FU-4 退役 v1 twin、skill list 改走 v2 `listPaged(filter)` 后,可把客户端过滤升级为服务端 `?query=` |
+| FU-9 | **已实现(2026-09-06,round-2)** — 技能模态框市场 tab 补搜索框(与知识空间市场 tab 对称)。后端公开技能 list 走 v1 `listApproved()` twin(FU-4,忽略 `?query=`)、技能无 tag 体系(B4 defer),故采客户端关键词过滤(name/description/author);复用共享 `kb-tag-filter-bar`/`-input` 类,无需新 CSS,re-filter 保持输入焦点。**已关闭(2026-09-06 M4 T2):技能搜索已升级服务端 `?query=`(300ms debounce + Enter 立即 + in-flight seq guard),前提条件同时解除 — FU-4 T1 list 路由退役(v2 Page 胜出)、B4 T4 skill tag 体系落地** | 特性补齐 / 既有不对称 | ~~待 FU-4 退役 v1 twin、skill list 改走 v2 `listPaged(filter)` 后,可把客户端过滤升级为服务端 `?query=`~~(已由 M4 T2 完成) |
 
 ---
 

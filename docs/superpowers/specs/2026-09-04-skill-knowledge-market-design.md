@@ -58,7 +58,7 @@
 | 录入路径 | **B 方案**:admin 主路径 + author 投稿 PENDING | admin 控制力 + 生态丰富度兼具 |
 | 镜像深度 | **完全镜像 8 项 + 对称差异**(stat / review 语义改名) | 稳定性(一套抽象两层实现) / 扩展性(加机制一两处) |
 | 审核 role | **仅 ADMIN**(起步轻);`reviewed_by` 留口子给未来 reviewer | 避免一上来扩 role 表 |
-| 标签形态 | **单 category + KB 多对多 tag 表**(M2 起) | 80% 场景单值够用,KB tag 是渐进增强 |
+| 标签形态 | **单 category + KB 多对多 tag 表**(M2 起;skill 侧对称 tag 已于 M4 2026-09-06 落地,见 § 4.2 注记) | 80% 场景单值够用,KB tag 是渐进增强 |
 | 评分门槛 | **严**:KB review 必须 `loom_user_knowledge.access_count >= 1` | 避免没用过就评 |
 | 评论实名 | **强制实名**(只显示 username) | 防刷、防报复 |
 | 统计粒度 | **每次 +1**,批写缓冲(`flush_window=30s`) | 行为可观测,落盘聚合做后台 |
@@ -97,6 +97,8 @@ CREATE TABLE loom_market_knowledge_tag (
 );
 CREATE INDEX idx_market_kb_tag ON loom_market_knowledge_tag(tag);
 ```
+
+> **M4 注记(2026-09-06)**:skill 侧对称 tag 体系已落地(T4,原 tech-debt spec B4 "本期不做, M4 候选")—— `market_skill_tag`(`market_skill_id BIGINT` FK → `market_skill(id)` ON DELETE CASCADE)+ `idx_market_skill_tag` + `SkillTagService` + admin/public 路由 + list embed + `?tag=` 过滤。
 
 ### 4.3 Stat 表(语义改名)
 
@@ -531,7 +533,7 @@ approvalBadge({ status, reviewer, reviewedAt, comment });
 | ADR-002 | 录入路径 | 仅 admin / 仅 author / admin+author 审批 / 现状直发 | admin 主路径 + author PENDING(B) |
 | ADR-003 | 镜像深度 | 完全镜像 / 部分镜像 | 完全镜像 + 对称差异 |
 | ADR-004 | 审核 role | 仅 admin / 新 reviewer | 仅 admin,字段预留 |
-| ADR-005 | 标签 | 单 category / 多对多 tag | 单 category + KB tag(M2 起) |
+| ADR-005 | 标签 | 单 category / 多对多 tag | 单 category + KB tag(M2 起;skill tag 已实现 M4 2026-09-06) |
 | ADR-006 | KB 评论门槛 | 严 / 宽 | 严(access_count >= 1) |
 | ADR-007 | 评论实名 | 强制 / 可选 | 强制实名 |
 | ADR-008 | 统计粒度 | 每次 / 日聚 | 每次 +1 + 30s batch flush |
