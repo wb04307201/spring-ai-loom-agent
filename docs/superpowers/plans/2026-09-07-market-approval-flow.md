@@ -507,6 +507,28 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
             cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
         }
     }
+
+    @Test
+    void kbResubmitApprovedKeepsApprovedNoDemotion() {
+        // T3 Ruling 的 KB 镜像:spec §2 APPROVED→PENDING 禁止 → 重投 APPROVED 行 = 同 id 就地更新 description
+        String user = "alice";
+        String kbId = newKb(user);
+        cn.wubo.spring.ai.loom.agent.user.UserContextHolder.setCurrentUser(user);
+        try {
+            String mid1 = kbSvc.submit(kbId).id();
+            kbSvc.approve(mid1, "admin1");
+            String mid2 = kbSvc.submit(kbId).id();
+            assertEquals(mid1, mid2, "APPROVED 重投 = 同 id 就地更新");
+            String status = jdbc.queryForObject(
+                "SELECT status FROM loom_market_knowledge WHERE id=?", String.class, mid2);
+            assertEquals("APPROVED", status);
+            String reviewedBy = jdbc.queryForObject(
+                "SELECT reviewed_by FROM loom_market_knowledge WHERE id=?", String.class, mid2);
+            assertEquals("admin1", reviewedBy, "审核字段不得被清空");
+        } finally {
+            cn.wubo.spring.ai.loom.agent.user.UserContextHolder.clear();
+        }
+    }
 ```
 
 > 实施提示:`IKnowledge.insert` 与 `UserContextHolder` 的确切签名以现有 `KnowledgeMarketIntegrationTest`(L197-202 一带)为准;若 insert 签名不同,镜像该测试的建 KB 手法,不要臆造。
@@ -548,9 +570,10 @@ Expected: FAIL(kbSubmitLandsPending 返回 APPROVED、kbPullRejectsNonApproved �
                     "VALUES (?, ?, ?, ?, 'PENDING', 'USER')",
                 marketId, username, kb.name(), kb.description());
         } else if (existingId != null) {
+            // 非 REJECTED 同名行(PENDING/APPROVED)→ 仅更新内容,状态与审核字段不动
+            // (spec §2: APPROVED→PENDING 禁止;T3 Ruling 已定,KB 镜像同语义)
             jdbcTemplate.update(
-                "UPDATE loom_market_knowledge SET description=?, status='PENDING', " +
-                    "reviewed_at=NULL, reviewed_by=NULL, review_comment=NULL WHERE id=?",
+                "UPDATE loom_market_knowledge SET description=? WHERE id=?",
                 kb.description(), existingId);
             marketId = existingId;
         } else {
