@@ -15,9 +15,12 @@ import java.util.List;
  * 与 {@link MarketSkill} 的 {@code BIGINT id} 是真实的对称差异。
  *
  * <p>M3+ T2.1 — 末尾 3 个字段 {@code announcementTitle} / {@code announcementBody}
- * / {@code tags} 由 {@link cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService#listPaged}
- * 在批量查询时通过 LEFT JOIN announcement + 单次批量 SELECT tag 一次性填充,
- * 避免前端 per-row 二次 GET (N+1 修复)。Skill 端无 tags 字段。
+ * / {@code tags} 避免前端 per-row 二次 GET (N+1 修复)。R4-deferred #2 修正:
+ * {@code tags} 由 {@link cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService}
+ * 的 <b>{@code listPaged} 与 {@code listApproved} 两条路径</b>共同填充(同一
+ * {@code embedTags} 批量 SELECT);{@code announcementTitle} / {@code announcementBody}
+ * 仅由 {@code listPaged} 的 LEFT JOIN announcement 填充({@code listApproved}
+ * 的 SELECT 不 JOIN 公告表)。Skill 端无 tags 字段。
  */
 public record MarketKnowledgeRecord(
         String id,
@@ -39,10 +42,12 @@ public record MarketKnowledgeRecord(
 
     /**
      * ResultSet 工厂方法 — 读取 {@code loom_market_knowledge} 表的 9 个核心字段
-     * + announcement 字段。{@code tags} 不从此 ResultSet 读取 —— 由
-     * {@code DefaultKnowledgeMarketService.listPaged} 在主查询后用批量
-     * {@code SELECT ... WHERE market_id IN (...)} 补齐,以避免 H2 不支持的
-     * GROUP_CONCAT 聚合。
+     * + announcement 字段(仅当 SELECT LEFT JOIN 了公告表时,通过 findColumn 探测)。
+     * {@code tags} 不从此 ResultSet 读取 —— 由
+     * {@code DefaultKnowledgeMarketService} 的 {@code listPaged} 与 {@code listApproved}
+     * <b>两条路径</b>在主查询后各自用批量 {@code SELECT ... WHERE market_id IN (...)}
+     * ({@code embedTags})补齐(R4-deferred #2 修正:旧 doc 只提 listPaged),
+     * 以避免 H2 不支持的 GROUP_CONCAT 聚合。
      *
      * <p>M0 升级新增的 {@code is_official} / {@code featured_rank} / {@code category} /
      * {@code created_by_kind} 4 列在此不读取(record 上没有对应字段);
@@ -51,7 +56,7 @@ public record MarketKnowledgeRecord(
      *
      * @param rs 已定位到当前行的 {@link ResultSet}
      * @return 填充后的 {@link MarketKnowledgeRecord} 实例(tags 字段为 null,
-     *         待 listPaged 后处理填充)
+     *         待 listPaged / listApproved 的 embedTags 后处理填充)
      */
     public static MarketKnowledgeRecord from(ResultSet rs) throws SQLException {
         Timestamp submittedAt = rs.getTimestamp("submitted_at");

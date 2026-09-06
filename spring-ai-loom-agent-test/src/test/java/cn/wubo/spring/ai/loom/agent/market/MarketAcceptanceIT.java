@@ -66,7 +66,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ul>
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
-@DisplayName("Market Acceptance IT — A1-A18 (spec § 12 + T1.4/T1.6 fix-ups + R3)")
+@DisplayName("Market Acceptance IT — A1-A18 + A13-KB/A16b/A17b (spec § 12 + T1.4/T1.6 fix-ups + R3 + final-review fix wave)")
 class MarketAcceptanceIT {
 
     @Autowired DefaultSkillMarketService skillSvc;
@@ -78,8 +78,11 @@ class MarketAcceptanceIT {
     @Autowired
     @Qualifier("kbReviewService")
     IMarketContentReviewService<String> kbReviewService;
-    @Autowired IMarketContentStatsService skillStatsService;
-    @Autowired IMarketContentStatsService kbStatsService;
+    // M3+ final-review fix wave (Important #3 / ledger R2 deferred minor #1):
+    // stats 注入参数化 — skill=<Long>, KB=<String>(消除 raw type;
+    // Spring 泛型感知 autowiring 按 ResolvableType 唯一命中各自 bean)。
+    @Autowired IMarketContentStatsService<Long> skillStatsService;
+    @Autowired IMarketContentStatsService<String> kbStatsService;
     @Autowired BatchedCounterService batchedCounterService;
     @Autowired MarketAnnouncementRepository annRepo;
 
@@ -99,6 +102,12 @@ class MarketAcceptanceIT {
     @Autowired
     @Qualifier("loomAgentMarketKnowledgePublicRouter")
     RouterFunction<ServerResponse> kbPublicRouter;
+
+    // M3+ final-review fix wave (Important #1): KB admin router — a13kb twin 驱动
+    // PUT /admin/market-knowledge/{uuid}/announcement 端到端。
+    @Autowired
+    @Qualifier("loomAgentMarketKnowledgeAdminRouter")
+    RouterFunction<ServerResponse> kbAdminRouter;
 
     private static final String ADMIN_USER = "acceptadmin";
     private static final String ADMIN_PASS = "accept-pwd-123";
@@ -532,31 +541,24 @@ class MarketAcceptanceIT {
     /* ===== A12: KB search 触发 stat (高 QPS 不锁) ===== */
 
     @Test
-    @DisplayName("A12 — KB search 触发 stat (M3+ T1.7: 真 UUID path 当前 4xx 仍待 service 实现)")
+    @DisplayName("A12 — KB search 触发 stat (真 UUID path 全链路 2xx — R2/R3 后 service+router 均已实现)")
     void a12_kbAccessTriggersSearchStat() throws Exception {
-        // M3+ T1.7 — use real UUID instead of numeric-style id so the test exercises
-        // the VARCHAR(36) path that the B1 schema migration (T1.1) introduced.
-        //
-        // Current state (post-T1.6):
-        //   - Schema: loom_market_knowledge.id is VARCHAR(36); loom_market_knowledge_stats
-        //     .market_id is VARCHAR(36) (T1.1 migration).
-        //   - Service path: IMarketContentStatsService<String> overload (T1.5) handles
-        //     UUID correctly when invoked directly, but the public router
-        //     (/market-knowledge/{id}/access) Long.parseLong the path variable and
-        //     returns 4xx for non-numeric ids — same graceful-degradation that
-        //     the pre-T1.7 test was exploiting.
+        // M3+ T1.7 引入真 UUID;**final-review fix wave (Minor #4) 更新过时文档**:
+        // 旧注释声称 "真 UUID path 当前 4xx 仍待 service 实现" — 那是 T1.7 时的状态。
+        // R2 (review 链 <String> 泛型化) + T1.4/R3 (KB router String-native +
+        // RouterIdParserKnowledge) 之后,真 UUID 的 2xx 路径已全部落地:
+        //   - Schema: loom_market_knowledge.id / loom_market_knowledge_stats.market_id
+        //     均 VARCHAR(36)(T1.1)。
+        //   - Service: IMarketContentStatsService<String> 直连 UUID(T1.5)。
+        //   - Router: POST /market-knowledge/{uuid}/access 经 RouterIdParserKnowledge
+        //     → String 主键 → 200(T1.4 起,不再有 Long.parseLong 4xx 路径)。
         //
         // What this test asserts:
         //   1. Direct JDBC insert with UUID succeeds (schema accepts VARCHAR(36)).
-        //   2. Direct service invocation with the UUID id succeeds and increments
-        //      search_count after flush (proves the service layer UUID path works).
-        //   3. The router path still returns 4xx for UUID ids (documents the residual
-        //      Long.parseLong in RouterIdParser — T1.4 only fixed skill router;
-        //      KB public router awaits T1.7.1 follow-up).
-        //
-        // When the router UUID path is wired (T1.7.1 follow-up), the router
-        // assertion can be tightened to 200; the direct service assertion
-        // is the durable contract for AT1.
+        //   2. Direct service invocation increments search_count after flush.
+        //   3. **Router path strict 200** (final-review fix wave Important #2(c):
+        //      safeRoute + if(resp!=null) 条件断言 → strict route() 确定性断言;
+        //      route() 不匹配时 orElseThrow 响亮失败 — 绿色即证明 router leg 真实执行)。
         String kbId = UUID.randomUUID().toString();
         jdbc.update(
                 "INSERT INTO loom_market_knowledge (id, username, name, description, category, status, created_by_kind) " +
@@ -569,9 +571,8 @@ class MarketAcceptanceIT {
                 Integer.class, kbId);
         assertEquals(0, before, "stats row must not exist pre-access");
 
-        // (2) direct service invocation — UUID path. This is the AT1 durable
-        // contract: IMarketContentStatsService<K=String> supports UUID end-to-end.
-        // We do 5 increments on the batched counter then flush.
+        // (2) direct service invocation — UUID path. AT1 durable contract:
+        // IMarketContentStatsService<K=String> supports UUID end-to-end.
         UserContextHolder.setCurrentUser(NORMAL_USER);
         for (int i = 0; i < 5; i++) {
             kbStatsService.incrementStat(kbId, "SEARCH");
@@ -585,55 +586,117 @@ class MarketAcceptanceIT {
         assertTrue(count >= 5L,
                 "5 direct incrementStat calls must accumulate search_count >= 5; got " + count);
 
-        // (3) router path: post-T1.4, KB router uses RouterIdParserKnowledge which
-        // accepts String UUIDs and returns 200 for valid UUID KB rows. Earlier
-        // versions Long.parseLong'd the path variable and returned 4xx; this
-        // assertion now confirms the migration landed end-to-end.
-        ServerResponse routerResp = safeRoute(kbPublicRouter, "POST",
+        // (3) router path — strict, de-conditionalized. KB row exists (seeded above),
+        // access() 走 getById(String UUID) 真路径 → 200。strict route() 保证
+        // 路由必须命中(否则 NoSuchElementException 让测试失败,不再静默跳过)。
+        ServerResponse routerResp = route(kbPublicRouter, "POST",
                 "/spring/ai/loom/market-knowledge/" + kbId + "/access", null);
-        // routerResp may be null in Mock env (router didn't match); both 200
-        // and null are acceptable — the direct service assertion above is the
-        // AT1 durable contract.
-        if (routerResp != null) {
-            assertEquals(200, routerResp.statusCode().value(),
-                    "router path with UUID must be 200 (T1.4 RouterIdParserKnowledge); got "
-                            + routerResp.statusCode().value());
-        }
+        assertEquals(200, routerResp.statusCode().value(),
+                "router path with UUID must deterministically return 200 (R2/R3 String-native); got "
+                        + routerResp.statusCode().value());
     }
 
     /* ===== A13: admin 上公告 → 公告行置顶 (featured_rank 钉 999) ===== */
 
     @Test
-    @DisplayName("A13 — admin 上公告 → announcement upsert + featured_rank 钉 999")
+    @DisplayName("A13 — admin 上公告 → strict 200 + 响应体回读 + announcement upsert + featured_rank 钉 999")
     void a13_adminAnnouncementPinsFeaturedRank() throws Exception {
         String name = "a13-skill-" + System.nanoTime();
         UserContextHolder.setCurrentUser(ADMIN_USER);
         Long id = createSkillAdmin(name, null);
         skillSvc.approve(id, ADMIN_USER);
 
-        // 走 router (PUT /admin/market-skills/{id}/announcement) — 端到端验证
-        ServerResponse resp = safeRoute(skillAdminRouter, "PUT",
+        // M3+ final-review fix wave (Important #1): 去条件化 — safeRoute → strict route()。
+        // 根因结论:并不是 mock harness 在 "PUT + body" 下不匹配 — 同款 strict
+        // route() PUT+JSON body 在 A5(/official) / A6(/featured-rank) /
+        // A7(/category) / DefaultSkillStatsServiceIT(/stats-reset)全部确定性命中。
+        // 历史上的间歇失败来自 pre-R3 handler 本身:findOne 回读在 Long 主键绑
+        // VARCHAR(36) 列 + 共享表混入 KNOWLEDGE UUID 行时抛 H2 conversion error /
+        // body(null)(R3 commit:「修 a13 间歇 500 的根因」),safeRoute + if(resp!=null)
+        // 把这类失败静默吞掉。R3 之后 repo String-native + PUT handler null-safe →
+        // 200 确定性成立;route() 的 orElseThrow() 在路由不匹配时抛
+        // NoSuchElementException 让测试响亮失败 — 绿色即证明 router leg 真实执行。
+        ServerResponse resp = route(skillAdminRouter, "PUT",
                 "/spring/ai/loom/admin/market-skills/" + id + "/announcement",
                 json(Map.of("title", "重要通知", "body", "公告正文")));
-        // router 可能匹配或不匹配 (MockHttpServletRequest 在 PUT + body 下偶发不匹配);
-        // 两条路径都验证 DB 端效果
-        if (resp != null) {
-            assertEquals(200, resp.statusCode().value());
-        }
-        // 兜底:直接 upsert 保证 DB 一定有行 (binding context 接受 router 偶发跳过)
-        // R3: announcement repo 是 String-native(market_id VARCHAR(36))→ String.valueOf(id)
-        annRepo.upsert("SKILL", String.valueOf(id), "重要通知", "公告正文");
-        skillSvc.setFeaturedRank(id, 999, ADMIN_USER);
+        assertEquals(200, resp.statusCode().value(),
+                "admin announcement PUT must deterministically return 200 (R3 null-safe handler)");
 
-        // announcement 行存在
+        // 响应体 = handler 回读的完整行(announcementResponse helper 组装):
+        // marketKind / marketId / title / body 必须与写入一致。
+        @SuppressWarnings("unchecked")
+        Map<String, Object> respBody = (Map<String, Object>) ((EntityResponse<?>) resp).entity();
+        assertNotNull(respBody, "PUT /announcement must return the re-read announcement map");
+        assertEquals("SKILL", respBody.get("marketKind"));
+        assertEquals(String.valueOf(id), respBody.get("marketId"),
+                "marketId must be the String-native decimal id (R3 VARCHAR(36))");
+        assertEquals("重要通知", respBody.get("title"));
+        assertEquals("公告正文", respBody.get("body"));
+
+        // DB 端效果现在完全由 router PUT 产生(final-review fix wave:删除了旧的
+        // annRepo.upsert + setFeaturedRank 直接兜底 — 那会掩盖 router 未执行的事实)。
+        // R3: announcement repo 是 String-native(market_id VARCHAR(36))→ String.valueOf(id)
         MarketAnnouncement ann = annRepo.findOne("SKILL", String.valueOf(id));
-        assertNotNull(ann, "announcement row must be persisted");
+        assertNotNull(ann, "announcement row must be persisted by the router PUT itself");
         assertEquals("重要通知", ann.title());
 
         // featured_rank = 999 (置顶)
         Integer rank = jdbc.queryForObject(
                 "SELECT featured_rank FROM market_skill WHERE id=?", Integer.class, id);
         assertEquals(999, rank, "announcement must pin featured_rank to 999");
+    }
+
+    /* ===== A13-KB: M3+ final-review fix wave (Important #1) — a13 的 KB 真 UUID 孪生 ===== */
+
+    /**
+     * a13 的 KB 孪生用例:seed 真 UUID 的 {@code loom_market_knowledge} 行后,以 admin 身份
+     * 通过 KB admin router({@code loomAgentMarketKnowledgeAdminRouter})驱动
+     * {@code PUT /spring/ai/loom/admin/market-knowledge/{uuid}/announcement}(title+body)
+     * → strict route() 确定性 200 → 响应体 title/marketId 与写入一致(kind 为 R4 修正后的
+     * {@code "KNOWLEDGE"})→ {@code market_content_announcement} 存在 kind=KNOWLEDGE 行
+     * → {@code loom_market_knowledge.featured_rank} 钉 999。
+     *
+     * <p>与 a13 一起,给 Minor #2 抽取的 {@code announcementResponse(...)} helper 的
+     * SKILL / KNOWLEDGE 两个调用点都提供 router 级覆盖。
+     */
+    @Test
+    @DisplayName("A13-KB — admin 上 KB 公告(真 UUID)→ strict 200 + KNOWLEDGE 行 + featured_rank 钉 999")
+    void a13kb_adminKbAnnouncementPinsFeaturedRank() throws Exception {
+        String kbId = UUID.randomUUID().toString();
+        jdbc.update(
+                "INSERT INTO loom_market_knowledge (id, username, name, description, category, status, created_by_kind) " +
+                        "VALUES (?, ?, ?, ?, ?, 'APPROVED', 'USER')",
+                kbId, "author-a13kb", "a13kb-kb-" + kbId, "desc", "cat-a13kb");
+
+        UserContextHolder.setCurrentUser(ADMIN_USER);
+        ServerResponse resp = route(kbAdminRouter, "PUT",
+                "/spring/ai/loom/admin/market-knowledge/" + kbId + "/announcement",
+                json(Map.of("title", "KB重要通知", "body", "KB公告正文")));
+        assertEquals(200, resp.statusCode().value(),
+                "admin KB announcement PUT (String-native R3 path) must deterministically return 200");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> respBody = (Map<String, Object>) ((EntityResponse<?>) resp).entity();
+        assertNotNull(respBody, "PUT /announcement must return the re-read announcement map");
+        assertEquals("KNOWLEDGE", respBody.get("marketKind"),
+                "R4: KB marketKind spelling is KNOWLEDGE (legacy \"KB\" removed)");
+        assertEquals(kbId, respBody.get("marketId"), "marketId must equal the KB UUID");
+        assertEquals("KB重要通知", respBody.get("title"));
+        assertEquals("KB公告正文", respBody.get("body"));
+
+        // DB: announcement row with kind KNOWLEDGE
+        MarketAnnouncement ann = annRepo.findOne("KNOWLEDGE", kbId);
+        assertNotNull(ann, "KNOWLEDGE announcement row must be persisted by the router PUT itself");
+        assertEquals("KB重要通知", ann.title());
+        Integer rowCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM market_content_announcement WHERE market_kind='KNOWLEDGE' AND market_id=?",
+                Integer.class, kbId);
+        assertEquals(1, rowCount, "row must exist in market_content_announcement with kind KNOWLEDGE");
+
+        // featured_rank pinned 999 on loom_market_knowledge
+        Integer rank = jdbc.queryForObject(
+                "SELECT featured_rank FROM loom_market_knowledge WHERE id=?", Integer.class, kbId);
+        assertEquals(999, rank, "KB announcement must pin featured_rank to 999");
     }
 
     /* ===== A14: 改 USER_CREATED fanout (MARKET_PULLED 副本同步) ===== */
@@ -815,6 +878,92 @@ class MarketAcceptanceIT {
         assertEquals(204, status,
                 "UUID KB id with no announcement row must produce 204 No Content "
                         + "(findOne null → noContent()), not 4xx/5xx. got status=" + status);
+    }
+
+    /* ===== A17b: M3+ final-review fix wave (Important #2a) — seeded positive GET announcement ===== */
+
+    /**
+     * A17 的正向孪生(A17 保留 no-row → 204 用例):先经 String-native repo 为真 UUID KB
+     * upsert 一条 kind=KNOWLEDGE 公告行,再以 strict route() 驱动公开
+     * {@code GET /market-knowledge/{uuid}/announcement} → 200 + body 的
+     * title/body/marketId 与写入一致(spec AT1「200 + 真实 row」正向覆盖)。
+     */
+    @Test
+    @DisplayName("A17b — GET /market-knowledge/{UUID}/announcement 有行 → 200 + title/body/marketId (AT1 正向)")
+    void a17b_existingKbAnnouncementReturns200WithRow() throws Exception {
+        UserContextHolder.setCurrentUser(NORMAL_USER);
+        String kbUuid = UUID.randomUUID().toString();
+        annRepo.upsert("KNOWLEDGE", kbUuid, "a17b-公告标题", "a17b-公告正文");
+
+        ServerResponse resp = route(kbPublicRouter, "GET",
+                "/spring/ai/loom/market-knowledge/" + kbUuid + "/announcement", null);
+
+        assertEquals(200, resp.statusCode().value(),
+                "existing announcement row must produce 200 (A17 covers the no-row 204 path)");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> respBody = (Map<String, Object>) ((EntityResponse<?>) resp).entity();
+        assertNotNull(respBody, "200 must carry the announcement map body");
+        assertEquals("KNOWLEDGE", respBody.get("marketKind"));
+        assertEquals(kbUuid, respBody.get("marketId"), "marketId must equal the KB UUID");
+        assertEquals("a17b-公告标题", respBody.get("title"));
+        assertEquals("a17b-公告正文", respBody.get("body"));
+
+        // cleanup — 不让 KNOWLEDGE 残留行影响 A18 等跨 kind 用例的计数
+        annRepo.delete("KNOWLEDGE", kbUuid);
+    }
+
+    /* ===== A16b: M3+ final-review fix wave (Important #2b) — seeded positive POST review ===== */
+
+    /**
+     * A9(no-access → 403 严门槛)的正向孪生:seed 真 UUID KB + NORMAL_USER 的
+     * {@code loom_user_knowledge} 行(access_count=1,镜像
+     * {@code DefaultKnowledgeReviewServiceIT.seedUserKbRow} 的严门槛放行条件),
+     * 再以 strict route() 驱动公开 {@code POST /market-knowledge/{uuid}/reviews}
+     * → 200 + {@code ReviewRow<String>} 的 marketId==uuid(spec AT1「200 + 真实 row」)。
+     *
+     * <p>排查结论(final-review 要求先查证再新增):本仓库此前<b>没有</b> KB 公开路由的
+     * 正向 review POST 测试 — A9 只覆盖 403 负向(safeRoute 条件断言),A16 只覆盖
+     * GET 空页,DefaultKnowledgeReviewServiceIT 的正向用例只打 service 层不打 router。
+     * 因此本用例是新增覆盖而非重复。
+     */
+    @Test
+    @DisplayName("A16b — POST /market-knowledge/{UUID}/reviews (已 access) → 200 + ReviewRow marketId==uuid (AT1 正向)")
+    void a16b_kbReviewPositiveSubmitReturns200WithRow() throws Exception {
+        String kbId = UUID.randomUUID().toString();
+        jdbc.update(
+                "INSERT INTO loom_market_knowledge (id, username, name, description, category, status, created_by_kind) " +
+                        "VALUES (?, ?, ?, ?, ?, 'APPROVED', 'USER')",
+                kbId, "author-a16b", "a16b-kb-" + kbId, "desc", "cat-a16b");
+        // 严门槛放行:NORMAL_USER 对该 KB access_count >= 1
+        jdbc.update(
+                "INSERT INTO loom_user_knowledge (username, market_knowledge_id, source, locked, access_count) " +
+                        "VALUES (?, ?, 'MARKET_PULLED', FALSE, 1)",
+                NORMAL_USER, kbId);
+
+        UserContextHolder.setCurrentUser(NORMAL_USER);
+        ServerResponse resp = route(kbPublicRouter, "POST",
+                "/spring/ai/loom/market-knowledge/" + kbId + "/reviews",
+                json(Map.of("rating", 5, "comment", "a16b-正向评价")));
+
+        assertEquals(200, resp.statusCode().value(),
+                "review submit with access_count >= 1 must deterministically return 200 (A9 covers the 403 gate)");
+        @SuppressWarnings("unchecked")
+        ReviewRow<String> row = (ReviewRow<String>) ((EntityResponse<?>) resp).entity();
+        assertNotNull(row, "200 must carry the submitted ReviewRow");
+        assertEquals(kbId, row.marketId(),
+                "ReviewRow.marketId must equal the KB UUID (R2 String-native review chain)");
+        assertEquals(NORMAL_USER, row.username());
+        assertEquals(5, row.rating());
+        assertEquals("a16b-正向评价", row.comment());
+
+        // 真实落库 + GET 列表可见(与 A16 的空页用例互为正负镜像)
+        ServerResponse listResp = route(kbPublicRouter, "GET",
+                "/spring/ai/loom/market-knowledge/" + kbId + "/reviews", null);
+        assertEquals(200, listResp.statusCode().value());
+        @SuppressWarnings("unchecked")
+        Page<ReviewRow<String>> page = (Page<ReviewRow<String>>) ((EntityResponse<?>) listResp).entity();
+        assertEquals(1L, page.total(), "the submitted review row must be listed for this UUID");
+        assertEquals(kbId, page.items().get(0).marketId());
     }
 
     /* ===== A18: R3 跨 kind JOIN 回归 — KB UUID 公告行存在时 SKILL listPaged/search 不得炸 ===== */

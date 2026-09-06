@@ -839,7 +839,7 @@ public class LoomAgentConfiguration {
                 IKnowledge knowledge,
                 VectorStore vectorStore,
                 LoomAgentProperties properties,
-                @Qualifier("kbStatsService") IMarketContentStatsService kbStatsService) {
+                @Qualifier("kbStatsService") IMarketContentStatsService<String> kbStatsService) {
             return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag(), kbStatsService);
         }
     }
@@ -2514,6 +2514,42 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * M3+ final-review fix wave (Minor #2 / R3-deferred #1) — SKILL 与 KB 的 admin
+         * {@code PUT .../announcement} 处理器曾各自复制同一段 ~11 行的
+         * “upsert 成功后回读 + null-safe 兜底 + 组装响应 Map” 代码;抽取为单一 helper,
+         * 行为逐字节一致(确定性 200,同样的 map keys,{@code createdAt} 仅在回读命中时
+         * 经 {@link java.util.HashMap} 条件性放入)。
+         * <p>
+         * M3+ final-review fix wave (Minor #1) — 回读 {@code findOne} 在 upsert 成功后
+         * 返回 null(并发删除/清理)时不再静默兜底:先 {@code log.warn} 再用刚写入的
+         * title/body 组装响应。
+         *
+         * @param repo 公告仓储(String-native,R3)
+         * @param kind {@code "SKILL"} 或 {@code "KNOWLEDGE"}
+         * @param id   market id 字符串(SKILL 是十进制字符串,KB 是 UUID)
+         * @param body 刚写入的公告请求体(null 兜底数据源)
+         * @return 确定性 200 响应,entity 为 {@code Map<String, Object>}
+         */
+        private static ServerResponse announcementResponse(
+                cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository repo,
+                String kind,
+                String id,
+                cn.wubo.spring.ai.loom.agent.market.AnnouncementBody body) {
+            cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement saved = repo.findOne(kind, id);
+            java.util.Map<String, Object> respBody = new java.util.HashMap<>();
+            respBody.put("marketKind", kind);
+            respBody.put("marketId", id);
+            respBody.put("title", saved != null ? saved.title() : body.title());
+            respBody.put("body", saved != null ? saved.body() : body.body());
+            if (saved != null) {
+                respBody.put("createdAt", saved.createdAt());
+            } else {
+                log.warn("announcement re-read empty after successful upsert: {}/{}", kind, id);
+            }
+            return ServerResponse.ok().body(respBody);
+        }
+
+        /**
          * Skill 市场管理 v2 — 走 M0 重构后的 {@link cn.wubo.spring.ai.loom.agent.market.AbstractMarketAdminService}
          * 模板（统一的 admin CRUD + 审批/官方/精选/分类）。{@code loomAgentSkillMarketAdminRouter}
          * 是 v1 旧契约；本 bean 是 v2 新契约，二者并行存在以便灰度切换。
@@ -2532,7 +2568,7 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentMarketSkillAdminRouter(
                 cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
                 IUser user,
-                @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService,
+                @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService<Long> skillStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<Long> skillReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
@@ -2791,20 +2827,10 @@ public class LoomAgentConfiguration {
                     marketAnnouncementRepository.upsert("SKILL", String.valueOf(id), body.title(), body.body());
                     // 钉到顶部 — 999 让 list 排序自然把带公告的 Skill 置顶
                     svc.setFeaturedRank(id, 999, username);
-                    // R3 (a13): upsert 成功后必须确定性 200 — 不再 body(findOne(...)),
-                    // findOne 可能因并发/清理返回 null 导致 body(null) NPE → 500。
-                    // 回读命中则返回完整行(含 createdAt),否则用刚写入的值兜底。
-                    cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement saved =
-                            marketAnnouncementRepository.findOne("SKILL", String.valueOf(id));
-                    java.util.Map<String, Object> respBody = new java.util.HashMap<>();
-                    respBody.put("marketKind", "SKILL");
-                    respBody.put("marketId", String.valueOf(id));
-                    respBody.put("title", saved != null ? saved.title() : body.title());
-                    respBody.put("body", saved != null ? saved.body() : body.body());
-                    if (saved != null) {
-                        respBody.put("createdAt", saved.createdAt());
-                    }
-                    return ServerResponse.ok().body(respBody);
+                    // R3 (a13) + final-review fix wave (Minor #1/#2): 回读 + null-safe
+                    // 兜底逻辑已抽取为 announcementResponse(...) — 两端共享,行为不变
+                    // (确定性 200;回读 null 时 log.warn + 用刚写入值兜底)。
+                    return announcementResponse(marketAnnouncementRepository, "SKILL", String.valueOf(id), body);
                 } catch (RuntimeException ex) {
                     String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
                     log.warn("announcement upsert failed for skill {}: {}", id, msg, ex);
@@ -2927,7 +2953,7 @@ public class LoomAgentConfiguration {
         @Bean("loomAgentSkillMarketPublicRouter")
         public RouterFunction<ServerResponse> loomAgentSkillMarketPublicRouter(
                 cn.wubo.spring.ai.loom.agent.skill.DefaultSkillMarketService svc,
-                @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService skillStatsService,
+                @org.springframework.beans.factory.annotation.Qualifier("skillStatsService") IMarketContentStatsService<Long> skillStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("skillReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<Long> skillReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
@@ -3215,7 +3241,7 @@ public class LoomAgentConfiguration {
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService svc,
                 cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
                 IUser user,
-                @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
+                @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService<String> kbStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<String> kbReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository,
                 // M3+ T1.4: KB router 走 RouterIdParserKnowledge 把 path-variable 解析为
@@ -3460,20 +3486,10 @@ public class LoomAgentConfiguration {
                     marketAnnouncementRepository.upsert("KNOWLEDGE", rawId, body.title(), body.body());
                     // KB 端 setFeaturedRank 接受 String(与 KB 的 VARCHAR(36) UUID 主键对齐)
                     svc.setFeaturedRank(rawId, 999, username);
-                    // R3 (a13 对称): upsert 成功后必须确定性 200 — 不再 body(findOne(...)),
-                    // findOne 可能返回 null 导致 body(null) NPE → 500。回读命中则返回完整行,
-                    // 否则用刚写入的值兜底。
-                    cn.wubo.spring.ai.loom.agent.market.MarketAnnouncement saved =
-                            marketAnnouncementRepository.findOne("KNOWLEDGE", rawId);
-                    java.util.Map<String, Object> respBody = new java.util.HashMap<>();
-                    respBody.put("marketKind", "KNOWLEDGE");
-                    respBody.put("marketId", rawId);
-                    respBody.put("title", saved != null ? saved.title() : body.title());
-                    respBody.put("body", saved != null ? saved.body() : body.body());
-                    if (saved != null) {
-                        respBody.put("createdAt", saved.createdAt());
-                    }
-                    return ServerResponse.ok().body(respBody);
+                    // R3 (a13 对称) + final-review fix wave (Minor #1/#2): 回读 +
+                    // null-safe 兜底逻辑已抽取为 announcementResponse(...) — 与 SKILL
+                    // 端共享,行为不变(确定性 200;回读 null 时 log.warn + 刚写入值兜底)。
+                    return announcementResponse(marketAnnouncementRepository, "KNOWLEDGE", rawId, body);
                 } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex) {
                     int code = ex.getStatusCode() != null ? ex.getStatusCode() : HttpStatus.NOT_FOUND.value();
                     return ServerResponse.status(code).body(java.util.Map.of("error", ex.getMessage()));
@@ -3673,7 +3689,7 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentMarketKnowledgePublicRouter(
                 cn.wubo.spring.ai.loom.agent.knowledge.DefaultKnowledgeMarketService kbSvc,
                 cn.wubo.spring.ai.loom.agent.knowledge.market.KnowledgeTagService kbTagService,
-                @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService kbStatsService,
+                @org.springframework.beans.factory.annotation.Qualifier("kbStatsService") IMarketContentStatsService<String> kbStatsService,
                 @org.springframework.beans.factory.annotation.Qualifier("kbReviewService") cn.wubo.spring.ai.loom.agent.market.IMarketContentReviewService<String> kbReviewService,
                 @org.springframework.beans.factory.annotation.Qualifier("marketAnnouncementRepository") cn.wubo.spring.ai.loom.agent.market.MarketAnnouncementRepository marketAnnouncementRepository,
                 // M3+ T1.4: 同 admin router — KB id 是 VARCHAR(36) UUID。
