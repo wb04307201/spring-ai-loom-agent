@@ -3812,6 +3812,22 @@ textarea::placeholder {
   outline: none;
   border-color: var(--primary-color, #6366f1);
 }
+/* M4 T7: 市场排序 select（两市场 tab 的 .kb-tag-filter-bar 内） */
+.market-sort-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+/* M4 T7: 搜索关键词高亮（色值同 admin console.css .flow-search-hit，不跨文件 import） */
+.search-hit {
+  background: #fef08a;
+  color: #92400e;
+  padding: 0 2px;
+  border-radius: 2px;
+}
 .kb-tag-filter-empty {
   font-size: 12px;
   color: var(--text-muted, #94a3b8);

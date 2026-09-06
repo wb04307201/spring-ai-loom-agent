@@ -21,5 +21,8 @@
   "market.admin.empty.knowledge": "市场暂无知识库",
   "market.admin.error.network": "网络错误，请稍后重试",
   "market.load.more": "加载更多",
-  "market.load.end": "没有更多了"
+  "market.load.end": "没有更多了",
+  "market.sort.official": "官方优先",
+  "market.sort.newest": "最新提交",
+  "market.sort.rating": "评分最高"
 }

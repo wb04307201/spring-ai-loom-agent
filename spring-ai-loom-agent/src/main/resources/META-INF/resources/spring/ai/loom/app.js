@@ -547,10 +547,13 @@ const api = {
     return r.ok ? r.json() : null;
   },
   // M4 T2: v2 分页路由 — page 0-based，返回 Page{items,total,page,size}；
-  // query 非空时附加 &query=（服务端搜索）。sortBy 留给 T7，先不加。
-  async listMarketSkills(page = 0, size = 20, query = "") {
+  // query 非空时附加 &query=（服务端搜索）。
+  // M4 T7: sortBy 非空时附加 &sortBy=（official_rank / submitted_at / rating；
+  // 仅分页分支有效，?tag= 分支服务端忽略排序 — 调用方在 tag 激活时不应传）。
+  async listMarketSkills(page = 0, size = 20, query = "", sortBy = "") {
     let url = `${API.listMarketSkills}?page=${page}&size=${size}`;
     if (query) url += `&query=${encodeURIComponent(query)}`;
+    if (sortBy) url += `&sortBy=${encodeURIComponent(sortBy)}`;
     const r = await apiFetch(url);
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
@@ -633,10 +636,13 @@ const api = {
 
   // Knowledge market
   // M4 T2: v2 分页路由 — page 0-based（默认 0），返回 Page{items,total,page,size}。
-  async listMarketKnowledge(page = 0, size = 20) {
-    const r = await apiFetch(
-      `${API.listMarketKnowledge}?page=${page}&size=${size}`,
-    );
+  // M4 T7: +query（服务端关键词搜索）+sortBy（official_rank / submitted_at / rating；
+  // 仅分页分支有效，?tag= 分支服务端忽略两者 — 调用方在 tag 激活时不应传）。
+  async listMarketKnowledge(page = 0, size = 20, query = "", sortBy = "") {
+    let url = `${API.listMarketKnowledge}?page=${page}&size=${size}`;
+    if (query) url += `&query=${encodeURIComponent(query)}`;
+    if (sortBy) url += `&sortBy=${encodeURIComponent(sortBy)}`;
+    const r = await apiFetch(url);
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   },
@@ -2190,6 +2196,14 @@ const knowledge = {
   _kbMarketHasMore: false,
   _kbMarketLoading: false,
   _kbMarketSeq: 0,
+  // M4 T7: KB 市场服务端关键词搜索（镜像技能 tab T2 模式）+ 排序状态。
+  // query/sortBy 仅分页分支下发；tag 分支服务端忽略两者（D11），tag 激活时
+  // 搜索 input 事件被忽略、排序 select 被 disable。
+  _kbMarketQuery: "",
+  _kbMarketDebounce: null,
+  _kbSort: "official_rank",
+  // 搜索触发的重渲染后把焦点还给 #kb-market-search（bar 全量重建会丢焦点）
+  _kbSearchFocus: false,
   _renderTagChipsHtml(tags, opts) {
     // Render a list of tag strings as `.tag-chip` spans. opts.onChipClick
     // (when present) wires each chip as a filter button; otherwise they're
@@ -2231,6 +2245,15 @@ const knowledge = {
     this._kbMarketTotal = 0;
     this._kbMarketPage = 0;
     this._kbMarketHasMore = false;
+    // M4 T7: 重进 tab（含 tag 切换）时清 query + 取消悬挂 debounce（镜像技能 tab
+    // Fix round 1 —— 否则旧 input 的 300ms 定时器晚触发会 bump seq 把本次合法
+    // 初始 fetch 判 stale，tab 卡「加载中...」）。排序 select 值跨重渲染保留。
+    this._kbMarketQuery = "";
+    if (this._kbMarketDebounce) {
+      clearTimeout(this._kbMarketDebounce);
+      this._kbMarketDebounce = null;
+    }
+    this._kbSearchFocus = false; // 全量重进 tab — 不把焦点强制交给搜索框
     // Fix round 1: 每次重置 bump seq —— 让旧 tag/旧渲染的 in-flight load-more
     // 响应（可能晚到）在 _fetchKbMarketPage 里被识别为 stale 并丢弃，防止
     // 旧响应 concat 进新列表造成混行。
@@ -2277,7 +2300,13 @@ const knowledge = {
         this._kbMarketHasMore = items.length >= size;
       } else {
         const size = 20;
-        const data = await api.listMarketKnowledge(page, size);
+        // M4 T7: 分页分支下发 query + sortBy（tag 分支服务端忽略两者，故不传）。
+        const data = await api.listMarketKnowledge(
+          page,
+          size,
+          this._kbMarketQuery,
+          this._kbSort,
+        );
         items = (data && (data.items || data.content)) || data || [];
         total = data && typeof data.total === "number" ? data.total : null;
         if (seq !== this._kbMarketSeq) return { stale: true };
@@ -2306,26 +2335,37 @@ const knowledge = {
         ? window.I18N.t(key, fallback)
         : fallback) || fallback;
     // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
-    // 当前后端 MarketKnowledgeRecord 未暴露 isOfficial/featuredRank，比较退化为 submittedAt。
-    const items = [...(this._kbMarketItems || [])].sort((a, b) => {
-      const ao = a && a.isOfficial ? 1 : 0;
-      const bo = b && b.isOfficial ? 1 : 0;
-      if (ao !== bo) return bo - ao;
-      const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
-      const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
-      if (ar !== br) return br - ar;
-      const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
-      const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
-      return bd - ad;
-    });
+    // M4 T7: 默认（分页）分支服务端已按 sortBy 排序（official_rank 默认语义 == 本
+    // 比较器；submitted_at / rating 只有服务端能排）—— 客户端再排会覆盖服务端顺序，
+    // 故仅 tag 分支（裸数组，服务端固定 rank 序、忽略 sortBy）保留客户端兜底排序。
+    const rawItems = this._kbMarketItems || [];
+    const items = tagFilter
+      ? [...rawItems].sort((a, b) => {
+          const ao = a && a.isOfficial ? 1 : 0;
+          const bo = b && b.isOfficial ? 1 : 0;
+          if (ao !== bo) return bo - ao;
+          const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
+          const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
+          if (ar !== br) return br - ar;
+          const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+          const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+          return bd - ad;
+        })
+      : rawItems;
     // M3+ T2.2: listWithTags helper removed — tags (when backend embeds via
     // T2.1 follow-up batch SELECT) are read directly from row.tags.
     if (!items || items.length === 0) {
+      // M4 T7: 空态三分支（镜像技能 tab）：tag → 「没有匹配 tag「x」的知识库」；
+      // query → 「没有匹配「kw」的知识库」；无 → 市场暂无知识库。空态文本不高亮。
       const empty = tagFilter
         ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
           escapeHtml(tagFilter) +
           "」的知识库</div>"
-        : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+        : this._kbMarketQuery
+          ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配「' +
+            escapeHtml(this._kbMarketQuery) +
+            "」的知识库</div>"
+          : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
       container.innerHTML = this._renderKbTagFilterBar([], tagFilter) + empty;
       this._bindKbTagFilterBar(container, detail);
       return;
@@ -2391,12 +2431,14 @@ const knowledge = {
           this._renderTagChipsHtml(kb.tags) +
           "</div>"
         : "";
+      // M4 T7: name/description/username 走 highlightHtml（当前 query 命中包 <mark>；
+      // tag 分支 query 恒为 ""，highlightHtml 退化为 escapeHtml）。详情/公告/chips 不高亮。
       div.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(kb.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ <span class="ks-item-name">${highlightHtml(kb.name, this._kbMarketQuery)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
- <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author || "")} · ${escapeHtml(kb.description || "")}</span>
+ <span class="ks-item-desc">by ${highlightHtml(kb.username || kb.author || "", this._kbMarketQuery)} · ${highlightHtml(kb.description || "", this._kbMarketQuery)}</span>
  ${tagChips}
  </div>
  `;
@@ -2456,8 +2498,25 @@ const knowledge = {
       .join("");
     const allChipCls =
       "tag-chip tag-chip-filter" + (allActive ? " active" : "");
+    // M4 T7: 关键词搜索框（镜像技能 tab #skill-market-search）+ 排序 select（复用
+    // skills._renderSortSelectHtml）。搜索框 value 从 _kbMarketQuery 恢复（每次
+    // load-more/搜索都会全量重渲染 bar，靠 value 保留已输入文本）。tag 过滤激活时
+    // 排序 select disable（tag 分支忽略 sortBy，D11）。
     return (
       '<div class="kb-tag-filter-bar">' +
+      '<span class="kb-tag-filter-bar-label">搜索：</span>' +
+      '<div class="kb-tag-filter-input-row">' +
+      '<input type="text" id="kb-market-search" class="kb-tag-filter-input" ' +
+      'placeholder="搜索知识库（名称 / 描述 / 作者）" value="' +
+      escapeHtml(this._kbMarketQuery || "") +
+      '"/>' +
+      "</div>" +
+      '<span class="kb-tag-filter-bar-label">排序：</span>' +
+      skills._renderSortSelectHtml(
+        "kb-market-sort",
+        this._kbSort,
+        !!active,
+      ) +
       '<span class="kb-tag-filter-bar-label">标签筛选：</span>' +
       '<span class="' +
       allChipCls +
@@ -2508,6 +2567,95 @@ const knowledge = {
           trigger();
         }
       });
+    }
+    // M4 T7: 关键词搜索（镜像技能 tab：300ms debounce + Enter 立即 + seq guard）。
+    // tag 过滤激活时忽略 keyword（tag 分支不带 query，D11）—— 与技能 tab runSearch 同语义。
+    const searchInput = container.querySelector("#kb-market-search");
+    const runKbSearch = async () => {
+      if (self._kbTagFilter) return;
+      if (self._kbMarketDebounce) {
+        clearTimeout(self._kbMarketDebounce);
+        self._kbMarketDebounce = null;
+      }
+      self._kbMarketQuery = searchInput.value.trim();
+      self._kbSearchFocus = true; // 搜索触发的重渲染 → 渲染后把焦点还给搜索框
+      self._kbMarketPage = 0;
+      self._kbMarketItems = [];
+      self._kbMarketTotal = 0;
+      self._kbMarketHasMore = false;
+      // 新搜索开始 → 旧 load-more 按钮立即失效（seq guard 兜底 stale response）
+      const staleBtn = container.querySelector(".load-more-btn");
+      if (staleBtn) staleBtn.remove();
+      try {
+        const res = await self._fetchKbMarketPage(0, false); // 内部 ++seq 作 in-flight guard
+        if (res && res.stale) return;
+        self._renderKbMarketList(container, detail);
+      } catch (e) {
+        // page-0 失败 → 错误态（镜像 _renderMarketTab catch；stale 错误已被 fetch 吞掉）
+        self._kbSearchFocus = false;
+        container.innerHTML =
+          '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+          escapeHtml(e.message) +
+          "</div>";
+      }
+    };
+    if (searchInput) {
+      searchInput.addEventListener("input", () => {
+        self._kbSearchFocus = true;
+        if (self._kbMarketDebounce) clearTimeout(self._kbMarketDebounce);
+        self._kbMarketDebounce = setTimeout(runKbSearch, 300);
+      });
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          runKbSearch();
+        }
+      });
+      searchInput.addEventListener("blur", () => {
+        self._kbSearchFocus = false;
+      });
+    }
+    // M4 T7: 排序 change → 重置 page/items + bump seq（经 _fetchKbMarketPage）重新拉取。
+    // tag 过滤激活时 select 已 disabled（change 不触发）。
+    const sortSel = container.querySelector("#kb-market-sort");
+    if (sortSel) {
+      sortSel.addEventListener("change", async () => {
+        self._kbSearchFocus = false; // 排序触发不应抢焦点到搜索框
+        self._kbSort = sortSel.value || "official_rank";
+        if (self._kbMarketDebounce) {
+          clearTimeout(self._kbMarketDebounce);
+          self._kbMarketDebounce = null;
+        }
+        self._kbMarketPage = 0;
+        self._kbMarketItems = [];
+        self._kbMarketTotal = 0;
+        self._kbMarketHasMore = false;
+        const staleBtn = container.querySelector(".load-more-btn");
+        if (staleBtn) staleBtn.remove();
+        try {
+          const res = await self._fetchKbMarketPage(0, false);
+          if (res && res.stale) return;
+          self._renderKbMarketList(container, detail);
+        } catch (e) {
+          // page-0 失败 → 错误态（镜像 _renderMarketTab catch）
+          container.innerHTML =
+            '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+            escapeHtml(e.message) +
+            "</div>";
+        }
+      });
+    }
+    // M4 T7: 全量重渲染会销毁并重建搜索框 —— 若本次渲染由搜索触发（_kbSearchFocus），
+    // 把焦点 + 光标（置于文末）还给新搜索框，避免 debounce 中途丢焦点。load-more /
+    // tag 点击 / 排序不置该 flag，故不会抢焦点。
+    if (self._kbSearchFocus && searchInput) {
+      searchInput.focus();
+      const len = searchInput.value.length;
+      try {
+        searchInput.setSelectionRange(len, len);
+      } catch (_) {
+        /* ignore — non-text input */
+      }
     }
   },
 
@@ -3949,7 +4097,23 @@ function getFileIcon(name) {
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
-  return div.innerHTML;
+  // M4 T7 (T6 review hardening): div.innerHTML 只转义 & < >，不转义引号 —
+  // data-tag="..." 等属性上下文遇到含 " 的值可被注入。补 " / ' 转义。
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// M4 T7: 搜索关键词高亮 — 必须先 escape 后 mark（kw 与 text 都走 escapeHtml，
+// 再做正则转义），保证 <img onerror=...> 之类输入只会以转义文本呈现，
+// 命中的子串被包进 <mark class="search-hit">。kw trim 后为空 → 等价 escapeHtml。
+function highlightHtml(text, kw) {
+  const esc = escapeHtml(text == null ? "" : String(text));
+  const k = (kw || "").trim();
+  if (!k) return esc;
+  const ekw = escapeHtml(k).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return esc.replace(
+    new RegExp(ekw, "gi"),
+    (m) => '<mark class="search-hit">' + m + "</mark>",
+  );
 }
 
 // ===================== §9 MCP Service =====================
@@ -4274,6 +4438,37 @@ const skills = {
   _skillMarketDebounce: null,
   // M4 T6: tag 过滤状态（null/空 = 无 tag 过滤，走 T2 服务端 query+分页路径）
   _skillTagFilter: null,
+  // M4 T7: 排序状态（official_rank 默认 / submitted_at / rating）。仅分页分支带 sortBy；
+  // tag 过滤激活时 select 被 disable，sortBy 不下发（服务端 ?tag= 分支忽略排序 — D11）。
+  _skillSort: "official_rank",
+
+  // M4 T7: 排序 select 的 HTML（两 tab 复用同一构造器）。label 走 I18N.t（带 zh fallback）；
+  // disabled=true 用于 tag 过滤激活时锁死 select（clearest UX，见 D11 裁决）。
+  _renderSortSelectHtml(id, currentSort, disabled) {
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    const opt = (val, label) =>
+      '<option value="' +
+      val +
+      '"' +
+      (currentSort === val ? " selected" : "") +
+      ">" +
+      escapeHtml(label) +
+      "</option>";
+    return (
+      '<select id="' +
+      id +
+      '" class="market-sort-select"' +
+      (disabled ? " disabled" : "") +
+      ">" +
+      opt("official_rank", t("market.sort.official", "官方优先")) +
+      opt("submitted_at", t("market.sort.newest", "最新提交")) +
+      opt("rating", t("market.sort.rating", "评分最高")) +
+      "</select>"
+    );
+  },
 
   async _renderMarketTab(container, tagFilter) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
@@ -4305,12 +4500,20 @@ const skills = {
     container.innerHTML = "";
     const bar = document.createElement("div");
     bar.className = "kb-tag-filter-bar";
+    // M4 T7: 排序 select —— tag 过滤激活时 disable（?tag= 分支忽略 sortBy，D11）。
+    // select 的 disabled 状态随每次 _renderMarketTab 重建（tag chip 点击会重进此函数）。
     bar.innerHTML =
       '<span class="kb-tag-filter-bar-label">搜索：</span>' +
       '<div class="kb-tag-filter-input-row">' +
       '<input type="text" id="skill-market-search" class="kb-tag-filter-input" ' +
       'placeholder="搜索技能（名称 / 描述 / 作者）"/>' +
       "</div>" +
+      '<span class="kb-tag-filter-bar-label">排序：</span>' +
+      this._renderSortSelectHtml(
+        "skill-market-sort",
+        this._skillSort,
+        !!this._skillTagFilter,
+      ) +
       '<span class="kb-tag-filter-bar-label">标签筛选：</span>' +
       '<span id="skill-market-tag-chips" class="tag-chip-group"></span>';
     container.appendChild(bar);
@@ -4345,6 +4548,22 @@ const skills = {
         runSearch();
       }
     });
+    // M4 T7: 排序 change → 重置 page/items/seq（bump seq 让 in-flight fetch 失效），
+    // 再走 page 0 分页 fetch（tag 过滤激活时 select 已 disabled，不会触发）。
+    const sortSelect = bar.querySelector("#skill-market-sort");
+    if (sortSelect) {
+      sortSelect.addEventListener("change", () => {
+        this._skillSort = sortSelect.value || "official_rank";
+        this._skillMarketPage = 0;
+        this._skillMarketItems = [];
+        this._skillMarketTotal = 0;
+        this._skillMarketHasMore = false;
+        this._skillMarketSeq++;
+        const staleBtn = container.querySelector(".load-more-btn");
+        if (staleBtn) staleBtn.remove();
+        this._fetchSkillMarketPage(0, false, rowsWrap, container);
+      });
+    }
     await this._fetchSkillMarketPage(0, false, rowsWrap, container);
   },
 
@@ -4442,7 +4661,12 @@ const skills = {
         this._renderSkillMarketRows(rowsWrap, container);
         return;
       }
-      const data = await api.listMarketSkills(page, 20, this._skillMarketQuery);
+      const data = await api.listMarketSkills(
+        page,
+        20,
+        this._skillMarketQuery,
+        this._skillSort,
+      );
       if (seq !== this._skillMarketSeq) return; // stale response — discard
       const items = (data && (data.items || data.content)) || data || [];
       this._skillMarketItems = append
@@ -4547,12 +4771,14 @@ const skills = {
             knowledge._renderTagChipsHtml(m.tags) +
             "</div>"
           : "";
+      // M4 T7: name/description/author 走 highlightHtml（当前 query 命中包 <mark>；
+      // tag 分支 query 恒为 ""，highlightHtml 退化为 escapeHtml）。详情/公告/chips 不高亮。
       item.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(m.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ <span class="ks-item-name">${highlightHtml(m.name, this._skillMarketQuery)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
- <span class="ks-item-desc">by ${escapeHtml(m.author || "")} · ${escapeHtml(m.description || "")}</span>
+ <span class="ks-item-desc">by ${highlightHtml(m.author || "", this._skillMarketQuery)} · ${highlightHtml(m.description || "", this._skillMarketQuery)}</span>
  ${tagChips}
  </div>
  `;
