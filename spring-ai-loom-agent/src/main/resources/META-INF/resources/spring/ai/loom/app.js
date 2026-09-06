@@ -2189,6 +2189,7 @@ const knowledge = {
   _kbMarketPage: 0,
   _kbMarketHasMore: false,
   _kbMarketLoading: false,
+  _kbMarketSeq: 0,
   _renderTagChipsHtml(tags, opts) {
     // Render a list of tag strings as `.tag-chip` spans. opts.onChipClick
     // (when present) wires each chip as a filter button; otherwise they're
@@ -2230,12 +2231,17 @@ const knowledge = {
     this._kbMarketTotal = 0;
     this._kbMarketPage = 0;
     this._kbMarketHasMore = false;
+    // Fix round 1: 每次重置 bump seq —— 让旧 tag/旧渲染的 in-flight load-more
+    // 响应（可能晚到）在 _fetchKbMarketPage 里被识别为 stale 并丢弃，防止
+    // 旧响应 concat 进新列表造成混行。
+    this._kbMarketSeq++;
     container.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">加载中...</div>';
     detail.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
     try {
-      await this._fetchKbMarketPage(0, false);
+      const res = await this._fetchKbMarketPage(0, false);
+      if (res && res.stale) return; // 已被更新的渲染取代 — 不碰 container
       this._renderKbMarketList(container, detail);
     } catch (e) {
       container.innerHTML =
@@ -2247,35 +2253,47 @@ const knowledge = {
 
   // M4 T2: 拉取 KB 市场一页并累积到 _kbMarketItems。默认分支 v2 Page（total 驱动）；
   // tag 分支裸数组（返回条数 < size 即没有更多）。
+  // Fix round 1: sequence token 防 stale response（与技能 tab 同款）—— fetch 开始时
+  // 捕获 token，await 之后 token 过期则丢弃响应/错误，返回 {stale:true}。
   async _fetchKbMarketPage(page, append) {
+    const seq = ++this._kbMarketSeq;
     const tagFilter = this._kbTagFilter;
     let items;
     let total = null;
-    if (tagFilter) {
-      const size = 50;
-      const url =
-        "/spring/ai/loom/market-knowledge?tag=" +
-        encodeURIComponent(tagFilter) +
-        "&page=" +
-        page +
-        "&size=" +
-        size;
-      const r = await apiFetch(url);
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      items = (await r.json()) || [];
-      this._kbMarketHasMore = items.length >= size;
-    } else {
-      const size = 20;
-      const data = await api.listMarketKnowledge(page, size);
-      items = (data && (data.items || data.content)) || data || [];
-      total = data && typeof data.total === "number" ? data.total : null;
-      this._kbMarketHasMore =
-        items.length >= size &&
-        (total == null || (append ? this._kbMarketItems.length : 0) + items.length < total);
+    try {
+      if (tagFilter) {
+        const size = 50;
+        const url =
+          "/spring/ai/loom/market-knowledge?tag=" +
+          encodeURIComponent(tagFilter) +
+          "&page=" +
+          page +
+          "&size=" +
+          size;
+        const r = await apiFetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        items = (await r.json()) || [];
+        if (seq !== this._kbMarketSeq) return { stale: true };
+        this._kbMarketHasMore = items.length >= size;
+      } else {
+        const size = 20;
+        const data = await api.listMarketKnowledge(page, size);
+        items = (data && (data.items || data.content)) || data || [];
+        total = data && typeof data.total === "number" ? data.total : null;
+        if (seq !== this._kbMarketSeq) return { stale: true };
+        this._kbMarketHasMore =
+          items.length >= size &&
+          (total == null || (append ? this._kbMarketItems.length : 0) + items.length < total);
+      }
+    } catch (e) {
+      if (seq !== this._kbMarketSeq) return { stale: true }; // stale error — discard
+      throw e;
     }
+    if (seq !== this._kbMarketSeq) return { stale: true };
     this._kbMarketItems = append ? this._kbMarketItems.concat(items) : items;
     if (total != null) this._kbMarketTotal = total;
     this._kbMarketPage = page;
+    return { stale: false };
   },
 
   // M4 T2: 渲染 KB 市场列表（tag 过滤栏 + 全部已加载行 + load-more 按钮）。
@@ -2399,7 +2417,9 @@ const knowledge = {
         this._kbMarketLoading = true;
         btn.disabled = true;
         try {
-          await this._fetchKbMarketPage(this._kbMarketPage + 1, true);
+          const res = await this._fetchKbMarketPage(this._kbMarketPage + 1, true);
+          // Fix round 1: stale 响应（用户已切 tag / 重进 tab）→ 不重渲染旧 container
+          if (res && res.stale) return;
           this._renderKbMarketList(container, detail);
         } catch (e) {
           showToast("加载失败：" + e.message, "error");
@@ -4262,6 +4282,13 @@ const skills = {
     this._skillMarketPage = 0;
     this._skillMarketItems = [];
     this._skillMarketTotal = 0;
+    // Fix round 1: 重进 tab 时取消悬挂的 debounce —— 否则 300ms 内切走再切回，
+    // 旧 rowsWrap 的 runSearch 会晚触发并 bump seq，把本次合法的初始 fetch
+    // 判为 stale 丢弃，tab 卡在「加载中...」。
+    if (this._skillMarketDebounce) {
+      clearTimeout(this._skillMarketDebounce);
+      this._skillMarketDebounce = null;
+    }
     // 搜索栏复用 kb-tag-filter-bar/input（已在 style.css 共享层）—— DOM/位置保持不变。
     container.innerHTML = "";
     const bar = document.createElement("div");
@@ -4336,6 +4363,10 @@ const skills = {
           '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
           escapeHtml(e.message) +
           "</div>";
+        // Fix round 1: page-0 搜索失败也要清掉旧 load-more 按钮（runSearch 只是
+        // disabled 它）—— 与空态 early-return 的清理对称，避免残留 disabled 按钮。
+        const staleLoadMore = container.querySelector(".load-more-btn");
+        if (staleLoadMore) staleLoadMore.remove();
       }
     }
   },
