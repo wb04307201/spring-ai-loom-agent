@@ -199,6 +199,41 @@
       </div>
     </div>
 
+    <!-- M4 T5：标签批量编辑模态框（镜像 knowledge-market.html） -->
+    <div id="tag-edit-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 560px">
+        <div class="modal-header">
+          <h3 id="tag-edit-title-text">编辑标签</h3>
+          <div class="close-button" id="tag-edit-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div class="form-group">
+            <label>当前标签</label>
+            <div id="tag-edit-current" class="tag-edit-list"></div>
+          </div>
+          <div class="form-group">
+            <label
+              >标签（逗号分隔,例如 <code>RAG, FAQ, 教程</code>）</label
+            >
+            <input
+              type="text"
+              id="tag-edit-input"
+              class="tag-edit-input"
+              placeholder="RAG, FAQ, 教程"
+            />
+            <div class="tag-edit-hint">
+              输入逗号、空格或全角逗号分隔的标签;重复和空标签会被忽略;留空则清空所有标签。
+            </div>
+          </div>
+          <div id="tag-edit-error" class="error-msg" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="tag-edit-cancel">取消</button>
+          <button class="primary-btn" id="tag-edit-save">保存</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 通用确认 -->
     <div id="confirm-modal" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 440px">
