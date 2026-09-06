@@ -758,3 +758,35 @@ CREATE TABLE market_skill_tag (
   FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_market_skill_tag ON market_skill_tag(tag);
+
+-- =============================================================
+-- #4 市场审批流:REJECTED 行重投时旧行归档表(只增不删,供追溯)
+-- 主表 UNIQUE(author/username, name) 不动;重投 = 旧行挪进 archive + 主表新建 PENDING 行(新 id)
+-- 归档行保留原主键值(非自增),便于与原行对应。
+-- =============================================================
+CREATE TABLE market_skill_archive (
+  id BIGINT PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  author VARCHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  submitted_at TIMESTAMP NOT NULL,
+  reviewed_at TIMESTAMP NULL,
+  reviewed_by VARCHAR(64) NULL,
+  review_comment TEXT NULL,
+  archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE loom_market_knowledge_archive (
+  id VARCHAR(36) PRIMARY KEY,
+  username VARCHAR(64) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  description TEXT,
+  status VARCHAR(20) NOT NULL,
+  submitted_at TIMESTAMP,
+  reviewed_at TIMESTAMP,
+  reviewed_by VARCHAR(64),
+  review_comment TEXT,
+  archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
