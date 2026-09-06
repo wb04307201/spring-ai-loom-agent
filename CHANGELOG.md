@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Intermittent `评价 upsert 失败:行未写入` / A13 announcement `500` failures — root cause was `Long` JDBC binds against VARCHAR(36) `market_id` columns; eliminated structurally by the type alignments above (no KB market path binds Long anymore)
 - Acceptance ITs de-conditionalized: `a13` / `A12` router legs assert strict `200` via `route()` (direct-DB fallbacks removed); new positive-path KB router ITs (`a13kb` PUT announcement, `a16b` POST review, `a17b` GET announcement, `A18` cross-kind poison-row)
 - `IMarketContentStatsService` injection sites in `LoomAgentConfiguration` parameterized `<Long>`/`<String>` (was raw types; compile-time safety, no behavior change)
+- (2026-09-06, found by full Chrome UI test) `market-admin.js` admin write-endpoint builders pluralized `market-${kind}s` → KB admin "发布公告"/"删除评价" hit `/admin/market-knowledges/...` and 404'd (backend KB routes are singular `market-knowledge`); builders now derive from the existing `ADMIN_API[kind]` map — spec FU-6
+- (2026-09-06, found by full Chrome UI test) `i18n/i18n.js` fetched dicts via document-relative `../i18n/*.json`, which 404s from `index.html` (sits beside `i18n/`, not one level down like `admin/*.html`) → dictionaries never loaded on the main page and announcement banners rendered the raw key `market.admin.announcement.badge`; dict URLs now resolve relative to the script's own location — spec FU-7
 
 ## [v1.2.0] - 2026-09-04
 
