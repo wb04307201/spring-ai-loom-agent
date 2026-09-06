@@ -116,6 +116,11 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
         throw new UnsupportedOperationException("create must be implemented by subclass");
     }
 
+    @Override
+    public M createApproved(String adminUsername, MarketCreateRequest req) {
+        throw new UnsupportedOperationException("createApproved must be implemented by subclass");
+    }
+
     /**
      * 默认 update 不实现 — 同 {@link #create(String, MarketCreateRequest)}。
      */

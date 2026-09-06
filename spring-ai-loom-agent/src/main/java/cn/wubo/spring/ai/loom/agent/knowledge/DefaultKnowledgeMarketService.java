@@ -135,6 +135,25 @@ public class DefaultKnowledgeMarketService
     }
 
     /**
+     * admin 直发 APPROVED — 可信主路径,绕过 PENDING 审批 (Task 2 / #4)。
+     * 新 UUID id;落 {@code status='APPROVED', created_by_kind='ADMIN',
+     * reviewed_at=NOW, reviewed_by=adminUsername, category=req.category}。
+     * 注意:{@code loom_market_knowledge} 没有 {@code content} 列,
+     * {@link MarketCreateRequest#content()} 在 KB 端被忽略。
+     */
+    @Override
+    @Transactional
+    public MarketKnowledgeRecord createApproved(String adminUsername, MarketCreateRequest req) {
+        String marketId = UUID.randomUUID().toString();
+        jdbcTemplate.update(
+            "INSERT INTO loom_market_knowledge (id, username, name, description, category, status, " +
+                "created_by_kind, reviewed_at, reviewed_by) " +
+                "VALUES (?, ?, ?, ?, ?, 'APPROVED', 'ADMIN', CURRENT_TIMESTAMP, ?)",
+            marketId, adminUsername, req.name(), req.description(), req.category(), adminUsername);
+        return getById(marketId);
+    }
+
+    /**
      * 动态 SET 更新。{@code content} 列在 KB 端不存在,忽略。
      * Override abstract base 的 {@code update(K, MarketUpdateRequest)} (K=String → UUID 直接传)。
      */

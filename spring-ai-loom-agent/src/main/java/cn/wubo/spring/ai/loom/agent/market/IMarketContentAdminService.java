@@ -37,6 +37,9 @@ public interface IMarketContentAdminService<K, M, U, R> {
 
     void setCategory(K id, String category, String reviewer);
 
+    /** admin 直接创建 → 落 APPROVED(可信主路径,绕过 PENDING 审批)。 */
+    M createApproved(String adminUsername, MarketCreateRequest req);
+
     /** 全字段搜索(MVP 用 SQL LIKE)。 */
     Page<M> search(String query, String category, int page, int size);
 

@@ -118,6 +118,39 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         return getById(id);
     }
 
+    /**
+     * admin 直发 APPROVED — 可信主路径,绕过 PENDING 审批 (Task 2 / #4)。
+     * 落 {@code status='APPROVED', created_by_kind='ADMIN', reviewed_at=NOW,
+     * reviewed_by=adminUsername, category=req.category};先按 author+name 查重,
+     * 同名已存在抛 422 (镜像 adminCreate 的查重语义)。
+     */
+    @Override
+    @Transactional
+    public MarketSkill createApproved(String adminUsername, MarketCreateRequest req) {
+        if (req.name() == null || req.name().isBlank()) {
+            throw new LoomAgentRuntimeException("name 不能为空");
+        }
+        if (req.content() == null || req.content().isBlank()) {
+            throw new LoomAgentRuntimeException("content 不能为空");
+        }
+        Integer dup = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM market_skill WHERE author=? AND name=?",
+            Integer.class, adminUsername, req.name());
+        if (dup != null && dup > 0) {
+            throw new LoomAgentRuntimeException(422,
+                "已存在同名 Skill: author=" + adminUsername + " name=" + req.name());
+        }
+        jdbc.update(
+            "INSERT INTO market_skill (name, description, content, author, status, category, " +
+                "created_by_kind, reviewed_at, reviewed_by) " +
+                "VALUES (?, ?, ?, ?, 'APPROVED', ?, 'ADMIN', CURRENT_TIMESTAMP, ?)",
+            req.name(), req.description(), req.content(), adminUsername, req.category(), adminUsername);
+        Long id = jdbc.queryForObject(
+            "SELECT MAX(id) FROM market_skill WHERE author=? AND name=?",
+            Long.class, adminUsername, req.name());
+        return get(id);
+    }
+
     @Override
     public MarketSkill update(Long id, MarketUpdateRequest req) {
         StringBuilder sql = new StringBuilder("UPDATE market_skill SET updated_at=CURRENT_TIMESTAMP");
