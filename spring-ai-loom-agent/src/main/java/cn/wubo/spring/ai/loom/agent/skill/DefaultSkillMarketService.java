@@ -343,11 +343,11 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
                 "SELECT MAX(id) FROM market_skill WHERE author=? AND name=?",
                 Long.class, username, req.name());
         } else if (existingId != null) {
-            // 非 REJECTED(PENDING/APPROVED)同名 → UPSERT 回 PENDING + 清审核字段
+            // 非 REJECTED 同名行(PENDING/APPROVED)→ 仅更新内容,状态与审核字段不动
+            // (spec §2: APPROVED→PENDING 禁止;PENDING 本就未审,review 字段已是 NULL)
             jdbc.update(
-                "UPDATE market_skill SET description=?, content=?, status='PENDING', " +
-                    "reviewed_at=NULL, reviewed_by=NULL, review_comment=NULL WHERE id=?",
-                req.description(), req.content(), existingId);
+                    "UPDATE market_skill SET description = ?, content = ? WHERE id = ?",
+                    req.description(), req.content(), existingId);
             marketId = existingId;
         } else {
             jdbc.update(

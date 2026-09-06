@@ -91,4 +91,21 @@ class MarketApprovalFlowIT {
             "SELECT COUNT(*) FROM market_skill WHERE id=?", Integer.class, id1);
         assertEquals(0, mainStillHasOld, "旧 id 已从主表删除");
     }
+
+    @Test
+    void resubmitApprovedKeepsApprovedNoDemotion() {
+        String name = "nodemote-" + System.nanoTime();
+        long id1 = skillSvc.submit("alice",
+            new cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest(name, "d", "c1")).id();
+        skillSvc.approve(id1, "admin1");
+        long id2 = skillSvc.submit("alice",
+            new cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest(name, "d", "c2")).id();
+        assertEquals(id1, id2, "APPROVED 重投 = 同 id 就地更新");
+        String status = jdbc.queryForObject("SELECT status FROM market_skill WHERE id=?", String.class, id2);
+        assertEquals("APPROVED", status, "APPROVED 不得回退 PENDING(spec §2)");
+        String reviewedBy = jdbc.queryForObject("SELECT reviewed_by FROM market_skill WHERE id=?", String.class, id2);
+        assertEquals("admin1", reviewedBy, "审核字段不得被清空");
+        String content = jdbc.queryForObject("SELECT content FROM market_skill WHERE id=?", String.class, id2);
+        assertEquals("c2", content, "内容应已就地更新");
+    }
 }
