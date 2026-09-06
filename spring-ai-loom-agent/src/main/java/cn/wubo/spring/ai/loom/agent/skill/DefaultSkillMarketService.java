@@ -315,35 +315,53 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         if (req.content() == null || req.content().isBlank()) {
             throw new LoomAgentRuntimeException("content 不能为空");
         }
-        // UPSERT(同一作者+name 只保留一行)+ 直接 APPROVED
+        // 查同名旧行(可能不存在)
         Long existingId = null;
+        String existingStatus = null;
         try {
             existingId = jdbc.queryForObject(
-                    "SELECT id FROM market_skill WHERE author = ? AND name = ? LIMIT 1",
-                    Long.class, username, req.name());
+                "SELECT id FROM market_skill WHERE author=? AND name=? LIMIT 1",
+                Long.class, username, req.name());
+            existingStatus = jdbc.queryForObject(
+                "SELECT status FROM market_skill WHERE id=?", String.class, existingId);
         } catch (org.springframework.dao.EmptyResultDataAccessException ignored) {
         }
         Long marketId;
-        if (existingId != null) {
-            // UPDATE 内容 + 标记 APPROVED
+        if (existingId != null && "REJECTED".equals(existingStatus)) {
+            // REJECTED 重投:旧行整行归档 → 主表删 → 新建 PENDING 行(新 id)
             jdbc.update(
-                    "UPDATE market_skill SET description = ?, content = ?, status = 'APPROVED', " +
-                            "reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?, review_comment = NULL WHERE id = ?",
-                    req.description(), req.content(), username, existingId);
+                "INSERT INTO market_skill_archive (id, name, description, content, author, status, " +
+                    "submitted_at, reviewed_at, reviewed_by, review_comment) " +
+                    "SELECT id, name, description, content, author, status, submitted_at, reviewed_at, " +
+                    "reviewed_by, review_comment FROM market_skill WHERE id=?", existingId);
+            jdbc.update("DELETE FROM market_skill WHERE id=?", existingId);
+            jdbc.update(
+                "INSERT INTO market_skill (name, description, content, author, status, created_by_kind) " +
+                    "VALUES (?, ?, ?, ?, 'PENDING', 'USER')",
+                req.name(), req.description(), req.content(), username);
+            marketId = jdbc.queryForObject(
+                "SELECT MAX(id) FROM market_skill WHERE author=? AND name=?",
+                Long.class, username, req.name());
+        } else if (existingId != null) {
+            // 非 REJECTED(PENDING/APPROVED)同名 → UPSERT 回 PENDING + 清审核字段
+            jdbc.update(
+                "UPDATE market_skill SET description=?, content=?, status='PENDING', " +
+                    "reviewed_at=NULL, reviewed_by=NULL, review_comment=NULL WHERE id=?",
+                req.description(), req.content(), existingId);
             marketId = existingId;
         } else {
             jdbc.update(
-                    "INSERT INTO market_skill (name, description, content, author, status, reviewed_at, reviewed_by) " +
-                            "VALUES (?, ?, ?, ?, 'APPROVED', CURRENT_TIMESTAMP, ?)",
-                    req.name(), req.description(), req.content(), username, username);
+                "INSERT INTO market_skill (name, description, content, author, status, created_by_kind) " +
+                    "VALUES (?, ?, ?, ?, 'PENDING', 'USER')",
+                req.name(), req.description(), req.content(), username);
             marketId = jdbc.queryForObject(
-                    "SELECT MAX(id) FROM market_skill WHERE author = ? AND name = ?",
-                    Long.class, username, req.name());
+                "SELECT MAX(id) FROM market_skill WHERE author=? AND name=?",
+                Long.class, username, req.name());
         }
-        // 反写 author 自己的 user_skill.market_skill_id(用于 save() 反向同步 + 推送)
+        // backlink 重写为新 marketId(REJECTED 重投时指向新行)
         jdbc.update(
-                "UPDATE user_skill SET market_skill_id = ? WHERE username = ? AND name = ?",
-                marketId, username, req.name());
+            "UPDATE user_skill SET market_skill_id=? WHERE username=? AND name=?",
+            marketId, username, req.name());
         return get(marketId);
     }
 
@@ -407,7 +425,9 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
     @Transactional
     public UserSkill pull(String username, Long marketSkillId) {
         MarketSkill m = get(marketSkillId);
-        // 去掉 status='APPROVED' 校验(提交即上架)
+        if (!MarketSkill.STATUS_APPROVED.equals(m.status())) {
+            throw new LoomAgentRuntimeException(403, "该技能未通过审批,暂不可拉取(status=" + m.status() + ")");
+        }
         // 检查 user_skill 是否已存在同 name
         List<UserSkill> existing = jdbc.query(
                 "SELECT * FROM user_skill WHERE username = ? AND name = ?",
