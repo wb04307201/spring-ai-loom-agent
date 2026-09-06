@@ -3400,3 +3400,497 @@ textarea::placeholder {
   color: var(--primary-color, #6366f1);
   transform: translateY(-1px);
 }
+
+/* ==========================================================================
+   共享市场 UI 组件 —— 2026-09-06 从 admin/console.css 迁移至此
+   --------------------------------------------------------------------------
+   index.html 只加载 style.css（不加载 console.css），但知识空间模态框通过
+   app.js + admin/market-admin.js 渲染同一套市场组件（公告横幅 / 评价 / 星级 /
+   标签筛选 / 表单原语）。此前这些规则只存在于 console.css，导致 index.html 上
+   全部裸奔无样式。迁移到共享基础层后：index.html 与 admin 页（两者都加载
+   style.css）均可正确渲染；console.css 仅保留 admin 专属版式。
+   随后附加 bucket B 新增规则（文件树 / 详情内容 / 评价容器 / 删除技能按钮 /
+   MCP 选择项），这些类此前在任何 CSS 中都无定义。
+   ========================================================================== */
+.primary-btn {
+  padding: 8px 16px;
+  background: var(--primary-color, #6366f1);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.primary-btn:hover {
+  background: var(--primary-hover, #4f46e5);
+}
+.primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.type-badge.ADMIN {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-color, #6366f1);
+}
+
+.type-badge.USER {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-muted, #94a3b8);
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--text-primary, #1e293b);
+}
+
+.form-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--bg-secondary, #f8fafc);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary-color, #6366f1);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+/* ===== M0 T19: 市场公告横幅 ===== */
+.market-announcement {
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.market-announcement-list {
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+.market-announcement-list:hover {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+.market-announcement-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.market-announcement-body {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #78350f;
+}
+.market-announcement-time {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #a16207;
+}
+
+/* ===== M0 T19: 评价 / 星级 ===== */
+.review-aggregate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-primary, #1e293b);
+}
+.review-aggregate-empty {
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+}
+.review-aggregate-avg {
+  font-weight: 600;
+  font-size: 18px;
+  color: #f59e0b;
+}
+.review-aggregate-count {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.star-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 16px;
+  line-height: 1;
+}
+.star-rating-readonly {
+  pointer-events: none;
+}
+.star-rating-editable .star-btn {
+  background: transparent;
+  border: none;
+  padding: 2px 3px;
+  cursor: pointer;
+  color: #cbd5e1;
+  font-size: 18px;
+  line-height: 1;
+  transition: color 0.1s;
+}
+.star-rating-editable .star-btn.star-filled,
+.star-rating-editable .star-btn:hover {
+  color: #f59e0b;
+}
+.star-rating .star-filled {
+  color: #f59e0b;
+}
+.star-rating .star-empty {
+  color: #cbd5e1;
+}
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.review-item {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--bg-primary, #fff);
+}
+.review-row1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  flex-wrap: wrap;
+}
+.review-user {
+  font-weight: 500;
+  color: var(--text-primary, #1e293b);
+}
+.review-time {
+  color: var(--text-muted, #94a3b8);
+}
+.review-edit-tag {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.review-comment {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary, #1e293b);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.review-comment-empty {
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+}
+.review-empty {
+  padding: 14px;
+  text-align: center;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  font-style: italic;
+  border: 1px dashed var(--border-color, #e2e8f0);
+  border-radius: 6px;
+}
+.review-loading {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+}
+
+.review-form {
+  margin: 8px 0 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.review-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.review-comment-input {
+  resize: vertical;
+  min-height: 60px;
+  font-size: 13px;
+}
+.review-form-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.review-form-msg:empty::before {
+  content: "";
+}
+.review-del-btn {
+  margin-left: auto;
+}
+
+/* ===== M2 T21: Tag chip styles (KB market tag filter + admin batch edit) ===== */
+.tag-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: default;
+  transition: background 0.15s ease;
+}
+.tag-chip-muted {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+.tag-chip-filter {
+  cursor: pointer;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+}
+.tag-chip-filter:hover {
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+}
+.tag-chip-filter.active {
+  background: var(--primary-color, #6366f1);
+  color: #fff;
+  border-color: var(--primary-color, #6366f1);
+}
+.tag-chip-removable {
+  cursor: default;
+}
+.tag-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: rgba(67, 56, 202, 0.18);
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.tag-chip-remove:hover {
+  background: rgba(67, 56, 202, 0.35);
+}
+
+.kb-tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+.kb-tag-filter-bar-label {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.kb-tag-filter-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color, #e2e8f0);
+}
+.kb-tag-filter-input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #1e293b);
+}
+.kb-tag-filter-input:focus {
+  outline: none;
+  border-color: var(--primary-color, #6366f1);
+}
+.kb-tag-filter-empty {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+}
+.kb-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
+}
+
+/* ===== 文件管理模态框：目录树（bucket B 新增） ===== */
+.file-tree {
+  font-size: 13px;
+  color: var(--text-primary, #1e293b);
+  padding: 4px 0;
+}
+.tree-dir {
+  margin: 1px 0;
+}
+.tree-dir-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+  list-style: none;
+  user-select: none;
+}
+.tree-dir-summary::-webkit-details-marker {
+  display: none;
+}
+.tree-dir-summary:hover {
+  background: var(--bg-secondary, #f1f5f9);
+}
+.tree-children {
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-color, #e2e8f0);
+}
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.tree-file:hover {
+  background: var(--bg-secondary, #f8fafc);
+}
+.tree-file-icon {
+  flex: 0 0 auto;
+}
+.tree-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-file-size {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+.tree-file-btn {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 4px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-secondary, #475569);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tree-file-btn:hover {
+  border-color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #6366f1);
+}
+
+/* ===== 市场详情内容 / 评价容器 / 删除技能按钮（bucket B 新增） ===== */
+.detail-section-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary, #1e293b);
+  word-break: break-word;
+}
+.market-reviews-slot {
+  margin-top: 4px;
+}
+.review-list-wrap {
+  margin-top: 12px;
+}
+.delete-skill-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--error-color, #ef4444);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s);
+}
+.delete-skill-btn:hover {
+  filter: brightness(0.95);
+  transform: translateY(-2px);
+}
+
+/* ===== 工具 / MCP 选择项（bucket B 新增；主要视觉仍来自内联样式） ===== */
+.mcp-checkbox {
+  cursor: pointer;
+}
+.mcp-item-text {
+  min-width: 0;
+}
