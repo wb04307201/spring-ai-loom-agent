@@ -4272,16 +4272,23 @@ const skills = {
   _skillMarketSeq: 0,
   _skillMarketLoading: false,
   _skillMarketDebounce: null,
+  // M4 T6: tag 过滤状态（null/空 = 无 tag 过滤，走 T2 服务端 query+分页路径）
+  _skillTagFilter: null,
 
-  async _renderMarketTab(container) {
+  async _renderMarketTab(container, tagFilter) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
     // M4 T2: 客户端过滤（_skillMarketAll）已被服务端搜索取代 —— 搜索框 input 事件
     // debounce 300ms → page=0 重新 fetch；Enter 立即 fetch。in-flight guard 用递增
     // sequence token，过期响应直接丢弃。highlight 留给 T7。
+    // M4 T6: tagFilter (string|null) — 非空时走公开 GET /market-skills?tag=...
+    // 分支（enriched 裸数组，keyword query 忽略 —— 与 KB tab D11/D12 相同语义）；
+    // 为空时保持 T2 服务端 query + load-more 分页路径原样。
+    this._skillTagFilter = tagFilter || null;
     this._skillMarketQuery = "";
     this._skillMarketPage = 0;
     this._skillMarketItems = [];
     this._skillMarketTotal = 0;
+    this._skillMarketHasMore = false;
     // Fix round 1: 重进 tab 时取消悬挂的 debounce —— 否则 300ms 内切走再切回，
     // 旧 rowsWrap 的 runSearch 会晚触发并 bump seq，把本次合法的初始 fetch
     // 判为 stale 丢弃，tab 卡在「加载中...」。
@@ -4289,7 +4296,12 @@ const skills = {
       clearTimeout(this._skillMarketDebounce);
       this._skillMarketDebounce = null;
     }
+    // M4 T6: tag/no-tag 切换时立即 bump seq —— 让上一分支的 in-flight fetch
+    //（旧 tag 的裸数组响应 / 旧 query 的分页响应）在 _fetchSkillMarketPage
+    // 里被判 stale 丢弃，防止晚到响应污染新分支的 rowsWrap。
+    this._skillMarketSeq++;
     // 搜索栏复用 kb-tag-filter-bar/input（已在 style.css 共享层）—— DOM/位置保持不变。
+    // M4 T6: 同一个 .kb-tag-filter-bar 里合并「搜索 input 行 + tag chips 行」（镜像 KB 布局）。
     container.innerHTML = "";
     const bar = document.createElement("div");
     bar.className = "kb-tag-filter-bar";
@@ -4298,14 +4310,21 @@ const skills = {
       '<div class="kb-tag-filter-input-row">' +
       '<input type="text" id="skill-market-search" class="kb-tag-filter-input" ' +
       'placeholder="搜索技能（名称 / 描述 / 作者）"/>' +
-      "</div>";
+      "</div>" +
+      '<span class="kb-tag-filter-bar-label">标签筛选：</span>' +
+      '<span id="skill-market-tag-chips" class="tag-chip-group"></span>';
     container.appendChild(bar);
+    // 初始 chips（items 已重置为空 → 只有「全部」chip）；每次 rows 渲染后按已加载行聚合刷新
+    this._refreshSkillTagChips(container);
     const rowsWrap = document.createElement("div");
     rowsWrap.innerHTML =
       '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
     container.appendChild(rowsWrap);
     const searchInput = bar.querySelector("#skill-market-search");
     const runSearch = () => {
+      // M4 T6: tag 过滤激活时忽略 keyword 搜索（KB tab 同语义：tag 分支不带 query，
+      // 排序固定 rank 序）—— input/Enter 不发 fetch，不发明新 UX。
+      if (this._skillTagFilter) return;
       if (this._skillMarketDebounce) {
         clearTimeout(this._skillMarketDebounce);
         this._skillMarketDebounce = null;
@@ -4329,13 +4348,100 @@ const skills = {
     await this._fetchSkillMarketPage(0, false, rowsWrap, container);
   },
 
+  // M4 T6: 技能市场 tag 过滤 chips（镜像 KB _renderKbTagFilterBar 的 chip 构造 —
+  // 「全部」chip + 每个聚合 tag 一个 chip；active chip 高亮）。
+  // 复用说明：chips 的渲染/绑定是 skill-local 镜像，因为 KB 的 _renderKbTagFilterBar /
+  // _bindKbTagFilterBar 硬编码 KB 的 input id（kb-tag-filter-input/apply）且回调
+  // KB 自己的 _renderMarketTab —— 直接复用会触发 KB tab 重渲染。纯展示型的
+  // _renderTagChipsHtml（row/详情 chips 用）则通过同作用域的 knowledge 对象复用。
+  _renderSkillTagChipsHtml(tags, activeTag) {
+    const tagList = Array.isArray(tags) ? tags : [];
+    const active = activeTag || null;
+    const allActive = active == null || active === "";
+    const allChipCls = "tag-chip tag-chip-filter" + (allActive ? " active" : "");
+    const chips = tagList
+      .map((t) => {
+        const cls =
+          "tag-chip tag-chip-filter" + (active === t ? " active" : "");
+        return (
+          '<span class="' +
+          cls +
+          '" data-tag="' +
+          escapeHtml(t) +
+          '">' +
+          escapeHtml(t) +
+          "</span>"
+        );
+      })
+      .join("");
+    return (
+      '<span class="' + allChipCls + '" data-tag="">全部</span>' + chips
+    );
+  },
+
+  // M4 T6: 从当前已加载行聚合 distinct tags（null-safe，KB 2337-2349 同款）→
+  // 刷新 #skill-market-tag-chips 并绑定 chip 点击（点 active chip / 「全部」= 清除过滤）。
+  _refreshSkillTagChips(container) {
+    const slot = container.querySelector("#skill-market-tag-chips");
+    if (!slot) return;
+    const aggregatedTags = [];
+    const seen = new Set();
+    for (const m of this._skillMarketItems || []) {
+      const tags = m && Array.isArray(m.tags) ? m.tags : [];
+      for (const tg of tags) {
+        const s = String(tg);
+        if (s && !seen.has(s)) {
+          seen.add(s);
+          aggregatedTags.push(s);
+        }
+      }
+    }
+    aggregatedTags.sort();
+    slot.innerHTML = this._renderSkillTagChipsHtml(
+      aggregatedTags,
+      this._skillTagFilter,
+    );
+    slot.querySelectorAll(".tag-chip-filter").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const tag = chip.getAttribute("data-tag") || "";
+        // 「全部」或再点已 active 的 chip = 清除过滤 → 回 T2 服务端分页路径（page 0，
+        // _renderMarketTab 统一重置 items/page/query/debounce 并 bump seq）
+        if (tag === "" || chip.classList.contains("active")) {
+          this._renderMarketTab(container, null);
+          return;
+        }
+        this._renderMarketTab(container, tag);
+      });
+    });
+  },
+
   // M4 T2: 拉取技能市场一页（page 0-based，size=20）。append=true 时 concat 追加。
   // sequence token 防 stale response（搜索 debounce 期间旧请求晚到会覆盖新结果）。
   // 错误全部内部消化（带 seq guard）：page-0 失败渲染错误态；load-more 失败保留
   // 已加载行 + toast + 重新启用按钮。
+  // M4 T6: _skillTagFilter 非空时走 ?tag= 分支 —— 公开 GET /market-skills?tag=...
+  // 返回 enriched 裸数组（rows 带 tags + announcement；无 Page wrapper / total，
+  // 单次 fetch size=100，无 load-more）；keyword query 在该分支被忽略（KB 同语义）。
   async _fetchSkillMarketPage(page, append, rowsWrap, container) {
     const seq = ++this._skillMarketSeq;
     try {
+      if (this._skillTagFilter) {
+        // tag 分支基址复用 API.listMarketSkills（T2 已接线的 API map 条目），镜像 KB tag 分支拼 URL
+        const url =
+          `${API.listMarketSkills}?tag=` +
+          encodeURIComponent(this._skillTagFilter) +
+          "&page=0&size=100";
+        const r = await apiFetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const items = (await r.json()) || [];
+        if (seq !== this._skillMarketSeq) return; // stale response — discard
+        this._skillMarketItems = Array.isArray(items) ? items : [];
+        this._skillMarketTotal = this._skillMarketItems.length;
+        this._skillMarketPage = 0;
+        this._skillMarketHasMore = false; // 裸数组单次 fetch — tag 路径无 load-more
+        this._renderSkillMarketRows(rowsWrap, container);
+        return;
+      }
       const data = await api.listMarketSkills(page, 20, this._skillMarketQuery);
       if (seq !== this._skillMarketSeq) return; // stale response — discard
       const items = (data && (data.items || data.content)) || data || [];
@@ -4373,6 +4479,8 @@ const skills = {
 
   _renderSkillMarketRows(rowsWrap, container) {
     // M4 T2: 渲染 this._skillMarketItems 原样（服务端已按 query 过滤；不再客户端过滤）
+    // M4 T6: tag 过滤激活时同样原样渲染（?tag= 分支返回 enriched 裸数组）——
+    // rows 渲染后按已加载行聚合刷新 tag chips（bar 在 container 上，rows 在 rowsWrap）。
     const t = (key, fallback) =>
       (window.I18N && window.I18N.t
         ? window.I18N.t(key, fallback)
@@ -4384,12 +4492,20 @@ const skills = {
     const oldBtn = container.querySelector(".load-more-btn");
     if (oldBtn) oldBtn.remove();
     if (items.length === 0) {
-      // 空态：有 query → 「没有匹配「kw」的技能」（沿用旧文案）；无 query → 市场暂无技能
-      rowsWrap.innerHTML = this._skillMarketQuery
-        ? '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配「' +
-          escapeHtml(this._skillMarketQuery) +
+      // 空态：tag 过滤 → 「没有匹配 tag「x」的技能」（镜像 KB）；有 query →
+      // 「没有匹配「kw」的技能」（沿用旧文案）；无 → 市场暂无技能
+      rowsWrap.innerHTML = this._skillTagFilter
+        ? '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
+          escapeHtml(this._skillTagFilter) +
           '」的技能</div>'
-        : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无技能</div>';
+        : this._skillMarketQuery
+          ? '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配「' +
+            escapeHtml(this._skillMarketQuery) +
+            '」的技能</div>'
+          : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无技能</div>';
+      // M4 T6: 空态也要刷新 chips —— tag 激活时聚合为空（仅「全部」+ active chip
+      // 依赖 _skillTagFilter 渲染），点击「全部」可退出空态
+      this._refreshSkillTagChips(container);
       return;
     }
     // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
@@ -4424,17 +4540,27 @@ const skills = {
       const officialBadge = m && m.isOfficial
         ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
         : "";
+      // M4 T6: per-row tag chips（镜像 KB ~2389-2393）—— listPaged / ?tag= 分支的 rows 都带 tags
+      const tagChips =
+        m && Array.isArray(m.tags) && m.tags.length > 0
+          ? '<div class="kb-tag-row">' +
+            knowledge._renderTagChipsHtml(m.tags) +
+            "</div>"
+          : "";
       item.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
  <span class="ks-item-name">${escapeHtml(m.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
  <span class="ks-item-desc">by ${escapeHtml(m.author || "")} · ${escapeHtml(m.description || "")}</span>
+ ${tagChips}
  </div>
  `;
       item.addEventListener("click", () => this._selectMarketSkill(m, item));
       rowsWrap.appendChild(item);
     }
+    // M4 T6: rows 渲染完成后按已加载行聚合刷新 tag filter chips（null-safe）
+    this._refreshSkillTagChips(container);
     // M4 T2: 有更多时追加 load-more 按钮（旧按钮已在函数开头移除）
     if (this._skillMarketHasMore) {
       const btn = document.createElement("button");
@@ -4465,6 +4591,9 @@ const skills = {
     document.getElementById("skill-detail-title").textContent =
       marketSkill.name;
     const detail = document.getElementById("skills-detail");
+    // M4 T6: 优先用列表已内嵌的 row.tags（listPaged / ?tag= 分支都带 tags），否则详情内实时拉一次
+    const preloadedTags =
+      marketSkill && Array.isArray(marketSkill.tags) ? marketSkill.tags : null;
     detail.innerHTML = `
  <div id="market-announcement-slot"></div>
  <div class="detail-section">
@@ -4472,6 +4601,7 @@ const skills = {
  <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
  <div>作者：${escapeHtml(marketSkill.author)}</div>
  <div>状态：<span class="type-badge ADMIN">${escapeHtml(marketSkill.status)}</span></div>
+ <div id="skill-detail-tags-row" style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:var(--text-muted);">标签：</span><span id="skill-detail-tags-slot"></span></div>
  </div>
  </div>
  <div class="detail-section">
@@ -4501,6 +4631,36 @@ const skills = {
     // T19: load announcement + review list + submission form.
     const annSlot = detail.querySelector("#market-announcement-slot");
     const reviewSlot = detail.querySelector("#market-reviews-slot");
+    // M4 T6: tag slot（镜像 KB ~2553-2582）— 优先 row.tags，否则 MarketAdmin.getMarketTags
+    // 实时拉一次；失败静默显示「无」。
+    const tagSlot = detail.querySelector("#skill-detail-tags-slot");
+    const renderTags = (tags) => {
+      if (!tagSlot) return;
+      if (Array.isArray(tags) && tags.length > 0) {
+        tagSlot.outerHTML =
+          '<span id="skill-detail-tags-slot" class="tag-chip-group">' +
+          knowledge._renderTagChipsHtml(tags) +
+          "</span>";
+      } else {
+        tagSlot.outerHTML =
+          '<span id="skill-detail-tags-slot" style="color:var(--text-muted);font-size:12px;">无</span>';
+      }
+    };
+    if (preloadedTags) {
+      renderTags(preloadedTags);
+    } else if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getMarketTags === "function"
+    ) {
+      window.MarketAdmin
+        .getMarketTags("SKILL", marketSkill.id)
+        .then(renderTags)
+        .catch(() => {
+          if (tagSlot) tagSlot.textContent = "无";
+        });
+    } else if (tagSlot) {
+      tagSlot.textContent = "—";
+    }
     if (
       window.MarketAdmin &&
       typeof window.MarketAdmin.getAnnouncement === "function"
