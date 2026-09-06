@@ -57,7 +57,9 @@ const API = {
   uploadFile: "/spring/ai/loom/file/upload",
   checkKnowledgeUpload: "/spring/ai/loom/knowledge/checkKnowledgeUpload",
   // Knowledge market
-  listMarketKnowledge: "/spring/ai/loom/api/knowledge-market",
+  // M4 T2: KB 市场 tab 默认分支改走 v2 分页路由（0-based，返回 Page{items,total,page,size}）。
+  // 旧 v1 /api/knowledge-market（1-based）不再被本 SPA 调用；pull/my-submitted 等仍走各自 v1 路由。
+  listMarketKnowledge: "/spring/ai/loom/market-knowledge",
   pullMarketKnowledge: (id) =>
     `/spring/ai/loom/api/knowledge-market/${id}/pull`,
   submitToMarket: (id) => `/spring/ai/loom/api/knowledge/${id}/submit`,
@@ -544,8 +546,12 @@ const api = {
     });
     return r.ok ? r.json() : null;
   },
-  async listMarketSkills() {
-    const r = await apiFetch(API.listMarketSkills);
+  // M4 T2: v2 分页路由 — page 0-based，返回 Page{items,total,page,size}；
+  // query 非空时附加 &query=（服务端搜索）。sortBy 留给 T7，先不加。
+  async listMarketSkills(page = 0, size = 20, query = "") {
+    let url = `${API.listMarketSkills}?page=${page}&size=${size}`;
+    if (query) url += `&query=${encodeURIComponent(query)}`;
+    const r = await apiFetch(url);
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   },
@@ -626,7 +632,8 @@ const api = {
   },
 
   // Knowledge market
-  async listMarketKnowledge(page = 1, size = 20) {
+  // M4 T2: v2 分页路由 — page 0-based（默认 0），返回 Page{items,total,page,size}。
+  async listMarketKnowledge(page = 0, size = 20) {
     const r = await apiFetch(
       `${API.listMarketKnowledge}?page=${page}&size=${size}`,
     );
@@ -2176,6 +2183,12 @@ const knowledge = {
     }
   },
   _kbTagFilter: null,
+  // M4 T2: KB 市场「加载更多」分页状态（默认分支 v2 Page total 驱动；tag 分支裸数组 cursor 驱动）
+  _kbMarketItems: [],
+  _kbMarketTotal: 0,
+  _kbMarketPage: 0,
+  _kbMarketHasMore: false,
+  _kbMarketLoading: false,
   _renderTagChipsHtml(tags, opts) {
     // Render a list of tag strings as `.tag-chip` spans. opts.onChipClick
     // (when present) wires each chip as a filter button; otherwise they're
@@ -2209,111 +2222,158 @@ const knowledge = {
   async _renderMarketTab(container, detail, tagFilter) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
     // M2 T21: tagFilter (string|null) — 当非空时走公开 /market-knowledge?tag=...
-    // 端点(返回 list 形态);为空时走默认 /api/knowledge-market 分页接口。
+    // 端点(返回裸 list 形态);为空时走 v2 /market-knowledge Page 分页接口。
+    // M4 T2: 默认分支已切 v2（0-based，Page{items,total}，size=20，total 驱动 load-more）；
+    // tag 分支保持裸数组契约（size=50，cursor 式：本页返回条数 < size 即停）。
     this._kbTagFilter = tagFilter || null;
+    this._kbMarketItems = [];
+    this._kbMarketTotal = 0;
+    this._kbMarketPage = 0;
+    this._kbMarketHasMore = false;
     container.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">加载中...</div>';
     detail.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
     try {
-      let rawItems;
-      if (tagFilter) {
-        // T21: tag 过滤走 /market-knowledge?tag=... (返回 list,不分页)
-        const url =
-          "/spring/ai/loom/market-knowledge?tag=" +
-          encodeURIComponent(tagFilter) +
-          "&page=0&size=50";
-        const r = await apiFetch(url);
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        rawItems = (await r.json()) || [];
-      } else {
-        const data = await api.listMarketKnowledge(1, 50);
-        rawItems = (data && data.content) || data || [];
-      }
-      // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
-      // 当前后端 MarketKnowledgeRecord 未暴露 isOfficial/featuredRank，比较退化为 submittedAt。
-      let items = [...rawItems].sort((a, b) => {
-        const ao = a && a.isOfficial ? 1 : 0;
-        const bo = b && b.isOfficial ? 1 : 0;
-        if (ao !== bo) return bo - ao;
-        const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
-        const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
-        if (ar !== br) return br - ar;
-        const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
-        const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
-        return bd - ad;
-      });
-      // M3+ T2.2: listWithTags helper removed — tags (when backend embeds via
-      // T2.1 follow-up batch SELECT) are read directly from row.tags.
-      if (!items || items.length === 0) {
-        const empty = tagFilter
-          ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
-            escapeHtml(tagFilter) +
-            "」的知识库</div>"
-          : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
-        container.innerHTML = this._renderKbTagFilterBar([], tagFilter) + empty;
-        this._bindKbTagFilterBar(container, detail);
-        return;
-      }
-      // M3+ T2.2: listWithAnnouncements helper removed — announcement data
-      // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
-      // via T2.1 LEFT JOIN market_content_announcement).
-      // M2 T21: 客户端聚合当前页所有 unique tag,渲染成可点击的过滤 chip
-      const aggregatedTags = [];
-      const seen = new Set();
-      for (const kb of items) {
-        const tags = kb && Array.isArray(kb.tags) ? kb.tags : [];
-        for (const t of tags) {
-          const s = String(t);
-          if (s && !seen.has(s)) {
-            seen.add(s);
-            aggregatedTags.push(s);
-          }
-        }
-      }
-      aggregatedTags.sort();
-      container.innerHTML = "";
-      container.insertAdjacentHTML(
-        "beforeend",
-        this._renderKbTagFilterBar(aggregatedTags, tagFilter),
-      );
+      await this._fetchKbMarketPage(0, false);
+      this._renderKbMarketList(container, detail);
+    } catch (e) {
+      container.innerHTML =
+        '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+        escapeHtml(e.message) +
+        "</div>";
+    }
+  },
+
+  // M4 T2: 拉取 KB 市场一页并累积到 _kbMarketItems。默认分支 v2 Page（total 驱动）；
+  // tag 分支裸数组（返回条数 < size 即没有更多）。
+  async _fetchKbMarketPage(page, append) {
+    const tagFilter = this._kbTagFilter;
+    let items;
+    let total = null;
+    if (tagFilter) {
+      const size = 50;
+      const url =
+        "/spring/ai/loom/market-knowledge?tag=" +
+        encodeURIComponent(tagFilter) +
+        "&page=" +
+        page +
+        "&size=" +
+        size;
+      const r = await apiFetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      items = (await r.json()) || [];
+      this._kbMarketHasMore = items.length >= size;
+    } else {
+      const size = 20;
+      const data = await api.listMarketKnowledge(page, size);
+      items = (data && (data.items || data.content)) || data || [];
+      total = data && typeof data.total === "number" ? data.total : null;
+      this._kbMarketHasMore =
+        items.length >= size &&
+        (total == null || (append ? this._kbMarketItems.length : 0) + items.length < total);
+    }
+    this._kbMarketItems = append ? this._kbMarketItems.concat(items) : items;
+    if (total != null) this._kbMarketTotal = total;
+    this._kbMarketPage = page;
+  },
+
+  // M4 T2: 渲染 KB 市场列表（tag 过滤栏 + 全部已加载行 + load-more 按钮）。
+  // load-more 后全量重渲染 —— 客户端 sort 作用于累积列表，增量 append 会与
+  // sort 顺序冲突（新行可能排到已渲染行之前），故不做 cursor 式局部追加。
+  _renderKbMarketList(container, detail) {
+    const tagFilter = this._kbTagFilter;
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
+    // 当前后端 MarketKnowledgeRecord 未暴露 isOfficial/featuredRank，比较退化为 submittedAt。
+    const items = [...(this._kbMarketItems || [])].sort((a, b) => {
+      const ao = a && a.isOfficial ? 1 : 0;
+      const bo = b && b.isOfficial ? 1 : 0;
+      if (ao !== bo) return bo - ao;
+      const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
+      const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
+      if (ar !== br) return br - ar;
+      const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+      const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+      return bd - ad;
+    });
+    // M3+ T2.2: listWithTags helper removed — tags (when backend embeds via
+    // T2.1 follow-up batch SELECT) are read directly from row.tags.
+    if (!items || items.length === 0) {
+      const empty = tagFilter
+        ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
+          escapeHtml(tagFilter) +
+          "」的知识库</div>"
+        : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+      container.innerHTML = this._renderKbTagFilterBar([], tagFilter) + empty;
       this._bindKbTagFilterBar(container, detail);
-      // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
-      // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
-      for (const kb of items) {
-        if (kb && kb.announcementTitle) {
-          const annView = {
-            title: kb.announcementTitle,
-            body: kb.announcementBody || "",
-          };
-          const banner = document.createElement("div");
-          banner.className = "market-announcement market-announcement-list";
-          banner.innerHTML =
-            window.MarketAdmin && window.MarketAdmin.announcementHtml
-              ? window.MarketAdmin.announcementHtml(annView)
-              : `<div class="market-announcement-title">📢 ${escapeHtml(
-                  annView.title,
-                )}</div><div class="market-announcement-body">${escapeHtml(
-                  annView.body,
-                )}</div>`;
-          banner.style.cursor = "pointer";
-          banner.addEventListener("click", () => {
-            const rowEl = banner.nextElementSibling;
-            if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
-          });
-          container.appendChild(banner);
+      return;
+    }
+    // M3+ T2.2: listWithAnnouncements helper removed — announcement data
+    // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
+    // via T2.1 LEFT JOIN market_content_announcement).
+    // M2 T21: 客户端聚合当前已加载行所有 unique tag,渲染成可点击的过滤 chip
+    const aggregatedTags = [];
+    const seen = new Set();
+    for (const kb of items) {
+      const tags = kb && Array.isArray(kb.tags) ? kb.tags : [];
+      for (const tg of tags) {
+        const s = String(tg);
+        if (s && !seen.has(s)) {
+          seen.add(s);
+          aggregatedTags.push(s);
         }
-        const div = document.createElement("div");
-        div.className = "ks-item";
-        const officialBadge = kb && kb.isOfficial
-          ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
-          : "";
-        const tagChips = (kb && Array.isArray(kb.tags) && kb.tags.length > 0)
-          ? '<div class="kb-tag-row">' +
-            this._renderTagChipsHtml(kb.tags) +
-            "</div>"
-          : "";
-        div.innerHTML = `
+      }
+    }
+    aggregatedTags.sort();
+    container.innerHTML = "";
+    container.insertAdjacentHTML(
+      "beforeend",
+      this._renderKbTagFilterBar(aggregatedTags, tagFilter),
+    );
+    this._bindKbTagFilterBar(container, detail);
+    const rowsWrap = document.createElement("div");
+    rowsWrap.className = "kb-market-rows";
+    container.appendChild(rowsWrap);
+    // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
+    // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
+    for (const kb of items) {
+      if (kb && kb.announcementTitle) {
+        const annView = {
+          title: kb.announcementTitle,
+          body: kb.announcementBody || "",
+        };
+        const banner = document.createElement("div");
+        banner.className = "market-announcement market-announcement-list";
+        banner.innerHTML =
+          window.MarketAdmin && window.MarketAdmin.announcementHtml
+            ? window.MarketAdmin.announcementHtml(annView)
+            : `<div class="market-announcement-title">📢 ${escapeHtml(
+                annView.title,
+              )}</div><div class="market-announcement-body">${escapeHtml(
+                annView.body,
+              )}</div>`;
+        banner.style.cursor = "pointer";
+        banner.addEventListener("click", () => {
+          const rowEl = banner.nextElementSibling;
+          if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
+        });
+        rowsWrap.appendChild(banner);
+      }
+      const div = document.createElement("div");
+      div.className = "ks-item";
+      const officialBadge = kb && kb.isOfficial
+        ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
+        : "";
+      const tagChips = (kb && Array.isArray(kb.tags) && kb.tags.length > 0)
+        ? '<div class="kb-tag-row">' +
+          this._renderTagChipsHtml(kb.tags) +
+          "</div>"
+        : "";
+      div.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
  <span class="ks-item-name">${escapeHtml(kb.name)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
@@ -2322,16 +2382,33 @@ const knowledge = {
  ${tagChips}
  </div>
  `;
-        div.addEventListener("click", () =>
-          this._showMarketKbDetail(kb, div, detail),
-        );
-        container.appendChild(div);
-      }
-    } catch (e) {
-      container.innerHTML =
-        '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
-        escapeHtml(e.message) +
-        "</div>";
+      div.addEventListener("click", () =>
+        this._showMarketKbDetail(kb, div, detail),
+      );
+      rowsWrap.appendChild(div);
+    }
+    // M4 T2: load-more 按钮 — 没有更多时直接移除（ruling: removal，不留 end-state）
+    const oldBtn = container.querySelector(".load-more-btn");
+    if (oldBtn) oldBtn.remove();
+    if (this._kbMarketHasMore) {
+      const btn = document.createElement("button");
+      btn.className = "secondary-btn load-more-btn";
+      btn.textContent = t("market.load.more", "加载更多");
+      btn.addEventListener("click", async () => {
+        if (this._kbMarketLoading) return;
+        this._kbMarketLoading = true;
+        btn.disabled = true;
+        try {
+          await this._fetchKbMarketPage(this._kbMarketPage + 1, true);
+          this._renderKbMarketList(container, detail);
+        } catch (e) {
+          showToast("加载失败：" + e.message, "error");
+          btn.disabled = false;
+        } finally {
+          this._kbMarketLoading = false;
+        }
+      });
+      container.appendChild(btn);
     }
   },
 
@@ -4165,88 +4242,123 @@ const skills = {
       });
   },
 
+  // M4 T2: 技能市场服务端搜索 + load-more 分页状态
+  //（v2 GET /market-skills?page=&size=&query=，Page{items,total,page,size}，0-based）
+  _skillMarketQuery: "",
+  _skillMarketPage: 0,
+  _skillMarketItems: [],
+  _skillMarketTotal: 0,
+  _skillMarketHasMore: false,
+  _skillMarketSeq: 0,
+  _skillMarketLoading: false,
+  _skillMarketDebounce: null,
+
   async _renderMarketTab(container) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
-    container.innerHTML =
+    // M4 T2: 客户端过滤（_skillMarketAll）已被服务端搜索取代 —— 搜索框 input 事件
+    // debounce 300ms → page=0 重新 fetch；Enter 立即 fetch。in-flight guard 用递增
+    // sequence token，过期响应直接丢弃。highlight 留给 T7。
+    this._skillMarketQuery = "";
+    this._skillMarketPage = 0;
+    this._skillMarketItems = [];
+    this._skillMarketTotal = 0;
+    // 搜索栏复用 kb-tag-filter-bar/input（已在 style.css 共享层）—— DOM/位置保持不变。
+    container.innerHTML = "";
+    const bar = document.createElement("div");
+    bar.className = "kb-tag-filter-bar";
+    bar.innerHTML =
+      '<span class="kb-tag-filter-bar-label">搜索：</span>' +
+      '<div class="kb-tag-filter-input-row">' +
+      '<input type="text" id="skill-market-search" class="kb-tag-filter-input" ' +
+      'placeholder="搜索技能（名称 / 描述 / 作者）"/>' +
+      "</div>";
+    container.appendChild(bar);
+    const rowsWrap = document.createElement("div");
+    rowsWrap.innerHTML =
       '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
-    try {
-      const list = await api.listMarketSkills(1, 50);
-      const rawItems = (list && (list.items || list.content)) || list || [];
-      // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序。后端目前未在 DTO 中
-      // 暴露 isOfficial/featuredRank（MarketSkill 仅含 10 个基础字段），所以比较退化为
-      // submittedAt 降序；待后端扩展 MarketSkill DTO 后这里会自动生效。
-      let items = [...rawItems].sort((a, b) => {
-        const ao = a && a.isOfficial ? 1 : 0;
-        const bo = b && b.isOfficial ? 1 : 0;
-        if (ao !== bo) return bo - ao;
-        const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
-        const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
-        if (ar !== br) return br - ar;
-        const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
-        const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
-        return bd - ad;
-      });
-      if (!items || items.length === 0) {
-        container.innerHTML =
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无技能</div>';
-        return;
+    container.appendChild(rowsWrap);
+    const searchInput = bar.querySelector("#skill-market-search");
+    const runSearch = () => {
+      if (this._skillMarketDebounce) {
+        clearTimeout(this._skillMarketDebounce);
+        this._skillMarketDebounce = null;
       }
-      // M3+ T2.2: listWithAnnouncements helper removed — announcement data
-      // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
-      // via T2.1 LEFT JOIN). Render reads row.announcementTitle below.
-      // 技能市场搜索（与知识空间市场 Tab 对称）：后端技能公开 list 走 v1 listApproved
-      // (不支持 query)，且技能无 tag 体系（B4 defer），故采用客户端关键词过滤
-      // name/description/author。搜索栏复用 kb-tag-filter-bar/input（已在 style.css 共享层）。
-      this._skillMarketAll = items;
-      container.innerHTML = "";
-      const bar = document.createElement("div");
-      bar.className = "kb-tag-filter-bar";
-      bar.innerHTML =
-        '<span class="kb-tag-filter-bar-label">搜索：</span>' +
-        '<div class="kb-tag-filter-input-row">' +
-        '<input type="text" id="skill-market-search" class="kb-tag-filter-input" ' +
-        'placeholder="搜索技能（名称 / 描述 / 作者）"/>' +
-        "</div>";
-      container.appendChild(bar);
-      const rowsWrap = document.createElement("div");
-      container.appendChild(rowsWrap);
-      const searchInput = bar.querySelector("#skill-market-search");
-      searchInput.addEventListener("input", () =>
-        this._renderSkillMarketRows(rowsWrap, searchInput.value),
-      );
-      this._renderSkillMarketRows(rowsWrap, "");
+      this._skillMarketQuery = searchInput.value.trim();
+      // 新搜索开始 → 旧 load-more 按钮立即失效（seq guard 兜底 stale response）
+      const staleBtn = container.querySelector(".load-more-btn");
+      if (staleBtn) staleBtn.disabled = true;
+      this._fetchSkillMarketPage(0, false, rowsWrap, container);
+    };
+    searchInput.addEventListener("input", () => {
+      if (this._skillMarketDebounce) clearTimeout(this._skillMarketDebounce);
+      this._skillMarketDebounce = setTimeout(runSearch, 300);
+    });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        runSearch();
+      }
+    });
+    await this._fetchSkillMarketPage(0, false, rowsWrap, container);
+  },
+
+  // M4 T2: 拉取技能市场一页（page 0-based，size=20）。append=true 时 concat 追加。
+  // sequence token 防 stale response（搜索 debounce 期间旧请求晚到会覆盖新结果）。
+  // 错误全部内部消化（带 seq guard）：page-0 失败渲染错误态；load-more 失败保留
+  // 已加载行 + toast + 重新启用按钮。
+  async _fetchSkillMarketPage(page, append, rowsWrap, container) {
+    const seq = ++this._skillMarketSeq;
+    try {
+      const data = await api.listMarketSkills(page, 20, this._skillMarketQuery);
+      if (seq !== this._skillMarketSeq) return; // stale response — discard
+      const items = (data && (data.items || data.content)) || data || [];
+      this._skillMarketItems = append
+        ? this._skillMarketItems.concat(items)
+        : items;
+      this._skillMarketTotal =
+        data && typeof data.total === "number"
+          ? data.total
+          : this._skillMarketItems.length;
+      this._skillMarketPage = page;
+      this._skillMarketHasMore =
+        items.length >= 20 &&
+        this._skillMarketItems.length < this._skillMarketTotal;
+      this._renderSkillMarketRows(rowsWrap, container);
     } catch (e) {
-      container.innerHTML =
-        '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
-        escapeHtml(e.message) +
-        "</div>";
+      if (seq !== this._skillMarketSeq) return; // stale error — discard
+      if (append) {
+        showToast("加载失败：" + e.message, "error");
+        const btn = container.querySelector(".load-more-btn");
+        if (btn) btn.disabled = false;
+        this._skillMarketLoading = false;
+      } else {
+        rowsWrap.innerHTML =
+          '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+          escapeHtml(e.message) +
+          "</div>";
+      }
     }
   },
 
-  _renderSkillMarketRows(rowsWrap, keyword) {
-    const all = this._skillMarketAll || [];
-    const kw = (keyword || "").trim().toLowerCase();
-    const items = kw
-      ? all.filter(
-          (m) =>
-            m &&
-            (
-              (m.name || "") +
-              " " +
-              (m.description || "") +
-              " " +
-              (m.author || "")
-            )
-              .toLowerCase()
-              .includes(kw),
-        )
-      : all;
+  _renderSkillMarketRows(rowsWrap, container) {
+    // M4 T2: 渲染 this._skillMarketItems 原样（服务端已按 query 过滤；不再客户端过滤）
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    const items = this._skillMarketItems || [];
     rowsWrap.innerHTML = "";
+    // M4 T2: load-more 按钮 — 没有更多时移除（ruling: removal）；空态 early-return
+    // 前也要移除，否则旧按钮残留在 container 上
+    const oldBtn = container.querySelector(".load-more-btn");
+    if (oldBtn) oldBtn.remove();
     if (items.length === 0) {
-      rowsWrap.innerHTML =
-        '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配「' +
-        escapeHtml(keyword || "") +
-        '」的技能</div>';
+      // 空态：有 query → 「没有匹配「kw」的技能」（沿用旧文案）；无 query → 市场暂无技能
+      rowsWrap.innerHTML = this._skillMarketQuery
+        ? '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配「' +
+          escapeHtml(this._skillMarketQuery) +
+          '」的技能</div>'
+        : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无技能</div>';
       return;
     }
     // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
@@ -4291,6 +4403,26 @@ const skills = {
  `;
       item.addEventListener("click", () => this._selectMarketSkill(m, item));
       rowsWrap.appendChild(item);
+    }
+    // M4 T2: 有更多时追加 load-more 按钮（旧按钮已在函数开头移除）
+    if (this._skillMarketHasMore) {
+      const btn = document.createElement("button");
+      btn.className = "secondary-btn load-more-btn";
+      btn.textContent = t("market.load.more", "加载更多");
+      btn.addEventListener("click", async () => {
+        if (this._skillMarketLoading) return;
+        this._skillMarketLoading = true;
+        btn.disabled = true;
+        // 错误已在 _fetchSkillMarketPage 内部消化（toast + 重新启用按钮）
+        await this._fetchSkillMarketPage(
+          this._skillMarketPage + 1,
+          true,
+          rowsWrap,
+          container,
+        );
+        this._skillMarketLoading = false;
+      });
+      container.appendChild(btn);
     }
   },
 

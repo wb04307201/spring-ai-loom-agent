@@ -3444,6 +3444,33 @@ textarea::placeholder {
   cursor: not-allowed;
 }
 
+/* M4 T2: .secondary-btn 从 admin/console.css 迁入共享层（与 .primary-btn 迁移同款做法）
+   —— index.html 的市场 tab「加载更多」按钮使用 .secondary-btn.load-more-btn。 */
+.secondary-btn {
+  padding: 8px 16px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.secondary-btn:hover {
+  border-color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #6366f1);
+}
+.secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.load-more-btn {
+  display: block;
+  margin: 12px auto;
+}
+
 .type-badge {
   display: inline-block;
   padding: 2px 8px;

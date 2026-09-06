@@ -19,5 +19,7 @@
   "market.admin.tag.empty": "暂无标签",
   "market.admin.empty.skill": "市场暂无 Skill",
   "market.admin.empty.knowledge": "市场暂无知识库",
-  "market.admin.error.network": "网络错误，请稍后重试"
+  "market.admin.error.network": "网络错误，请稍后重试",
+  "market.load.more": "加载更多",
+  "market.load.end": "没有更多了"
 }

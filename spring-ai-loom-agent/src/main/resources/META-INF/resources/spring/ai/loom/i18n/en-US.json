@@ -19,5 +19,7 @@
   "market.admin.tag.empty": "No tags",
   "market.admin.empty.skill": "No skills in the market",
   "market.admin.empty.knowledge": "No knowledge bases in the market",
-  "market.admin.error.network": "Network error, please retry"
+  "market.admin.error.network": "Network error, please retry",
+  "market.load.more": "Load more",
+  "market.load.end": "No more items"
 }

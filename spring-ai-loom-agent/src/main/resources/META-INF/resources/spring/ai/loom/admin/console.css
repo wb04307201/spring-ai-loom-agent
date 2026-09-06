@@ -7,8 +7,8 @@
  *   .modal-xl   800px  — 详情编辑
  *
  * 按钮约定：
- *   .primary-btn    — 蓝色填充（主操作：保存 / 创建 / 通过）
- *   .secondary-btn  — 灰底白边（次操作：刷新 / 取消 / 编辑）
+ *   .primary-btn    — 蓝色填充（主操作：保存 / 创建 / 通过）【已迁入 style.css 共享层】
+ *   .secondary-btn  — 灰底白边（次操作：刷新 / 取消 / 编辑）【M4 T2 已迁入 style.css 共享层】
  *   .delete-btn / .danger-btn — 红边框白底（删除 / 拒绝）
  *   .danger-solid   — 红底白字（确认对话框的「确定」红底按钮）
  *   .btn-sm         — 表格行内按钮（4-12px padding / 12px font-size）
@@ -215,21 +215,8 @@ body {
   margin-bottom: 16px;
 }
 
-.secondary-btn {
-  padding: 8px 16px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #1e293b);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.secondary-btn:hover {
-  border-color: var(--primary-color, #6366f1);
-  color: var(--primary-color, #6366f1);
-}
+/* M4 T2: .secondary-btn + :hover 已迁入共享层 style.css（index.html 的市场
+   load-more 按钮也要用）——与之前 .primary-btn 迁移同款做法，此处不再重复定义。 */
 
 .table-container {
   background: var(--bg-primary, #fff);
