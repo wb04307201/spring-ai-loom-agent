@@ -20,10 +20,25 @@
   const SUPPORTED = ["zh-CN", "en-US"];
   const cache = {};
 
+  // Resolve dict URLs relative to THIS script's own directory (captured
+  // synchronously — document.currentScript is null inside async callbacks).
+  // A previous relative "../i18n/" fetch resolved against the DOCUMENT url:
+  // correct from admin/*.html (one level down) but 404 from index.html, which
+  // sits beside i18n/ → it requested /spring/ai/i18n/ instead of
+  // /spring/ai/loom/i18n/, so the dicts never loaded and I18N.t echoed raw keys.
+  const scriptEl =
+    (typeof document !== "undefined" && document.currentScript) ||
+    (typeof document !== "undefined" &&
+      document.querySelector('script[src$="i18n/i18n.js"]'));
+  const BASE =
+    scriptEl && scriptEl.src
+      ? scriptEl.src.replace(/[^/]*$/, "") // strip "i18n.js" → ".../i18n/"
+      : "i18n/";
+
   async function loadDict(locale) {
     if (cache[locale]) return cache[locale];
     try {
-      const resp = await fetch(`../i18n/${locale}.json`, {
+      const resp = await fetch(BASE + locale + ".json", {
         credentials: "include",
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);

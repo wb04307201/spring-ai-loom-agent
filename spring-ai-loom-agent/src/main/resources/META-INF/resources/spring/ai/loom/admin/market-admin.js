@@ -35,15 +35,20 @@
     KNOWLEDGE: "/spring/ai/loom/market-knowledge",
   };
 
-  /** Admin write endpoints (delete review by username, write announcement). */
+  /**
+   * Admin write endpoints (delete review by username, write announcement).
+   * Derived from {@link ADMIN_API} — the single source of truth for the
+   * correct plural/singular base path (SKILL = "market-skills", KNOWLEDGE =
+   * "market-knowledge"). A previous template pluralized `market-${kind}s`,
+   * which produced "market-knowledges" (404) for the KB side; the backend
+   * KB admin routes are singular "market-knowledge".
+   */
   const ADMIN_REVIEW_API = (kind, id, username) =>
-    `/spring/ai/loom/admin/market-${kind.toLowerCase()}s/${encodeURIComponent(
-      id,
-    )}/reviews/${encodeURIComponent(username)}`;
+    `${ADMIN_API[kind]}/${encodeURIComponent(id)}/reviews/${encodeURIComponent(
+      username,
+    )}`;
   const ADMIN_ANNOUNCEMENT_API = (kind, id) =>
-    `/spring/ai/loom/admin/market-${kind.toLowerCase()}s/${encodeURIComponent(
-      id,
-    )}/announcement`;
+    `${ADMIN_API[kind]}/${encodeURIComponent(id)}/announcement`;
 
   /** Human-readable kind label (used in thrown errors). */
   const KIND_LABEL = {
