@@ -104,5 +104,19 @@ class LoomAgentToolAutoConfigTest {
         cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService kbStatsService() {
             return mock(cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService.class);
         }
+
+        // T3 askUser:defaultAskUserTool 注入 AskUserRegistry + SseEmitterRegistry。
+        // 两者都是无参构造的简单类,用真实实例(AskUserRegistry 本可由 ToolConfiguration
+        // 自建,这里显式提供以便 @ConditionalOnMissingBean 跳过,SseEmitterRegistry 在
+        // 生产上下文靠组件扫描注册,本切片测试必须手动提供)。
+        @Bean
+        cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry() {
+            return new cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry();
+        }
+
+        @Bean
+        cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry sseEmitterRegistry() {
+            return new cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry();
+        }
     }
 }
