@@ -838,20 +838,29 @@ Expected: FAIL —— 当前 v2 admin POST 调 `svc.create()`→PENDING(或 v1 a
 
 **SkillListDispatchIT 同步改造**(已核实它 `@Qualifier("loomAgentSkillMarketRouter")` 注入 v1 bean,L53):v1 bean 删除后该 IT 编译失败 → 删除 `v1Router` 字段 + 测试 3(`v1RouterNoLongerHoldsPublicListPath`,其 FU-4 使命已被本任务超越);测试 2 的 DisplayName "(v1-only, kept)" 改为 "(v2, ARRAY shape kept)";测试 1/2/4 保留(HTTP 层断言仍有效)。
 
-- [ ] **Step 6: 跑测试确认通过 + 全 IT 回归**
+- [ ] **Step 5b: T5 carry-forward —— base delete() 加 @Transactional**
+
+T5 评审裁定:`AbstractMarketAdminService.delete()`(现 cascadeCleanup + DELETE 多语句)缺 `@Transactional`;T6 退役 v1 `adminDelete`(原本 @Transactional)后,v2 `delete()` 成为 admin 删除**唯一路径**,原子性缺口此刻才真正生效。故在 T6 顺手给 base `delete()` 加 `@Transactional`(确认/补 import `org.springframework.transaction.annotation.Transactional`)。此文件加入 T6 commit 的 staging。
+
+- [ ] **Step 6: 路由回归 gate(全 IT 跑,但只修路由因失败;submit→PENDING 语义失败留给 T9)**
 
 ```bash
 mvn clean install -pl spring-ai-loom-agent,spring-ai-loom-agent-spring-boot-autoconfigure,spring-ai-loom-agent-spring-boot-starter -am -Dgpg.skip=true -DskipTests
 rm -rf ~/.loom/datasource spring-ai-loom-agent-test/target/test-ds spring-ai-loom-agent-test/target/surefire-reports
 mvn test -pl spring-ai-loom-agent-test -Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false
 ```
-Expected: 全 IT PASS(关注 SkillListDispatchIT、MarketAcceptanceIT、各 *ReviewServiceIT —— 路由退役后分发应无歧义)。若 MarketAcceptanceIT 有依赖"提交即上架"的 A-腿失败 → 按 Task 4 Step 6 同样手法补 approve 步骤(改测试,不改回 service)。
+
+**T6 完成判据(controller ruling,见 ledger)**:
+- **必须绿**:SkillListDispatchIT(含新 `adminPostSkillCreatesApproved` + 既有 list-shape 测试,且 v1Router 删除后能编译)、MarketApprovalFlowIT 13/13、以及所有**路由型** IT(SkillTagRoutesIT / SkillAdminMissingIdReturns404IT 等)无 404 / wrong-handler / dispatch 歧义。
+- **逐个分类每个失败**:① 路由因(404、调错 handler、bean 删除导致 DI/编译断、dispatch 歧义)→ **T6 必须修**;② submit→PENDING 语义因(MarketAcceptanceIT 的 A-腿、各 *ReviewServiceIT 依赖"提交即上架")→ **不在 T6 修,报告里标注"T9-pending flip"**,T9 负责翻转。
+- T6 在"零路由因失败"时即算完成,即便 MarketAcceptanceIT/review IT 因语义仍红。
+- **背景**:T3/T4 从未跑过全量 gate,MarketAcceptanceIT/review IT 可能自 T3 起就红(submit→PENDING),与本任务路由改动无关 —— 报告里务必区分。
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add spring-ai-loom-agent-spring-boot-autoconfigure/src/main/java/cn/wubo/spring/ai/loom/agent/LoomAgentConfiguration.java spring-ai-loom-agent-test/src/test/java/cn/wubo/spring/ai/loom/agent/market/SkillListDispatchIT.java
-git commit -m "refactor(market): retire v1 duplicate route registrations, v2 sole winner; admin POST→createApproved (#4)
+git add spring-ai-loom-agent-spring-boot-autoconfigure/src/main/java/cn/wubo/spring/ai/loom/agent/LoomAgentConfiguration.java spring-ai-loom-agent/src/main/java/cn/wubo/spring/ai/loom/agent/market/AbstractMarketAdminService.java spring-ai-loom-agent-test/src/test/java/cn/wubo/spring/ai/loom/agent/market/SkillListDispatchIT.java
+git commit -m "refactor(market): retire v1 duplicate route registrations, v2 sole winner; admin POST→createApproved; base delete @Transactional (#4)
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
