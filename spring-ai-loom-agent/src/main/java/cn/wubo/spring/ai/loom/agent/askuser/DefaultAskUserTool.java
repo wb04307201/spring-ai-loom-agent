@@ -95,7 +95,7 @@ public class DefaultAskUserTool implements IAskUserTool {
             return "[提问失败] options 数量必须在 2-4 个之间,当前 " + options.size() + " 个。请调整后重试。";
         }
         for (AskUserOption o : options) {
-            if (o.label() == null || o.label().isBlank()) {
+            if (o == null || o.label() == null || o.label().isBlank()) {
                 return "[提问失败] 每个选项必须有非空 label。请修正 optionsJson 后重试。";
             }
         }

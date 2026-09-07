@@ -134,6 +134,13 @@ class DefaultAskUserToolTest {
     }
 
     @Test
+    void rejectsNullElementInOptionsArray() {
+        DefaultAskUserTool tool = new DefaultAskUserTool(askRegistry, sseRegistry, 5);
+        assertThat(tool.askUser("选哪个?", null, null, "[null,{\"label\":\"A\"}]", false, false, ctx))
+                .startsWith("[提问失败]").contains("label");
+    }
+
+    @Test
     void returnsUnavailableWhenNoActiveStream() throws Exception {
         SseEmitterRegistry emptyRegistry = new SseEmitterRegistry(); // 未 register
         DefaultAskUserTool tool = new DefaultAskUserTool(askRegistry, emptyRegistry, 5);
