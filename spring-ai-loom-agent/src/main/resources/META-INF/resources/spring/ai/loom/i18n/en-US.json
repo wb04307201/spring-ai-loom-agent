@@ -28,5 +28,8 @@
   "market.sort.official": "Official first",
   "market.sort.newest": "Newest",
   "market.sort.rating": "Top rated",
-  "market.resubmit": "Resubmit"
+  "market.resubmit": "Resubmit",
+  "market.withdraw.pending": "Withdraw submission",
+  "market.withdraw.approved": "Delist & delete",
+  "market.withdraw.rejected": "Delete rejected record"
 }

@@ -28,5 +28,8 @@
   "market.sort.official": "官方优先",
   "market.sort.newest": "最新提交",
   "market.sort.rating": "评分最高",
-  "market.resubmit": "重新投稿"
+  "market.resubmit": "重新投稿",
+  "market.withdraw.pending": "撤回投稿",
+  "market.withdraw.approved": "下架并删除",
+  "market.withdraw.rejected": "删除被拒记录"
 }

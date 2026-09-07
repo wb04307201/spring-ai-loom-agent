@@ -5046,7 +5046,10 @@ const skills = {
       }
     }
     // Spec §2: withdraw 在任意状态可用 — 按钮文案按状态区分（PENDING/APPROVED/REJECTED）。
-    const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
     const withdrawLabel =
       skill.status === "APPROVED"
         ? t("market.withdraw.approved", "下架并删除")
