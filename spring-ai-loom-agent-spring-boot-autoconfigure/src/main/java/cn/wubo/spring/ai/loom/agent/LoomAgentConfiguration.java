@@ -557,6 +557,7 @@ public class LoomAgentConfiguration {
 
             private final IChat chat;
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
+            private final cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry;
             private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
             // tool_call_log 唯一写入入口是 LoggingToolCallback — SseController 不再写
 
@@ -586,7 +587,12 @@ public class LoomAgentConfiguration {
                                 return disposeRequested.get() || d == null || d.isDisposed();
                             }
                         },
-                        () -> { /* 用户主动 stop 时不再落库（：usage 实时从 chat_memory 聚合） */ });
+                        () -> {
+                            // 用户主动 stop 时不再落库（usage 实时从 chat_memory 聚合）;
+                            // #1 AskUser(spec D7):哨兵 complete 释放被 future.get() 阻塞的
+                            // 工具线程 —— Flux dispose 本身不会中断阻塞。
+                            askUserRegistry.cancelAll(username, conversationId);
+                        });
 
                 // 注册 lifecycle 自动清理
                 emitter.onTimeout(() -> {
@@ -1753,6 +1759,51 @@ public class LoomAgentConfiguration {
             registration.addUrlPatterns("/spring/ai/loom/market-skills/*", "/spring/ai/loom/market-knowledge/*");
             registration.setOrder(2);
             return registration;
+        }
+
+        /**
+         * #1 AskUser:用户提交问题卡片答案(spec §3 A4)。
+         * 鉴权:AuthenticationFilter 已注入 UserContextHolder;跨用户/未知/已失效
+         * 统一 404 "not found"(防存在性泄露,spec D8)。
+         */
+        @Bean("loomAgentAskRouter")
+        public RouterFunction<ServerResponse> loomAgentAskRouter(
+                cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.POST("spring/ai/loom/ask/{questionId}/answer", request -> {
+                String user = cn.wubo.spring.ai.loom.agent.user.UserContextHolder.getCurrentUser();
+                String qid = request.pathVariable("questionId");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> body;
+                try {
+                    body = request.body(Map.class);
+                } catch (Exception e) {
+                    return ServerResponse.badRequest().body(Map.of("error", "invalid answer"));
+                }
+                Object answer = body == null ? null : body.get("answer");
+                String answerText;
+                if (answer instanceof java.util.List<?> list) {
+                    answerText = list.stream()
+                            .map(String::valueOf)
+                            .map(String::trim)
+                            .filter(s -> !s.isBlank())
+                            .collect(java.util.stream.Collectors.joining("; "));
+                } else if (answer instanceof String s) {
+                    answerText = s.trim();
+                } else {
+                    return ServerResponse.badRequest().body(Map.of("error", "invalid answer"));
+                }
+                if (answerText.isBlank()) {
+                    return ServerResponse.badRequest().body(Map.of("error", "invalid answer"));
+                }
+                boolean ok = askUserRegistry.answer(qid, user, answerText);
+                if (!ok) {
+                    return ServerResponse.status(org.springframework.http.HttpStatus.NOT_FOUND)
+                            .body(Map.of("error", "not found"));
+                }
+                return ServerResponse.ok().body(Map.of("ok", true));
+            });
+            return builder.build();
         }
 
         @Bean("loomAgentBaseRouter")
