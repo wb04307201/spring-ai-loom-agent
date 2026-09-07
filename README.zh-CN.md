@@ -208,18 +208,25 @@ spring:
 
 | 表 | 作用 |
 |----------------|--------------------------------------------------------------------------------------------|
-| `market_skill` | 公共 **Skill 市场** — 每条只有 `(author, name)` 唯一约束（ 去掉 `version`）；admin 可新增（直发 `APPROVED`）/ 编辑 / 审批 / 下架 |
-| `user_skill` | 用户本地的 Skill 副本（`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`） |
-| `role_skill` | 角色 → market_skill 的授权关系（给某个角色下放哪些 Skill） |
+| `market_skill` | 公共 **Skill 市场** — 每条只有 `(author, name)` 唯一约束（`version` 字段已移除）；admin 可新增（直发 `APPROVED`）/ 编辑 / 审批 / 下架 |
+| `user_skill` | 用户本地的 Skill 副本（`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`）；关联 `market_skill_id` 时禁止删除；拉取时拒绝覆盖同名 `USER_CREATED` |
+| `role_skill` | 角色 → market_skill 的授权关系（给某个角色下放哪些 Skill）；admin 通过 `setRoleSkills` 写入，被授权技能在用户下次技能 list/get 时懒同步进各自的 `user_skill`（`ROLE_GRANTED` 条目被锁定） |
 
 ### 6 个系统种子技能
 
-首次启动时 init migration 会 seed 6 个 system skill（author=`system`, status=`APPROVED`），让新装环境开箱即用 — 包括 **网络月度事件报告**、**HTTP 测试**、**部署项目**、**自动 E2E** 等——admin 可随时在 **Skill 市场** 管理页新建 / 编辑 / 审批 / 删除——### 普通用户的技能生命周期
+演示应用首次启动时，`V1.1` 迁移会把 6 个系统技能直接 seed 进**默认 admin 用户**的 `user_skill`（`source=USER_CREATED`、`default_loaded=true`），让新装环境开箱即用 — 包括 **网络月度事件报告**、**HTTP 测试**、**部署项目**、**自动 E2E** 等。admin 可随时在 **Skill 市场** 管理页新建 / 编辑 / 审批 / 下架市场技能。
 
-1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`——写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）——2. **提交到市场** — 技能库 → **共享** Tab，点击自建 Skill，详情面板直接点「共享到市场」（提交后状态为 `PENDING`，等待 admin 审批通过/拒绝——拒绝必须填评论；无需版本号；两段式 UX）——同 `(author, name)` 重复提交：原行为 **REJECTED** 时旧行整行归档（保留拒绝评论/审核人/时间），新建一条 PENDING 行（新 id）；原行为 **PENDING / APPROVED** 时仅原地更新内容，状态不动（APPROVED 永不降级）——3. **拉取** — 技能库 → **市场** Tab，点击列表项 → 右侧详情面板「拉取到我的 Skill」（：若已存在同名 `USER_CREATED` 则拒绝 — 需先点「复制为我的技能」）——同 `(username, name)` 拉取走 UPSERT——4. **从市场拉取** — 技能库 → **市场** Tab，点 **拉取**——写入 `user_skill`，`source=MARKET_PULLED`——可改 `description` 和 `default_loaded`，**不能改 content**（要更新就重新拉取）——5. **通过角色授权获得** — admin 在角色管理里给某角色授权某 market_skill，登录后自动注入到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是具体版本）——### admin 的额外能力
+### 普通用户的技能生命周期
+
+1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`。写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）。
+2. **提交到市场** — 技能库 → **共享** Tab，点击自建 Skill → 详情面板「共享到市场」。提交后 `status=PENDING`，等待 admin 审批通过/拒绝（拒绝必须填评论）；无需版本号。同 `(author, name)` 重复提交：原行为 **REJECTED** → 旧行整行归档到 `market_skill_archive`（保留拒绝评论/审核人/时间），新建一条 PENDING 行（新 id）；原行为 **PENDING / APPROVED** → 仅原地更新内容，状态不动（APPROVED 永不降级）。
+3. **从市场拉取** — 技能库 → **市场** Tab，点击列表项 → 右侧详情面板「拉取到我的 Skill」。写入 `user_skill`，`source=MARKET_PULLED`；同名重新拉取即刷新内容（UPSERT，无报错）。**注意**：已有同名 `USER_CREATED` 时拒绝拉取（403）—— 需先「复制为我的技能」。
+4. **通过角色授权获得** — admin 给角色授权 market_skill 后，每次技能 list/get 自动同步到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是该市场条目）。
+
+### admin 的额外能力
 
 - **新建**（直发 `APPROVED`，`created_by_kind='ADMIN'`）、**编辑 / 审批通过 / 拒绝 / 下架 (delete)** 任意 `market_skill`——作者从聊天 UI 发布进 PENDING，admin 审核或直接新建
-- 给任意角色授权任意 APPROVED 的 market_skill（：`setRoleKnowledges` 自动 sync 到所有已分配用户）
+- 给任意角色授权任意 APPROVED 的 market_skill（写入 `role_skill`，用户在下次技能 list/get 时自动同步）
 - 下架级联清理 `user_skill`（拉取者）+ `role_skill`（角色授权），无孤儿记录
 
 ### 权限矩阵
@@ -227,7 +234,7 @@ spring:
 | 操作 | USER_CREATED | MARKET_PULLED | ROLE_GRANTED |
 |-------------|--------------|---------------|--------------|
 | 改 name | ✗（PK） | ✗ | ✗ |
-| 改 description | ✅ | ✅ | ✗ |
+| 改 description | ✅ | ✗（锁定为市场快照） | ✗ |
 | 改 content | ✅ | ✗（重新拉取）| ✗ |
 | 改 default_loaded | ✅ | ✅ | ✗ |
 | 删除 | ✅ | ✅ | ✗ |
@@ -237,11 +244,23 @@ spring:
 
 点 **🧠 技能库** 按钮打开 —— 四个 Tab：
 
-- **我的** — 你的 `user_skill`（admin 还会看到 union view）——点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）——- **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下——- **共享** — 选自建 skill，提交到 PENDING，等 admin 审批——- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED，展示拒绝原因），可撤回；REJECTED 可重新提交（旧行归档 + 新建 PENDING 行）——`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）——完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)——## 知识库 & 知识市场
+- **我的** — 你的 `user_skill`（admin 也只看自己的 `user_skill`，无 union view）。点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）。
+- **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下（已有同名 `USER_CREATED` 时拒绝）。
+- **共享** — 选自建 skill，提交到 PENDING，等 admin 审批。
+- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED，展示拒绝原因）。任意状态可撤回（按钮文案随状态变化：撤回投稿 / 下架并删除 / 删除被拒记录）；作者撤回删除市场条目并清空自己 `user_skill.market_skill_id` 反向链接 —— 他人已拉取的副本保留但不再同步更新（级联清理 `user_skill` + `role_skill` 的是 **admin** 下架/删除）。REJECTED 可重新提交（旧行归档 + 新建 PENDING 行）。
 
-知识库存储用于 RAG 检索的文档——知识空间弹窗有四个 Tab：
+`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）。完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
 
-- **我的** — 自己的知识库——创建、上传文档、删除——- **市场** — 浏览已审批的市场知识库，**添加到我的知识库**（：两段式 — 点列表项 → 右侧详情面板 + send-skill-btn 风格按钮）——- **共享** — 自己尚未共享的知识库，点列表项 → 右侧详情面板点「共享到市场」（：两段式统一）——- **我的发布** — 查看自己提交到市场的知识库状态（PENDING / APPROVED / REJECTED，展示拒绝原因）——点列表项 → 右侧详情面板「撤回共享（下架）」按钮——撤回级联清理 `user_knowledge` + `role_knowledge`——市场流程：提交 → PENDING → admin 审批通过 → APPROVED → 其他用户可订阅；拒绝后重新提交，旧行归档（`loom_market_knowledge_archive`）+ 新建 PENDING 行——也可通过角色授权自动下发知识库给用户（类似技能）——知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)——---
+## 知识库 & 知识市场
+
+知识库存储用于 RAG 检索的文档。知识空间弹窗有四个 Tab：
+
+- **我的** — 自己的知识库：创建、上传文档、删除。
+- **市场** — 浏览已审批的市场知识库，**添加到我的知识库**（两段式：点列表项 → 右侧详情面板确认按钮）。
+- **共享** — 自己尚未共享的知识库，点列表项 → 右侧详情面板点「共享到市场」（提交进 PENDING，等 admin 审批）。
+- **我的发布** — 查看自己提交到市场的知识库状态（PENDING / APPROVED / REJECTED，展示拒绝原因）。点列表项 → 右侧详情面板撤回按钮（文案随状态变化）；知识库撤回会级联清理 `loom_user_knowledge`（订阅者行）+ `loom_role_knowledge`（角色授权）。REJECTED 可重新提交 —— 旧行归档（`loom_market_knowledge_archive`）+ 新建 PENDING 行。
+
+市场流程：提交 → PENDING → admin 审批通过 → APPROVED → 其他用户可订阅。也可通过角色授权自动下发知识库给用户（类似技能）。知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)。
 
 ## 管理控制台
 
@@ -250,13 +269,16 @@ spring:
 | 区块 | 路径 | 用途 |
 |--------------|-----------------------------------|---------------------------------|
 | 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 批量清理会话内容 |
-| 角色管理 | `admin/roles.html` | 业务角色 + 给角色授权 MCP / Skill |
-| Skill 市场 | `admin/market-skills.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架 Skill |
+| 角色管理 | `admin/roles.html` | 业务角色 + 给角色授权 MCP / Skill / 知识库 |
+| 技能市场 | `admin/market-skills.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架 Skill |
+| 知识库市场 | `admin/knowledge-market.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架知识库 |
 | MCP 描述维护 | `admin/mcps.html` | 给 SDK MCP 工具维护中文描述 |
-| 用量统计 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
+| 日志 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
 | 返回主页 | `/` | 回到聊天首页 |
 
-- **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护——未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401——- **"清理聊天内容" 唯一入口**: 只保留 `控制台 → 批量清理` 按钮——原 user 行 / conversation 行的"清理内容"/"一键清理"按钮已整合删除——- **Role gating**: 所有 admin 路径都要求 `user_info.type = 'ADMIN'`——非 admin 访问 admin URL 被重定向回聊天首页——---
+- **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护——未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401。
+- **"清理聊天内容" 唯一入口**: 只保留 `控制台 → 批量清理` 按钮——原 user 行 / conversation 行的"清理内容"/"一键清理"按钮已整合删除。
+- **Role gating**: 所有 admin 路径都要求 `user_info.type = 'ADMIN'`——非 admin 访问 admin URL 被重定向回聊天首页。
 
 
 

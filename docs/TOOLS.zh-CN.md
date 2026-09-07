@@ -64,7 +64,7 @@ spring:
 | 子接口 | 默认实现 | 方法数 | 默认状态 | 备注 |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | 启用 | 未设 `time.enabled` 时始终开启 |
-| `ISkillTool` | `DefaultSkillTool` | 2 | 启用 | 从 `user_skill`（数据库）读取；init migration seed 6 个 system skill —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
+| `ISkillTool` | `DefaultSkillTool` | 2 | 启用 | 从 `user_skill`（数据库）读取；演示应用由 `V1.1` 迁移把 6 个系统技能 seed 进默认 admin 用户的 `user_skill` —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
 | `IFileTool` | `DefaultFileTool` | 16 | 启用 | 基于路径；根目录 = `{fileBasePath}/{username}/` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | 启用 | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | 启用 | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |

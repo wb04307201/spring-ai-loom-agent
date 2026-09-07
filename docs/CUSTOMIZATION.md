@@ -86,11 +86,11 @@ All properties are prefixed with `spring.ai.loom.agent`.
 
 ### 1.5 Skill Configuration (no longer read from yml)
 
-> ⚠️ Skill configuration is **no longer done via yml**. The old `skills[]` block (under `spring.ai.loom.agent`) has been removed. The init migration:
+> ⚠️ Skill configuration is **no longer done via yml**. The old `skills[]` block (under `spring.ai.loom.agent`) has been removed. The library init migration (`V1.0__init.sql`):
 >
-> 1. Creates three tables — `market_skill`, `user_skill`, `role_skill`
-> 2. Migrates any existing data from the old `skill` table into `user_skill` (`source=USER_CREATED`)
-> 3. Seeds 6 system skills into `market_skill` (author=`system`, status=`APPROVED`, version=`1.0.0`) — these are the demo skills with full Prompt template content hard-coded directly in the init migration:
+> 1. Creates three tables — `market_skill`, `user_skill`, `role_skill` (fresh-DB policy: schema only, no data seeding at the library level)
+>
+> The bundled demo/test app's `V1.1__init_app_data.sql` then seeds 6 sample system skills into the **default admin user's** `user_skill` (`source=USER_CREATED`, `default_loaded=true`, `locked=false`) — the full Prompt template content is hard-coded directly in the migration:
 > - `Monthly Event Report` (网络月度事件报告)
 > - `HTTP Test` (http测试)
 > - `Save/Download/Preview Demo 1` (测试保存、下载、预览1)
@@ -392,7 +392,7 @@ public IChat customChat(
 | **Override** | Custom `@Bean ISkillStorage` |
 | **Controls** | Per-user skill list (`user_skill`), save / patch / get / remove; auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow: submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submits archive the old row to `market_skill_archive` and create a NEW PENDING row; pull requires APPROVED (else 403) and rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` set; admin only sees own `user_skill` (no union view); pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
 
-**Default behavior**: JDBC-backed storage using three tables — `user_skill` (per-user installed skills), `role_skill` (skills granted to a role, automatically locked in `user_skill` for every user holding that role), and `market_skill` (the Skill Market catalog: three statuses — PENDING / APPROVED / REJECTED — under the approval flow; REJECTED rows re-submitted by their author are archived to `market_skill_archive`). `DefaultSkillStorage` does not load any yml fallback anymore; the `spring.ai.loom.agent.skills.*` properties were removed in favor of seeding via the `/` Flyway migrations and managing through the admin console → Skill Market page.
+**Default behavior**: JDBC-backed storage using three tables — `user_skill` (per-user installed skills), `role_skill` (skills granted to a role, automatically locked in `user_skill` for every user holding that role), and `market_skill` (the Skill Market catalog: three statuses — PENDING / APPROVED / REJECTED — under the approval flow; REJECTED rows re-submitted by their author are archived to `market_skill_archive`). `DefaultSkillStorage` does not load any yml fallback anymore; the `spring.ai.loom.agent.skills.*` properties were removed in favor of seeding via the `V1.0`/`V1.1` Flyway migrations and managing through the admin console → Skill Market page.
 
 **Common use case**: Add a third-party skill registry (e.g., pull from a private Nexus / REST catalog) by implementing `ISkillStorage` and registering it as a `@Bean` to replace `DefaultSkillStorage`.
 

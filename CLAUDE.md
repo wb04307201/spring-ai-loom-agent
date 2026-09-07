@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Framework**: Spring Boot 3.x + Spring AI 1.x
 - **Build**: Maven (multi-module)
 - **Database**: H2 (default), with Flyway migrations
+- **No CHANGELOG**: this project does not maintain a `CHANGELOG.md` — read `git log` for the change history
 
 ## Project Overview Images
 
@@ -42,7 +43,7 @@ mvn clean deploy
 
 ## M0/M1/M2 Market Upgrade (v1.2.0)
 
-The v1.2.0 cycle (commits `26834b0..dceaddc`, M0 + M1 + M2 milestones) introduced a unified Skill + Knowledge Base market: full CRUD via admin UI, PENDING/APPROVED/REJECTED approval flow, `is_official / featured_rank / category` columns on both `market_skill` and `loom_market_knowledge`, `BatchedCounterService` for stat tracking, 5-star reviews with an `edit_count` gate, per-row announcements, and a KB tag system with filter UI. See [`docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md`](docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md) for the design, and `CHANGELOG.md` for the v1.2.0 entry.
+The v1.2.0 cycle (commits `26834b0..dceaddc`, M0 + M1 + M2 milestones) introduced a unified Skill + Knowledge Base market: full CRUD via admin UI, PENDING/APPROVED/REJECTED approval flow, `is_official / featured_rank / category` columns on both `market_skill` and `loom_market_knowledge`, `BatchedCounterService` for stat tracking, 5-star reviews with an `edit_count` gate, per-row announcements, and a KB tag system with filter UI. See [`docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md`](docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md) for the design.
 
 ### M3+ Technical Debt (named inventory)
 
@@ -50,7 +51,7 @@ v1.2.0 left a tech-debt inventory (named categories `A12 / B1 / B2 / B3 / B4 / B
 
 | Phase | Scope |
 |-------|-------|
-| T0 | Doc sync (`CLAUDE.md` + `CHANGELOG` for v1.2.0); auto-enable `@EnableScheduling` + javadoc `BatchedCounterService` |
+| T0 | Doc sync (`CLAUDE.md` for v1.2.0); auto-enable `@EnableScheduling` + javadoc `BatchedCounterService` |
 | T1 | **B1 真修 (core)** — schema `market_id BIGINT → VARCHAR(36)`; `IMarketContentAdminService<K, M, U, R>` 参数化; `RouterIdParser<K>` 抽象; drop KB String twins + `findOneByRawId` + NFE catches |
 | T2 | **N+1 fix** — list DTO embed announcement / tags; drop frontend `listWithAnnouncements` / `listWithTags` helpers |
 | T3 | **Architecture cleanup** — v1 service shim policy (1 minor version); `buildAdminMarketRoutes` helper extraction |

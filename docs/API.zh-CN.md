@@ -633,7 +633,7 @@ GET /spring/ai/loom/api/knowledge-market/my-submitted
 
 ## 6. 技能管理
 
-> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 改为 6 个 system seed 进默认 admin 用户（wb04307201）的 `user_skill`，加一套 admin 管理的市场流程。
+> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 演示应用由 `V1.1` 迁移把 6 个系统技能 seed 进**默认 admin 用户**的 `user_skill`，加一套 admin 管理的市场流程。
 >
 > `user_skill.source` 字段反映 Skill 三个来源：
 > - `USER_CREATED` — 用户通过 API 或聊天 UI 自己创建；**完全可编辑**（name/desc/content/default_loaded）。若该 skill 已共享到市场，作者保存时会**自动反向同步**到对应的 `market_skill` 行，并**推送给所有 MARKET_PULLED 拉取者**
@@ -658,7 +658,7 @@ GET /spring/ai/loom/skill
 | `description` | string | 技能描述 |
 | `load` | boolean | 是否预加载到 LLM 系统提示 |
 | `content` | string | 技能内容（如果存的是 `classpath:xxx`，会在读时自动 resolve 成真实文本） |
-| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（ 起移除 `MARKET_VIEW`；admin 也只看到自己 user_skill） |
+| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（`MARKET_VIEW` 已移除；admin 也只看到自己 user_skill） |
 
 admin 也只看到自己的 `user_skill`（与普通用户一致）；浏览市场 APPROVED 用 `GET /market-skills`。
 
@@ -757,7 +757,7 @@ POST /spring/ai/loom/skill/sync
 GET /spring/ai/loom/market-skills
 ```
 
-返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name` 排序（ 去掉 version 字段后无 version DESC 排序）。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
+返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name` 排序（`version` 字段已移除，无 version DESC 排序）。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
 
 ---
 
@@ -777,9 +777,11 @@ GET /spring/ai/loom/market-skills/{id}
 POST /spring/ai/loom/market-skills/{id}/pull
 ```
 
-从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。市场 Skill 状态不是 `APPROVED` 时抛 `403`（审批流 —— 仅已审批条目可拉取）。抛 `400` 条件：
-- 同名已有 `ROLE_GRANTED` 锁定
-- 同名已存在（静默刷新 content）
+从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。市场 Skill 状态不是 `APPROVED` 时抛 `403`（审批流 —— 仅已审批条目可拉取）。拒绝条件：
+- 同名已有 `ROLE_GRANTED` 锁定（`400`）
+- 同名已有 `USER_CREATED` 自建技能（`403` —— 拒绝覆盖自建内容，需先删除自建版本）
+
+同名已是 `MARKET_PULLED` 时原地刷新 content 至最新市场快照（无报错）。
 
 ---
 
@@ -800,7 +802,7 @@ Content-Type: application/json
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
 
-：去掉 `version` 字段 — 唯一约束改为 `(author, name)`。同一作者同名重复提交视原行状态而定：**REJECTED** → 旧行整行归档到 `market_skill_archive`（保留原 id，含拒绝评论/审核人/时间），新建一条 PENDING 行（新 id），作者 `user_skill.market_skill_id` 反向链接改绑新行；**PENDING / APPROVED** → 仅原地更新内容，**状态不动**（APPROVED 永不降级）。
+注：`version` 字段已移除 — 唯一约束为 `(author, name)`。同一作者同名重复提交视原行状态而定：**REJECTED** → 旧行整行归档到 `market_skill_archive`（保留原 id，含拒绝评论/审核人/时间），新建一条 PENDING 行（新 id），作者 `user_skill.market_skill_id` 反向链接改绑新行；**PENDING / APPROVED** → 仅原地更新内容，**状态不动**（APPROVED 永不降级）。
 
 ---
 
@@ -1549,7 +1551,7 @@ GET /spring/ai/chat/loom/mcp
 }
 ```
 
-> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（ 起移除 `MARKET_VIEW`）。
+> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（`MARKET_VIEW` 已移除）。
 
 ---
 

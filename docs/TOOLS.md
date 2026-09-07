@@ -81,7 +81,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | Sub-Interface | Default Impl | Methods | Visibility | Notes |
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | Read-only current time / timezone conversion |
-| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
+| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); the demo app seeds 6 system skills into the default admin user's `user_skill` (`V1.1` migration) — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
 | `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{fileBasePath}/{username}/` |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
@@ -489,7 +489,7 @@ The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Scheduled tasks are namespaced `loom-sched-{user}-{conv}-{name}` and fire as sub-tasks. |
 | **Methods (4)** | `createSchedule` (cron / fixed_delay / fixed_rate / one_shot), `cancelSchedule`, `listSchedules`, `getScheduleHistory` |
 
-Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` and **fire as sub-tasks** when triggered. LoomAgent owns the H2 persistence (`loom_scheduled_task`, added in ``); `ScheduleRestoreListener` rehydrates rows on `ApplicationReadyEvent` preserving the original `createdAt` so the `max-lifetime` ceiling accumulates across restarts (rows older than the ceiling are cleaned up). Cancelling verifies row ownership (cross-user cancel is refused) and deletes the persisted row so the restore listener cannot resurrect a "ghost" task.
+Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` and **fire as sub-tasks** when triggered. LoomAgent owns the H2 persistence (`loom_scheduled_task`, part of the single `V1.0__init.sql` schema); `ScheduleRestoreListener` rehydrates rows on `ApplicationReadyEvent` preserving the original `createdAt` so the `max-lifetime` ceiling accumulates across restarts (rows older than the ceiling are cleaned up). Cancelling verifies row ownership (cross-user cancel is refused) and deletes the persisted row so the restore listener cannot resurrect a "ghost" task.
 
 **Trigger constraints** come from `flex.schedule.limits`:
 

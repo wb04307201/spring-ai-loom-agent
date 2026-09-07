@@ -86,11 +86,11 @@ spring-ai-loom-agent/
 
 ### 1.5 技能配置（yml 不再读取）
 
-> ⚠️ Skill 配置**不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。init migration 会：
+> ⚠️ Skill 配置**不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。库主 schema（`V1.0__init.sql`）会：
 >
-> 1. 建三张表 —— `market_skill` / `user_skill` / `role_skill`
-> 2. 把旧 `skill` 表的存量数据迁到 `user_skill`（标 `source=USER_CREATED`）
-> 3. Seed 6 个 system skill 进 `market_skill`（author=`system`, status=`APPROVED`, version=`1.0.0`）—— 它们的完整 Prompt 模板内容直接 hardcode 在 init migration 里：
+> 1. 建三张表 —— `market_skill` / `user_skill` / `role_skill`（全新库政策：库层只建 schema，不 seed 业务数据）
+>
+> 随附的演示/test 应用的 `V1.1__init_app_data.sql` 再把 6 个示例系统技能 seed 进**默认 admin 用户**的 `user_skill`（`source=USER_CREATED`、`default_loaded=true`、`locked=false`）—— 它们的完整 Prompt 模板内容直接 hardcode 在迁移脚本里：
 > - 网络月度事件报告
 > - http 测试
 > - 测试保存、下载、预览 1
@@ -385,7 +385,7 @@ public IChat customChat(
 | **覆盖方式** | 自定义 `@Bean ISkillStorage` |
 | **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。审批流：提交 → PENDING，admin 审批通过/拒绝（拒绝必须填评论）；REJECTED 重新提交时旧行归档到 `market_skill_archive` 并新建 PENDING 行；拉取仅允许 APPROVED（否则 403），且拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
 
-**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，三种状态 —— PENDING / APPROVED / REJECTED —— 走审批流；作者重投的 REJECTED 行归档到 `market_skill_archive`）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `/ ` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
+**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，三种状态 —— PENDING / APPROVED / REJECTED —— 走审批流；作者重投的 REJECTED 行归档到 `market_skill_archive`）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `V1.0`/`V1.1` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
 
 **常见自定义场景**: 接入第三方技能注册中心（如私有 Nexus / REST 目录），实现 `ISkillStorage` 接口并以 `@Bean` 注册即可替换 `DefaultSkillStorage`。
 

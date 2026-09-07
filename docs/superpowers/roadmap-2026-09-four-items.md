@@ -11,7 +11,7 @@
 | 序 | 项 | 状态 | 量级 |
 |---|---|---|---|
 | 1 | #4 控制台 CRUD + 复活审批流 | ✅ 完成(2026-09-07,10 Task 全部落地) | 中-大 |
-| 2 | #2 文档清理(删 CHANGELOG + md 对齐) | 🔵 | 小 |
+| 2 | #2 文档清理(删 CHANGELOG + md 对齐) | ✅ 完成(2026-09-07) | 小 |
 | 3 | #3 H2 向量存储(自研 H2VectorStore) | 🔵 | 大 |
 | 4 | #1 AskUser 交互工具 | 🔵 | 大 |
 | 末 | 概览图重生成(#1 工具组 8→9 + #3 JVector→H2 会让图失真;全部代码完成后一次性重生成,**需提醒用户**) | 🔵 | 小 |
@@ -97,7 +97,7 @@
 
 ---
 
-## #2 文档清理(🔵)
+## #2 文档清理(✅ 完成 2026-09-07)
 
 ### 调研结论
 
@@ -115,6 +115,27 @@
 4. docs/CUSTOMIZATION*.md:同上。
 5. README/README.zh-CN:核对市场描述段。
 6. 检查 .claude/skills/project-overview-image 的 SKILL.md/README.md/generate.py 是否因 #4 需要改(admin 控制台 5 区块描述、工具组数量)——#4 不加新工具组,预计不用;#1 会。
+
+### 落地记录(2026-09-07)
+
+**CHANGELOG 删除**:`git rm CHANGELOG.md`(77 行);全库非-md 文件(pom/脚本/java)零引用,活 md 仅 CLAUDE.md L45/L53 两处引用已清。CLAUDE.md 顶部加 **No CHANGELOG** 声明(变更历史看 git log)。docs/superpowers/{specs,plans,decisions} 内的历史 CHANGELOG 引用按"历史快照不改"约定保留原样。
+
+**活文档失真修正**(以源码为准逐条核实,Explore 子 agent 扫描 + controller 裁决):
+- **种子落点**:V1.1 迁移把 6 个 system skill seed 进**默认 admin 用户**的 `user_skill`(source=USER_CREATED),**非** market_skill/author=system/version=1.0.0 —— 修正 CUSTOMIZATION×2、TOOLS×2、README×2、API.zh-CN(去掉硬编码个人用户名 wb04307201)。
+- **MARKET_PULLED description 锁**:`DefaultSkillStorage.patch()` L144-148 对 MARKET_PULLED 改 desc 抛 403,只允许 default_loaded —— 修正 README×2 权限矩阵(desc MARKET_PULLED ✅→✗)+ API×2 §6.3 PATCH 描述。
+- **pull 同名语义**:USER_CREATED→403(非 400),MARKET_PULLED→静默刷新 content —— 修正 API×2 自相矛盾的"抛 400 + 静默刷新"。
+- **union view / MARKET_VIEW**:均已移除 —— 清 README×2 "admin 还会看到 union view"、API.md:724 "falls back to market view"、API.zh-CN 两处 "( 起移除 MARKET_VIEW" 残句。
+- **setRoleKnowledges→setRoleSkills**:技能角色授权节误用知识库函数名 —— 修正 README.md role_skill 行 + 生命周期步骤 4。
+- **withdraw 三态**:README.md:294 "Withdraw PENDING items" → 三态文案 + KB 撤回级联清理 loom_user_knowledge/loom_role_knowledge(与 skill 侧"仅清作者 backlink"的非对称如实描述)。
+- **admin 控制台表**:README×2 补 knowledge-market.html 行;stats.html 侧栏现名"日志"(非"用量统计");角色管理补 Knowledge 授权。
+- **空占位残句**(疑似历史 CHANGELOG/版本号引用被机械剥离):`****:`、``added in ` ` ``、``( removed version)``、``( 起移除)``、``：去掉``、``/ `` Flyway、``D2 ()`` 等 —— 全部还原为可读文本或移除。
+- **死链**:API.md "See docs/knowledge-market.md"(文件不存在)→ 改指本文 §5.8。
+- **version 字段残留**:README.zh-CN.md:219 "角色锁的是具体版本" → "角色锁的是该市场条目"(version 字段已移除)。
+- **README.zh-CN.md 格式事故**:技能生命周期 1-5 步被压成单行、`###` 标题内联 —— 重建为正常 markdown 列表/标题。
+
+**概览图**:删 CHANGELOG 不影响图;#4 未加工具组、未改 admin 侧栏区块数(仍 6 区块)→ **图无需重生成**(重生成仍排在 #1/#3 之后,届时提醒用户)。
+
+**回归**:纯文档改动,无代码/测试影响。
 
 ---
 

@@ -239,21 +239,21 @@ Skills are prompt templates that the LLM uses for recurring workflows. The data 
 
 | Table | Purpose |
 |----------------|-----------------------------------------------------------------------------------------------|
-| `market_skill` | Public **Skill Market** — every entry has only `(author, name)` unique constraint ( removed `version`); admin creates (direct `APPROVED`) / edits / approves / rejects / pulls |
+| `market_skill` | Public **Skill Market** — every entry has only a `(author, name)` unique constraint (the `version` field has been removed); admin creates (direct `APPROVED`) / edits / approves / rejects / pulls |
 | `user_skill` | A user's local copy of a skill (`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`); remove blocked when `market_skill_id` is set; pull rejects overwriting same-name USER_CREATED |
-| `role_skill` | Role → market_skill authorization (which skills a role unlocks for its users); `setRoleKnowledges` auto-syncs `user_knowledge` for all assigned users |
+| `role_skill` | Role → market_skill authorization (which skills a role unlocks for its users), written via `ISkillRoleAdmin.setRoleSkills`; granted skills sync into each user's `user_skill` (locked `ROLE_GRANTED` entries) lazily on their next skill list/get |
 
 ### 6 seeded system skills
 
-On first launch, the init migration seeds 6 system skills (stored directly in each user's `user_skill` with `source=USER_CREATED`, `default_loaded=true`) so every fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can create / edit / approve / reject / delete market skills from the **Skill Market** admin page.
+On first launch, the demo init migration seeds 6 system skills (stored directly in the default admin user's `user_skill` with `source=USER_CREATED`, `default_loaded=true`) so a fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can create / edit / approve / reject / delete market skills from the **Skill Market** admin page.
 
 ### Skill lifecycle for a normal user
 
 1. **Create** — In the chat UI's Skill Library → **我的** tab → **+ 新增**, or `PUT /spring/ai/loom/skill`. The skill is stored in `user_skill` with `source=USER_CREATED`. Fully editable (name / desc / content / default-loaded).
 2. **Submit to market** — Library → **共享** tab. Click your skill, the form shows market metadata （无版本号）。 Submitted with `status=PENDING` — awaits admin approve/reject (reject requires a comment). Re-submitting a same `(author, name)` entry: if it was **REJECTED**, the old row is archived (reject comment/reviewer/time preserved) and a NEW PENDING row is created; if **PENDING / APPROVED**, content updates in place and status is untouched (APPROVED never demotes).
-3. **Pull from market** — Library → **市场** tab. Click item → right panel shows full details + **「添加到我的知识库」** button. Creates / refreshes a `user_skill` row with `source=MARKET_PULLED`. Re-pull of same name UPSERTs (no error).
- - ****: If you already have a same-name `USER_CREATED` skill, pull is rejected (403) — use **「复制为我的技能」** first to copy as a new `USER_CREATED`.
-4. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-injected into your `user_skill` on every login with `source=ROLE_GRANTED, locked=true`. `setRoleKnowledges` auto-syncs new role grants. **You cannot edit or delete it** (it's pinned by the role).
+3. **Pull from market** — Library → **市场** tab. Click item → right panel shows full details + **「拉取到我的 Skill」** button. Creates / refreshes a `user_skill` row with `source=MARKET_PULLED`. Re-pull of same name UPSERTs (no error).
+ - **Note**: If you already have a same-name `USER_CREATED` skill, pull is rejected (403) — use **「复制为我的技能」** first to copy as a new `USER_CREATED`.
+4. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-synced into your `user_skill` on every skill list/get with `source=ROLE_GRANTED, locked=true`. **You cannot edit or delete it** (it's pinned by the role).
 
 ### What admins can do that normal users cannot
 
@@ -266,7 +266,7 @@ On first launch, the init migration seeds 6 system skills (stored directly in ea
 | Operation | USER_CREATED | MARKET_PULLED | ROLE_GRANTED |
 |----------------------------------------|--------------|---------------|--------------|
 | Edit `name` | ✗ (PK) | ✗ | ✗ |
-| Edit `description` | ✅ | ✅ | ✗ |
+| Edit `description` | ✅ | ✗ (locked to market snapshot) | ✗ |
 | Edit `content` | ✅ | ✗ (re-pull) | ✗ |
 | Edit `default_loaded` | ✅ | ✅ | ✗ |
 | Delete | ✅ | ✅ | ✗ |
@@ -276,7 +276,7 @@ On first launch, the init migration seeds 6 system skills (stored directly in ea
 
 Open the Skill Library button (🧠) — four tabs:
 
-- **我的** — your local `user_skill` (plus admin's union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
+- **我的** — your local `user_skill` (admin sees only their own `user_skill` — no union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
 - **市场** — browse all `APPROVED` market skills and **拉取** them into your `user_skill` (rejects if you already have a same-name `USER_CREATED`).
 - **共享** — submit a `USER_CREATED` skill to the market. Submission goes to `PENDING` awaiting admin approval. no version number. two-stage click list item → right panel form.
 - **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Click list item → right panel with a withdraw button (label varies by status: 撤回投稿 / 下架并删除 / 删除被拒记录). Author withdraw removes the market entry and clears the author's own `user_skill.market_skill_id` backlink — other users' already-pulled copies (`MARKET_PULLED`) and `role_skill` grants remain but stop receiving updates. (It's the **admin** 下架/delete that cascades cleanup to `user_skill` + `role_skill`.) REJECTED entries can be re-submitted — the old row is archived and a fresh PENDING row is created.
@@ -291,7 +291,7 @@ Knowledge bases store documents for RAG retrieval. The knowledge space modal has
 - **我的** — your own knowledge bases. Create, upload documents, delete.
 - **市场** — browse approved market knowledge bases and **添加到我的知识库** (subscribe).
 - **共享** — your own knowledge bases not yet shared. Click **共享到市场** to submit for admin approval.
-- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED). Withdraw PENDING items.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Withdraw is available at any status (label varies: 撤回投稿 / 下架并删除 / 删除被拒记录) — withdrawing deletes the market entry and, on the knowledge side, cascades cleanup of `loom_user_knowledge` subscriber rows + `loom_role_knowledge` grants. REJECTED entries can be re-submitted — the old row is archived (`loom_market_knowledge_archive`) and a fresh PENDING row is created.
 
 Market workflow: submit → PENDING → admin approve → APPROVED → other users can subscribe. Role-based authorization can also auto-grant knowledge bases to users (similar to skills).
 
@@ -306,10 +306,11 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 | Section | Path | Purpose |
 |-----------------|-------------------------------|--------------------------------------|
 | 用户管理 | `admin/console.html` | User list + role assignment + batch content cleanup |
-| 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill |
-| Skill 市场 | `admin/market-skills.html` | Approve / reject / directly CRUD Skill |
+| 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
+| 技能市场 | `admin/market-skills.html` | Approve / reject / directly create / edit / delete Skill |
+| 知识库市场 | `admin/knowledge-market.html` | Approve / reject / directly create / edit / delete Knowledge |
 | MCP 描述维护 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
-| 用量统计 | `admin/stats.html` | Monthly Token usage (year + month filter) |
+| 日志 | `admin/stats.html` | Monthly Token usage (year + month filter) |
 | 返回主页 | `/` | Back to chat home page |
 
 - **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.

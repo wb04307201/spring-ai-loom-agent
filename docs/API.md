@@ -567,11 +567,11 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **Response**: `{"success": true}` on success.
 
-****: Unified DELETE endpoint for both author withdraw and admin takedown. Internal permission check decides path:
+**Behavior**: Unified DELETE endpoint for both author withdraw and admin takedown. Internal permission check decides path:
 - **Author**: `DELETE FROM loom_market_knowledge WHERE id=? AND username=?` (only deletes own)
-- **Admin**: `DELETE FROM loom_market_knowledge WHERE id=?` (cascades to all references)
+- **Admin**: `DELETE FROM loom_market_knowledge WHERE id=?` (any row)
 
-**Cascading cleanup**: Auto-deletes `loom_user_knowledge` (subscriber rows) + `loom_role_knowledge` (role grants).
+**Cascading cleanup** (both paths): Auto-deletes `loom_user_knowledge` (subscriber rows) + `loom_role_knowledge` (role grants) referencing the market entry.
 
 **Approval endpoints** (v2 admin router — the v1 `/api/knowledge-market/{marketId}/approve|reject` paths remain retired; approve/reject now live under `/admin`):
 - `POST /admin/market-knowledge/{id}/approve` — admin approve: `status=APPROVED`, `reviewed_at`/`reviewed_by` set
@@ -698,7 +698,7 @@ PATCH /spring/ai/loom/skill/{name}
 Content-Type: application/json
 ```
 
-For `MARKET_PULLED` and `USER_CREATED` skills — change `description` and/or `default_loaded` without overwriting content. Returns `400` if the skill is `ROLE_GRANTED` (locked).
+For `USER_CREATED` skills — change `description` and/or `default_loaded` without overwriting content. For `MARKET_PULLED` skills — only `default_loaded` may change; a `description` change is rejected with `403` (locked to the market snapshot). Returns `400` if the skill is `ROLE_GRANTED` (locked).
 
 **Request Body** (`UserSkillPatchRequest`):
 
@@ -721,7 +721,7 @@ GET /spring/ai/loom/skill/{name}
 |-----------|--------|-------------|
 | `name` | string | Skill name |
 
-**Response**: `SkillRecord`. For admins, falls back to the market view if no local copy exists.
+**Response**: `SkillRecord`. Admins see only their own `user_skill` (no market-view fallback — consistent with §6.2).
 
 ---
 
@@ -751,7 +751,7 @@ Re-runs the `role_skill` → `user_skill` sync for the current user. Mostly for 
 GET /spring/ai/loom/market-skills
 ```
 
-Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name` ( removed the `version` field — no `version DESC` ordering any more). Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
+Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name` (the `version` field has been removed — no `version DESC` ordering any more). Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
 
 ---
 
@@ -771,9 +771,11 @@ GET /spring/ai/loom/market-skills/{id}
 POST /spring/ai/loom/market-skills/{id}/pull
 ```
 
-Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `403` if the market skill isn't `APPROVED` (approval flow — only approved entries are pullable). Throws `400` if:
+Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `403` if the market skill isn't `APPROVED` (approval flow — only approved entries are pullable). Throws `400`/`403` if:
 - A `ROLE_GRANTED` lock with the same name already exists
-- The same name is already in your `user_skill` (refreshes content silently)
+- A same-name `USER_CREATED` skill exists in your `user_skill` (`403` — pull refuses to overwrite self-built content; delete it first or use `duplicate`)
+
+A same-name `MARKET_PULLED` row is refreshed in place (content updated to the latest market snapshot, no error).
 
 ---
 
@@ -794,7 +796,7 @@ Submits a new `market_skill` row with `status=PENDING` and `author=currentUser` 
 | `description`| string | No | Description |
 | `content` | string | Yes | Prompt template |
 
-removed the `version` field — the `(author, name)` pair is the unique constraint.
+The `version` field has been removed — the `(author, name)` pair is the unique constraint.
 
 Behavior: If `(author, name)` already exists in `market_skill`, the outcome depends on its status:
 - **REJECTED** → the old row is archived to `market_skill_archive` (id-preserving, includes reject comment/reviewer/time), and a **NEW** PENDING row is inserted (new id). The author's `user_skill.market_skill_id` backlink is rebound to the new row.
@@ -1231,10 +1233,9 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 
 All under `/admin/...` and already documented in:
 
-- [§ 5 Knowledge Base Management](#5-knowledge-base-management) — `admin/knowledge*`, `/api/knowledge-market*`
+- [§ 5 Knowledge Base Management](#5-knowledge-base-management) — `admin/knowledge*`, `/api/knowledge-market*`, and the Knowledge Market approval flow (§5.8)
 - [§ 6 Skill Management](#6-skill-management) — `admin/market-skills*`, `/admin/roles/{code}/skills`
 - [§ 7 MCP Tools](#7-mcp-tools) — `admin/mcps*`, `admin/mcp-tools*`
-- See `docs/knowledge-market.md` for the Knowledge Market flow.
 
 ### 10.5 Admin UI Pages (`admin/*.html`)
 
@@ -1248,7 +1249,7 @@ All under `/admin/...` and already documented in:
 | `admin/conversation.html` | Drill into any user's conversation turns (admin only) |
 | `admin/stats.html` | Monthly Token usage (year + month filter) |
 
-All admin pages share a fixed left sidebar (see README "Admin Console" section). `D2` () fixed the previously dead `admin/knowledge-market.html` page (the JS file was missing).
+All admin pages share a fixed left sidebar (see README "Admin Console" section).
 
 ---
 
