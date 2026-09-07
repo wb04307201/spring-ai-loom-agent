@@ -27,5 +27,6 @@
   "market.load.end": "没有更多了",
   "market.sort.official": "官方优先",
   "market.sort.newest": "最新提交",
-  "market.sort.rating": "评分最高"
+  "market.sort.rating": "评分最高",
+  "market.resubmit": "重新投稿"
 }

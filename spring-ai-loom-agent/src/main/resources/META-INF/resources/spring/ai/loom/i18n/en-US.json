@@ -27,5 +27,6 @@
   "market.load.end": "No more items",
   "market.sort.official": "Official first",
   "market.sort.newest": "Newest",
-  "market.sort.rating": "Top rated"
+  "market.sort.rating": "Top rated",
+  "market.resubmit": "Resubmit"
 }

@@ -1838,7 +1838,7 @@ const knowledge = {
         market:
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">从左侧选一个市场知识库查看详情</div>',
         share:
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">无审批流，提交即上架，<br>其他用户可在「市场」Tab 立即订阅。</p></div>',
+          '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后进入审核，管理员审批通过后，<br>其他用户可在「市场」Tab 订阅。</p></div>',
         mypublish:
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>',
         mine: null, // 「我的」Tab 用 select() 主动填；列表为空时 sidebar 已自带 empty
@@ -2166,13 +2166,13 @@ const knowledge = {
       // M3+ T4.3 — i18n key extraction; resolution happens at render time
       // via window.I18N.t (loaded by i18n/i18n.js). Falls back to the key
       // string itself if dict not yet loaded or key missing.
-      message: `确认将「${kb.name}」共享到市场？共享后其他用户可浏览并添加到自己的知识库。`,
+      message: `确认将「${kb.name}」提交到市场？审批通过后其他用户可浏览并添加到自己的知识库。`,
       okText: "共享",
     });
     if (!ok) return;
     try {
       await api.submitToMarket(id);
-      showToast(`已将「${kb.name}」共享到市场`, "success");
+      showToast(`已提交「${kb.name}」，等待管理员审批`, "success");
       this.loadList();
     } catch (e) {
       showToast("共享失败：" + e.message, "error");
@@ -2180,10 +2180,17 @@ const knowledge = {
   },
 
   _kmStatusLabel(status) {
-    // +20: 只有 APPROVED 一个状态（去审批）
+    // +20: 审批流已上线 — PENDING/APPROVED/REJECTED 三态映射，
+    // 与 skills._statusLabel 保持同一视觉语义（knowledge 对象独立，
+    // 不能用 this._statusLabel —— 该方法在 skills 对象上）。
+    const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
     switch (status) {
+      case "PENDING":
+        return { text: t("market.admin.status.pending", "审核中"), bg: "#fef3c7", color: "#92400e" };
       case "APPROVED":
-        return { text: "已上架", bg: "#d1fae5", color: "#065f46" };
+        return { text: t("market.admin.status.approved", "已通过"), bg: "#d1fae5", color: "#065f46" };
+      case "REJECTED":
+        return { text: t("market.admin.status.rejected", "已拒绝"), bg: "#fee2e2", color: "#991b1b" };
       default:
         return { text: status || "未知", bg: "#f1f5f9", color: "#475569" };
     }
@@ -2764,7 +2771,7 @@ const knowledge = {
   async _renderShareTab(container, detail) {
     // 两段式（点列表项 → 详情面板打开共享表单）
     detail.innerHTML =
-      '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">无审批流，提交即上架，<br>其他用户可在「市场」Tab 立即订阅。</p></div>';
+      '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后进入审核，管理员审批通过后，<br>其他用户可在「市场」Tab 订阅。</p></div>';
     const ownKbs = (this._kbList || []).filter(
       (kb) => kb.username === state.username,
     );
@@ -2794,11 +2801,11 @@ const knowledge = {
     detail.innerHTML = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
- 共享「<strong>${escapeHtml(kb.name)}</strong>」到市场。其他用户可在「市场」Tab 立即订阅。<br>
+ 共享「<strong>${escapeHtml(kb.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 订阅。<br>
  你的本地实例保持不变，共享不影响你的使用。
  </div>
  <div style="font-size: 12px; color: var(--text-muted);">
- 无审批流，提交即上架。同名+同作者会覆盖（status 直接 APPROVED）。
+ 提交后状态为 PENDING，等待管理员审批。同名+同作者会更新原投稿。
  </div>
  <div style="display: flex; gap: 12px;">
  <button class="send-skill-btn" id="share-kb-confirm-btn" style="flex: 1;">共享到市场</button>
@@ -2813,14 +2820,15 @@ const knowledge = {
   async _handleShareSubmit(kb) {
     try {
       await api.submitToMarket(kb.id);
-      showToast(`已共享「${kb.name}」，其他用户可立即订阅`, "success");
+      showToast(`已提交「${kb.name}」，等待管理员审批`, "success");
       this.loadList();
     } catch (e) {
       showToast("共享失败：" + e.message, "error");
     }
   },
   async _renderMyPublishTab(container, detail) {
-    // -2: 所有提交都是 APPROVED；列表只显示名称 + 描述，详情面板显示完整信息 + 撤回按钮
+    // -2: 列表显示名称 + 描述 + 审批状态徽章，详情面板显示完整信息 + 撤回按钮
+    // （审批流已上线：PENDING/APPROVED/REJECTED，与 Skill 侧「我的发布」一致）
     detail.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>';
     try {
@@ -2834,10 +2842,11 @@ const knowledge = {
       for (const kb of items) {
         const div = document.createElement("div");
         div.className = "ks-item";
+        const st = skills._statusLabel(kb.status);
         div.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#d1fae5;color:#065f46;">已上架</span></span>
+ <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></span>
  </div>
  <span class="ks-item-desc">${escapeHtml(kb.description || "")}</span>
  </div>
@@ -2856,24 +2865,40 @@ const knowledge = {
   },
 
   _showMyPublishDetail(kb, detail) {
-    // -2: 详情面板显示完整信息 + 「撤回共享（下架）」按钮
-    // M0 T14: 镜像 Skills 市场「我的发布」详情面板：后端若返回 reviewComment 则展示
-    // （KB 当前无审批流，字段多为 null；保留条件渲染以便后端将来接入审核意见时无感生效）
-    const reviewCommentBlock = kb && kb.reviewComment
-      ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;color:#991b1b;font-size:12px;line-height:1.6;">审核意见：${escapeHtml(kb.reviewComment)}</div>`
-      : "";
+    // -2: 详情面板显示完整信息 + 审批状态徽章 + 「撤回共享（下架）」按钮
+    // M0 T14 / Task 8: 审批流已上线。镜像 Skill 侧「我的发布」详情：
+    // 顶部显示状态徽章；REJECTED 时把审核意见做成醒目的红框块（拒绝原因），
+    // 其他状态若有评论则降级显示为一行「审核意见」。
+    // 注：_statusLabel 挂在 skills 对象上（knowledge 对象独立），显式跨对象引用。
+    const st = skills._statusLabel(kb.status);
+    let reviewCommentBlock = "";
+    if (kb && kb.reviewComment) {
+      if (kb.status === "REJECTED") {
+        reviewCommentBlock =
+          '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;color:#991b1b;font-size:12px;line-height:1.6;">' +
+          "拒绝原因：" +
+          escapeHtml(kb.reviewComment) +
+          "</div>";
+      } else {
+        reviewCommentBlock =
+          '<div style="background: var(--bg-secondary); border-radius:6px; padding:10px 12px; color: var(--text-muted); font-size:12px; line-height:1.6;">审核意见：' +
+          escapeHtml(kb.reviewComment) +
+          "</div>";
+      }
+    }
     detail.innerHTML = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
  <div>名称：<strong>${escapeHtml(kb.name)}</strong></div>
  <div>描述：${escapeHtml(kb.description || "无")}</div>
+ <div>状态：<span class="ks-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
  <div>上架时间：${kb.submittedAt ? new Date(kb.submittedAt).toLocaleString() : "-"}</div>
  ${kb && kb.reviewedAt ? "<div>审核时间：" + new Date(kb.reviewedAt).toLocaleString() + "</div>" : ""}
  ${kb && kb.reviewedBy ? "<div>审核人：" + escapeHtml(kb.reviewedBy) + "</div>" : ""}
  </div>
  ${reviewCommentBlock}
  <div style="font-size: 12px; color: var(--text-muted);">
- 上架即可被其他用户订阅。你的本地实例保持不变，可正常编辑或删除。
+ 审批通过后即可被其他用户订阅。你的本地实例保持不变，可正常编辑或删除。
  </div>
  <div style="display: flex; gap: 12px;">
  <button class="send-skill-btn" id="my-publish-withdraw-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享（下架）</button>
@@ -5050,12 +5075,24 @@ const skills = {
  </div>
  `;
     }
+    if (skill.status === "REJECTED") {
+      const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
+      html += `
+ <div style="display: flex; gap: 12px; margin-top: 8px;">
+ <button class="send-skill-btn" id="resubmit-skill-btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">${escapeHtml(t("market.resubmit", "重新投稿"))}</button>
+ </div>
+ `;
+    }
     html += "</div>";
     detail.innerHTML = html;
 
     const withdrawBtn = document.getElementById("withdraw-skill-btn");
     if (withdrawBtn) {
       withdrawBtn.addEventListener("click", () => this.handleWithdraw(skill));
+    }
+    const resubmitBtn = document.getElementById("resubmit-skill-btn");
+    if (resubmitBtn) {
+      resubmitBtn.addEventListener("click", () => this.handleResubmit(skill));
     }
   },
 
@@ -5067,6 +5104,21 @@ const skills = {
       this.renderModal();
     } catch (e) {
       showToast("撤回失败：" + e.message, "error");
+    }
+  },
+
+  async handleResubmit(skill) {
+    // REJECTED 行重新投稿：后端自动归档旧 REJECTED 行 + 新建 PENDING 行
+    try {
+      await api.submitMarketSkill({
+        name: skill.name,
+        description: skill.description,
+        content: skill.content,
+      });
+      showToast("已重新投稿，等待管理员审批", "success");
+      this.renderModal();
+    } catch (e) {
+      showToast("重新投稿失败：" + e.message, "error");
     }
   },
 
@@ -5085,7 +5137,7 @@ const skills = {
  <input type="text" id="submit-skill-version" class="param-input" placeholder="例如 1.0.0（语义化版本）" value="1.0.0">
  </div>
  <div style="font-size: 12px; color: var(--text-muted);">
- 共享后状态为 PENDING。同名+同版本号不能重复共享。
+ 共享后状态为 PENDING，等待管理员审批。同名投稿会更新原记录。
  </div>
  <div style="display: flex; gap: 12px;">
  <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">共享到市场</button>
