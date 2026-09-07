@@ -790,3 +790,22 @@ CREATE TABLE loom_market_knowledge_archive (
   review_comment TEXT,
   archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- =============================================================
+-- #3 H2 向量存储:H2JVectorStore 持久层(向量 + 文档 + metadata)
+-- 替代旧 ~/.loom/jvector-index/{docs,ids}.json;启动 ApplicationReadyEvent
+-- 时全量 hydrate 进内存 JVector HNSW 图,消灭启动 re-embed。
+-- 不加 username/knowledge_id 列(隔离档 A:knowledgeId 在 metadata_json 内,
+-- SpEL 后过滤照旧)。dim 列是换 embedding 模型守卫(不匹配行加载时跳过)。
+-- =============================================================
+CREATE TABLE IF NOT EXISTS loom_vector_store (
+  document_id   VARCHAR(64) PRIMARY KEY,
+  content       CLOB NOT NULL,
+  metadata_json CLOB NOT NULL,
+  embedding     BLOB NOT NULL,
+  dim           INT NOT NULL,
+  score         DOUBLE,
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_loom_vector_store_created ON loom_vector_store(created_at);
