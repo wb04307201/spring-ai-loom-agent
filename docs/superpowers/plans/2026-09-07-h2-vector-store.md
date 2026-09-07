@@ -672,9 +672,11 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
         rwLock.writeLock().lock();
         try {
             int expectedDim = embeddingModel.dimensions();
-            int loaded = 0;
             AtomicInteger dimSkipped = new AtomicInteger();
             AtomicInteger poisonSkipped = new AtomicInteger();
+            // 先建局部副本再原子换入,保证 docs/ids/vectors 三者严格对齐
+            //(单行 decode 失败不得让 ids 与 vectors 错位 → 否则 embeddingMap 重建会 IndexOutOfBounds)
+            Map<String, Document> loadedDocs = new LinkedHashMap<>();
             List<String> ids = new ArrayList<>();
             List<VectorFloat<?>> vectors = new ArrayList<>();
             for (H2VectorRow row : rows) {
@@ -683,6 +685,7 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
                     continue;
                 }
                 try {
+                    float[] vec = VectorRowCodec.decodeEmbedding(row.embedding());   // 先解码,失败即整行跳过
                     Map<String, Object> metadata = VectorRowCodec.metadataFromJson(row.metadataJson());
                     Document.Builder docBuilder = Document.builder()
                             .id(row.documentId())
@@ -691,16 +694,20 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
                     if (row.score() != null) {
                         docBuilder.score(row.score());
                     }
-                    documentStore.put(row.documentId(), docBuilder.build());
+                    Document doc = docBuilder.build();
+                    // 三个结构同步提交(decode 已成功)
+                    loadedDocs.put(row.documentId(), doc);
                     ids.add(row.documentId());
-                    vectors.add(toVectorFloat(VectorRowCodec.decodeEmbedding(row.embedding())));
-                    loaded++;
+                    vectors.add(toVectorFloat(vec));
                 } catch (Exception e) {
                     poisonSkipped.incrementAndGet();
                     logger.warn("[H2Vector] skipping poison row documentId={}: {}",
                             row.documentId(), e.getMessage());
                 }
             }
+            // 原子换入:hydrate 后内存索引 == DB 有效行的精确镜像(清掉构造期/上轮残留)
+            documentStore.clear();
+            documentStore.putAll(loadedDocs);
             documentIds.clear();
             documentIds.addAll(ids);
             embeddingMap.clear();
@@ -710,7 +717,7 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
             rebuildGraph();
             hydrated = true;
             logger.info("[H2Vector] hydrate done: loaded={}, dimSkipped={}, poisonSkipped={}",
-                    loaded, dimSkipped.get(), poisonSkipped.get());
+                    ids.size(), dimSkipped.get(), poisonSkipped.get());
             if (dimSkipped.get() > 0) {
                 logger.warn("[H2Vector] {} row(s) skipped for dim mismatch (expected {}) — "
                         + "embedding 模型已更换,需清库(删 loom_vector_store 行)并重传知识库文档",
