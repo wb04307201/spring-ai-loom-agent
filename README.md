@@ -29,7 +29,7 @@
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
 - **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
-- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted); no approval flow (submit goes direct APPROVED); pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` is set; admin only edits / pulls (no creation); no version field. Skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
+- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted); approval flow (submit → PENDING → admin approve/reject, rejected re-submits archive the old row); pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` is set; admin can create (lands APPROVED immediately) / edit / approve / reject; no version field. Skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
@@ -245,19 +245,19 @@ Skills are prompt templates that the LLM uses for recurring workflows. The data 
 
 ### 6 seeded system skills
 
-On first launch, the init migration seeds 6 system skills (stored directly in each user's `user_skill` with `source=USER_CREATED`, `default_loaded=true`) so every fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can edit / delete any of them at any time from the **Skill Market** admin page (no creation from admin).
+On first launch, the init migration seeds 6 system skills (stored directly in each user's `user_skill` with `source=USER_CREATED`, `default_loaded=true`) so every fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can create / edit / approve / reject / delete market skills from the **Skill Market** admin page.
 
 ### Skill lifecycle for a normal user
 
 1. **Create** — In the chat UI's Skill Library → **我的** tab → **+ 新增**, or `PUT /spring/ai/loom/skill`. The skill is stored in `user_skill` with `source=USER_CREATED`. Fully editable (name / desc / content / default-loaded).
-2. **Submit to market** — Library → **共享** tab. Click your skill, the form shows market metadata （无版本号）。 Submitted with `status=APPROVED` directly (no approval flow). Same `(author, name)` re-submits UPSERT (overwrites content + status).
+2. **Submit to market** — Library → **共享** tab. Click your skill, the form shows market metadata （无版本号）。 Submitted with `status=PENDING` — awaits admin approve/reject (reject requires a comment). Re-submitting a same `(author, name)` entry: if it was **REJECTED**, the old row is archived (reject comment/reviewer/time preserved) and a NEW PENDING row is created; if **PENDING / APPROVED**, content updates in place and status is untouched (APPROVED never demotes).
 3. **Pull from market** — Library → **市场** tab. Click item → right panel shows full details + **「添加到我的知识库」** button. Creates / refreshes a `user_skill` row with `source=MARKET_PULLED`. Re-pull of same name UPSERTs (no error).
  - ****: If you already have a same-name `USER_CREATED` skill, pull is rejected (403) — use **「复制为我的技能」** first to copy as a new `USER_CREATED`.
 4. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-injected into your `user_skill` on every login with `source=ROLE_GRANTED, locked=true`. `setRoleKnowledges` auto-syncs new role grants. **You cannot edit or delete it** (it's pinned by the role).
 
 ### What admins can do that normal users cannot
 
-- **Edit / 下架 (delete)** any `market_skill` (admin no longer creates new skills — author is the one who publishes from chat UI)
+- **Create** (direct `APPROVED`, `created_by_kind='ADMIN'`), **edit / approve / reject / 下架 (delete)** any `market_skill` — authors publish from the chat UI into PENDING; admins review or create directly
 - Authorize any APPROVED market skill to any role via `role_skill` (auto-syncs to all assigned users)
 - 下架 cascades to all `user_skill` (pullers) and `role_skill` (role grants) — no orphans
 
@@ -278,8 +278,8 @@ Open the Skill Library button (🧠) — four tabs:
 
 - **我的** — your local `user_skill` (plus admin's union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
 - **市场** — browse all `APPROVED` market skills and **拉取** them into your `user_skill` (rejects if you already have a same-name `USER_CREATED`).
-- **共享** — submit a `USER_CREATED` skill to the market. status is direct `APPROVED`, no approval. no version number. two-stage click list item → right panel form.
-- **我的发布** — track your market submissions (all `APPROVED` after de-approval). Click list item → right panel with **「撤回共享（下架）」** button. Withdraw cascades to all `user_skill` and `role_skill`.
+- **共享** — submit a `USER_CREATED` skill to the market. Submission goes to `PENDING` awaiting admin approval. no version number. two-stage click list item → right panel form.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Click list item → right panel with **「撤回共享（下架）」** button. Withdraw cascades to all `user_skill` and `role_skill`. REJECTED entries can be re-submitted — the old row is archived and a fresh PENDING row is created.
 
 Inside `content` you can reference MCP tools by `@tool_name` — the available tools come from the role-based `mcps` authorization, not from yml.
 

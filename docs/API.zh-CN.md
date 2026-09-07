@@ -486,9 +486,11 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ### 5.8 知识市场
 
-> 知识市场支持跨用户共享知识库。 起无审批流：提交 → 直接 APPROVED → 其他用户可订阅。
+> 知识市场支持跨用户共享知识库。审批流：提交 → **PENDING** → admin 审批通过/拒绝（`POST /admin/market-knowledge/{id}/approve|reject`）；只有 APPROVED 条目才公开列出、可被订阅。REJECTED 条目重新提交时，旧行整行归档到 `loom_market_knowledge_archive`（保留原 id，含拒绝评论/审核人/时间），主表新建一条 PENDING 行（新 id）。
 
 #### 5.8.1 浏览已审批的市场知识库
+
+> 保留的 v1 腿（roles.js 依赖）：`GET /api/knowledge-market` 仍返回 APPROVED-only 列表；功能更全的 v2 列表（`GET /market-knowledge`，分页 + tag/category 过滤）是前端主浏览端点。
 
 ```
 GET /spring/ai/loom/api/knowledge-market?page=1&size=20
@@ -527,7 +529,7 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
 |------------|--------|----------------|
 | `marketId` | string | 市场知识库 ID |
 
-**响应**: 成功返回 `{"success": true}`。在 `loom_user_knowledge` 表中创建 `source=MARKET_PULLED` 的订阅记录。
+**响应**: 成功返回 `{"success": true}`。在 `loom_user_knowledge` 表中创建 `source=MARKET_PULLED` 的订阅记录。仅 `APPROVED` 条目可订阅 —— 非 APPROVED 返回 `403`。
 
 ---
 
@@ -543,9 +545,9 @@ POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
 |---------------|--------|------------|
 | `knowledgeId` | string | 知识库 ID |
 
-**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status='APPROVED'`（ 起无审批流）。
+**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status='PENDING'`（等待 admin 审批）。
 
-**行为**: 同一 `(username, name)` 已存在 → UPSERT（更新 description；不新增行）；不存在 → INSERT 全新行（直接 APPROVED）。
+**行为**: 同一 `(username, name)` 已存在 → 视其状态而定：**REJECTED** → 旧行整行归档到 `loom_market_knowledge_archive`（保留原 id，含拒绝评论/审核人/时间），新建一条 PENDING 行（新 id）；**PENDING / APPROVED** → 仅原地更新内容，**状态不动**（APPROVED 永不降级）。不存在 → INSERT 新行（PENDING，`created_by_kind='USER'`）。
 
 ---
 
@@ -585,31 +587,27 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **级联清理**: 自动删除 `loom_user_knowledge`（拉取者订阅）+ `loom_role_knowledge`（角色授权）。
 
-** 移除的端点**:
-- `_已移除_ /api/knowledge-market/{marketId}/approve` — 无审批流
-- `_已移除_ /api/knowledge-market/{marketId}/reject` — 无审批流
+**审批端点**（v2 admin 路由 —— v1 `/api/knowledge-market/{marketId}/approve|reject` 路径已退役；approve/reject 现挂在 `/admin` 下）：
+- `POST /admin/market-knowledge/{id}/approve` — admin 审批通过：`status=APPROVED`，落 `reviewed_at` / `reviewed_by`
+- `POST /admin/market-knowledge/{id}/reject` — admin 拒绝：`status=REJECTED`；请求体 `{"comment": "..."}` **必填**（空/缺失 → `400`，前端与服务端双重校验）
 
-**新增 admin 端点**（新增）：
-- `GET /admin/market-knowledge` — admin 列出所有市场知识库（所有都是 APPROVED）
-- `DELETE /admin/market-knowledge/{marketId}` — admin 下架（级联清理）
+**admin 端点**：
+- `GET /admin/market-knowledge` — admin 列出所有市场知识库（全状态：PENDING / APPROVED / REJECTED）
+- `POST /admin/market-knowledge` — admin 新增：直发 `APPROVED` + `created_by_kind='ADMIN'`。请求体 `MarketCreateRequest`（`name` / `description` / `content` / `category`）
+- `PUT /admin/market-knowledge/{id}` — 编辑字段（`MarketUpdateRequest`）—— **不能改状态**（无 status 字段）；状态变更只能走 approve/reject
+- `DELETE /admin/market-knowledge/{marketId}` — admin 下架（级联清理 `loom_user_knowledge` + `loom_role_knowledge` 引用行）
+- 其余 per-id admin 腿与技能市场镜像：`/official`、`/featured-rank`、`/category`、`/announcement`（PUT + DELETE）、`/reviews/{username}`（DELETE）、`/stats-reset`、`/tags`（PUT + GET）
 
 ---
 
-#### 5.8.6 管理员拒绝市场提交
+#### 5.8.6 管理员审批通过 / 拒绝市场提交
 
 ```
-POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
+POST /spring/ai/loom/admin/market-knowledge/{id}/approve
+POST /spring/ai/loom/admin/market-knowledge/{id}/reject
 ```
 
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------------|--------|----------------|
-| `marketId` | string | 市场知识库 ID |
-
-**响应**: `MarketKnowledgeRecord` — 更新后的记录，`status=REJECTED`。
-
-**权限**: 仅管理员。非管理员返回 403。
+仅 admin（非 admin → `403`）。`approve` 置 `status=APPROVED` 并记录 `reviewed_at` / `reviewed_by`。`reject` 置 `status=REJECTED`，请求体必须携带非空 `comment`（`{"comment": "理由"}`）—— 缺失/空白 → `400`。作者在**我的发布**看到拒绝原因后可重新提交：REJECTED 旧行归档到 `loom_market_knowledge_archive`（保留原 id，含评论/审核人/时间），主表新建 PENDING 行。
 
 ---
 
@@ -629,7 +627,7 @@ GET /spring/ai/loom/api/knowledge-market/my-pulled
 GET /spring/ai/loom/api/knowledge-market/my-submitted
 ```
 
-**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（ 后全是 APPROVED）。
+**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（PENDING / APPROVED / REJECTED 全状态）。
 
 ---
 
@@ -779,8 +777,7 @@ GET /spring/ai/loom/market-skills/{id}
 POST /spring/ai/loom/market-skills/{id}/pull
 ```
 
-从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。抛 `400` 条件：
-- 市场 Skill 状态不是 `APPROVED`
+从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。市场 Skill 状态不是 `APPROVED` 时抛 `403`（审批流 —— 仅已审批条目可拉取）。抛 `400` 条件：
 - 同名已有 `ROLE_GRANTED` 锁定
 - 同名已存在（静默刷新 content）
 
@@ -793,7 +790,7 @@ POST /spring/ai/loom/user/market-skills
 Content-Type: application/json
 ```
 
-新建一条 `market_skill`，`status='APPROVED'`（ 起无需审批，提交即上架），`author=currentUser`。
+新建一条 `market_skill`，`status='PENDING'`（审批流 —— 等待 admin 审批通过/拒绝；`created_by_kind='USER'`），`author=currentUser`。
 
 **请求体** (`MarketSkillSubmitRequest`):
 
@@ -803,7 +800,7 @@ Content-Type: application/json
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
 
-：去掉 `version` 字段 — 唯一约束改为 `(author, name)`。同一作者同名直接 UPSERT（覆盖内容 + 重置 APPROVED），无需新版本号。
+：去掉 `version` 字段 — 唯一约束改为 `(author, name)`。同一作者同名重复提交视原行状态而定：**REJECTED** → 旧行整行归档到 `market_skill_archive`（保留原 id，含拒绝评论/审核人/时间），新建一条 PENDING 行（新 id），作者 `user_skill.market_skill_id` 反向链接改绑新行；**PENDING / APPROVED** → 仅原地更新内容，**状态不动**（APPROVED 永不降级）。
 
 ---
 
@@ -813,22 +810,38 @@ Content-Type: application/json
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/spring/ai/loom/admin/market-skills` | 列出**所有**（ 起所有都是 APPROVED，无审批流） |
-| POST | `/spring/ai/loom/admin/market-skills` | 直接以 `status=APPROVED` 创建 |
-| PUT | `/spring/ai/loom/admin/market-skills/{id}` | 改任意字段 |
-| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | 级联删除 user_skill / role_skill 引用（：这就是"下架"，拉取者失去该 skill） |
-| _已移除_ | `/admin/market-skills/pending` | ：去掉（无审批流，没有 PENDING 状态） |
-| _已移除_ | `/admin/market-skills/{id}/approve` | ：去掉（提交即上架） |
-| _已移除_ | `/admin/market-skills/{id}/reject` | ：去掉（需要下架请用 DELETE） |
+| GET | `/spring/ai/loom/admin/market-skills` | 列出**所有**状态（PENDING / APPROVED / REJECTED）；可选 `?status=PENDING` 过滤（没有单独的 `/pending` 端点），另支持 `page` / `size` / `category` / `query` / `sortBy` |
+| POST | `/spring/ai/loom/admin/market-skills` | admin 新增 —— 直发 `status=APPROVED` + `created_by_kind='ADMIN'`（绕过 PENDING）。请求体 `MarketCreateRequest`（`name` / `description` / `content` / `category`） |
+| PUT | `/spring/ai/loom/admin/market-skills/{id}` | 改任意字段。请求体 `MarketUpdateRequest` —— **不能改状态**（无 status 字段）；状态变更只能走 approve/reject |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | 级联删除 user_skill / role_skill 引用（这就是"下架"，拉取者失去该 skill） |
+| POST | `/admin/market-skills/{id}/approve` | admin 审批通过：`status=APPROVED`，落 `reviewed_at` / `reviewed_by` |
+| POST | `/admin/market-skills/{id}/reject` | admin 拒绝：`status=REJECTED`；请求体 `{"comment": "..."}` **必填**（空/缺失 → `400`）。作者重投 REJECTED 行时旧行归档到 `market_skill_archive`，新建 PENDING 行 |
+| _已移除_ | `/admin/market-skills/pending` | 由 `GET /admin/market-skills?status=PENDING` 取代（v2 中从未存在单独的 `/pending` 端点） |
+| PUT | `/admin/market-skills/{id}/official` \| `/featured-rank` \| `/category` \| `/announcement` \| `/stats-reset` \| `/tags` | per-row admin 腿（官方标记 / 精选排序 / 分类 / 公告 / 统计重置 / tag 管理）；另有 `GET .../tags`、`DELETE .../announcement`、`DELETE .../reviews/{username}` |
 
-`MarketSkillUpsertRequest`（POST/PUT 通用）:
+请求体：
+
+`MarketCreateRequest`（POST — admin 新增）:
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `name` | string | 是 | 技能名称 |
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
-| `status` | string | 否 | 默认 `APPROVED`（：admin 不再新建技能 — 此端点为向后兼容保留） |
+| `category` | string | 否 | 分类 |
+
+`MarketUpdateRequest`（PUT — admin 编辑；无 `status` 字段 —— 状态变更只能走 approve/reject）:
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 否 | 重命名；null = 不改 |
+| `description` | string | 否 | 技能描述 |
+| `content` | string | 否 | prompt 模板 |
+| `category` | string | 否 | 分类 |
+| `isOfficial` | boolean | 否 | 官方标记 |
+| `featuredRank` | int | 否 | 精选排序 |
+
+> `MarketSkillUpsertRequest`（+ `ISkillMarketService.adminCreate/adminUpdate/adminDelete`）已 `@Deprecated`（ADR-T03 shim，保留 1 个 minor 版本）—— 上面 v2 的 `createApproved` / `update` / `delete` 路径是受支持的入口。
 
 ---
 
@@ -1736,12 +1749,12 @@ spring:
 | 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | 上传文件到知识库 |
 | 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | 获取知识库文件列表 |
 | 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | 删除知识库文件 |
-| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | 浏览已审批的市场知识库（分页） |
-| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | 订阅市场知识库 |
-| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | 提交知识库到市场 |
+| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | 浏览已审批的市场知识库（保留的 v1 腿；v2 `GET /market-knowledge` 为主列表） |
+| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | 订阅市场知识库（仅 APPROVED，否则 403） |
+| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | 提交知识库到市场（→ PENDING） |
 | 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}` | 撤回市场提交 |
-| 15e| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/approve` | 管理员审批市场提交 |
-| 15f| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/reject` | 管理员拒绝市场提交 |
+| 15e| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/approve` | 管理员审批通过市场提交（v2 admin 路由） |
+| 15f| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/reject` | 管理员拒绝市场提交（comment 必填） |
 | 15g| `GET` | `/spring/ai/loom/api/knowledge-market/my-pulled` | 查看我订阅的市场知识库 |
 | 15h| `GET` | `/spring/ai/loom/api/knowledge-market/my-submitted` | 查看我的市场提交 |
 | 16 | `GET` | `/spring/ai/chat/loom/mcp` | 获取 MCP 工具列表 |

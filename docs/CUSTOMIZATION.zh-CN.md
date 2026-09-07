@@ -383,9 +383,9 @@ public IChat customChat(
 | **接口** | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage` |
 | **默认实现** | `DefaultSkillStorage` |
 | **覆盖方式** | 自定义 `@Bean ISkillStorage` |
-| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。：去审批流；拉取拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
+| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。审批流：提交 → PENDING，admin 审批通过/拒绝（拒绝必须填评论）；REJECTED 重新提交时旧行归档到 `market_skill_archive` 并新建 PENDING 行；拉取仅允许 APPROVED（否则 403），且拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
 
-**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，含 PENDING / APPROVED / REJECTED / DEPRECATED 四种状态）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `/ ` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
+**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，三种状态 —— PENDING / APPROVED / REJECTED —— 走审批流；作者重投的 REJECTED 行归档到 `market_skill_archive`）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `/ ` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
 
 **常见自定义场景**: 接入第三方技能注册中心（如私有 Nexus / REST 目录），实现 `ISkillStorage` 接口并以 `@Bean` 注册即可替换 `DefaultSkillStorage`。
 

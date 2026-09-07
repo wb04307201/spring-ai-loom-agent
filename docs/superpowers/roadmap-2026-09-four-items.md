@@ -10,7 +10,7 @@
 
 | 序 | 项 | 状态 | 量级 |
 |---|---|---|---|
-| 1 | #4 控制台 CRUD + 复活审批流 | 🟡 进行中(brainstorming 已完成 3 段确认,spec 待写) | 中-大 |
+| 1 | #4 控制台 CRUD + 复活审批流 | ✅ 完成(2026-09-07,10 Task 全部落地) | 中-大 |
 | 2 | #2 文档清理(删 CHANGELOG + md 对齐) | 🔵 | 小 |
 | 3 | #3 H2 向量存储(自研 H2VectorStore) | 🔵 | 大 |
 | 4 | #1 AskUser 交互工具 | 🔵 | 大 |
@@ -20,7 +20,7 @@
 
 ---
 
-## #4 控制台 CRUD + 复活审批流(🟡 进行中)
+## #4 控制台 CRUD + 复活审批流(✅ 完成)
 
 ### 背景(调研结论,已逐行核实)
 
@@ -53,6 +53,37 @@
 - `AbstractMarketAdminServiceTest` L88-93 mock 的是 approve SQL,不受影响。
 - `DefaultKnowledgeReviewServiceIT`/`DefaultSkillReviewServiceIT`/`MarketAcceptanceIT`(A1-A15 验收)需过一遍状态机断言。
 - 新增:archive 表迁移 IT(重投→旧行进 archive→主表回 PENDING)、pull 403 IT、reject 无 comment 400 IT。
+
+### 落地记录(2026-09-07)
+
+**Commits(按 Task 序)**:
+- `d0ae184` — T1 archive 表(market_skill_archive + loom_market_knowledge_archive 入 V1.0)
+- `7649eb7` — T2 createApproved(admin 直发 APPROVED + created_by_kind='ADMIN')
+- `a412086` + `5ff225b` — T3 skill submit→PENDING / pull 403 + §2 ruling 修正(REJECTED 重投归档;PENDING/APPROVED 同名重投原地更新、状态不动)
+- `5bc3995` — T4 KB 镜像 + IT 断言翻转
+- `cd95266` — T5 admin delete 级联清理(cascadeCleanup user_*/role_* 引用行)
+- `3b16350` — T6 路由收敛(退役 v1 重复注册,v2 唯一赢家;admin POST→createApproved)
+- `079f529` — T7 admin 前端(审批按钮 + reject comment + 新增表单接线)
+- `16b4588` — T8 用户前端(我的发布状态徽章 + 拒绝理由 + 重投入口)
+- `df8dc7d` — T7.5 gate-fix(category 补进 MarketSkill/MarketKnowledgeRecord DTO)
+- `67c20ba` — T9 回归门(全量测试翻转到两阶段 submit→approve)
+
+**与 spec/调研的偏差**:
+1. **B1 fresh-DB**:按项目"只跑全新库"政策清库重跑,25 条测试技能数据被清(无需迁移脚本)。
+2. **KB v1 list 腿保留**:`GET /api/knowledge-market` 未退役 —— admin/roles.js 角色知识库授权下拉仍依赖该路径;follow-up 迁 v2 后再退役。
+3. **KB v2 user-submit 腿退役**:`POST /user/market-knowledge` 删除(前端零调用;聊天侧投稿走 v1 `POST /api/knowledge/{id}/submit`)。
+4. **category 补进两个 DTO**:MarketSkill(18 组件)/ MarketKnowledgeRecord(17 组件)source-breaking,沿用 M4 T3 先例(record 加组件属可接受破坏)。
+
+**回归门**:库单元 118/0 + test 模块单元 383/0 + IT 120/0/3-skip,全绿。
+
+**Follow-ups(记录,本期不做)**:
+- archive 浏览 UI(admin 查看历史归档的 REJECTED 行)。
+- roles.js 迁 v2 Page 形态 → 随后退役 KB v1 list 腿。
+- KB 重投需要 MarketKnowledgeRecord 携带 source-knowledgeId(当前重投从主表行反查)。
+- reject() 加 PENDING-only 前置条件(当前任意状态可 reject)——候选收紧。
+- `_kmStatusLabel` 死代码清理(app.js)。
+- KB admin 新增表单 official/rank 字段静默丢弃(MarketCreateRequest 无该两字段)。
+- `ISkillMarketService.listAllForAdmin` 零调用方,shim 到期随接口一并删除。
 
 ---
 

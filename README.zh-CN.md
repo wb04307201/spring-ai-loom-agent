@@ -25,7 +25,7 @@
 > **高级特性**：🧩 子任务 · ⏰ 定时任务 · 🖼 多模态 —— 引一个依赖，开箱即用——- **💬 流式对话** — SSE 多轮聊天，推理过程折叠展示，消息复制/下载；支持图片 + 文档**多模态混合输入**
 - **📚 RAG 知识库** — 多知识库管理，Tika 解析 + 向量化，内置 JVector 本地向量库（可替换为任意 Spring AI 向量存储）
 - **🔧 MCP 工具集成** — 同步/异步双模式；可用工具按**角色授权**下发，会话内按需勾选启用
-- **🧠 技能市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权）；去审批流，提交即 APPROVED；拉取拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 不再新建技能（只编辑 / 下架）；去掉 version 字段；技能用 `@工具名` 调用 MCP
+- **🧠 技能市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权）；审批流：提交 → PENDING → admin 审批通过/拒绝，REJECTED 重新提交时旧行归档；拉取拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 可新建（直发 APPROVED）/ 编辑 / 审批 / 下架；去掉 version 字段；技能用 `@工具名` 调用 MCP
 - **🧩 子任务 & ⏰ 定时任务** — 主对话把任务委派给"子模型"同步执行；LLM 可创建定时任务，触发时以子任务运行，重启自动恢复
 - **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
 - **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / 知识库市场 / MCP 描述 / 日志（原用量统计）六大模块，admin 路径鉴权
@@ -214,11 +214,11 @@ spring:
 
 ### 6 个系统种子技能
 
-首次启动时 init migration 会 seed 6 个 system skill（author=`system`, status=`APPROVED`），让新装环境开箱即用 — 包括 **网络月度事件报告**、**HTTP 测试**、**部署项目**、**自动 E2E** 等——admin 可随时在 **Skill 市场** 管理页编辑/删除——### 普通用户的技能生命周期
+首次启动时 init migration 会 seed 6 个 system skill（author=`system`, status=`APPROVED`），让新装环境开箱即用 — 包括 **网络月度事件报告**、**HTTP 测试**、**部署项目**、**自动 E2E** 等——admin 可随时在 **Skill 市场** 管理页新建 / 编辑 / 审批 / 删除——### 普通用户的技能生命周期
 
-1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`——写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）——2. **提交到市场** — 技能库 → **共享** Tab，点击自建 Skill，详情面板直接点「共享到市场」（：状态直接 `APPROVED`；无需版本号；两段式 UX）——同 `(author, name)` 重复提交走 UPSERT（覆盖内容 + 重置 APPROVED）——3. **拉取** — 技能库 → **市场** Tab，点击列表项 → 右侧详情面板「拉取到我的 Skill」（：若已存在同名 `USER_CREATED` 则拒绝 — 需先点「复制为我的技能」）——同 `(username, name)` 拉取走 UPSERT——4. **从市场拉取** — 技能库 → **市场** Tab，点 **拉取**——写入 `user_skill`，`source=MARKET_PULLED`——可改 `description` 和 `default_loaded`，**不能改 content**（要更新就重新拉取）——5. **通过角色授权获得** — admin 在角色管理里给某角色授权某 market_skill，登录后自动注入到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是具体版本）——### admin 的额外能力
+1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`——写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）——2. **提交到市场** — 技能库 → **共享** Tab，点击自建 Skill，详情面板直接点「共享到市场」（提交后状态为 `PENDING`，等待 admin 审批通过/拒绝——拒绝必须填评论；无需版本号；两段式 UX）——同 `(author, name)` 重复提交：原行为 **REJECTED** 时旧行整行归档（保留拒绝评论/审核人/时间），新建一条 PENDING 行（新 id）；原行为 **PENDING / APPROVED** 时仅原地更新内容，状态不动（APPROVED 永不降级）——3. **拉取** — 技能库 → **市场** Tab，点击列表项 → 右侧详情面板「拉取到我的 Skill」（：若已存在同名 `USER_CREATED` 则拒绝 — 需先点「复制为我的技能」）——同 `(username, name)` 拉取走 UPSERT——4. **从市场拉取** — 技能库 → **市场** Tab，点 **拉取**——写入 `user_skill`，`source=MARKET_PULLED`——可改 `description` 和 `default_loaded`，**不能改 content**（要更新就重新拉取）——5. **通过角色授权获得** — admin 在角色管理里给某角色授权某 market_skill，登录后自动注入到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是具体版本）——### admin 的额外能力
 
-- **编辑 / 下架 (delete)** 任意 `market_skill`（：admin 不再新建技能 — 由作者本人在聊天 UI 发布）
+- **新建**（直发 `APPROVED`，`created_by_kind='ADMIN'`）、**编辑 / 审批通过 / 拒绝 / 下架 (delete)** 任意 `market_skill`——作者从聊天 UI 发布进 PENDING，admin 审核或直接新建
 - 给任意角色授权任意 APPROVED 的 market_skill（：`setRoleKnowledges` 自动 sync 到所有已分配用户）
 - 下架级联清理 `user_skill`（拉取者）+ `role_skill`（角色授权），无孤儿记录
 
@@ -237,11 +237,11 @@ spring:
 
 点 **🧠 技能库** 按钮打开 —— 四个 Tab：
 
-- **我的** — 你的 `user_skill`（admin 还会看到 union view）——点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）——- **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下——- **共享** — 选自建 skill + 填版本号，提交到 PENDING，等 admin 审批——- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED），可撤回 PENDING 的——`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）——完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)——## 知识库 & 知识市场
+- **我的** — 你的 `user_skill`（admin 还会看到 union view）——点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）——- **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下——- **共享** — 选自建 skill，提交到 PENDING，等 admin 审批——- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED，展示拒绝原因），可撤回；REJECTED 可重新提交（旧行归档 + 新建 PENDING 行）——`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）——完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)——## 知识库 & 知识市场
 
 知识库存储用于 RAG 检索的文档——知识空间弹窗有四个 Tab：
 
-- **我的** — 自己的知识库——创建、上传文档、删除——- **市场** — 浏览已审批的市场知识库，**添加到我的知识库**（：两段式 — 点列表项 → 右侧详情面板 + send-skill-btn 风格按钮）——- **共享** — 自己尚未共享的知识库，点列表项 → 右侧详情面板点「共享到市场」（：两段式统一）——- **我的发布** — 查看自己提交到市场的知识库状态（：全是 APPROVED）——点列表项 → 右侧详情面板「撤回共享（下架）」按钮——撤回级联清理 `user_knowledge` + `role_knowledge`——市场流程：提交 → 直接 APPROVED（ 去审批）→ 其他用户可订阅——也可通过角色授权自动下发知识库给用户（类似技能）——知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)——---
+- **我的** — 自己的知识库——创建、上传文档、删除——- **市场** — 浏览已审批的市场知识库，**添加到我的知识库**（：两段式 — 点列表项 → 右侧详情面板 + send-skill-btn 风格按钮）——- **共享** — 自己尚未共享的知识库，点列表项 → 右侧详情面板点「共享到市场」（：两段式统一）——- **我的发布** — 查看自己提交到市场的知识库状态（PENDING / APPROVED / REJECTED，展示拒绝原因）——点列表项 → 右侧详情面板「撤回共享（下架）」按钮——撤回级联清理 `user_knowledge` + `role_knowledge`——市场流程：提交 → PENDING → admin 审批通过 → APPROVED → 其他用户可订阅；拒绝后重新提交，旧行归档（`loom_market_knowledge_archive`）+ 新建 PENDING 行——也可通过角色授权自动下发知识库给用户（类似技能）——知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)——---
 
 ## 管理控制台
 

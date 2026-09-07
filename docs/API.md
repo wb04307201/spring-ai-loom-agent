@@ -488,9 +488,11 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ### 5.8 Knowledge Market
 
-> Knowledge market enables sharing knowledge bases across users. no approval flow — submit goes directly to APPROVED.
+> Knowledge market enables sharing knowledge bases across users. Approval flow: submit → **PENDING** → admin approve/reject (`POST /admin/market-knowledge/{id}/approve|reject`); only APPROVED entries are publicly listed and pullable. Re-submitting a REJECTED entry archives the old row (id-preserving, incl. reject comment/reviewer/time) into `loom_market_knowledge_archive` and creates a NEW PENDING row.
 
 #### 5.8.1 Browse Approved Market Knowledge Bases
+
+> Kept v1 leg (roles.js dependency): `GET /api/knowledge-market` still returns the APPROVED-only list; the richer v2 list (`GET /market-knowledge`, paged with tag/category filters) is the primary browse endpoint for the frontend.
 
 ```
 GET /spring/ai/loom/api/knowledge-market?page=1&size=20
@@ -529,7 +531,7 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
 |-----------|--------|-------------------------|
 | `marketId`| string | Market knowledge ID |
 
-**Response**: `{"success": true}` on success. Creates a subscription in `loom_user_knowledge` with `source=MARKET_PULLED`.
+**Response**: `{"success": true}` on success. Creates a subscription in `loom_user_knowledge` with `source=MARKET_PULLED`. Requires the entry to be `APPROVED` — non-APPROVED returns `403`.
 
 ---
 
@@ -545,9 +547,9 @@ POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
 
-**Response**: `MarketKnowledgeRecord` — The created market entry with `status='APPROVED'` (no approval flow).
+**Response**: `MarketKnowledgeRecord` — The created market entry with `status='PENDING'` (awaits admin review).
 
-**Behavior**: If `(username, name)` already exists → UPSERT (updates description; no new row). Otherwise → INSERT a new row directly APPROVED.
+**Behavior**: If a same-`(username, name)` entry exists → depends on its status: **REJECTED** → old row archived to `loom_market_knowledge_archive` (id-preserving, includes reject comment/reviewer/time), a NEW PENDING row is inserted (new id). **PENDING / APPROVED** → in-place content update, **status untouched** (APPROVED never demotes). Otherwise → INSERT a new PENDING row (`created_by_kind='USER'`).
 
 ---
 
@@ -571,29 +573,37 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **Cascading cleanup**: Auto-deletes `loom_user_knowledge` (subscriber rows) + `loom_role_knowledge` (role grants).
 
-** removed endpoints**:
-- `_removed_ /api/knowledge-market/{marketId}/approve` — no approval flow
-- `_removed_ /api/knowledge-market/{marketId}/reject` — no approval flow
+**Approval endpoints** (v2 admin router — the v1 `/api/knowledge-market/{marketId}/approve|reject` paths remain retired; approve/reject now live under `/admin`):
+- `POST /admin/market-knowledge/{id}/approve` — admin approve: `status=APPROVED`, `reviewed_at`/`reviewed_by` set
+- `POST /admin/market-knowledge/{id}/reject` — admin reject: `status=REJECTED`; body `{"comment": "..."}` is **required** (empty/missing → `400` both client-side and server-side)
 
-**New admin endpoints ()**:
-- `GET /admin/market-knowledge` — list all market knowledge bases (all APPROVED)
-- `DELETE /admin/market-knowledge/{marketId}` — admin takedown (cascade cleanup)
-
----
-
-#### 5.8.5 Admin Approve Market Submission (removed)
-
-> removed — no approval flow needed.
+**Admin endpoints**:
+- `GET /admin/market-knowledge` — list all market knowledge bases (all statuses: PENDING / APPROVED / REJECTED)
+- `POST /admin/market-knowledge` — admin create: direct `APPROVED` + `created_by_kind='ADMIN'`. Body: `MarketCreateRequest` (`name` / `description` / `content` / `category`)
+- `PUT /admin/market-knowledge/{id}` — edit fields (`MarketUpdateRequest`) — **cannot change status** (no status field); state changes only via approve/reject
+- `DELETE /admin/market-knowledge/{marketId}` — admin takedown (cascade cleanup of `loom_user_knowledge` + `loom_role_knowledge` reference rows)
+- Plus per-id admin legs mirroring the skill market: `/official`, `/featured-rank`, `/category`, `/announcement` (PUT + DELETE), `/reviews/{username}` (DELETE), `/stats-reset`, `/tags` (PUT + GET)
 
 ---
 
-#### 5.8.6 Admin Reject Market Submission
+#### 5.8.5 Admin Approve / Reject Market Submission
+
+```
+POST /spring/ai/loom/admin/market-knowledge/{id}/approve
+POST /spring/ai/loom/admin/market-knowledge/{id}/reject
+```
+
+Admin-only (non-admin → `403`). `approve` sets `status=APPROVED` and records `reviewed_at` / `reviewed_by`. `reject` sets `status=REJECTED` and requires a non-blank `comment` in the body (`{"comment": "reason"}`) — missing/blank → `400`. The author sees the reject reason in **我的发布** and can re-submit: the REJECTED row is archived to `loom_market_knowledge_archive` (id-preserving, includes comment/reviewer/time) and a fresh PENDING row is created.
+
+---
+
+#### 5.8.6 Admin Reject Market Submission (legacy v1 path)
 
 ```
 POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
 ```
 
-> removed — use unified `DELETE /api/knowledge-market/{marketId}` instead.
+> removed — the v1 KB approve/reject legs are retired; use the v2 admin endpoints `POST /admin/market-knowledge/{id}/approve|reject` (see § 5.8.5) instead.
 
 ---
 
@@ -613,7 +623,7 @@ GET /spring/ai/loom/api/knowledge-market/my-pulled
 GET /spring/ai/loom/api/knowledge-market/my-submitted
 ```
 
-**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (all are APPROVED).
+**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (PENDING / APPROVED / REJECTED).
 
 ---
 
@@ -761,8 +771,7 @@ GET /spring/ai/loom/market-skills/{id}
 POST /spring/ai/loom/market-skills/{id}/pull
 ```
 
-Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `400` if:
-- The market skill isn't `APPROVED`
+Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `403` if the market skill isn't `APPROVED` (approval flow — only approved entries are pullable). Throws `400` if:
 - A `ROLE_GRANTED` lock with the same name already exists
 - The same name is already in your `user_skill` (refreshes content silently)
 
@@ -775,7 +784,7 @@ POST /spring/ai/loom/user/market-skills
 Content-Type: application/json
 ```
 
-Submits a new `market_skill` row with `status=APPROVED` and `author=currentUser` (no approval flow — submit is instant).
+Submits a new `market_skill` row with `status=PENDING` and `author=currentUser` (approval flow — awaits admin approve/reject; `created_by_kind='USER'`).
 
 **Request Body** (`MarketSkillSubmitRequest`):
 
@@ -787,7 +796,11 @@ Submits a new `market_skill` row with `status=APPROVED` and `author=currentUser`
 
 removed the `version` field — the `(author, name)` pair is the unique constraint.
 
-Behavior: If `(author, name)` already exists in `market_skill`, the existing row is **UPSERTed** (content/desc replaced; status reset to APPROVED). Otherwise INSERT a new row with `status=APPROVED` (no approval flow). The author's `user_skill.market_skill_id` is rebound to the new market_skill row so that subsequent `save` propagates to all pullers.
+Behavior: If `(author, name)` already exists in `market_skill`, the outcome depends on its status:
+- **REJECTED** → the old row is archived to `market_skill_archive` (id-preserving, includes reject comment/reviewer/time), and a **NEW** PENDING row is inserted (new id). The author's `user_skill.market_skill_id` backlink is rebound to the new row.
+- **PENDING / APPROVED** → in-place content/desc update, **status untouched** (APPROVED never demotes back to PENDING).
+
+Otherwise INSERT a new row with `status=PENDING`. The author's `user_skill.market_skill_id` is bound to the market_skill row so that subsequent `save` propagates to all pullers.
 
 ---
 
@@ -797,22 +810,38 @@ Behavior: If `(author, name)` already exists in `market_skill`, the existing row
 
 | Method | Path | Description |
 |--------|---------------------------------------------------|---------------------------------------------------|
-| GET | `/spring/ai/loom/admin/market-skills` | List **all** ( 起所有都是 APPROVED，无审批流) |
-| POST | `/spring/ai/loom/admin/market-skills` | Create directly with `status=APPROVED`. Body: `MarketSkillUpsertRequest` |
-| PUT | `/spring/ai/loom/admin/market-skills/{id}` | Edit any field of any market skill |
-| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | Cascade-deletes from `user_skill` and `role_skill`（：这就是"下架"，拉取者失去该 skill） |
-| _removed_ | `/admin/market-skills/pending` | ：去掉（无审批流，没有 PENDING 状态） |
-| _removed_ | `/admin/market-skills/{id}/approve` | ：去掉（提交即上架） |
-| _removed_ | `/admin/market-skills/{id}/reject` | ：去掉（需要下架请用 DELETE） |
+| GET | `/spring/ai/loom/admin/market-skills` | List **all** statuses (PENDING / APPROVED / REJECTED); optional `?status=PENDING` filter (there is no separate `/pending` endpoint), plus `page` / `size` / `category` / `query` / `sortBy` |
+| POST | `/spring/ai/loom/admin/market-skills` | Admin create — direct `status=APPROVED` + `created_by_kind='ADMIN'` (bypasses PENDING). Body: `MarketCreateRequest` (`name` / `description` / `content` / `category`) |
+| PUT | `/spring/ai/loom/admin/market-skills/{id}` | Edit any field of any market skill. Body: `MarketUpdateRequest` — **cannot change status** (no status field); state changes only via approve/reject |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | Cascade-deletes from `user_skill` and `role_skill`（这就是"下架"，拉取者失去该 skill） |
+| POST | `/admin/market-skills/{id}/approve` | Admin approve: `status=APPROVED`, `reviewed_at` / `reviewed_by` set |
+| POST | `/admin/market-skills/{id}/reject` | Admin reject: `status=REJECTED`; body `{"comment": "..."}` **required** (empty/missing → `400`). Author re-submit of a REJECTED row archives it to `market_skill_archive` and creates a NEW PENDING row |
+| _removed_ | `/admin/market-skills/pending` | Replaced by `GET /admin/market-skills?status=PENDING` (never existed as a separate endpoint in v2) |
+| PUT | `/admin/market-skills/{id}/official` \| `/featured-rank` \| `/category` \| `/announcement` \| `/stats-reset` \| `/tags` | Per-row admin legs (official flag / featured rank / category / announcement / stats reset / tag management); plus `GET .../tags`, `DELETE .../announcement`, `DELETE .../reviews/{username}` |
 
-`MarketSkillUpsertRequest`:
+Request bodies:
+
+`MarketCreateRequest` (POST — admin create):
 
 | Field | Type | Required | Description |
 |------------|--------|----------|------------------------------------------------------|
 | `name` | string | Yes | Skill name |
 | `description`| string| No | Description |
 | `content` | string | Yes | Prompt template |
-| `status` | string | No | Defaults to `APPROVED` if omitted (admin no longer creates new skills — this endpoint is preserved for backward compatibility only) |
+| `category` | string | No | Category |
+
+`MarketUpdateRequest` (PUT — admin edit; no `status` field — status changes only via approve/reject):
+
+| Field | Type | Required | Description |
+|------------|--------|----------|------------------------------------------------------|
+| `name` | string | No | Rename; null = no change |
+| `description`| string| No | Description |
+| `content` | string | No | Prompt template |
+| `category` | string | No | Category |
+| `isOfficial` | boolean | No | Official flag |
+| `featuredRank` | int | No | Featured ranking |
+
+> `MarketSkillUpsertRequest` (+ `ISkillMarketService.adminCreate/adminUpdate/adminDelete`) are `@Deprecated` (ADR-T03 shim, kept 1 minor version) — the v2 `createApproved` / `update` / `delete` paths above are the supported entry points.
 
 ---
 
@@ -1581,12 +1610,12 @@ spring:
 | 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | Upload file to knowledge base |
 | 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | List files in knowledge base |
 | 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | Delete file from knowledge base |
-| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | Browse approved market knowledge (paginated) |
-| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | Subscribe to market knowledge |
-| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | Submit knowledge to market |
+| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | Browse approved market knowledge (kept v1 leg; v2 `GET /market-knowledge` is the primary list) |
+| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | Subscribe to market knowledge (APPROVED-only, else 403) |
+| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | Submit knowledge to market (→ PENDING) |
 | 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}` | Withdraw market submission |
-| 15e| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/approve`| Admin approve market submission |
-| 15f| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/reject`| Admin reject market submission |
+| 15e| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/approve` | Admin approve market submission (v2 admin router) |
+| 15f| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/reject` | Admin reject market submission (comment required) |
 | 15g| `GET` | `/spring/ai/loom/api/knowledge-market/my-pulled` | List my subscribed market knowledge |
 | 15h| `GET` | `/spring/ai/loom/api/knowledge-market/my-submitted` | List my market submissions |
 | 16 | `GET` | `/spring/ai/chat/loom/mcp` | Get MCP servers and tools |
