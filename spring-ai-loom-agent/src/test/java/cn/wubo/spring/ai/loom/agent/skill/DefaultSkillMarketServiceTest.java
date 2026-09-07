@@ -161,13 +161,13 @@ class DefaultSkillMarketServiceTest {
  /* ===== submit/pull 改造 ===== */
 
  @Test
- @DisplayName("submit 直接 APPROVED + 反写 author user_skill.market_skill_id")
- void testSubmit_directlyApprovedAndBindsAuthor() {
+ @DisplayName("submit 落 PENDING(created_by_kind='USER',无 reviewed_*)+ 反写 author user_skill.market_skill_id")
+ void testSubmit_landsPendingAndBindsAuthor() {
  MarketSkill stub = new MarketSkill(
  100L, "my-skill", "desc", "content",
- "alice", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "alice", null, null, null, null, null, null, null, null, null);
- // SELECT id 默认抛 EmptyResultDataAccessException → 走 INSERT 分支
+ "alice", "PENDING",
+ LocalDateTime.now(), null, null, null, null, null, null, null, null, null, null, null);
+ // SELECT id 默认返回 null（无同名旧行）→ 走全新 INSERT 分支
  // SELECT MAX(id) 返回 100L（让 marketId 有值）
  doReturn(100L).when(jdbcTemplate.mock).queryForObject(
  contains("SELECT MAX(id)"), eq(Long.class), any(Object[].class));
@@ -181,20 +181,30 @@ class DefaultSkillMarketServiceTest {
  MarketSkill result = marketService.submit("alice", req);
 
  assertNotNull(result);
+ // 新契约：INSERT 只绑 4 参（name/description/content/author），status/created_by_kind 是字面量 PENDING/USER，
+ // 且不得携带 reviewed_at/reviewed_by（投稿未审）
  verify(jdbcTemplate.mock).update(
- contains("INSERT INTO market_skill"),
- eq("my-skill"), eq("desc"), eq("content"), eq("alice"), eq("alice"));
+ argThat((String s) -> s.contains("INSERT INTO market_skill")
+ && s.contains("'PENDING', 'USER'")
+ && !s.contains("reviewed_at")),
+ eq("my-skill"), eq("desc"), eq("content"), eq("alice"));
+ // author 绑定仍要断言：backlink 用 submit 返回的 marketId(100L) 反写 user_skill
  verify(jdbcTemplate.mock).update(
- contains("UPDATE user_skill SET market_skill_id = ?"),
+ contains("UPDATE user_skill SET market_skill_id=?"),
  eq(100L), eq("alice"), eq("my-skill"));
  }
 
  @Test
- @DisplayName("submit 同一作者+name 已存在 → UPSERT + 仍写 APPROVED")
+ @DisplayName("submit 同一作者+name 已存在（非 REJECTED）→ 仅 UPDATE 内容，status 不动，不 INSERT")
  void testSubmit_upsertsExistingAuthorName() {
+ // 新实现的同名旧行查询 SQL：WHERE author=? AND name=? LIMIT 1
  doReturn(7L).when(jdbcTemplate.mock).queryForObject(
- argThat((String s) -> s.contains("WHERE author = ? AND name = ?")),
+ argThat((String s) -> s.contains("SELECT id FROM market_skill WHERE author=? AND name=?")),
  eq(Long.class), any(Object[].class));
+ // 旧行状态 APPROVED（非 REJECTED）→ 走就地 UPDATE 分支（REJECTED 才会归档+重 INSERT）
+ doReturn("APPROVED").when(jdbcTemplate.mock).queryForObject(
+ argThat((String s) -> s.contains("SELECT status FROM market_skill WHERE id=?")),
+ eq(String.class), any(Object[].class));
  MarketSkill stub = new MarketSkill(
  7L, "my-skill", "new-desc", "new-content",
  "alice", MarketSkill.STATUS_APPROVED,
@@ -207,34 +217,33 @@ class DefaultSkillMarketServiceTest {
  "my-skill", "new-desc", "new-content");
  marketService.submit("alice", req);
 
+ // 新契约：UPDATE 只写 description/content，SQL 不得触碰 status（APPROVED 永不降级）
  verify(jdbcTemplate.mock).update(
- argThat((String s) -> s.contains("UPDATE market_skill SET description = ?, content = ?, status = 'APPROVED'")),
- eq("new-desc"), eq("new-content"), eq("alice"), eq(7L));
+ argThat((String s) -> s.contains("UPDATE market_skill SET description = ?, content = ? WHERE id = ?")
+ && !s.contains("status")),
+ eq("new-desc"), eq("new-content"), eq(7L));
  verify(jdbcTemplate.mock, never()).update(
  argThat((String s) -> s.contains("INSERT INTO market_skill")),
  any(Object[].class));
  }
 
  @Test
- @DisplayName("pull 不再校验 status='APPROVED'")
- void testPull_noStatusCheck() {
- MarketSkill legacy = new MarketSkill(
- 1L, "legacy", "d", "c",
- "alice", MarketSkill.STATUS_APPROVED,
- LocalDateTime.now(), LocalDateTime.now(), "alice", null, null, null, null, null, null, null, null, null);
- doReturn(legacy).when(jdbcTemplate.mock).queryForObject(
+ @DisplayName("pull 非 APPROVED → 403 拒绝（审批流新契约）")
+ void testPull_rejectsNonApproved() {
+ MarketSkill pending = new MarketSkill(
+ 1L, "pending-skill", "d", "c",
+ "alice", "PENDING",
+ LocalDateTime.now(), null, null, null, null, null, null, null, null, null, null, null);
+ doReturn(pending).when(jdbcTemplate.mock).queryForObject(
  argThat((String s) -> s.contains("FROM market_skill WHERE id = ?")),
  any(RowMapper.class), any(Object[].class));
 
- // 不再因 status 抛错 —— 后续 user_skill 查询因 mock 不全会抛错，try-catch 兜底
- try {
- marketService.pull("bob", 1L);
- } catch (Exception ignored) {
- // 不在乎后续 mock 缺失
- }
- verify(jdbcTemplate.mock).queryForObject(
- argThat((String s) -> s.contains("FROM market_skill WHERE id = ?")),
- any(RowMapper.class), any(Object[].class));
+ LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+ () -> marketService.pull("bob", 1L));
+ assertEquals(403, ex.getStatusCode());
+ assertTrue(ex.getMessage().contains("未通过审批"), "错误消息应说明未通过审批: " + ex.getMessage());
+ // 403 应发生在任何 user_skill 写入之前
+ verify(jdbcTemplate.mock, never()).update(anyString(), any(Object[].class));
  }
 
  @Test

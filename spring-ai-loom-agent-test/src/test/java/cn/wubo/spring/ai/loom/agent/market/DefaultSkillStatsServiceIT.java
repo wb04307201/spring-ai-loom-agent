@@ -256,8 +256,11 @@ class DefaultSkillStatsServiceIT {
     @SuppressWarnings("unchecked")
     void incrementStatLandsInDbAndPullEndpointRoutesThrough() throws Exception {
         // 准备:让 alice 有一个 user_skill 同名 USER_CREATED 行会阻塞 pull,所以我们用全新 name。
+        // 审批流新契约(#4):create() 落 PENDING,pull 非 APPROVED → 403。
+        // 本测试验证的是 stats 计数(不是审批),故 seed 后先 approve 再驱动 pull。
         Long skillId = skillMarketService.create("alice", new MarketCreateRequest(
                 "stats-pull-" + System.nanoTime(), "d", "c", null)).id();
+        skillMarketService.approve(skillId, "admin1");
         // 起:无 stats row
         Integer before = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM market_skill_stats WHERE market_skill_id = ?",
