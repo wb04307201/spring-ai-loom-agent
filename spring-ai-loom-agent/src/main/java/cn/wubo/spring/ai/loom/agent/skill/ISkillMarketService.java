@@ -48,10 +48,25 @@ public interface ISkillMarketService {
 
     /* ===== admin 直接 CRUD ===== */
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
+     * {@code IMarketContentAdminService#createApproved} 取代
+     */
+    @Deprecated
     MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req);
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
+     * {@code IMarketContentAdminService#update} 取代
+     */
+    @Deprecated
     MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req);
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
+     * {@code IMarketContentAdminService#delete}（含 cascadeCleanup 级联）取代
+     */
+    @Deprecated
     void adminDelete(String adminUsername, Long id);
 
     /* ===== 用户拉取 ===== */

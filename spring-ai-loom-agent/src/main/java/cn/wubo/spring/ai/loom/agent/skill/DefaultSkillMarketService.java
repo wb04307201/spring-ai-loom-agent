@@ -367,6 +367,10 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
 
     /* ===== ISkillMarketService — admin 直接 CRUD ===== */
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由 {@link #createApproved(String, MarketCreateRequest)} 取代
+     */
+    @Deprecated
     @Override
     @Transactional
     public MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req) {
@@ -394,6 +398,10 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         return get(id);
     }
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由 {@link #update(Long, MarketUpdateRequest)} 取代
+     */
+    @Deprecated
     @Override
     @Transactional
     public MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req) {
@@ -409,6 +417,10 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         return get(id);
     }
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由 {@link #delete(Long)}（含 cascadeCleanup 级联）取代
+     */
+    @Deprecated
     @Override
     @Transactional
     public void adminDelete(String adminUsername, Long id) {

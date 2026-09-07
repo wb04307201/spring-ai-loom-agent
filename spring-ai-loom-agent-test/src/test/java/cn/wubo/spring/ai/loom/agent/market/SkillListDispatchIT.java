@@ -1,14 +1,12 @@
 package cn.wubo.spring.ai.loom.agent.market;
 
 import cn.wubo.spring.ai.loom.agent.LoomAgentTestApplication;
-import cn.wubo.spring.ai.loom.agent.testutil.LoomAgentTestUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
@@ -16,15 +14,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.servlet.function.RouterFunction;
-import org.springframework.web.servlet.function.ServerResponse;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -33,14 +27,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>断言:
  * <ul>
  *   <li>GET /spring/ai/loom/market-skills → 200 + Page shape (items/total/page/size)</li>
- *   <li>GET /spring/ai/loom/user/market-skills → 200 + ARRAY (v1-only 路由保留)</li>
- *   <li>@Qualifier("loomAgentSkillMarketRouter") v1 bean 不再持有 GET /market-skills 路径</li>
+ *   <li>GET /spring/ai/loom/user/market-skills → 200 + ARRAY (T6 #4: v1 退役迁入 v2 public router)</li>
+ *   <li>POST /spring/ai/loom/admin/market-skills → APPROVED + created_by_kind=ADMIN (v2 createApproved 唯一赢家)</li>
  * </ul>
  *
  * <p>环境: 走 RANDOM_PORT + TestRestTemplate (真实 servlet 容器), 与
  * MarketAcceptanceIT 的 RouterFunction 直接驱动互补 — 本 IT 验证 HTTP 层的
- * dispatch 路由 (两个同名 bean 注册同一路径时, Spring 按声明顺序先声明者胜;
- * v1 删除后 v2 自然成为唯一胜出者)。
+ * dispatch 路由 (T6 #4 起 v1 skill 路由 bean 已全部退役, v2 是唯一注册者)。
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @DisplayName("Skill List Dispatch IT — FU-4 v1 退役后 v2 Page handler 胜出")
@@ -50,8 +43,7 @@ class SkillListDispatchIT {
     TestRestTemplate restTemplate;
 
     @Autowired
-    @Qualifier("loomAgentSkillMarketRouter")
-    RouterFunction<ServerResponse> v1Router;
+    org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -98,10 +90,10 @@ class SkillListDispatchIT {
         assertTrue(body.get("items").isArray(), "'items' must be an array");
     }
 
-    /* ===== 2. 用户提交列表返回 ARRAY (v1-only 路由保留) ===== */
+    /* ===== 2. 用户提交列表返回 ARRAY (v2 承接, 形态不变) ===== */
 
     @Test
-    @DisplayName("GET /user/market-skills → 200 + ARRAY (v1-only, kept)")
+    @DisplayName("GET /user/market-skills → 200 + ARRAY (v2, ARRAY shape kept)")
     void userSubmittedListReturnsArray() throws Exception {
         HttpEntity<Void> req = new HttpEntity<>(authHeaders);
         ResponseEntity<String> resp = restTemplate.exchange(
@@ -115,18 +107,7 @@ class SkillListDispatchIT {
                 "user submitted list must return ARRAY (v1-only route kept)");
     }
 
-    /* ===== 3. v1 router bean 不再持有 GET /market-skills 路径 ===== */
-
-    @Test
-    @DisplayName("v1 router bean: safeRoute GET /market-skills → empty (route removed)")
-    void v1RouterNoLongerHoldsPublicListPath() throws Exception {
-        ServerResponse resp = LoomAgentTestUtil.safeRoute(
-                v1Router, "GET", "/spring/ai/loom/market-skills", null);
-        assertNull(resp,
-                "v1 router must NOT match GET /spring/ai/loom/market-skills after FU-4 retirement");
-    }
-
-    /* ===== 4. Admin list 也返回 v2 Page shape ===== */
+    /* ===== 3. Admin list 也返回 v2 Page shape ===== */
 
     @Test
     @DisplayName("GET /admin/market-skills → 200 + Page{items,total,page,size} (v2 wins)")
@@ -144,5 +125,30 @@ class SkillListDispatchIT {
         assertTrue(body.has("page"), "v2 admin response must have 'page' field");
         assertTrue(body.has("size"), "v2 admin response must have 'size' field");
         assertTrue(body.get("items").isArray(), "'items' must be an array");
+    }
+
+    /* ===== 5. Admin POST → v2 createApproved 唯一赢家 (T6) ===== */
+
+    @Test
+    @DisplayName("POST /admin/market-skills → 200 + APPROVED + created_by_kind=ADMIN (v2 createApproved 唯一赢家)")
+    void adminPostSkillCreatesApproved() throws Exception {
+        HttpHeaders h = new HttpHeaders();
+        h.add(HttpHeaders.COOKIE, authHeaders.getFirst(HttpHeaders.COOKIE));
+        h.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        String name = "disp-adm-" + System.nanoTime();
+        HttpEntity<String> req = new HttpEntity<>(
+                "{\"name\":\"" + name + "\",\"description\":\"d\",\"content\":\"c\",\"category\":\"cat\"}", h);
+        ResponseEntity<String> resp = restTemplate.exchange(
+                "/spring/ai/loom/admin/market-skills", HttpMethod.POST, req, String.class);
+        assertEquals(HttpStatus.OK, resp.getStatusCode(),
+                "admin create must return 200; got " + resp.getStatusCode() + " body=" + resp.getBody());
+        JsonNode body = MAPPER.readTree(resp.getBody());
+        assertEquals("APPROVED", body.get("status").asText(),
+                "admin create must land APPROVED");
+        long id = body.get("id").asLong();
+        String kind = jdbc.queryForObject(
+                "SELECT created_by_kind FROM market_skill WHERE id=?", String.class, id);
+        assertEquals("ADMIN", kind,
+                "must be createApproved (created_by_kind=ADMIN), not v1 adminCreate (USER) nor v2 create (PENDING)");
     }
 }

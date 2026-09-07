@@ -278,7 +278,12 @@ public abstract class AbstractMarketAdminService<K, M, U, R> implements IMarketC
     /** 子类实现:删主表前清理 user_ 与 role_ 引用表(级联)。 */
     protected abstract void cascadeCleanup(K id);
 
+    /**
+     * T6 #4 (T5 carry-forward):v1 adminDelete 退役后本方法是 admin 删除唯一路径 —
+     * cascadeCleanup + DELETE 多语句必须原子,加 @Transactional。
+     */
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void delete(K id) {
         cascadeCleanup(id);
         jdbc.update("DELETE FROM " + tableName() + " WHERE id=?", id);
