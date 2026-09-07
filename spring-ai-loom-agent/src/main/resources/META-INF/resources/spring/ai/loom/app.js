@@ -1606,6 +1606,157 @@ const conversation = {
   },
 };
 
+/**
+ * #1 AskUser:LLM 提问卡片(聊天流内嵌,spec D1)。
+ * 卡片仅活于当前流:提交/超时/取消后就地定格;刷新页面不重建(历史里只有文本)。
+ */
+const askUserCards = (() => {
+  const active = new Map(); // questionId -> { el, timer, submitBtn, countdownEl }
+
+  function fmtRemaining(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function freeze(qid, stateText, ok) {
+    const card = active.get(qid);
+    if (!card) return;
+    clearInterval(card.timer);
+    active.delete(qid);
+    card.el.classList.add("askuser-frozen");
+    card.el.querySelectorAll("input,button").forEach((n) => (n.disabled = true));
+    const badge = card.el.querySelector(".askuser-state");
+    if (badge) {
+      badge.textContent = stateText;
+      badge.classList.toggle("askuser-state-ok", !!ok);
+    }
+  }
+
+  async function submit(qid, ev) {
+    const card = active.get(qid);
+    if (!card) return;
+    const inputs = card.el.querySelectorAll(".askuser-opt-input:checked");
+    const labels = Array.from(inputs).map((n) => n.value);
+    const customInput = card.el.querySelector(".askuser-custom-input");
+    const customText = customInput ? customInput.value.trim() : "";
+    if (customText) labels.push(customText);
+    if (labels.length === 0) {
+      showToast("请先选择一个选项或输入自定义答案", "error");
+      return;
+    }
+    card.submitBtn.disabled = true;
+    card.submitBtn.textContent = "提交中...";
+    try {
+      const r = await fetch(
+        `/spring/ai/loom/ask/${encodeURIComponent(qid)}/answer`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({ answer: ev.multiSelect ? labels : labels[0] }),
+        },
+      );
+      if (r.ok) {
+        freeze(qid, "已答 ✓", true);
+      } else {
+        // 404 = 已超时/已取消/已失效(spec §5 竞态行)
+        freeze(qid, r.status === 404 ? "已失效(超时或已取消)" : "提交失败", false);
+      }
+    } catch (e) {
+      freeze(qid, "提交失败:" + (e.message || "网络错误"), false);
+    }
+  }
+
+  function render(ev) {
+    if (!ev || !ev.questionId) return;
+    const qid = ev.questionId;
+    const inputType = ev.multiSelect ? "checkbox" : "radio";
+    const optionsHtml = (ev.options || [])
+      .map(
+        (opt, i) => `
+      <label class="askuser-opt">
+        <input class="askuser-opt-input" type="${inputType}" name="askuser-${qid}" value="${escapeHtml(opt.label)}"/>
+        <span class="askuser-opt-label">${escapeHtml(opt.label)}</span>
+        ${opt.description ? `<span class="askuser-opt-desc">${escapeHtml(opt.description)}</span>` : ""}
+      </label>`,
+      )
+      .join("");
+    const customHtml = ev.allowCustomInput
+      ? `<div class="askuser-custom">
+          <label class="askuser-opt">
+            <input class="askuser-opt-input" type="${ev.multiSelect ? "checkbox" : "radio"}" name="askuser-${qid}" value="" data-custom-trigger="1"/>
+            <span class="askuser-opt-label">其他:</span>
+          </label>
+          <input class="askuser-custom-input" type="text" placeholder="输入自定义答案..." maxlength="500"/>
+        </div>`
+      : "";
+
+    const item = document.createElement("div");
+    item.className = "chat-item chat-item-left";
+    item.innerHTML = `
+      <div class="avatar"><img src="${aiImage}" alt="AI"/></div>
+      <div class="bubble">
+        <div class="askuser-card" id="askuser-${qid}">
+          <div class="askuser-head">
+            ${ev.header ? `<span class="askuser-header-chip">${escapeHtml(ev.header)}</span>` : ""}
+            <span class="askuser-countdown">⏳ <span class="askuser-countdown-num"></span></span>
+            <span class="askuser-state"></span>
+          </div>
+          <div class="askuser-question">${escapeHtml(ev.question)}</div>
+          ${ev.background ? `<div class="askuser-background">${escapeHtml(ev.background)}</div>` : ""}
+          <div class="askuser-options">${optionsHtml}${customHtml}</div>
+          <button class="askuser-submit">提交答案</button>
+        </div>
+      </div>`;
+    ui.mainContent.appendChild(item);
+    ui.scrollToBottom();
+
+    const el = item.querySelector(".askuser-card");
+    const submitBtn = el.querySelector(".askuser-submit");
+    const countdownEl = el.querySelector(".askuser-countdown-num");
+    submitBtn.addEventListener("click", () => submit(qid, ev));
+    // 单选时点选项文字也可提交(减少一次点击);多选保留显式提交
+    if (!ev.multiSelect) {
+      el.querySelectorAll(".askuser-opt-input").forEach((n) =>
+        n.addEventListener("change", () => {
+          const custom = el.querySelector(".askuser-custom-input");
+          if (n.dataset.customTrigger && custom) {
+            custom.focus(); // "其他"选项:聚焦输入框,等用户填完点提交
+            return;
+          }
+          if (custom) custom.value = "";
+          submit(qid, ev);
+        }),
+      );
+    }
+
+    // 本地倒计时(spec D2:与后端 timeoutSeconds 同值;归零仅置灰前端,
+    // 后端超时以工具返回文本为准 —— 竞态窗口内提交会收到 404 → "已失效")
+    let remaining = Number(ev.timeoutSeconds) || 300;
+    countdownEl.textContent = fmtRemaining(remaining);
+    const timer = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        freeze(qid, "已超时", false);
+        return;
+      }
+      countdownEl.textContent = fmtRemaining(remaining);
+    }, 1000);
+
+    active.set(qid, { el, timer, submitBtn, countdownEl });
+  }
+
+  /** 流结束(complete/error/stop)时把仍在等待的卡片定格。 */
+  function cancelAllActive(reasonText) {
+    for (const qid of Array.from(active.keys())) {
+      freeze(qid, reasonText, false);
+    }
+  }
+
+  return { render, cancelAllActive };
+})();
+
 // ===================== §7 Chat Engine =====================
 const chat = {
   async send() {
@@ -1669,6 +1820,10 @@ const chat = {
       await api.streamChat(
         record,
         (data) => {
+          // #1 AskUser:提问卡片事件帧(按字段分派,普通内容帧不受影响)
+          if (data.askUser) {
+            askUserCards.render(data.askUser);
+          }
           // reasoning content
           if (data.reasoningContent) {
             const thinkingContainer = document.getElementById("thinking-" + id);
@@ -1688,6 +1843,7 @@ const chat = {
           ui.scrollToBottom();
         },
         () => {
+          askUserCards.cancelAllActive("已结束");
           // complete
           const actionsEl = document.getElementById("actions-" + id);
           if (actionsEl) actionsEl.style.display = "";
@@ -1701,6 +1857,7 @@ const chat = {
           conversation.maybeAutoRename(state.conversationId, text);
         },
         (error) => {
+          askUserCards.cancelAllActive("已取消");
           // error
           const actionsEl = document.getElementById("actions-" + id);
           if (actionsEl) actionsEl.style.display = "";
@@ -1762,6 +1919,7 @@ const chat = {
           state.controller.abort();
         } catch (_) {}
       }
+      askUserCards.cancelAllActive("已取消");
       ui.setStopButtonVisible(false);
     }
   },

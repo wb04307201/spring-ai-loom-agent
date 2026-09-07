@@ -3949,3 +3949,38 @@ textarea::placeholder {
 .mcp-item-text {
   min-width: 0;
 }
+
+/* ===== #1 AskUser 提问卡片 ===== */
+.askuser-card { margin: 12px 16px; min-width: 320px; max-width: 560px; }
+.askuser-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.askuser-header-chip {
+  background: var(--primary, #6366f1); color: #fff; border-radius: 10px;
+  padding: 2px 10px; font-size: 12px; font-weight: 600;
+}
+.askuser-countdown { margin-left: auto; font-size: 12px; color: var(--text-secondary, #64748b); }
+.askuser-state { font-size: 12px; color: var(--text-secondary, #64748b); }
+.askuser-state-ok { color: var(--success-color, #22c55e); font-weight: 600; }
+.askuser-question { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.askuser-background { font-size: 12px; color: var(--text-secondary, #64748b); margin-bottom: 8px; }
+.askuser-options { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.askuser-opt {
+  display: flex; align-items: baseline; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.askuser-opt:hover { border-color: var(--primary, #6366f1); background: rgba(99,102,241,.04); }
+.askuser-opt-label { font-size: 13px; font-weight: 500; }
+.askuser-opt-desc { font-size: 12px; color: var(--text-secondary, #64748b); }
+.askuser-custom { display: flex; flex-direction: column; gap: 6px; }
+.askuser-custom-input {
+  border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;
+  padding: 7px 10px; font-size: 13px; width: 100%; box-sizing: border-box;
+}
+.askuser-submit {
+  background: var(--primary, #6366f1); color: #fff; border: none; border-radius: 8px;
+  padding: 7px 18px; font-size: 13px; cursor: pointer;
+}
+.askuser-submit:disabled { opacity: .5; cursor: not-allowed; }
+.askuser-frozen { opacity: .65; }
+.askuser-frozen .askuser-opt { cursor: default; }
+.askuser-frozen .askuser-opt:hover { border-color: var(--border-color, #e2e8f0); background: none; }
