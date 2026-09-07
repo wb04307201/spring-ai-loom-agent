@@ -1121,14 +1121,26 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `spring-ai-loom-agent-test/src/test/java/cn/wubo/spring/ai/loom/agent/market/MarketAcceptanceIT.java`(A1-A15 凡依赖"提交即上架"的腿补 approve)
-- Modify: 任何因 submit→PENDING 而红的既有 IT(`DefaultSkillReviewServiceIT`/`DefaultKnowledgeReviewServiceIT` setup 若依赖 submit→APPROVED)
-- Test: 跑全量 unit + IT
+- Modify: `spring-ai-loom-agent-test/src/test/java/cn/wubo/spring/ai/loom/agent/market/DefaultSkillStatsServiceIT.java`(T6 carry:B1 腿 create()→PENDING seed 后 pull→403,补 approve 再 pull)
+- Modify: `spring-ai-loom-agent/src/test/java/cn/wubo/spring/ai/loom/agent/skill/DefaultSkillMarketServiceTest.java`(T7.5 发现:`testSubmit_directlyApprovedAndBindsAuthor` + `testSubmit_upsertsExistingAuthorName` 断言旧 submit→APPROVED 的 mockito SQL 参数,翻转为 PENDING 语义)
+- Modify: `spring-ai-loom-agent/src/test/java/cn/wubo/spring/ai/loom/agent/knowledge/DefaultKnowledgeMarketServiceTest.java`(T7.5 发现:`testSubmit_upsertsExisting` 同上)
+- Modify: 任何其它因 submit→PENDING 而红的既有 IT(`DefaultSkillReviewServiceIT`/`DefaultKnowledgeReviewServiceIT` setup 若依赖 submit→APPROVED)
+- Test: 跑全量 unit(**两个模块**)+ IT
 
 **Interfaces:**
 - Consumes: 全部前序任务的 service/路由改动。
 - Produces: 绿灯的回归基线。
 
-- [ ] **Step 1: 跑全量 unit**
+**流程缺口修补(controller 核实)**:此前所有 gate 只跑 `-pl spring-ai-loom-agent-test`,**库模块 `spring-ai-loom-agent` 自带单测从未进过 gate** —— 这就是 3 个 stale 单测漏网的原因。本任务起,回归门必须同时跑两个模块的测试。
+
+- [ ] **Step 1: 跑库模块单测(先修 3 个已知 stale)**
+
+```bash
+mvn test -pl spring-ai-loom-agent -Dgpg.skip=true
+```
+预期先见 3 个已知失败(mockito `Argument(s) are different!`):`DefaultSkillMarketServiceTest.testSubmit_directlyApprovedAndBindsAuthor` / `.testSubmit_upsertsExistingAuthorName`、`DefaultKnowledgeMarketServiceTest.testSubmit_upsertsExisting` —— 旧期望 SQL 是 `'APPROVED'` + reviewed_at/by 参数,新实现是 `'PENDING','USER'` 且不带 reviewed_*。逐个 Read 失败测试,把 mockito 期望参数翻转成新 submit 语义;**保持每个测试的原始验证意图**(如 "bindsAuthor" 仍要断言 author 绑定)。改完重跑 → 库模块全绿。若发现其它红:同样区分"断言旧语义"(→翻测试)vs"真 bug"(→修 service 并上报 controller)。
+
+- [ ] **Step 2: 跑 test 模块全量 unit**
 
 ```bash
 mvn clean install -pl spring-ai-loom-agent,spring-ai-loom-agent-spring-boot-autoconfigure,spring-ai-loom-agent-spring-boot-starter -am -Dgpg.skip=true -DskipTests
@@ -1136,35 +1148,33 @@ mvn test -pl spring-ai-loom-agent-test
 ```
 Expected: 383 unit PASS。若有红:逐个 Read 失败测试,判断是"测试断言旧 APPROVED 语义"(→改测试补 approve)还是"真 bug"(→修 service)。
 
-- [ ] **Step 2: 跑全量 IT(清库)**
+- [ ] **Step 3: 跑全量 IT(清库)**
 
 ```bash
 rm -rf ~/.loom/datasource spring-ai-loom-agent-test/target/test-ds spring-ai-loom-agent-test/target/surefire-reports
 mvn test -pl spring-ai-loom-agent-test -Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false
 ```
-Expected: 全 IT PASS(原 104 + 新增 MarketApprovalFlowIT 11 = ~115,3 skip)。
+已知待翻:MarketAcceptanceIT(依赖"提交即上架"的 A-腿)、DefaultSkillStatsServiceIT(B1 腿:create() seed → PENDING → pull 403;修法 = seed 后补 `svc.approve(id,"admin1")` 再 pull,保持测的是 stats 不是审批)、review service IT(setup 若依赖 submit→APPROVED 则补 approve 或改 createApproved)。其余若红逐个分类:旧语义→翻测试;真 bug→修 service 上报。
 
-- [ ] **Step 3: 翻转 MarketAcceptanceIT**
+- [ ] **Step 4: 翻转 MarketAcceptanceIT + DefaultSkillStatsServiceIT + review IT**
 
-Read `MarketAcceptanceIT.java`,定位 A1-A15 中所有 `submit(...)` 后直接 `pull(...)` / 断言 APPROVED 的腿。每处在 submit 与 pull 之间插入 `svc.approve(id, "admin1")`(skill)或对应 KB approve。断言 `status==APPROVED` 的改为先 approve 再断言。改完重跑该 IT → PASS。
+Read `MarketAcceptanceIT.java`,定位 A1-A15 中所有 `submit(...)` 后直接 `pull(...)` / 断言 APPROVED 的腿。每处在 submit 与 pull 之间插入 `svc.approve(id, "admin1")`(skill)或对应 KB approve。断言 `status==APPROVED` 的改为先 approve 再断言。`DefaultSkillStatsServiceIT` B1 腿同理(create→approve→pull)。review service IT 的 setUp 若用 `submit()` 造 APPROVED 数据供评分,改为 `submit()` + `approve()` 两段或直接 `createApproved()`。**不得削弱任何断言的原始验证意图。** 改完逐个重跑 → PASS。
 
-- [ ] **Step 4: 翻转 review service IT(如需)**
-
-`DefaultSkillReviewServiceIT` / `DefaultKnowledgeReviewServiceIT`:若 setUp 用 `submit()` 造 APPROVED 数据供评分,改为 `submit()` + `approve()` 两段,或直接 `createApproved()`。重跑 → PASS。
-
-- [ ] **Step 5: 再跑全量 IT 确认全绿**
+- [ ] **Step 5: 全绿确认(两模块 unit + 全量 IT)**
 
 ```bash
+mvn test -pl spring-ai-loom-agent -Dgpg.skip=true
 rm -rf ~/.loom/datasource spring-ai-loom-agent-test/target/test-ds spring-ai-loom-agent-test/target/surefire-reports
 mvn test -pl spring-ai-loom-agent-test -Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false
+mvn test -pl spring-ai-loom-agent-test
 ```
-Expected: 全 PASS。
+Expected: 库模块 unit 全绿 + IT 全 PASS(原 104 + MarketApprovalFlowIT 16 = ~120,3 skip)+ test 模块 383 unit 全绿。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add spring-ai-loom-agent-test/src/test/java/cn/wubo/spring/ai/loom/agent/market/
-git commit -m "test(market): flip acceptance + review ITs to two-phase submit→approve (#4)
+git add spring-ai-loom-agent-test/src/test/java/cn/wubo/spring/ai/loom/agent/market/ spring-ai-loom-agent/src/test/java/cn/wubo/spring/ai/loom/agent/skill/DefaultSkillMarketServiceTest.java spring-ai-loom-agent/src/test/java/cn/wubo/spring/ai/loom/agent/knowledge/DefaultKnowledgeMarketServiceTest.java
+git commit -m "test(market): flip acceptance/stats/review ITs + stale library unit tests to two-phase submit→approve (#4)
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
