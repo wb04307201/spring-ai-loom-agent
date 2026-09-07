@@ -151,4 +151,51 @@ class DefaultSubTaskExecutorTest {
         assertThat(cancelledOk).isTrue();
         assertThat(workerInterrupted.getCount()).isZero(); // worker was interrupted inside spec.call()
     }
+
+    @Test
+    void subTaskToolListExcludesAskUserAndSelfTools() {
+        // #1 AskUser(spec D6):子任务 LLM 看不到 askUser(schema 级排除),
+        // 同时保留既有 ISubTaskTool/IScheduleTool 防递归排除的回归断言。
+        ChatClient.ChatClientRequestSpec spec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+        org.springframework.ai.chat.model.ChatResponse chatResponse =
+                mock(org.springframework.ai.chat.model.ChatResponse.class);
+        org.springframework.ai.chat.model.Generation generation =
+                mock(org.springframework.ai.chat.model.Generation.class);
+        org.springframework.ai.chat.messages.AssistantMessage msg =
+                mock(org.springframework.ai.chat.messages.AssistantMessage.class);
+
+        cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool timeTool =
+                mock(cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool.class);
+        cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool askTool =
+                mock(cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool.class);
+        ISubTaskTool selfTool = mock(ISubTaskTool.class);
+        cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool schedTool =
+                mock(cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool.class);
+
+        target = new DefaultSubTaskExecutor(chatClient, memoryAdvisor, executor, mcp,
+                java.util.List.of(timeTool, askTool, selfTool, schedTool), subTaskRegistry);
+
+        when(chatClient.prompt()).thenReturn(spec);
+        when(spec.user(any(String.class))).thenReturn(spec);
+        when(spec.system(any(String.class))).thenReturn(spec);
+        when(spec.advisors(any(java.util.function.Consumer.class))).thenReturn(spec);
+        when(spec.advisors(memoryAdvisor)).thenReturn(spec);
+        when(spec.toolContext(any(Map.class))).thenReturn(spec);
+        when(spec.tools(any(Object[].class))).thenReturn(spec);
+        when(spec.call()).thenReturn(callSpec);
+        when(callSpec.chatResponse()).thenReturn(chatResponse);
+        when(chatResponse.getResult()).thenReturn(generation);
+        when(generation.getOutput()).thenReturn(msg);
+        when(msg.getText()).thenReturn("done");
+
+        SubTaskRequest req = new SubTaskRequest("sub-f", "conv-f", null, "alice",
+                "do X", null, false);
+        target.execute(req);
+
+        org.mockito.ArgumentCaptor<Object[]> captor =
+                org.mockito.ArgumentCaptor.forClass(Object[].class);
+        verify(spec).tools(captor.capture());
+        assertThat(captor.getValue()).containsExactly(timeTool);
+    }
 }

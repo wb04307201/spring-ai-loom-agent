@@ -37,9 +37,11 @@ public class DefaultSubTaskTool implements ISubTaskTool {
         return (value instanceof String s) ? s : "";
     }
 
-    @Tool(description = "把一段任务委派给一个'子模型'去执行。子任务拥有与主对话相同的"
-            + "工具访问(文件/MCP/Skill/时间等),但不能再次启动子任务或创建定时器。"
-            + "主对话会同步等待子任务完成,然后拿到最终文本。")
+    @Tool(description = "把一段任务委派给一个'子模型'去执行。子任务只做你规划好的任务执行"
+            + "并返回执行结果:它拥有与主对话相同的工具访问(文件/MCP/Skill/时间等),"
+            + "但不能再次启动子任务、创建定时器,也不能直接向用户提问 —— 需要用户决策的"
+            + "疑问应写入委派指令的已知约束,或让子任务把疑问写进返回结果,由你收到结果后"
+            + "决定是否向用户提问。主对话会同步等待子任务完成,然后拿到最终文本。")
     @Override
     public String startSubTask(String prompt, String systemContext, ToolContext toolContext) {
         // Validate prompt at the tool boundary. Spring AI's ChatClient throws

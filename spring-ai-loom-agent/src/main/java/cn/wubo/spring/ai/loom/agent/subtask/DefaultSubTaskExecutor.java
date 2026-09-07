@@ -40,7 +40,9 @@ import java.util.concurrent.Future;
  * callers (e.g. {@link SubTaskRegistry#kill(String)} via a registered cancel
  * hook) can interrupt the worker thread via {@link Future#cancel(boolean)}.</li>
  * <li>Per-call filters the {@link IEmbedTool} list passed in via constructor
- * to drop {@code ISubTaskTool}/{@code IScheduleTool} (recursion guard).
+ * to drop {@code ISubTaskTool}/{@code IScheduleTool} (recursion guard) and
+ * {@code IAskUserTool} (sub-tasks execute what the main task planned and return
+ * results; questions for the user belong to the main conversation — #1 spec D6).
  * Lazy {@code @Lazy} resolution of the list breaks the bean-graph cycle that
  * would otherwise appear when both this executor and {@code defaultSubTaskTool}
  * are part of {@code List<IEmbedTool>} auto-collection.</li>
@@ -199,11 +201,15 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
             spec.toolContext(props);
 
             // Attach embedTools (filtered to exclude ISubTaskTool/IScheduleTool so the
-            // sub-task cannot recursively spawn sub-tasks or schedules).
+            // sub-task cannot recursively spawn sub-tasks or schedules, and IAskUserTool
+            // so sub-tasks / scheduled runs can never block on a user question — spec #1 D6:
+            // 子任务只做主任务规划好的执行并返回结果,疑问写进结果由主任务决定是否提问。
+            // 定时任务经子任务路径执行,自动继承本排除)。
             List<Object> filtered = new ArrayList<>();
             for (var t : embedTools) {
                 if (t instanceof cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool) continue;
                 if (t instanceof cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool) continue;
+                if (t instanceof cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool) continue;
                 filtered.add(t);
             }
             if (!filtered.isEmpty()) {
