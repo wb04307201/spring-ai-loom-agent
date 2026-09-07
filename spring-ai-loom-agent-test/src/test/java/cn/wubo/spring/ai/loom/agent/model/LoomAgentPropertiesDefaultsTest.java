@@ -69,4 +69,10 @@ class LoomAgentPropertiesDefaultsTest {
                     .startsWith(loomHome + "/");
         }
     }
+
+    @Test
+    void askuserTimeoutSeconds_defaultsTo300() {
+        LoomAgentProperties props = new LoomAgentProperties();
+        assertThat(props.getAskuser().getTimeoutSeconds()).isEqualTo(300L);
+    }
 }

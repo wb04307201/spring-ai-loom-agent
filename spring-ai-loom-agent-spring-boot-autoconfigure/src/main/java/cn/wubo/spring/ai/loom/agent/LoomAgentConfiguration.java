@@ -859,6 +859,29 @@ public class LoomAgentConfiguration {
                 @Qualifier("kbStatsService") IMarketContentStatsService<String> kbStatsService) {
             return new DefaultKnowledgeTool(knowledge, vectorStore, properties.getRag(), kbStatsService);
         }
+
+        /**
+         * #1 AskUser:挂起提问注册表(纯内存,镜像 SubTaskRegistry 的 @Bean 模式)。
+         */
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry.class)
+        public cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry() {
+            return new cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry();
+        }
+
+        /**
+         * #1 AskUser 工具(universal,defaultGranted=true — 零 CapabilityService 改动,
+         * universalToolGroups() 反射自动拾取)。ISubTaskTool bean 同款注册模式(L993-999)。
+         */
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool.class)
+        public cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool defaultAskUserTool(
+                cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry,
+                cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry sseEmitterRegistry,
+                LoomAgentProperties properties) {
+            return new cn.wubo.spring.ai.loom.agent.askuser.DefaultAskUserTool(
+                    askUserRegistry, sseEmitterRegistry, properties.getAskuser().getTimeoutSeconds());
+        }
     }
 
     /**

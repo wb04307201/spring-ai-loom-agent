@@ -93,6 +93,8 @@ public class LoomAgentProperties {
  */
  private ScheduleProperty schedule = new ScheduleProperty();
 
+ private AskUserProperty askuser = new AskUserProperty();
+
  @Data
  public static class RagProperty {
  private double similarityThreshold = 0.0F;
@@ -363,5 +365,19 @@ public class LoomAgentProperties {
  @Data
  public static class ScheduleProperty {
  private boolean enabled = true;
+ }
+
+ /**
+ * AskUser 交互工具配置(#1)。yml 通过 {@code spring.ai.loom.agent.askuser.*} 配置。
+ * <ul>
+ * <li>{@code timeoutSeconds} — 工具阻塞等待用户作答的最长秒数(默认 300 = 5 分钟,spec D2)。
+ * 超时后工具返回"用户未作答"文本给 LLM,Flux 正常 complete(ChatMemory 本轮保住)。</li>
+ * </ul>
+ * 无 enabled 开关:M3 起工具 bean 总是创建;askUser 是 universal 工具(defaultGranted),
+ * 不受 role_tool RBAC 控制。
+ */
+ @Data
+ public static class AskUserProperty {
+ private long timeoutSeconds = 300;
  }
 }
