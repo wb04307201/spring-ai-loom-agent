@@ -67,6 +67,9 @@
 - `16b4588` — T8 用户前端(我的发布状态徽章 + 拒绝理由 + 重投入口)
 - `df8dc7d` — T7.5 gate-fix(category 补进 MarketSkill/MarketKnowledgeRecord DTO)
 - `67c20ba` — T9 回归门(全量测试翻转到两阶段 submit→approve)
+- `e55778b` + `6842a52` — T10 文档同步(API/CUSTOMIZATION/CLAUDE/README×2/接口 javadoc/roadmap;fix round 1 补 3 处 admin-cannot-create)
+- `d55ca97` — 终审 fix wave(I-1 技能 withdraw 三态按钮 + I-2 README 撤回级联假声明修正 + M-1 reviewer 列绑定 + M-2 幽灵版本行 + _kmStatusLabel 死代码 + KB 新增表单 official/rank 仅编辑态)
+- `262bf35` — Chrome 复验 hotfix(withdraw 按钮渲染裸 i18n key:local t() 补传 fallback + market.withdraw.* 三键入双语字典)
 
 **与 spec/调研的偏差**:
 1. **B1 fresh-DB**:按项目"只跑全新库"政策清库重跑,25 条测试技能数据被清(无需迁移脚本)。
@@ -84,6 +87,13 @@
 - `_kmStatusLabel` 死代码清理(app.js)。
 - KB admin 新增表单 official/rank 字段静默丢弃(MarketCreateRequest 无该两字段)。
 - `ISkillMarketService.listAllForAdmin` 零调用方,shim 到期随接口一并删除。
+- **市场指针卫生(final review 归并,一个不变量:除 cascadeCleanup 或显式 rebind 外,引用不得比市场行活得久)**:reject() PENDING-only 前置 + skill withdraw() 级联/置空其他用户 user_skill.market_skill_id + role_skill 清理(当前只清作者自己 backlink,KB withdraw 已级联 → 两侧不对称)+ resubmit 归档时 rebind/null 非作者指针 + KB createApproved name-blank 校验对齐 skill。触发面:纯 UI 流不可达(admin 审批按钮仅 PENDING 行渲染);API-only reject-of-APPROVED 或 KB withdraw-of-APPROVED 才触达,低危(无 FK 不报错、副本仍可用、re-pull 自愈),但作为一个连贯卫生项一起修。
+- **M-3 测试补强(final review)**:double-archive cycle(二次重投再归档)、backlink-to-new-id 断言(resubmitRejectedArchivesOldRow 未断 user_skill.market_skill_id=id2)、route-level blank-comment→400 IT、reject-no-precondition 决策测试(无论 follow-up 怎么裁,都该有 test 记录决定)。
+- **M-4 死 i18n 键**:`market.admin.reject.commentRequired` / `market.admin.create.skill` / `market.admin.create.knowledge` 已加但未被消费(admin 页用硬编码中文,与既有风格一致);要么接线要么删。`market.withdraw.*`(本期新增)已接线。
+- **M-5**:skill submit 原地更新分支未写 `updated_at`(admin update() 写了)—— cosmetic。
+- **M-2 skill data-id 未 escapeHtml**(KB 侧 escapeHtml):数值 BIGINT 安全,纯样式一致性。
+- **dynamic-SET 无法从编辑弹窗清空 category/rank**(null 被跳过,两侧对称的 pre-existing 契约);需 sentinel/显式 clear 语义设计。
+- **CglibAopProxy WARN**(final currentStatus() 被代理):pre-existing 日志噪音,无害。
 
 ---
 
