@@ -190,6 +190,17 @@ class MarketApprovalFlowIT {
     }
 
     @Test
+    void skillUpdatePersistsOfficialRank() {
+        long id = skillSvc.createApproved("admin1", new MarketCreateRequest(
+            "upd-" + System.nanoTime(), "d", "c", null)).id();
+        skillSvc.update(id, new MarketUpdateRequest(null, null, null, null, true, 7));
+        Boolean official = jdbc.queryForObject("SELECT is_official FROM market_skill WHERE id=?", Boolean.class, id);
+        Integer rank = jdbc.queryForObject("SELECT featured_rank FROM market_skill WHERE id=?", Integer.class, id);
+        assertEquals(true, official);
+        assertEquals(7, rank);
+    }
+
+    @Test
     void adminDeleteCascadesSkillRefs() {
         long id = skillSvc.createApproved("admin1", new MarketCreateRequest(
             "del-" + System.nanoTime(), "d", "c", null)).id();

@@ -48,7 +48,7 @@
           <div class="admin-header-left">
             <h1>知识库市场</h1>
             <span class="admin-subtitle"
-              >审批 / 编辑 / 下架市场知识库</span
+              >admin 可新增 / 审批 / 编辑 / 下架市场知识库</span
             >
           </div>
           <div class="admin-header-right">
@@ -69,14 +69,16 @@
               margin-bottom: 12px;
             "
           >
-            <strong>admin 职责</strong> —— 仅负责<strong>审批 / 编辑 / 下架</strong
-            >市场知识库。不在控制台新建知识库（知识库由作者本人从聊天界面「共享」Tab
-            提交到市场）；作者提交后状态为 PENDING，待 admin 审批，审批通过后才会对其他用户可见。下架会自动级联清理所有订阅。
+            <strong>admin 职责</strong> —— 负责市场知识库的<strong>新增 / 审批 /
+            编辑 / 下架</strong>。admin 新增的知识库直接落 APPROVED;
+            作者从聊天界面「共享」Tab 提交后状态为 PENDING，待 admin
+            审批，审批通过后才会对其他用户可见。下架会自动级联清理所有订阅。
           </div>
 
           <div id="pending-chip-container" style="margin-bottom: 12px; display: none"></div>
 
           <div class="admin-toolbar">
+            <button id="create-knowledge-btn" class="primary-btn">+ 新增知识库</button>
             <button id="refresh-btn" class="secondary-btn">刷新</button>
           </div>
 
@@ -87,7 +89,7 @@
       </div>
     </div>
 
-    <!-- 编辑知识库模态框（仅编辑现有知识库，不用于新建） -->
+    <!-- 编辑知识库模态框（编辑知识库） -->
     <div id="edit-knowledge-modal" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 720px; max-height: 85vh">
         <div class="modal-header">

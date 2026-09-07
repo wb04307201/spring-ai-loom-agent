@@ -163,9 +163,9 @@
   /**
    * Render the table.
    *
-   * Columns (M0 T13 + T19): 名称 / 状态 / 作者 / 官方 / 排序 / 分类 / 提交时间 / 公告 / 评分 / 操作.
+   * Columns (M0 T13 + T19 + Task 7): 名称 / 状态 / 作者 / 官方 / 排序 / 分类 / 提交时间 / 公告 / 评分 / 操作.
    * The KB owner field is `username` (not the Skill-side `author` field).
-   * Approval controls are intentionally deferred to T18; edit and 下架 remain.
+   * PENDING rows render 通过 / 拒绝 approval buttons (Task 7); edit and 下架 remain.
    */
   function renderTable() {
     if (!allKnowledge || allKnowledge.length === 0) {
@@ -230,6 +230,12 @@
         const ratingCell = count > 0
           ? `${MarketAdmin.renderStarWidget(Math.round(avg), true)}<span style="font-size:12px;color:var(--text-muted);margin-left:4px;">${count}</span>`
           : '<span style="color: var(--text-muted); font-size:12px;">无评价</span>';
+        // Task 7: PENDING 行显示 通过 / 拒绝 审批按钮（KB id 是 String UUID,不 parseInt）
+        const statusValue = String(m.status || "").toUpperCase();
+        const approvalBtns = statusValue === "PENDING"
+          ? `<button class="primary-btn approve-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:4px 10px;font-size:12px;margin-right:4px;">通过</button>` +
+            `<button class="delete-btn reject-btn btn-sm" data-id="${escapeHtml(id)}" style="margin-right:4px;">拒绝</button>`
+          : "";
         return `<tr data-id="${escapeHtml(id)}">
  <td><strong>${escapeHtml(m.name)}</strong></td>
  <td>${statusBadge}</td>
@@ -242,6 +248,7 @@
  <td>${annCell}<button class="secondary-btn ann-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:2px 8px;font-size:11px;margin-left:6px;">${hasAnn ? "编辑" : "发布"}</button></td>
  <td>${ratingCell}<button class="secondary-btn reviews-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:2px 8px;font-size:11px;margin-left:6px;">管理</button></td>
  <td>
+ ${approvalBtns}
  <button class="secondary-btn tag-edit-row-btn btn-sm" data-id="${escapeHtml(id)}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑标签</button>
  <button class="secondary-btn edit-btn" data-id="${escapeHtml(id)}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
  <button class="delete-btn del-btn btn-sm" data-id="${escapeHtml(id)}">下架</button>
@@ -264,6 +271,31 @@
         openEdit(btn.getAttribute("data-id")),
       );
     });
+    // Task 7: PENDING 行审批按钮（KB id 是 String UUID,不 parseInt）
+    tableContainer.querySelectorAll(".approve-btn").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("确认通过该知识库?")) return;
+        try {
+          await MarketAdmin.approve("KNOWLEDGE", btn.getAttribute("data-id"));
+          showToast("已通过", "success");
+          await loadList();
+        } catch (e) {
+          alert("通过失败: " + e.message);
+        }
+      }));
+    tableContainer.querySelectorAll(".reject-btn").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const comment = prompt("拒绝理由(必填):");
+        if (comment === null) return;
+        if (!comment.trim()) { alert("拒绝理由不能为空"); return; }
+        try {
+          await MarketAdmin.reject("KNOWLEDGE", btn.getAttribute("data-id"), comment);
+          showToast("已拒绝", "success");
+          await loadList();
+        } catch (e) {
+          alert("拒绝失败: " + e.message);
+        }
+      }));
     tableContainer.querySelectorAll(".del-btn").forEach((btn) => {
       btn.addEventListener("click", () =>
         deleteKnowledge(btn.getAttribute("data-id")),
@@ -548,7 +580,8 @@
       return;
     }
     if (!currentEdit) {
-      showErr("控制台不再新建知识库");
+      // 新建走工具栏「+ 新增知识库」(MarketAdmin.form)，saveEdit 仅编辑;防御性兜底
+      showErr("请使用「+ 新增知识库」按钮创建知识库");
       return;
     }
 
@@ -618,6 +651,14 @@
     }
   }
 
+  // Task 7: 「+ 新增知识库」按钮 — create 模式 POST 到 ADMIN_API.KNOWLEDGE（createApproved → APPROVED）
+  document.getElementById("create-knowledge-btn")?.addEventListener("click", async () => {
+    const result = await MarketAdmin.form("KNOWLEDGE", "create", null);
+    if (result) {
+      showToast("已新增", "success");
+      await loadList();
+    }
+  });
   document.getElementById("refresh-btn")?.addEventListener("click", loadList);
   document
     .getElementById("edit-knowledge-close")

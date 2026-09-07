@@ -171,6 +171,14 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
             sql.append(", category=?");
             args.add(req.category());
         }
+        if (req.isOfficial() != null) {
+            sql.append(", is_official=?");
+            args.add(req.isOfficial());
+        }
+        if (req.featuredRank() != null) {
+            sql.append(", featured_rank=?");
+            args.add(req.featuredRank());
+        }
         sql.append(" WHERE id=?");
         args.add(id);
         jdbc.update(sql.toString(), args.toArray());

@@ -145,7 +145,8 @@
    * or `null` if the user cancelled.
    *
    * Knowledge entries expose `category`, `isOfficial`, `featuredRank`;
-   * skill entries do not. The function renders the appropriate field set
+   * skill entries expose `category` (spec §6.1) but not official/rank in
+   * this shared form. The function renders the appropriate field set
    * based on `kind`.
    */
   function form(kind, mode, entry) {
@@ -188,12 +189,13 @@
            <label>内容（Prompt 模板）<span style="color: var(--error-color)">*</span></label>
            <textarea id="mf-content" class="form-input" rows="14" style="font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.6;" placeholder="支持 {param} 占位符">${safe(cur.content)}</textarea>
          </div>`;
-    const kbExtraFields = isKnowledge
-      ? `<div class="form-group">
+    // Spec §6.1 — category renders for BOTH SKILL and KNOWLEDGE create/edit forms.
+    const categoryField = `<div class="form-group">
            <label>分类</label>
-           <input type="text" id="mf-category" class="form-input" placeholder="例如：技术文档" value="${safe(cur.category)}"/>
-         </div>
-         <div class="form-group">
+           <input type="text" id="mf-category" class="form-input" placeholder="${isKnowledge ? "例如：技术文档" : "例如：效率工具"}" value="${safe(cur.category)}"/>
+         </div>`;
+    const kbOfficialFields = isKnowledge
+      ? `<div class="form-group">
            <label>精选排序</label>
            <input type="number" id="mf-featured-rank" class="form-input" min="0" step="1" placeholder="留空表示不设置" value="${cur.featuredRank == null ? "" : safe(cur.featuredRank)}"/>
          </div>
@@ -218,7 +220,8 @@
        <textarea id="mf-description" class="form-input" rows="3" placeholder="简要描述功能或内容">${safe(cur.description)}</textarea>
      </div>
      ${contentField}
-     ${kbExtraFields}
+     ${categoryField}
+     ${kbOfficialFields}
      <div id="mf-error" class="error-msg" style="display:none"></div>
    </div>
    <div class="modal-footer">
@@ -273,6 +276,11 @@
               return;
             }
             body.content = content;
+            // Spec §6.1 — SKILL create/edit form now also carries category.
+            const catEl = overlay.querySelector("#mf-category");
+            if (catEl) {
+              body.category = catEl.value.trim() || null;
+            }
           } else {
             const category = overlay
               .querySelector("#mf-category")
@@ -777,6 +785,68 @@
     }
   }
 
+  /**
+   * approve(kind, id) -> Promise<RecordDescriptor | null>
+   *
+   * Admin-side: POST /admin/market-{kind}s/{id}/approve — transitions a
+   * PENDING entry to APPROVED (sets reviewed_at / reviewed_by). Mirrors the
+   * updateMarketTags fetch + error pattern: 401/403 → login bounce, non-2xx
+   * → descriptive throw.
+   */
+  async function approve(kind, id) {
+    if (kind !== "SKILL" && kind !== "KNOWLEDGE") {
+      throw new Error("MarketAdmin.approve: unknown kind " + kind);
+    }
+    const url = ADMIN_API[kind] + "/" + encodeURIComponent(id) + "/approve";
+    const resp = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+    });
+    if (resp.status === 401 || resp.status === 403) {
+      window.location.replace("/spring/ai/loom/index.html");
+      return null;
+    }
+    if (!resp.ok) {
+      let body = ""; try { body = await resp.text(); } catch (_) {}
+      throw new Error("MarketAdmin.approve failed: HTTP " + resp.status + (body ? " — " + body : ""));
+    }
+    return resp.json();
+  }
+
+  /**
+   * reject(kind, id, comment) -> Promise<RecordDescriptor | null>
+   *
+   * Admin-side: POST /admin/market-{kind}s/{id}/reject with body
+   * `{comment}` (backend RejectBody record). Comment is REQUIRED — the
+   * frontend throws REJECT_COMMENT_REQUIRED on empty input as a second
+   * line of defense (handler also returns 400 on blank comment).
+   */
+  async function reject(kind, id, comment) {
+    if (kind !== "SKILL" && kind !== "KNOWLEDGE") {
+      throw new Error("MarketAdmin.reject: unknown kind " + kind);
+    }
+    if (!comment || !comment.trim()) {
+      throw new Error("REJECT_COMMENT_REQUIRED");
+    }
+    const url = ADMIN_API[kind] + "/" + encodeURIComponent(id) + "/reject";
+    const resp = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ comment: comment.trim() }),
+    });
+    if (resp.status === 401 || resp.status === 403) {
+      window.location.replace("/spring/ai/loom/index.html");
+      return null;
+    }
+    if (!resp.ok) {
+      let body = ""; try { body = await resp.text(); } catch (_) {}
+      throw new Error("MarketAdmin.reject failed: HTTP " + resp.status + (body ? " — " + body : ""));
+    }
+    return resp.json();
+  }
+
   window.MarketAdmin = {
     list: list,
     form: form,
@@ -791,5 +861,7 @@
     renderStarWidget: renderStarWidget,
     getMarketTags: getMarketTags,
     updateMarketTags: updateMarketTags,
+    approve: approve,
+    reject: reject,
   };
 })();

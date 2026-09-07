@@ -192,6 +192,12 @@
         const ratingCell = count > 0
           ? `${MarketAdmin.renderStarWidget(Math.round(avg), true)}<span style="font-size:12px;color:var(--text-muted);margin-left:4px;">${count}</span>`
           : '<span style="color: var(--text-muted); font-size:12px;">无评价</span>';
+        // Task 7: PENDING 行显示 通过 / 拒绝 审批按钮
+        const status = String(m.status || "").toUpperCase();
+        const approvalBtns = status === "PENDING"
+          ? `<button class="primary-btn approve-btn btn-sm" data-id="${m.id}" style="padding:4px 10px;font-size:12px;margin-right:4px;">通过</button>` +
+            `<button class="delete-btn reject-btn btn-sm" data-id="${m.id}" style="margin-right:4px;">拒绝</button>`
+          : "";
         return `<tr data-id="${m.id}">
  <td><strong>${escapeHtml(m.name)}</strong></td>
  <td>${statusBadge}</td>
@@ -204,6 +210,7 @@
  <td>${annCell}<button class="secondary-btn ann-btn btn-sm" data-id="${m.id}" style="padding:2px 8px;font-size:11px;margin-left:6px;">${hasAnn ? "编辑" : "发布"}</button></td>
  <td>${ratingCell}<button class="secondary-btn reviews-btn btn-sm" data-id="${m.id}" style="padding:2px 8px;font-size:11px;margin-left:6px;">管理</button></td>
  <td>
+ ${approvalBtns}
  <button class="secondary-btn tag-edit-row-btn btn-sm" data-id="${m.id}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑标签</button>
  <button class="secondary-btn edit-btn" data-id="${m.id}" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
  <button class="delete-btn del-btn btn-sm" data-id="${m.id}">下架</button>
@@ -225,6 +232,31 @@
         openEdit(parseInt(btn.getAttribute("data-id"))),
       );
     });
+    // Task 7: PENDING 行审批按钮
+    tableContainer.querySelectorAll(".approve-btn").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("确认通过该技能?")) return;
+        try {
+          await MarketAdmin.approve("SKILL", parseInt(btn.getAttribute("data-id")));
+          showToast("已通过", "success");
+          await loadList();
+        } catch (e) {
+          alert("通过失败: " + e.message);
+        }
+      }));
+    tableContainer.querySelectorAll(".reject-btn").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const comment = prompt("拒绝理由(必填):");
+        if (comment === null) return;
+        if (!comment.trim()) { alert("拒绝理由不能为空"); return; }
+        try {
+          await MarketAdmin.reject("SKILL", parseInt(btn.getAttribute("data-id")), comment);
+          showToast("已拒绝", "success");
+          await loadList();
+        } catch (e) {
+          alert("拒绝失败: " + e.message);
+        }
+      }));
     tableContainer.querySelectorAll(".del-btn").forEach((btn) => {
       btn.addEventListener("click", () =>
         deleteSkill(parseInt(btn.getAttribute("data-id"))),
@@ -477,6 +509,11 @@
     document.getElementById("es-name").disabled = true; // 编辑模式：name 不能改（PK 关联）
     document.getElementById("es-desc").value = m.description || "";
     document.getElementById("es-content").value = m.content || "";
+    // Task 7: 回填 category / featuredRank / official
+    document.getElementById("edit-category").value = m.category || "";
+    document.getElementById("edit-featured-rank").value =
+      m.featuredRank == null ? "" : String(m.featuredRank);
+    document.getElementById("edit-official").checked = !!m.isOfficial;
     document.getElementById("es-error").style.display = "none";
     document.getElementById("edit-skill-modal").style.display = "flex";
   }
@@ -495,11 +532,29 @@
       return;
     }
     if (!currentEdit) {
-      // UI 已去掉新建按钮，但作为防御性兜底，禁止 saveEdit 在没 currentEdit 时提交
-      showErr("控制台不再新建技能");
+      // 新建走工具栏「+ 新增技能」(MarketAdmin.form)，saveEdit 仅编辑;防御性兜底
+      showErr("请使用「+ 新增技能」按钮创建技能");
       return;
     }
-    const body = { name, description: desc, content, status: "APPROVED" };
+    // Task 7: category / official / rank 与 KB 编辑弹窗对齐;不再发 status
+    // （v2 PUT 不吃 status,状态只走 approve/reject）
+    const category = document.getElementById("edit-category").value.trim();
+    const rankText = document.getElementById("edit-featured-rank").value.trim();
+    let featuredRank = null;
+    if (rankText !== "") {
+      featuredRank = Number(rankText);
+      if (!Number.isInteger(featuredRank) || featuredRank < 0) {
+        showErr("精选排序必须是非负整数");
+        return;
+      }
+    }
+    const body = {
+      description: desc,
+      content,
+      category: category || null,
+      isOfficial: document.getElementById("edit-official").checked,
+      featuredRank,
+    };
     try {
       const r = await fetch(API.update(currentEdit.id), {
         method: "PUT",
@@ -547,7 +602,14 @@
   }
 
   // 事件
-  // 去掉 create-skill-btn 事件绑定（不再新建）
+  // Task 7: 恢复「+ 新增技能」按钮 — create 模式 POST 到 ADMIN_API.SKILL（createApproved → APPROVED）
+  document.getElementById("create-skill-btn").addEventListener("click", async () => {
+    const result = await MarketAdmin.form("SKILL", "create", null);
+    if (result) {
+      showToast("已新增", "success");
+      await loadList();
+    }
+  });
   document.getElementById("refresh-btn").addEventListener("click", loadList);
   document
     .getElementById("edit-skill-close")
