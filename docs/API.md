@@ -1399,14 +1399,15 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
 The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Skill Management](#6-skill-management) for the database-driven flow. 6 system skills are seeded on first launch.
 
-### 10.5 JVector Configuration
+### 10.5 Vector Store Configuration (H2-backed JVector)
 
 | Property | Type | Default | Description |
 |-------------------------------------------------|--------|------------------------|------------------------------|
-| `spring.ai.loom.agent.jvector.indexPath` | string | `.local/jvector-index` | Vector index storage path |
 | `spring.ai.loom.agent.jvector.m` | int | `16` | HNSW graph parameter M |
 | `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | ef parameter at build time |
 | `spring.ai.loom.agent.jvector.efSearch` | int | `10` | ef parameter at search time |
+
+> Persistence: vectors live in the H2 table `loom_vector_store` (embedding BLOB, little-endian float32) and are hydrated into the in-memory JVector HNSW graph on `ApplicationReadyEvent` — no boot-time re-embedding. The legacy `~/.loom/jvector-index/` json files are retired. Changing the embedding model invalidates stored vectors (dim-guarded rows are skipped with a WARN); wipe the table and re-upload knowledge documents.
 
 ### 10.6 Authentication Configuration
 

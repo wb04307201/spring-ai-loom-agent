@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Module | Purpose |
 |--------|---------|
-| `spring-ai-loom-agent` | Core library — chat, knowledge base, file, MCP, skill (market + role auth), RBAC (user/role/mcp), user interfaces + default implementations, JVector vector store, H2 schema, static frontend resources |
+| `spring-ai-loom-agent` | Core library — chat, knowledge base, file, MCP, skill (market + role auth), RBAC (user/role/mcp), user interfaces + default implementations, H2-backed JVector vector store (loom_vector_store), H2 schema, static frontend resources |
 | `spring-ai-loom-agent-spring-boot-autoconfigure` | `LoomAgentConfiguration` with 7 nested static `@Configuration` classes (Infrastructure, Chat, Rag, Mcp, Tool, Storage, Web) — `@AutoConfiguration` with `@ConditionalOnMissingBean` on all beans for full replaceability |
 | `spring-ai-loom-agent-spring-boot-starter` | Empty JAR that depends on autoconfigure — the one dependency users add |
 | `spring-ai-loom-agent-test` | Test application with `application.yml` — run locally to verify changes |
@@ -99,7 +99,7 @@ Organized into 7 nested static `@Configuration` classes:
 |-------------|----------------|
 | `InfrastructureConfiguration` | Properties binding, Flyway, ChatMemory, BeanFactoryPostProcessors |
 | `ChatConfiguration` | ChatClient, IChat, SseController |
-| `RagConfiguration` | VectorStore (JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
+| `RagConfiguration` | VectorStore (H2-backed JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
 | `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **9 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
@@ -215,11 +215,11 @@ Organized into 7 nested static `@Configuration` classes:
 ### Data Layer
 
 - **Schema** (单一 V1.0 一站式 init,**项目只跑全新库**;任何已有 V1/V2 历史部署必须 `flyway baseline` 或 `rm -rf ~/.loom/datasource` 重跑):
- - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool / market_skill_archive / loom_market_knowledge_archive)+ RBAC 3 张子表 CASCADE FK(user_role.role_code → role.code, role_mcp.role_code → role.code, role_tool.role_code → role.code, user_role.username → user_info.username)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号。`*_archive` 两表(M4/#4 审批流)存 REJECTED 重投时归档的旧行(保留原 id + 拒绝评论/审核人/时间)
+ - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool / market_skill_archive / loom_market_knowledge_archive / loom_vector_store)+ RBAC 3 张子表 CASCADE FK(user_role.role_code → role.code, role_mcp.role_code → role.code, role_tool.role_code → role.code, user_role.username → user_info.username)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号。`*_archive` 两表(M4/#4 审批流)存 REJECTED 重投时归档的旧行(保留原 id + 拒绝评论/审核人/时间)
  - **保持稳定,不再拆分增量**:所有 schema 演进(loom_scheduled_task / loom_schedule_execution / loom_subtask_history / user_conversation 三列 / SPRING_AI_CHAT_MEMORY.conversation_id 加宽 / loom_market_knowledge / loom_user_knowledge / loom_role_knowledge / loom_file_content / loom_tool_call_log / loom_chat_usage / loom_chat_reasoning / tool_call_log + chat_token_usage 替换等)都已合并入 V1.0 单一文件;V12~V17 历史也已 inline 进 V1.0
  - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据:12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill。test 模块独立 Flyway,与库主 schema 物理隔离(`./target/test-ds`)
  - Flyway 在同实例按版本号顺序执行:`V1.0__init.sql`(库)→ `V1.1__init_app_data.sql`(业务)
- - **升级注意**(已收紧):任何已有 V1/V2.x 历史数据库 → 必须清空后重跑(`rm -rf ~/.loom/datasource`),或 `flyway baseline` 后手动迁移数据。本项目**不接受在已运行实例上增量升级 schema**
+ - **升级注意**(已收紧):任何已有 V1/V2.x 历史数据库 → 必须清空后重跑(`rm -rf ~/.loom/datasource`),或 `flyway baseline` 后手动迁移数据。本项目**不接受在已运行实例上增量升级 schema**。#3 起向量(embedding BLOB)也存 H2 表 loom_vector_store —— 清库重跑后知识库文档需重传(一次性 re-embed);更换 embedding 模型同理(dim 守卫会跳过旧维度行并 WARN)。
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
 - **Flyway table**: `flyway_schema_history`（Spring Boot 默认，库不覆盖）
 
@@ -232,7 +232,6 @@ All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wip
 | `~/.loom/file/{username}/` | 用户上传的文件（聊天附件、文件管理 UI 列出）| `fileBasePath` 默认 `${user.home}/.loom/file` |
 | `~/.loom/knowledge/{username}/{knowledgeId}/` | 知识库文档原文件 | `knowledgeBasePath` 默认 `${user.home}/.loom/knowledge` |
 | `~/.loom/datasource/` | H2 文件数据库 `db.mv.db` | `datasourceDir` 默认 `${user.home}/.loom/datasource`（yml 通过 `spring.datasource.url` 拼装）|
-| `~/.loom/jvector-index/` | HNSW 向量索引 | `jvector.indexPath` 默认 `${user.home}/.loom/jvector-index` |
 | `~/.loom/compile-deploy-workspaces/{username}/` | 编译部署工具临时 workspace（带 username/timestamp 前缀；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir` |
 
 **重名处理**: 同名文件自动追加序号，如 `file.txt` → `file(1).txt` → `file(2).txt`
@@ -244,7 +243,7 @@ All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wip
 
 All under `spring.ai.loom.agent`:
 - `rag` — similarity threshold, top-k, prompt templates
-- `jvector` — index path (默认 `${user.home}/.loom/jvector-index`)、HNSW params (m, efConstruction, efSearch)
+- `jvector` — HNSW params (m, efConstruction, efSearch);持久化在 H2 表 `loom_vector_store`(#3 起,原 indexPath/json 目录已退役)
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
 - ~~`skills`~~ — **no longer read from yml**. Skill data lives in the database now (tables `market_skill` / `user_skill` / `role_skill`); 6 system skills are seeded by the init migration. Manage via the admin console → **Skill Market** page.
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
@@ -267,7 +266,7 @@ Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring
 - `style.css` — styling
 - Uses marked.js for Markdown rendering (sanitized by a tiny inline `markdown-renderer.js` allowlist), and a minimal inline SSE parser in `app.js`
 
-**文件管理模态框**: 显示 `{fileBasePath}/{username}/`（例如 `C:\Users\<you>\.loom\file\<username>\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/jvector-index/`、`~/.loom/datasource/`、`~/.loom/compile-deploy-workspaces/` 这些工具/系统目录。
+**文件管理模态框**: 显示 `{fileBasePath}/{username}/`（例如 `C:\Users\<you>\.loom\file\<username>\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/datasource/`、`~/.loom/compile-deploy-workspaces/` 这些工具/系统目录。
 
 ## Extension Points
 
@@ -279,7 +278,7 @@ To customize behavior, replace any `@Bean` by providing your own implementation:
 public IChat customChat(...) { return new MyChat(...); }
 ```
 
-To swap the vector store, simply add a Spring AI vector store starter dependency — `JVectorStore` won't be created due to `@ConditionalOnMissingBean(VectorStore.class)`.
+To swap the vector store, simply add a Spring AI vector store starter dependency — `H2JVectorStore` won't be created due to `@ConditionalOnMissingBean(VectorStore.class)`.
 
 `IGitTool` uses both `@ConditionalOnProperty` (`matchIfMissing=false`; set `git.enabled=true` to enable) and `@ConditionalOnMissingBean` — users can replace it with a custom implementation (e.g., CLI-based git) while keeping the feature on. Disabled by default; `ICompileAndDeployTool` is the supported end-to-end entry point.
 

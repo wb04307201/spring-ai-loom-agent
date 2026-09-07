@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 1 | #4 控制台 CRUD + 复活审批流 | ✅ 完成(2026-09-07,10 Task 全部落地) | 中-大 |
 | 2 | #2 文档清理(删 CHANGELOG + md 对齐) | ✅ 完成(2026-09-07) | 小 |
-| 3 | #3 H2 向量存储(自研 H2VectorStore) | 🔵 | 大 |
+| 3 | #3 H2 向量存储(H2JVectorStore) | ✅ 完成(2026-09-07) | 大 |
 | 4 | #1 AskUser 交互工具 | 🔵 | 大 |
 | 末 | 概览图重生成(#1 工具组 8→9 + #3 JVector→H2 会让图失真;全部代码完成后一次性重生成,**需提醒用户**) | 🔵 | 小 |
 
@@ -139,7 +139,7 @@
 
 ---
 
-## #3 H2 向量存储(🔵)
+## #3 H2 向量存储(✅ 完成 2026-09-07)
 
 ### 调研结论(子 agent 完整报告要点)
 
@@ -157,6 +157,14 @@
 - 备选 C:换 MariaDB(官方 starter 省事)——违背"内嵌 H2 零运维"定位,不推荐。
 - 风险点:1024 维 × N 文档的 BLOB 体积;HNSW 重建时间(从 DB 读比 re-embed 快几个数量级,可接受);`~/.loom/jvector-index/` 目录退役 + 一次性迁移工具(旧 docs.json → H2,re-embed 最后一次)或直接全新库政策(项目本来就"只跑全新库")。
 - 影响概览图:Row B 技术栈胶囊 **JVector → H2 Vector**(或 JVector+H2),README/CLAUDE 相应段落 → **重生成图,提醒用户**。
+
+### 落地记录(2026-09-07)
+
+- **最终形态**:方案 A 落地为 `H2JVectorStore`(H2 表 `loom_vector_store` 持久化 embedding BLOB little-endian float32 + 内存 JVector HNSW 索引;`H2VectorStoreReloader` 在 `ApplicationReadyEvent` hydrate,消灭启动 re-embed)。表无 username/knowledge_id 列(按 spec D1 裁决:仅 6 组件 `document_id/content/metadata_json/embedding/dim/score`,隔离仍走 metadata 后过滤)。旧 `JVectorStore` 类 + `~/.loom/jvector-index/` json 目录退役;`jvector.indexPath` 属性删除,节名 `spring.ai.loom.agent.jvector.*`(m/efConstruction/efSearch)保留。全新库政策,无迁移工具(spec D3)。
+- **Commit**:T1 `14cb627`(VectorRowCodec + FakeEmbeddingModel)/ T2 `7fd362e`(loom_vector_store 表 + H2JVectorStore)/ T3 `26b7fc6`(H2VectorStoreReloader + RagConfiguration 接线 + 删 indexPath)/ T4 `8a87910`(删旧 JVectorStore 类 + H2VectorStoreIT)/ T5 文档同步 + 回归门(本 commit)。
+- **与 spec 偏差**:无(plan 预检时补充了 hydrate 原子交换细节 — decode 先行、clear+putAll,防毒行导致 doc/id/vector 错位,已按此实现)。
+- **回归门**(2026-09-07,三段式全绿):库单元 `mvn test -pl spring-ai-loom-agent` → 151 run, 0 failures(含新增 VectorRowCodecTest 5 + H2JVectorStoreTest 9 + H2VectorStoreReloaderTest 3);`mvn clean install`(3 库模块,-DskipTests)→ BUILD SUCCESS;test 模块单元 → **382 run, 0 failures**(383 基线 − 1,PropertiesDefaultsTest 删 jvectorIndexPath 用例);清库后 IT gate → **123 run, 0 failures, 3 skipped**(120 基线 + H2VectorStoreIT 3;skip 为既有 Maven 工具 IT 条件跳过)。
+- **概览图(spec §8 结论)**:**不重生成** —— 8 技术栈胶囊仍全准(JVector 仍是 HNSW 引擎名、H2 本就是胶囊);`.claude/skills/project-overview-image` 不动。下一个重生成触发源是 #1(工具组 9→10)。
 
 ---
 

@@ -27,7 +27,7 @@
 > **Advanced**: 🧩 Sub-tasks · ⏰ Scheduled tasks · 🖼 Multimodal — one dependency, batteries included.
 
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
-- **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
+- **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in H2-backed vector store (JVector HNSW in-memory index; swap in any Spring AI vector store)
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
 - **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted); approval flow (submit → PENDING → admin approve/reject, rejected re-submits archive the old row); pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` is set; admin can create (lands APPROVED immediately) / edit / approve / reject; no version field. Skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts

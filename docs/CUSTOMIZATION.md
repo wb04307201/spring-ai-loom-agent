@@ -15,7 +15,7 @@ spring-ai-loom-agent/
 │ ├── skill/ ISkillStorage # Skill storage
 │ ├── file/ IFile / IUpload # File storage & upload
 │ ├── user/ IUser / AuthenticationFilter # Auth & filter
-│ ├── vectorstore/ JVectorStore # Default vector store
+│ ├── vectorstore/ H2JVectorStore # Default vector store (H2-backed)
 │ ├── tool/ IEmbedTool (marker) # Aggregate tool interface
 │ │ ├── time/ ITimeTool / DefaultTimeTool # Time tools
 │ │ ├── skill/ ISkillTool / DefaultSkillTool # Skill tools
@@ -64,11 +64,12 @@ All properties are prefixed with `spring.ai.loom.agent`.
 | `rag.similarityThreshold` | double | `0.0` | Vector retrieval similarity threshold; documents below are filtered |
 | `rag.topK` | int | `4` | Number of documents to retrieve |
 
-### 1.3 JVector Vector Store Configuration (`jvector.*`)
+### 1.3 Vector Store Configuration (`jvector.*`, H2-backed)
+
+> Persistence: vectors live in the H2 table `loom_vector_store` and are hydrated into the in-memory JVector HNSW graph on `ApplicationReadyEvent` — no boot-time re-embedding.
 
 | Property | Type | Default | Description |
 |----------------------------|--------|------------------------|-----------------------------------------------------------------------------|
-| `jvector.indexPath` | String | `.local/jvector-index` | Path for vector index persistence |
 | `jvector.m` | int | `16` | HNSW graph parameter M (controls branching factor; higher = better quality but slower build) |
 | `jvector.efConstruction` | int | `100` | HNSW build-time search width (affects build quality and speed) |
 | `jvector.efSearch` | int | `10` | HNSW query-time search width (higher = more accurate but slower) |
@@ -471,11 +472,11 @@ Spring AI supports multiple persistence backends via auto-configuration based on
 
 ### 3.4 VectorStore
 
-JVector is the fallback. Add any Spring AI VectorStore Starter to auto-replace it:
+H2-backed JVector is the fallback. Add any Spring AI VectorStore Starter to auto-replace it:
 
 | Vector Store | Dependency Starter | Description |
 |-----------------------------|---------------------------------|------------------------------|
-| **JVector (fallback)** | Built-in | Local file persistence, zero external dependencies |
+| **H2-backed JVector (fallback)** | Built-in | H2 table persistence (loom_vector_store), in-memory HNSW, zero external dependencies |
 | Qdrant | `spring-ai-qdrant-store` | Used in the test module |
 | Milvus | `spring-ai-milvus-store` | Commonly used in production |
 | Redis | `spring-ai-redis-store` | Redis Vector |
@@ -493,7 +494,7 @@ JVector is the fallback. Add any Spring AI VectorStore Starter to auto-replace i
 </dependency>
 ```
 
-`JVectorStore` is skipped automatically — no code needed.
+`H2JVectorStore` is skipped automatically — no code needed.
 
 ### 3.5 ChatModel (AI Model Provider)
 
@@ -661,7 +662,7 @@ Place same-named static resources in your own project to override the defaults, 
 | `spring.ai.mcp.client.enabled=false` | application.yml | MCP client auto-configuration disabled (prevents startup failures if MCP servers are unavailable) |
 | `auth.enabled=false` | application.yml | Authentication disabled; `AuthenticationFilter` passes all requests through |
 | No `VectorStore` bean provided | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, `loomAgentFileRouter`, and `loomAgentKnowledgeRouter` are not created; knowledge base and file upload features unavailable |
-| No `EmbeddingModel` bean provided | Do not add EmbeddingModel Starter | `JVectorStore` is not created; vector storage unavailable |
+| No `EmbeddingModel` bean provided | Do not add EmbeddingModel Starter | `H2JVectorStore` is not created; vector storage unavailable |
 | Custom bean of the same type | Java `@Bean` configuration | The corresponding `@ConditionalOnMissingBean` bean will not be created |
 | `spring.ai.loom.agent.git.enabled=true` | application.yml | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.6.0); without this, no Git tool methods are available to the LLM |
 | `maven-invoker` on classpath | Provided dependency | Enables `IMavenTool` bean creation; without it, Maven tool is not available |

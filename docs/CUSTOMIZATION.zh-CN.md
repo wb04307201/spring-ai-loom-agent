@@ -15,7 +15,7 @@ spring-ai-loom-agent/
 │ ├── skill/ ISkillStorage # 技能存储
 │ ├── file/ IFile / IUpload # 文件存储、上传与下载
 │ ├── user/ IUser / AuthenticationFilter # 认证鉴权
-│ ├── vectorstore/ JVectorStore # 默认向量存储
+│ ├── vectorstore/ H2JVectorStore # 默认向量存储(H2 持久化)
 │ ├── tool/ IEmbedTool (marker) # 聚合工具接口
 │ │ ├── time/ ITimeTool / DefaultTimeTool # 时间工具
 │ │ ├── skill/ ISkillTool / DefaultSkillTool # 技能工具
@@ -64,11 +64,12 @@ spring-ai-loom-agent/
 | `rag.similarityThreshold` | double | `0.0` | 向量检索相似度阈值，低于此值的文档将被过滤 |
 | `rag.topK` | int | `4` | 检索返回的文档数量 |
 
-### 1.3 JVector 向量库配置 (`jvector.*`)
+### 1.3 向量库配置 (`jvector.*`, H2 持久化)
+
+> 持久化:向量存 H2 表 `loom_vector_store`,`ApplicationReadyEvent` 时 hydrate 进内存 JVector HNSW 图 —— 启动不再 re-embed。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |--------------------------|--------|------------------------|----------------------------------|
-| `jvector.indexPath` | String | `.local/jvector-index` | 向量索引持久化路径 |
 | `jvector.m` | int | `16` | HNSW 图参数 M（控制分支因子，越大索引质量越高但构建越慢） |
 | `jvector.efConstruction` | int | `100` | HNSW 构建时的搜索宽度（影响构建质量和速度） |
 | `jvector.efSearch` | int | `10` | HNSW 搜索时的搜索宽度（越大搜索越精确但越慢） |
@@ -464,11 +465,11 @@ Spring AI 支持多种持久化后端，通过引入对应依赖自动配置：
 
 ### 3.4 VectorStore（向量存储）
 
-JVector 是项目的回退方案。引入任何 Spring AI VectorStore Starter 即可自动替换：
+H2 持久化 JVector 是项目的回退方案。引入任何 Spring AI VectorStore Starter 即可自动替换：
 
 | 向量库 | 依赖 Starter | 说明 |
 |-------------------|---------------------------------|---------------|
-| **JVector（默认回退）** | 内置 | 本地文件持久化，零外部依赖 |
+| **H2 持久化 JVector（默认回退）** | 内置 | H2 表持久化(loom_vector_store)+ 内存 HNSW，零外部依赖 |
 | Qdrant | `spring-ai-qdrant-store` | 测试模块使用 |
 | Milvus | `spring-ai-milvus-store` | 生产常用 |
 | Redis | `spring-ai-redis-store` | Redis Vector |
@@ -486,7 +487,7 @@ JVector 是项目的回退方案。引入任何 Spring AI VectorStore Starter �
 </dependency>
 ```
 
-引入后 `JVectorStore` 将自动跳过，无需额外代码。
+引入后 `H2JVectorStore` 将自动跳过，无需额外代码。
 
 ### 3.5 ChatModel（AI 模型提供商）
 
@@ -654,7 +655,7 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | `spring.ai.mcp.client.enabled=false`| application.yml | 禁用 MCP 客户端自动配置（当 MCP 服务器不可用时可避免启动失败） |
 | `auth.enabled=false` | application.yml | 禁用鉴权；`AuthenticationFilter` 放行所有请求 |
 | 不提供 `VectorStore` Bean | 不引入任何 VectorStore Starter | 不会创建 `IDocumentRead`、`RetrievalAugmentationAdvisor`、`loomAgentFileRouter`、`loomAgentKnowledgeRouter`，知识库和文件上传功能不可用 |
-| 不提供 `EmbeddingModel` Bean | 不引入 EmbeddingModel Starter | 不会创建 `JVectorStore`，向量存储不可用 |
+| 不提供 `EmbeddingModel` Bean | 不引入 EmbeddingModel Starter | 不会创建 `H2JVectorStore`，向量存储不可用 |
 | 自定义同类型 Bean | Java `@Bean` 配置 | 对应的 `@ConditionalOnMissingBean` Bean 不会被创建 |
 | `spring.ai.loom.agent.git.enabled=true` | application.yml | 创建 `IGitTool` Bean（`DefaultGitTool`，Eclipse JGit 7.6.0）；未配置时 Git 工具不可用 |
 | classpath 上有 `maven-invoker` | 已提供依赖 | 启用 `IMavenTool` Bean 创建；没有时 Maven 工具不可用 |

@@ -1590,14 +1590,15 @@ GET /spring/ai/chat/loom/mcp
 
 `spring.ai.loom.agent.skills[]` yml 段**不再读取**。参见 [§6 技能管理](#6-技能管理) 了解新的数据库流程。首次启动时会 seed 6 个 system skill。
 
-### 11.5 JVector 配置
+### 11.5 向量存储配置(H2 持久化 JVector)
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.jvector.indexPath` | string | `.local/jvector-index` | 向量索引存储路径 |
 | `spring.ai.loom.agent.jvector.m` | int | `16` | HNSW 图参数 M |
 | `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | 构建时的 ef 参数 |
 | `spring.ai.loom.agent.jvector.efSearch` | int | `10` | 搜索时的 ef 参数 |
+
+> 持久化:向量存 H2 表 `loom_vector_store`(embedding BLOB,little-endian float32),`ApplicationReadyEvent` 时 hydrate 进内存 JVector HNSW 图 —— 启动不再 re-embed。旧 `~/.loom/jvector-index/` json 文件已退役。更换 embedding 模型会使存量向量失效(dim 守卫跳过旧行并 WARN);需清表并重传知识库文档。
 
 ### 11.6 鉴权配置
 
