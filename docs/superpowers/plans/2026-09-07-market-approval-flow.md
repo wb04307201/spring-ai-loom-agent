@@ -1184,9 +1184,11 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ### Task 10: 文档同步(spec §9 小切口)+ roadmap 状态更新
 
 **Files:**
-- Modify: `docs/API.md`(L800-805)、`docs/API.zh-CN.md`(L489-590)
-- Modify: `docs/CUSTOMIZATION.md`(L393)、`docs/CUSTOMIZATION.zh-CN.md`(对应行)
-- Modify: `CLAUDE.md`(ISkillStorage 行 + 数据层段落)
+- Modify: `docs/API.md`(L491/548/575-576/586/778/790/800/804-805)、`docs/API.zh-CN.md`(L489/546/589-590/593/796/816/820-821)
+- Modify: `docs/CUSTOMIZATION.md`(L393)、`docs/CUSTOMIZATION.zh-CN.md`(L388)
+- Modify: `CLAUDE.md`(L74 ISkillStorage 行 + 数据层段落)
+- Modify: `README.md`(L32/L253)、`README.zh-CN.md`(对应行)
+- Modify: `spring-ai-loom-agent/.../knowledge/IKnowledgeMarketService.java`(javadoc L23/40/46/60)、`spring-ai-loom-agent/.../skill/ISkillMarketService.java`(javadoc L36/84)— T4 carry-forward
 - Modify: `docs/superpowers/roadmap-2026-09-four-items.md`(#4 状态 🔵/🟡→✅ + 落地记录)
 
 **Interfaces:** 纯文档,无代码依赖。
@@ -1195,9 +1197,10 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 `docs/API.md` L800-805 + `docs/API.zh-CN.md` L489-590:把"无审批流/提交即上架/approve 端点已移除/pending 已移除"全部反转 → 审批流存在:submit→PENDING、`POST /admin/market-*/{id}/approve`、`POST .../reject`(comment 必填)、pull 仅 APPROVED、admin 新增直发 APPROVED、REJECTED 重投归档(说明 `*_archive` 表)。端点表格补回 approve/reject 行。
 
-- [ ] **Step 2: CUSTOMIZATION + CLAUDE.md**
+- [ ] **Step 2: CUSTOMIZATION + CLAUDE.md + README(controller 预扫描补全清单)**
 
-`docs/CUSTOMIZATION.md` L393 "no approval flow" → "approval flow: submit→PENDING, admin approve/reject"。`CLAUDE.md`:ISkillStorage 行(L~95)去掉"no approval flow — submit is direct APPROVED";数据层段落(L~)的表清单补 `market_skill_archive` / `loom_market_knowledge_archive`;M3+/M4 段落若提"submit 直发 APPROVED"一并更新。
+`docs/CUSTOMIZATION.md` L393 "no approval flow" → "approval flow: submit→PENDING, admin approve/reject (comment required); REJECTED re-submit archives old row"。`CLAUDE.md`:ISkillStorage 行(L74)去掉"no approval flow — submit is direct APPROVED"改为审批流语义;数据层段落的表清单补 `market_skill_archive` / `loom_market_knowledge_archive`;M3+/M4 段落若提"submit 直发 APPROVED"一并更新;ISkillMarketService/IKnowledgeMarketService 相关行核对。**README 也在扫描命中(controller 核实,必须改)**:`README.md` L32("no approval flow (submit goes direct APPROVED)")+ L253("Submitted with status=APPROVED directly... UPSERT overwrites content + status")→ 翻转为 PENDING/审批/归档语义;`README.zh-CN.md` 对应行同步(grep 同款关键词定位)。`docs/CUSTOMIZATION.zh-CN.md` L388 的"四种状态"表述核对(DEPRECATED 状态实际不存在,顺手修为三态)。
+**库接口 javadoc(T4 carry-forward,ledger 记录)**:`IKnowledgeMarketService` L23("所有提交都是 APPROVED")/ L40("直接 APPROVED,无审批")/ L46 / L60("不再校验 APPROVED,提交即上架");`ISkillMarketService` L36("起无审批流")/ L84("起所有提交都是 APPROVED")→ 全部翻转为审批流语义(submit→PENDING、pull 仅 APPROVED、REJECTED 重投归档)。这些是活代码注释,必须与行为一致。
 
 - [ ] **Step 3: roadmap 状态更新**
 
@@ -1212,9 +1215,11 @@ grep -rniE "无审批流|提交即上架|no approval flow|direct APPROVED|去掉
 
 - [ ] **Step 5: Commit**
 
+javadoc-only 的接口文件改动后跑一次库编译确认无语法错(javadoc 改动理论无风险,但既然动了 main 源码就验一下):`mvn -q -pl spring-ai-loom-agent compile -Dgpg.skip=true` → SUCCESS。
+
 ```bash
-git add docs/API.md docs/API.zh-CN.md docs/CUSTOMIZATION.md docs/CUSTOMIZATION.zh-CN.md CLAUDE.md docs/superpowers/roadmap-2026-09-four-items.md
-git commit -m "docs(market): sync API/CUSTOMIZATION/CLAUDE to revived approval flow + roadmap #4 done (#4)
+git add docs/API.md docs/API.zh-CN.md docs/CUSTOMIZATION.md docs/CUSTOMIZATION.zh-CN.md CLAUDE.md README.md README.zh-CN.md spring-ai-loom-agent/src/main/java/cn/wubo/spring/ai/loom/agent/knowledge/IKnowledgeMarketService.java spring-ai-loom-agent/src/main/java/cn/wubo/spring/ai/loom/agent/skill/ISkillMarketService.java docs/superpowers/roadmap-2026-09-four-items.md
+git commit -m "docs(market): sync API/CUSTOMIZATION/CLAUDE/README + interface javadoc to revived approval flow; roadmap #4 done (#4)
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
