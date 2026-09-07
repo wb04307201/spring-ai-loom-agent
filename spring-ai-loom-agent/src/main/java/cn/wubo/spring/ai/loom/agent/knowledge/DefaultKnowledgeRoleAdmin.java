@@ -149,6 +149,8 @@ public class DefaultKnowledgeRoleAdmin implements IKnowledgeRoleAdmin {
                 null,
                 null,
                 null,
-                null);
+                null,
+                // SELECT mk.* includes the category column — read it back (gate fix)
+                rs.getString("category"));
     }
 }

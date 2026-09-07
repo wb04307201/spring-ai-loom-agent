@@ -226,4 +226,22 @@ class MarketApprovalFlowIT {
             "SELECT COUNT(*) FROM loom_user_knowledge WHERE market_knowledge_id=?", Integer.class, id);
         assertEquals(0, remaining);
     }
+
+    @Test
+    void skillCategoryRoundTripsThroughDto() {
+        String cat = "cat-rt-" + System.nanoTime();
+        long id = skillSvc.createApproved("admin1", new MarketCreateRequest(
+            "cat-rt-" + System.nanoTime(), "d", "c", cat)).id();
+        assertEquals(cat, skillSvc.getById(id).category(),
+            "DTO must carry category (gate fix: was write-only)");
+    }
+
+    @Test
+    void kbCategoryRoundTripsThroughDto() {
+        String cat = "kbcat-rt-" + System.nanoTime();
+        String id = kbSvc.createApproved("admin1", new MarketCreateRequest(
+            "kbcat-rt-" + System.nanoTime(), "d", null, cat)).id();
+        assertEquals(cat, kbSvc.getById(id).category(),
+            "KB DTO must carry category");
+    }
 }

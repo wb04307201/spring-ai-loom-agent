@@ -46,7 +46,9 @@ public class DefaultSkillRoleAdmin implements ISkillRoleAdmin {
                         null,
                         null,
                         null,
-                        null),
+                        null,
+                        // SELECT m.* includes the category column — read it back (gate fix)
+                        rs.getString("category")),
                 roleCode);
     }
 

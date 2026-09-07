@@ -44,7 +44,8 @@ public record MarketKnowledgeRecord(
         Double avgRating,
         Long ratingCount,
         Boolean isOfficial,
-        Integer featuredRank
+        Integer featuredRank,
+        String category
 ) {
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_APPROVED = "APPROVED";
@@ -61,8 +62,9 @@ public record MarketKnowledgeRecord(
      *
      * <p>M4 T3 — {@code avg_rating} / {@code rating_count}(review-aggregate LEFT JOIN
      * 列别名)与 {@code is_official} / {@code featured_rank}({@code m.*} 列)经
-     * findColumn 探针读取,列缺失时落 null/0 默认值;{@code category} /
-     * {@code created_by_kind} 列仍不读取(record 上没有对应字段)。
+     * findColumn 探针读取,列缺失时落 null/0 默认值;{@code category} 同样经
+     * findColumn 探针读取(gate fix:此前列存在但 DTO 从不回读,admin UI 分类列/
+     * 编辑框成 write-only);{@code created_by_kind} 列仍不读取(record 上没有对应字段)。
      *
      * @param rs 已定位到当前行的 {@link ResultSet}
      * @return 填充后的 {@link MarketKnowledgeRecord} 实例(tags 字段为 null,
@@ -110,7 +112,8 @@ public record MarketKnowledgeRecord(
                 avgRating,
                 ratingCount,
                 officialPresent && rs.getBoolean("is_official"),
-                rankPresent ? rs.getInt("featured_rank") : 0);
+                rankPresent ? rs.getInt("featured_rank") : 0,
+                hasColumn(rs, "category") ? rs.getString("category") : null);
     }
 
     /** findColumn probe — true when the column label exists on this ResultSet. */
@@ -137,6 +140,6 @@ public record MarketKnowledgeRecord(
                 submittedAt, reviewedAt, reviewedBy, reviewComment,
                 announcementTitle, announcementBody,
                 newTags == null ? List.of() : List.copyOf(newTags),
-                avgRating, ratingCount, isOfficial, featuredRank);
+                avgRating, ratingCount, isOfficial, featuredRank, category);
     }
 }

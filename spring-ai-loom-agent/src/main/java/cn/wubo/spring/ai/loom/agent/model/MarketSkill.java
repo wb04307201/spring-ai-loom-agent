@@ -41,7 +41,8 @@ public record MarketSkill(
         Long ratingCount,
         Boolean isOfficial,
         Integer featuredRank,
-        java.util.List<String> tags
+        java.util.List<String> tags,
+        String category
 ) {
     /**
      * 标识常量
@@ -53,7 +54,9 @@ public record MarketSkill(
      * + M4 T3 的 4 个 rating/official 字段({@code avg_rating} / {@code rating_count} /
      * {@code is_official} / {@code featured_rank},均经 findColumn 探针 — 列缺失时
      * 落 null/0 默认值)。{@code tags} 恒为 null,由 {@link #withTags(java.util.List)}
-     * 后续填充(plan D7)。{@code category} / {@code created_by_kind} 列仍不读取。
+     * 后续填充(plan D7)。{@code category} 经 findColumn 探针读取
+     * (gate fix:此前列存在但 DTO 从不回读,admin UI 分类列/编辑框成 write-only);
+     * {@code created_by_kind} 列仍不读取。
      *
      * <p>announcement 字段以 {@code announcement_title} / {@code announcement_body}
      * 列别名读出,SQL 由 listPaged 用 LEFT JOIN 提供;若无 announcement 行则返回 null。
@@ -103,7 +106,8 @@ public record MarketSkill(
                 ratingCount,
                 officialPresent && rs.getBoolean("is_official"),
                 rankPresent ? rs.getInt("featured_rank") : 0,
-                null
+                null,
+                hasColumn(rs, "category") ? rs.getString("category") : null
         );
     }
 
@@ -129,7 +133,8 @@ public record MarketSkill(
                 submittedAt, reviewedAt, reviewedBy, reviewComment,
                 announcementTitle, announcementBody,
                 avgRating, ratingCount, isOfficial, featuredRank,
-                newTags == null ? java.util.List.of() : java.util.List.copyOf(newTags));
+                newTags == null ? java.util.List.of() : java.util.List.copyOf(newTags),
+                category);
     }
 
     /**
@@ -146,6 +151,6 @@ public record MarketSkill(
                 id, name, description, content, author, status,
                 submittedAt, reviewedAt, reviewedBy, reviewComment,
                 newTitle, newBody,
-                avgRating, ratingCount, isOfficial, featuredRank, tags);
+                avgRating, ratingCount, isOfficial, featuredRank, tags, category);
     }
 }
