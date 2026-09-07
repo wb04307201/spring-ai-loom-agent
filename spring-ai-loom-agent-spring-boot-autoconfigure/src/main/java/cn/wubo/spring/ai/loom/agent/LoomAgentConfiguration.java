@@ -40,7 +40,8 @@ import cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.DefaultTimeTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
 import cn.wubo.spring.ai.loom.agent.user.*;
-import cn.wubo.spring.ai.loom.agent.vectorstore.JVectorStore;
+import cn.wubo.spring.ai.loom.agent.vectorstore.H2JVectorStore;
+import cn.wubo.spring.ai.loom.agent.vectorstore.H2VectorStoreReloader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.client.McpSyncClient;
@@ -702,14 +703,30 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnMissingBean(VectorStore.class)
         @Bean
-        public VectorStore jVectorStore(EmbeddingModel embeddingModel, LoomAgentProperties properties) {
+        public VectorStore h2VectorStore(EmbeddingModel embeddingModel,
+                                         org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                                         org.springframework.transaction.PlatformTransactionManager transactionManager,
+                                         LoomAgentProperties properties) {
             LoomAgentProperties.JVectorProperties jv = properties.getJvector();
-            return JVectorStore.builder(embeddingModel)
-                    .indexPath(jv.getIndexPath())
+            return H2JVectorStore.builder(embeddingModel)
+                    .jdbcTemplate(jdbcTemplate)
+                    .transactionTemplate(new org.springframework.transaction.support.TransactionTemplate(transactionManager))
                     .m(jv.getM())
                     .efConstruction(jv.getEfConstruction())
                     .efSearch(jv.getEfSearch())
                     .build();
+        }
+
+        /**
+         * #3 spec D7:ApplicationReadyEvent 时从 loom_vector_store hydrate 内存 HNSW 图。
+         * ObjectProvider + reloader 内 instanceof 短路:用户替换 VectorStore 时自动失效。
+         */
+        @ConditionalOnBean(VectorStore.class)
+        @Bean
+        public H2VectorStoreReloader h2VectorStoreReloader(
+                org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+                org.springframework.beans.factory.ObjectProvider<VectorStore> vectorStoreProvider) {
+            return new H2VectorStoreReloader(jdbcTemplate, vectorStoreProvider);
         }
 
         @ConditionalOnBean(VectorStore.class)

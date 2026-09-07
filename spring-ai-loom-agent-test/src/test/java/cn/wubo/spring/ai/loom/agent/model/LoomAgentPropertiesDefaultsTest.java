@@ -42,15 +42,6 @@ class LoomAgentPropertiesDefaultsTest {
     }
 
     @Test
-    void jvectorIndexPath_defaultsUnderUserHome_dot_loom() {
-        LoomAgentProperties p = new LoomAgentProperties();
-        assertThat(p.getJvector().getIndexPath())
-                .startsWith(System.getProperty("user.home"))
-                .contains(".loom").contains("jvector-index")
-                .doesNotContain(".local");
-    }
-
-    @Test
     void loomHome_isExposedAndAbsolute() {
         LoomAgentProperties p = new LoomAgentProperties();
         // Compare via Path so OS-specific separators don't matter (Windows
@@ -71,8 +62,7 @@ class LoomAgentPropertiesDefaultsTest {
         for (String path : new String[]{
                 p.getFileBasePath(),
                 p.getKnowledgeBasePath(),
-                p.getDatasourceDir(),
-                p.getJvector().getIndexPath()
+                p.getDatasourceDir()
         }) {
             assertThat(path)
                     .as("path %s must live under loomHome %s", path, loomHome)

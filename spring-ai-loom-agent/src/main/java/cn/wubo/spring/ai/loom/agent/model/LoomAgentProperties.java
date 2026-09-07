@@ -106,12 +106,9 @@ public class LoomAgentProperties {
  @Data
  public static class JVectorProperties {
  /**
- * HNSW index directory. Defaulted to an absolute path under
- * {@code ~/.loom/jvector-index/} so the vector-store is owned by
- * the user regardless of cwd. Override via
- * {@code spring.ai.loom-agent.jvector.index-path} in yml.
+ * JVector HNSW 引擎参数。持久化已迁到 H2 表 loom_vector_store(#3),
+ * 不再有磁盘索引目录;旧 indexPath 属性已删除,yml 里的残留键被 binder 静默忽略。
  */
- private String indexPath = System.getProperty("user.home") + "/.loom/jvector-index";
  private int m = 16;
  private int efConstruction = 100;
  private int efSearch = 10;
