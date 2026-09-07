@@ -208,7 +208,7 @@ spring:
 
 | 表 | 作用 |
 |----------------|--------------------------------------------------------------------------------------------|
-| `market_skill` | 公共 **Skill 市场** — 每条只有 `(author, name)` 唯一约束（ 去掉 `version`）；admin 只能编辑 / 下架（ 不再新建） |
+| `market_skill` | 公共 **Skill 市场** — 每条只有 `(author, name)` 唯一约束（ 去掉 `version`）；admin 可新增（直发 `APPROVED`）/ 编辑 / 审批 / 下架 |
 | `user_skill` | 用户本地的 Skill 副本（`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`） |
 | `role_skill` | 角色 → market_skill 的授权关系（给某个角色下放哪些 Skill） |
 
@@ -251,7 +251,7 @@ spring:
 |--------------|-----------------------------------|---------------------------------|
 | 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 批量清理会话内容 |
 | 角色管理 | `admin/roles.html` | 业务角色 + 给角色授权 MCP / Skill |
-| Skill 市场 | `admin/market-skills.html` | 编辑 / 下架（：不再新建技能） |
+| Skill 市场 | `admin/market-skills.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架 Skill |
 | MCP 描述维护 | `admin/mcps.html` | 给 SDK MCP 工具维护中文描述 |
 | 用量统计 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
 | 返回主页 | `/` | 回到聊天首页 |

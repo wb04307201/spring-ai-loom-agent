@@ -816,7 +816,7 @@ Content-Type: application/json
 | DELETE | `/spring/ai/loom/admin/market-skills/{id}` | 级联删除 user_skill / role_skill 引用（这就是"下架"，拉取者失去该 skill） |
 | POST | `/admin/market-skills/{id}/approve` | admin 审批通过：`status=APPROVED`，落 `reviewed_at` / `reviewed_by` |
 | POST | `/admin/market-skills/{id}/reject` | admin 拒绝：`status=REJECTED`；请求体 `{"comment": "..."}` **必填**（空/缺失 → `400`）。作者重投 REJECTED 行时旧行归档到 `market_skill_archive`，新建 PENDING 行 |
-| _已移除_ | `/admin/market-skills/pending` | 由 `GET /admin/market-skills?status=PENDING` 取代（v2 中从未存在单独的 `/pending` 端点） |
+| _从未存在_ | `/admin/market-skills/pending` | 没有单独端点 —— 用 `GET /admin/market-skills?status=PENDING` 过滤 |
 | PUT | `/admin/market-skills/{id}/official` \| `/featured-rank` \| `/category` \| `/announcement` \| `/stats-reset` \| `/tags` | per-row admin 腿（官方标记 / 精选排序 / 分类 / 公告 / 统计重置 / tag 管理）；另有 `GET .../tags`、`DELETE .../announcement`、`DELETE .../reviews/{username}` |
 
 请求体：

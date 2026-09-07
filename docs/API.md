@@ -816,7 +816,7 @@ Otherwise INSERT a new row with `status=PENDING`. The author's `user_skill.marke
 | DELETE | `/spring/ai/loom/admin/market-skills/{id}` | Cascade-deletes from `user_skill` and `role_skill`（这就是"下架"，拉取者失去该 skill） |
 | POST | `/admin/market-skills/{id}/approve` | Admin approve: `status=APPROVED`, `reviewed_at` / `reviewed_by` set |
 | POST | `/admin/market-skills/{id}/reject` | Admin reject: `status=REJECTED`; body `{"comment": "..."}` **required** (empty/missing → `400`). Author re-submit of a REJECTED row archives it to `market_skill_archive` and creates a NEW PENDING row |
-| _removed_ | `/admin/market-skills/pending` | Replaced by `GET /admin/market-skills?status=PENDING` (never existed as a separate endpoint in v2) |
+| _never existed_ | `/admin/market-skills/pending` | No separate endpoint — use `GET /admin/market-skills?status=PENDING` |
 | PUT | `/admin/market-skills/{id}/official` \| `/featured-rank` \| `/category` \| `/announcement` \| `/stats-reset` \| `/tags` | Per-row admin legs (official flag / featured rank / category / announcement / stats reset / tag management); plus `GET .../tags`, `DELETE .../announcement`, `DELETE .../reviews/{username}` |
 
 Request bodies:

@@ -239,7 +239,7 @@ Skills are prompt templates that the LLM uses for recurring workflows. The data 
 
 | Table | Purpose |
 |----------------|-----------------------------------------------------------------------------------------------|
-| `market_skill` | Public **Skill Market** — every entry has only `(author, name)` unique constraint ( removed `version`); admin edits / pulls (cannot create) — |
+| `market_skill` | Public **Skill Market** — every entry has only `(author, name)` unique constraint ( removed `version`); admin creates (direct `APPROVED`) / edits / approves / rejects / pulls |
 | `user_skill` | A user's local copy of a skill (`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`); remove blocked when `market_skill_id` is set; pull rejects overwriting same-name USER_CREATED |
 | `role_skill` | Role → market_skill authorization (which skills a role unlocks for its users); `setRoleKnowledges` auto-syncs `user_knowledge` for all assigned users |
 
