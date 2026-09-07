@@ -270,7 +270,7 @@ On first launch, the init migration seeds 6 system skills (stored directly in ea
 | Edit `content` | ✅ | ✗ (re-pull) | ✗ |
 | Edit `default_loaded` | ✅ | ✅ | ✗ |
 | Delete | ✅ | ✅ | ✗ |
-| Submit to market | ✅ (new ver.)| ✗ | ✗ |
+| Submit to market | ✅ | ✗ | ✗ |
 
 ### Using skills in the chat UI
 
@@ -279,7 +279,7 @@ Open the Skill Library button (🧠) — four tabs:
 - **我的** — your local `user_skill` (plus admin's union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
 - **市场** — browse all `APPROVED` market skills and **拉取** them into your `user_skill` (rejects if you already have a same-name `USER_CREATED`).
 - **共享** — submit a `USER_CREATED` skill to the market. Submission goes to `PENDING` awaiting admin approval. no version number. two-stage click list item → right panel form.
-- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Click list item → right panel with **「撤回共享（下架）」** button. Withdraw cascades to all `user_skill` and `role_skill`. REJECTED entries can be re-submitted — the old row is archived and a fresh PENDING row is created.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Click list item → right panel with a withdraw button (label varies by status: 撤回投稿 / 下架并删除 / 删除被拒记录). Author withdraw removes the market entry and clears the author's own `user_skill.market_skill_id` backlink — other users' already-pulled copies (`MARKET_PULLED`) and `role_skill` grants remain but stop receiving updates. (It's the **admin** 下架/delete that cascades cleanup to `user_skill` + `role_skill`.) REJECTED entries can be re-submitted — the old row is archived and a fresh PENDING row is created.
 
 Inside `content` you can reference MCP tools by `@tool_name` — the available tools come from the role-based `mcps` authorization, not from yml.
 

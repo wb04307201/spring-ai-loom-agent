@@ -166,9 +166,10 @@
         const submittedAt = m.submittedAt
           ? escapeHtml(String(m.submittedAt).slice(0, 16).replace("T", " "))
           : "—";
+        const reviewer = m.reviewer ?? m.reviewedBy ?? m.reviewed_by;
         const statusBadge = MarketAdmin.approvalBadge(
           m.status,
-          m.reviewer,
+          reviewer,
           m.reviewedAt,
           m.reviewComment,
         );

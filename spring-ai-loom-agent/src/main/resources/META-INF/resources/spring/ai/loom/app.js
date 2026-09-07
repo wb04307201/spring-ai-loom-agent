@@ -2179,22 +2179,6 @@ const knowledge = {
     }
   },
 
-  _kmStatusLabel(status) {
-    // +20: 审批流已上线 — PENDING/APPROVED/REJECTED 三态映射，
-    // 与 skills._statusLabel 保持同一视觉语义（knowledge 对象独立，
-    // 不能用 this._statusLabel —— 该方法在 skills 对象上）。
-    const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
-    switch (status) {
-      case "PENDING":
-        return { text: t("market.admin.status.pending", "审核中"), bg: "#fef3c7", color: "#92400e" };
-      case "APPROVED":
-        return { text: t("market.admin.status.approved", "已通过"), bg: "#d1fae5", color: "#065f46" };
-      case "REJECTED":
-        return { text: t("market.admin.status.rejected", "已拒绝"), bg: "#fee2e2", color: "#991b1b" };
-      default:
-        return { text: status || "未知", bg: "#f1f5f9", color: "#475569" };
-    }
-  },
   _kbTagFilter: null,
   // M4 T2: KB 市场「加载更多」分页状态（默认分支 v2 Page total 驱动；tag 分支裸数组 cursor 驱动）
   _kbMarketItems: [],
@@ -2871,6 +2855,13 @@ const knowledge = {
     // 其他状态若有评论则降级显示为一行「审核意见」。
     // 注：_statusLabel 挂在 skills 对象上（knowledge 对象独立），显式跨对象引用。
     const st = skills._statusLabel(kb.status);
+    // Spec §2 parity: withdraw 文案按状态区分（与 Skill 侧「我的发布」一致）。
+    const withdrawLabel =
+      kb.status === "APPROVED"
+        ? "下架并删除"
+        : kb.status === "REJECTED"
+          ? "删除被拒记录"
+          : "撤回投稿";
     let reviewCommentBlock = "";
     if (kb && kb.reviewComment) {
       if (kb.status === "REJECTED") {
@@ -2901,7 +2892,7 @@ const knowledge = {
  审批通过后即可被其他用户订阅。你的本地实例保持不变，可正常编辑或删除。
  </div>
  <div style="display: flex; gap: 12px;">
- <button class="send-skill-btn" id="my-publish-withdraw-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享（下架）</button>
+ <button class="send-skill-btn" id="my-publish-withdraw-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">${escapeHtml(withdrawLabel)}</button>
  </div>
  </div>
  `;
@@ -5054,11 +5045,18 @@ const skills = {
           "<div>审核意见：" + escapeHtml(skill.reviewComment) + "</div>";
       }
     }
+    // Spec §2: withdraw 在任意状态可用 — 按钮文案按状态区分（PENDING/APPROVED/REJECTED）。
+    const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
+    const withdrawLabel =
+      skill.status === "APPROVED"
+        ? t("market.withdraw.approved", "下架并删除")
+        : skill.status === "REJECTED"
+          ? t("market.withdraw.rejected", "删除被拒记录")
+          : t("market.withdraw.pending", "撤回投稿");
     let html = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
  <div>名称：${escapeHtml(skill.name)}</div>
- <div>版本：v${escapeHtml(skill.version)}</div>
  <div>状态：<span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
  <div>共享时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : "-"}</div>
  ${skill.reviewedAt ? "<div>审核时间：" + new Date(skill.reviewedAt).toLocaleString() + "</div>" : ""}
@@ -5068,21 +5066,16 @@ const skills = {
  <div style="font-size: 13px; color: var(--text-muted);">${escapeHtml(skill.description || "无说明")}</div>
  <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(skill.content || "")}</div>
  `;
-    if (skill.status === "PENDING") {
-      html += `
+    html += `
  <div style="display: flex; gap: 12px; margin-top: 8px;">
- <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享</button>
+ <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">${escapeHtml(withdrawLabel)}</button>
+ ${
+   skill.status === "REJECTED"
+     ? `<button class="send-skill-btn" id="resubmit-skill-btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">${escapeHtml(t("market.resubmit", "重新投稿"))}</button>`
+     : ""
+ }
  </div>
  `;
-    }
-    if (skill.status === "REJECTED") {
-      const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
-      html += `
- <div style="display: flex; gap: 12px; margin-top: 8px;">
- <button class="send-skill-btn" id="resubmit-skill-btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">${escapeHtml(t("market.resubmit", "重新投稿"))}</button>
- </div>
- `;
-    }
     html += "</div>";
     detail.innerHTML = html;
 
@@ -5097,7 +5090,12 @@ const skills = {
   },
 
   async handleWithdraw(skill) {
-    if (!confirm(`确认撤回「${skill.name}」的共享？`)) return;
+    // Spec §2: APPROVED 下架是破坏性操作（市场条目被删除，他人已拉取副本不再同步更新），用更强确认文案。
+    const msg =
+      skill.status === "APPROVED"
+        ? `该技能已通过审批并被其他用户拉取，下架删除将移除市场条目（他人已拉取的副本保留但不再同步更新）。确认下架「${skill.name}」？`
+        : `确认撤回「${skill.name}」的共享？`;
+    if (!confirm(msg)) return;
     try {
       await api.withdrawMarketSkill(skill.id);
       showToast(`已撤回「${skill.name}」`, "success");

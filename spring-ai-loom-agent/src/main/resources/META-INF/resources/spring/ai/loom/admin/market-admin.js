@@ -194,15 +194,18 @@
            <label>分类</label>
            <input type="text" id="mf-category" class="form-input" placeholder="${isKnowledge ? "例如：技术文档" : "例如：效率工具"}" value="${safe(cur.category)}"/>
          </div>`;
-    const kbOfficialFields = isKnowledge
-      ? `<div class="form-group">
+    // triage#7: MarketCreateRequest 没有 isOfficial/featuredRank 字段 —
+    // 这些输入只在 EDIT 模式渲染，create 模式渲染会被静默丢弃（误导 admin）。
+    const kbOfficialFields =
+      isKnowledge && isEdit
+        ? `<div class="form-group">
            <label>精选排序</label>
            <input type="number" id="mf-featured-rank" class="form-input" min="0" step="1" placeholder="留空表示不设置" value="${cur.featuredRank == null ? "" : safe(cur.featuredRank)}"/>
          </div>
          <div class="form-group">
            <label><input type="checkbox" id="mf-official" ${cur.isOfficial ? "checked" : ""}/> 标记为官方</label>
          </div>`
-      : "";
+        : "";
 
     overlay.innerHTML = `
  <div class="modal-content" style="max-width: 720px; max-height: 85vh;">
@@ -285,24 +288,29 @@
             const category = overlay
               .querySelector("#mf-category")
               .value.trim();
-            const rankText = overlay
-              .querySelector("#mf-featured-rank")
-              .value.trim();
             body.category = category || null;
-            let featuredRank = null;
-            if (rankText !== "") {
-              featuredRank = Number(rankText);
-              if (
-                !Number.isInteger(featuredRank) ||
-                featuredRank < 0
-              ) {
-                errEl.textContent = "精选排序必须是非负整数";
-                errEl.style.display = "block";
-                return;
+            // triage#7: create 模式不渲染 official/rank 输入（MarketCreateRequest 无这两个字段），null-guard。
+            const rankEl = overlay.querySelector("#mf-featured-rank");
+            const officialEl = overlay.querySelector("#mf-official");
+            if (rankEl) {
+              const rankText = rankEl.value.trim();
+              let featuredRank = null;
+              if (rankText !== "") {
+                featuredRank = Number(rankText);
+                if (
+                  !Number.isInteger(featuredRank) ||
+                  featuredRank < 0
+                ) {
+                  errEl.textContent = "精选排序必须是非负整数";
+                  errEl.style.display = "block";
+                  return;
+                }
               }
+              body.featuredRank = featuredRank;
             }
-            body.isOfficial = overlay.querySelector("#mf-official").checked;
-            body.featuredRank = featuredRank;
+            if (officialEl) {
+              body.isOfficial = officialEl.checked;
+            }
           }
 
           try {
