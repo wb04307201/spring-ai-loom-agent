@@ -209,10 +209,22 @@ AskUser 主功能落地后追加的四项调整(卡片折叠 / 日志页提问�
   - T3 `1c0e73d` — §2 后端只读查询(`IAskUserLogQuery` + `JdbcAskUserLogQuery`,读 `loom_tool_call_log` WHERE tool_name='askUser',不新增表不改写入路径)+ `GET /spring/ai/loom/admin/ask-logs` 路由(adminPathPatterns 门禁;limit 默认 50 钳制 [1,200];status ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN)
   - T4 `1b93cb7` — §2 admin 日志页 stats.html/stats.js 新增"提问卡片"区块(时间/用户/问题/答案或状态徽章/等待时长"等待 Ns"/会话;username 过滤)
   - T5 `7b3fa27` — §4 V1.0__init.sql 尾部种子 2 条官方技能 market_skill(author=system / APPROVED / is_official=TRUE / created_by_kind=ADMIN / category=表达沟通):"STAR-IJ 讲清一件事"(六步)+ "靶心人公式 讲好一个故事"(七步,原词"转弯";含努力人/意外人 4 步变体)
-  - T6 本 commit — 文档同步(CLAUDE.md 4 处 + docs/API.md/API.zh-CN.md 补 ask-logs 端点行 + 本落地记录)+ console.js 注释口径统一(M3→M5)+ 全量回归门
-- **回归门(2026-09-08,四段全绿)**:库单元 `mvn test -pl spring-ai-loom-agent` → **183 run, 0 failures**(175 基线 + 8 AskUserLogParsingTest,首跑即过无 flaky);`mvn clean install -DskipTests`(排除 4 个 MCP 模块,既定先例)→ BUILD SUCCESS;test 模块单元 → **411 run, 0 failures**(397 基线 + T1 的 2 + T2 的 3 + T3 的 4 + T5 的 5);清库(`rm -rf ~/.loom/datasource` + `target/test-ds` + `target/surefire-reports`)后 IT gate → **127 run, 0 failures, 3 skipped**(123 基线 + SeedSkillIT 2 + JdbcAskUserLogQueryIT 2;skip 为既有 Maven 工具 IT 条件跳过)。
+  - T6 `47cd3dd` — 文档同步(CLAUDE.md 4 处 + docs/API.md/API.zh-CN.md 补 ask-logs 端点行 + 本落地记录)+ console.js 注释口径统一(M3→M5)+ 全量回归门
+  - fix `ad7bc8f` — **Chrome 复验抓到**:日志页状态显示"未知" —— Spring AI MethodToolCallback 把 @Tool String 返回值 JSON 序列化成带引号 string literal(`"[用户已回答] x"`),LoggingToolCallback 落库的就是该形态,而 `deriveStatus` 按裸文本 startsWith 判断永不匹配。修复:`JdbcAskUserLogQuery.unwrapJsonString`(Jackson 解 JSON string literal,畸形/null 安全原样返回)+ mapRow 规范化 + 两形态测试(单元 10 用例)+ IT seed 改带引号生产形态(scoped re-review: all addressed)
+- **回归门(2026-09-08,T6 四段全绿;fix 后 lib 185)**:库单元 `mvn test -pl spring-ai-loom-agent` → **183 run, 0 failures**(175 基线 + 8 AskUserLogParsingTest,首跑即过无 flaky;fix `ad7bc8f` 后 **185**,新增 2 个带引号形态用例);`mvn clean install -DskipTests`(排除 4 个 MCP 模块,既定先例)→ BUILD SUCCESS;test 模块单元 → **411 run, 0 failures**(397 基线 + T1 的 2 + T2 的 3 + T3 的 4 + T5 的 5);清库(`rm -rf ~/.loom/datasource` + `target/test-ds` + `target/surefire-reports`)后 IT gate → **127 run, 0 failures, 3 skipped**(123 基线 + SeedSkillIT 2 + JdbcAskUserLogQueryIT 2;skip 为既有 Maven 工具 IT 条件跳过)。
 - **升级提醒**:§4 种子行在 V1.0__init.sql 内 —— **已运行实例需清库重启**(`rm -rf ~/.loom/datasource`)才能拿到 2 条官方种子技能(项目"只跑全新库"政策,无增量迁移)。
-- **Chrome 复验**:controller 另行执行(见第三轮全面测试),不在本落地记录范围内。
+- **Chrome 复验(2026-09-09,controller 执行,全新库 8080 + 真实 DashScope qwen3.8-max + MCP 启用)**:
+  - V1 已答折叠 ✅:卡片隐藏,摘要 `✓ 问题 → 答案` 绿(ellipsis 生效),点击展开(▸→▾,inputs 禁用/提交按钮隐藏,只读回看)再收起
+  - V2 超时折叠 ✅:`⏳ 问题 → 已超时，未作答` 灰;多卡片独立不串扰
+  - V2b 停止折叠 ✅:stop → `✗ 问题 → 已取消`;流结束 cancelAll → `✗ → 已结束`
+  - V3 XSS ✅:question/label/自定义答案全 payload(multiSelect+custom)→ 摘要行 textContent 字面转义,img/svg/b 注入元素 0,`__XSS_*` 全 undefined
+  - V4 日志页 ✅(fix `ad7bc8f` 后复验):真实 LLM askUser 作答 → "提问卡片"区块出现记录,答案文本 + `等待 6s` + 会话 ID,username 过滤生效;原始 JSON `status=ANSWERED` 正确
+  - V5 admin 分配角色 ✅:弹窗加载角色列表(旧文案已消失),hint 含 strict RBAC 提示句,勾选保存 toast 成功,`GET roles` 确认
+  - V6 RBAC 闭环 ✅:dev-role 授权 bing-search → admin 的 capabilities 中 bing-search `effectiveEnabled=True`,其余 MCP/RBAC 工具仍 False —— admin 的 MCP 确实按角色控制
+  - V7 种子技能 ✅:admin 市场页 2 条官方技能(APPROVED + 🏛️ 官方徽章 + category=表达沟通);普通视角 pull STAR-IJ 成功
+  - V8 STAR-IJ 真实 LLM 一问一答 ✅:选中技能发"讲清楚上周项目上线" → LLM 第 1 问 S情境(header"情境",4 引导选项+自由输入)→ 作答折叠 → 自动第 2 问 T任务(header"任务"),**逐步推进、不自问自答、不描述计划**;stop 后第 2 卡冻结"已结束"
+  - V9 回归 ✅:工具弹窗(RBAC 3 工具+MCP 列表)/文件模态框/textarea/send 全正常,console 零 error/warn
+  - 截图:`.superpowers/sdd/2026-09-08-askuser-followups/v1-summary-answered.png`、`v4-asklog-fixed.png`
 
 ---
 
