@@ -35,7 +35,7 @@
 | D6 | 子任务排除 | **schema 级排除**:`DefaultSubTaskExecutor` 的 self-tool 过滤器追加 `IAskUserTool`(与防递归过滤同点位);定时任务经子任务路径执行,自动继承排除。`ISubTaskTool.startSubTask` @Tool description + `ISubTaskExecutor` javadoc 写入委派契约文案(描述能力,不硬编码工具名) |
 | D7 | stop 集成 | `SseEmitterRegistry.register` 的 onStop 回调链追加 `askUserRegistry.cancelAll(username, conversationId)` —— 以哨兵值 complete 挂起 Future **释放被阻塞的工具线程**(Flux dispose 本身不中断 `future.get()`,必须显式 complete) |
 | D8 | answer 端点鉴权 | `UserContextHolder` 取 username 与 PendingQuestion.username 不符 → **统一 404 "not found"**(复制 `DefaultSubTaskTool` 防存在性泄露先例);Registry 已 remove(超时竞态)→ 404 "问题已失效" |
-| D9 | 阻塞线程 | 默认在 Spring AI 同步 tool 执行线程阻塞(ForkJoinPool common —— subtask 已有同款无超时 `future.get()` 先例在跑);**若 Chrome 复验发现主流内容帧卡顿**,兜底方案:tool 执行处包 `boundedElastic`(写入 plan 作为条件步骤,不预防性引入) |
+| D9 | 阻塞线程 | 默认在 Spring AI 同步 tool 执行线程阻塞(ForkJoinPool common —— subtask 已有同款无超时 `future.get()` 先例在跑)(终审更正:实测 dashscope 1.1.2.3 为 boundedElastic,见 roadmap 落地记录);**若 Chrome 复验发现主流内容帧卡顿**,兜底方案:tool 执行处包 `boundedElastic`(写入 plan 作为条件步骤,不预防性引入) |
 
 ## 2. 现状(权威事实,2026-09-08 子 agent 逐行核实)
 

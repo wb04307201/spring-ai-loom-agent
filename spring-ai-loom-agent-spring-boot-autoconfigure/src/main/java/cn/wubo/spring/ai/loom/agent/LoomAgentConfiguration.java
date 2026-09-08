@@ -595,17 +595,22 @@ public class LoomAgentConfiguration {
                         });
 
                 // 注册 lifecycle 自动清理
+                // #1 AskUser(spec D7 扩展): 非 stop 的流终止路径同样释放挂起提问 ——
+                // autoCleanup 不走 onStop,超时/断连/异常若不清,工具线程会阻塞满 timeout。
                 emitter.onTimeout(() -> {
                     log.debug("SSE 链接超时: user={} conv={}", username, conversationId);
+                    askUserRegistry.cancelAll(username, conversationId);
                     emitterRegistry.autoCleanup(username, conversationId);
                     emitter.complete();
                 });
                 emitter.onCompletion(() -> {
                     log.debug("SSE 链接完成: user={} conv={}", username, conversationId);
+                    askUserRegistry.cancelAll(username, conversationId);
                     emitterRegistry.autoCleanup(username, conversationId);
                 });
                 emitter.onError(e -> {
                     log.debug("SSE 链接错误: user={} conv={} err={}", username, conversationId, e.getMessage());
+                    askUserRegistry.cancelAll(username, conversationId);
                     emitterRegistry.autoCleanup(username, conversationId);
                 });
                 CompletableFuture.runAsync(() -> {

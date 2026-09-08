@@ -1641,12 +1641,25 @@ const askUserCards = (() => {
     const customInput = card.el.querySelector(".askuser-custom-input");
     const customText = customInput ? customInput.value.trim() : "";
     if (customText) labels.push(customText);
-    if (labels.length === 0) {
+    // 单选 + 自定义输入时,"其他" radio 的 value="" 会混进来 —— 过滤空白后再组装 payload
+    const vals = labels.map((s) => s.trim()).filter(Boolean);
+    if (vals.length === 0) {
       showToast("请先选择一个选项或输入自定义答案", "error");
       return;
     }
     card.submitBtn.disabled = true;
     card.submitBtn.textContent = "提交中...";
+    // 非 404 失败(400/500/网络异常)可重试:恢复卡片待提交态,倒计时继续跑
+    const restorePending = (msg) => {
+      card.submitBtn.disabled = false;
+      card.submitBtn.textContent = "提交答案";
+      const badge = card.el.querySelector(".askuser-state");
+      if (badge) {
+        badge.textContent = "";
+        badge.classList.remove("askuser-state-ok");
+      }
+      showToast(msg, "error");
+    };
     try {
       const r = await fetch(
         `/spring/ai/loom/ask/${encodeURIComponent(qid)}/answer`,
@@ -1654,17 +1667,19 @@ const askUserCards = (() => {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json; charset=UTF-8" },
-          body: JSON.stringify({ answer: ev.multiSelect ? labels : labels[0] }),
+          body: JSON.stringify({ answer: ev.multiSelect ? vals : vals[0] }),
         },
       );
       if (r.ok) {
         freeze(qid, "已答 ✓", true);
+      } else if (r.status === 404) {
+        // 404 = 已超时/已取消/已失效(spec §5 竞态行)—— 唯一不可重试的情况
+        freeze(qid, "已失效(超时或已取消)", false);
       } else {
-        // 404 = 已超时/已取消/已失效(spec §5 竞态行)
-        freeze(qid, r.status === 404 ? "已失效(超时或已取消)" : "提交失败", false);
+        restorePending(`提交失败(HTTP ${r.status}),请重试`);
       }
     } catch (e) {
-      freeze(qid, "提交失败:" + (e.message || "网络错误"), false);
+      restorePending("提交失败:" + (e.message || "网络错误") + ",请重试");
     }
   }
 

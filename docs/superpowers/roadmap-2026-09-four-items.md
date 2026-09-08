@@ -193,7 +193,7 @@
 - **Commits(按 Task 序)**:T1 `f14006d`(AskUserEvent/AskUserOption/ChatResponseRecord 第 3 组件)/ T2 `41605ec`(AskUserRegistry)/ T3 `5187685`(IAskUserTool+DefaultAskUserTool+properties+beans)+ fix `2aaf7bb`(null-element 守卫)+ fix `b59ccf5`(LoomAgentToolAutoConfigTest 上下文 bean)/ T4 `dc26d48`(answer 端点+stop cancelAll)/ T5 `0f5fc50`(子任务 schema 级排除+契约文档)/ T6 `2511053`(前端内嵌卡片)/ T7a 本 commit。
 - **与 spec 偏差**:(1) spec §6 的"接线 IT"以 AskUserRouterTest(真 router+真 Registry,无 Spring 上下文,AdminRouterSpotTest 先例)等价交付;(2) answer 路由 body 解析用 `request.body(Map.class)`(仓库 ~40 处同款约定;LoomAgentTestUtil 无 StringHttpMessageConverter),状态码/响应体/join 语义与 spec 完全一致;(3) T3 补 null-element 守卫(fix round,spec 零异常逃逸硬约束的 plan 自身漏洞)。
 - **回归门**(2026-09-08,四段全绿):库单元 `mvn test -pl spring-ai-loom-agent` → **173 run, 0 failures**(151 基线 + 22 新增);`mvn clean install -DskipTests`(排除 4 个 MCP 模块 —— 运行中 MCP JVM 持有 Windows 文件锁,既定先例;4 模块零改动)→ BUILD SUCCESS;test 模块单元 → **392 run, 0 failures**(382 基线 + 10 新增);清库后 IT gate → **123 run, 0 failures, 3 skipped**(skip 为既有 Maven 工具 IT 条件跳过)。
-- **D9 线程预案**:Chrome 复验待执行(T7b),预案未触发/未验证 —— 复验后回填。
+- **D9 线程预案**:终审字节码核验(spring-ai-alibaba-dashscope 1.1.2.3,DashScopeChatModel.internalStream):tool 执行 continuation 实际跑在 **Schedulers.boundedElastic()**(Reactor 官方阻塞池),非 spec §2 推测的 ForkJoinPool common —— 兜底方案即现状,无需引入。Chrome 复验(T7b)仍按原计划执行后回填。
 - **概览图**:工具组 9→10,待 T7b 重生成(需用户确认 + DASHSCOPE 凭据)。
 
 ---
