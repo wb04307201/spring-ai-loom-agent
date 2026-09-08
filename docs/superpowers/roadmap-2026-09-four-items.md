@@ -231,6 +231,14 @@ AskUser 主功能落地后追加的四项调整(卡片折叠 / 日志页提问�
   - **组 B(测试补齐)**:`recent(500)` → 上限钳制 200 断言(锁 `MAX_LIMIT`);`extractAnswer` 前缀后纯空白边界用例。
   - **组 C(前端/文档小清扫)**:CLAUDE.md L107 "14 RouterFunctions" 计数陈旧(实测 19)→ 改数字或去数字化措辞;stats.js FAILED 徽章硬编码 `#ef4444` → 换 danger token;stats.js 旧 `load()` catch 的 `${e.message}` 补 escapeHtml(新 `loadAskLogs` 已是正确范本);`q.slice(0,60)` emoji 代理对截断(纯观感,可留);`fmtWait` Math.round 60s 边界舍入(可留);`map[status]` 原型键理论 TypeError(`Object.hasOwn` 一行加固,可留)。
   - **组 D(schema,触发式)**:loom_tool_call_log 增长到 10⁵+ 行时,V1.0 补 `(tool_name, created_at)` 索引(fresh-DB 政策下零成本);当前 admin-only + LIMIT≤200 全表扫可接受。
+  - **组 E(SSE 断连,第三轮测试 E1/E2 发现)**:askUser 挂起期间用户**刷新/登出**不会即时触发 cancelAll —— Tomcat 异步 servlet 仅在写入时检测断连,阻塞期 SSE 无数据帧 → onError/onCompletion 不触发 → 挂起 future 占 1 个 boundedElastic 线程至 timeoutSeconds(默认 300s)才释放。低危(自我伤害面、最终释放、无数据损坏;stop 按钮路径不受影响,主动 POST /stop 已验秒级 cancelAll)。**增强候选**:askUser 挂起期 SSE 定期发心跳帧(keep-alive),刷新后下次心跳写入即触发 onError → cancelAll 秒级释放线程。
+
+### 第三轮全面测试(2026-09-09,四项调整后全量验证)
+
+报告:`docs/superpowers/reports/2026-09-09-round3-comprehensive-test.md`。**结论:通过,0 需修缺陷。** 本轮 **MCP 首次启用**(前两轮关闭)+ **RAG 路径(#3 H2JVectorStore)生产首验**:
+- R1 MCP 环境差异 4/4(RBAC 双维度授权、混合流、ask-logs 隔离性、JSON UTF-8);R2 RAG 3/3(上传→embed 落库 dim=1024、检索→引用、**重启 hydrate loaded=1 零 re-embed**);R3 STAR-IJ 完整六步教科书级(7 问含 A 追问、立即汇总、电梯稿);R4 定时任务子任务在挂起提问期间并发触发、schema 级排除线程级实证;R5 边界 E1-E4(登出/刷新/断网重试/双用户跨会话 404 隔离);R6/R7 回归+响应式全过。
+- 三轮累计抓缺陷:第一轮 4(-parameters/字面 null/配置绑定/按钮卡死)+ 第二轮 2(CSS token/移动裁切)+ **第三轮 1**(result_text JSON 引号形态 → fix `ad7bc8f`)—— 质量逐轮收敛。
+- 唯一架构观察 = 组 E(SSE 惰性断连),低危不阻断。
 
 ---
 
