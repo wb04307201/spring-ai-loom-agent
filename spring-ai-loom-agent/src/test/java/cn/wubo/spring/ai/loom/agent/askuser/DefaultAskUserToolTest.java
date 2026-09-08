@@ -154,4 +154,34 @@ class DefaultAskUserToolTest {
         assertThat(tool.askUser("选哪个?", null, null, OPTIONS_JSON, false, false, new ToolContext(Map.of())))
                 .startsWith("[提问失败]").contains("会话上下文");
     }
+
+    @Test
+    void literalNullHeaderAndBackgroundNormalizeToNull() throws Exception {
+        answerOnSend("Docker");
+        DefaultAskUserTool tool = new DefaultAskUserTool(askRegistry, sseRegistry, 5);
+
+        String r = tool.askUser("选择部署方式?", "null", "NULL",
+                OPTIONS_JSON, false, false, ctx);
+
+        assertThat(r).isEqualTo("[用户已回答] Docker");
+        ArgumentCaptor<Object> sent = ArgumentCaptor.forClass(Object.class);
+        verify(emitter).send(sent.capture(), eq(MediaType.APPLICATION_JSON));
+        AskUserEvent ev = ((ChatResponseRecord) sent.getValue()).askUser();
+        assertThat(ev.header()).isNull();
+        assertThat(ev.background()).isNull();
+    }
+
+    @Test
+    void realBackgroundPreservedWhileLiteralNullDropped() throws Exception {
+        answerOnSend("jar");
+        DefaultAskUserTool tool = new DefaultAskUserTool(askRegistry, sseRegistry, 5);
+
+        tool.askUser("选择?", "部署", "null", OPTIONS_JSON, false, false, ctx);
+
+        ArgumentCaptor<Object> sent = ArgumentCaptor.forClass(Object.class);
+        verify(emitter).send(sent.capture(), eq(MediaType.APPLICATION_JSON));
+        AskUserEvent ev = ((ChatResponseRecord) sent.getValue()).askUser();
+        assertThat(ev.header()).isEqualTo("部署");
+        assertThat(ev.background()).isNull();
+    }
 }

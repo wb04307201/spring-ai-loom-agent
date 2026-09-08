@@ -51,7 +51,13 @@ public class DefaultAskUserTool implements IAskUserTool {
     }
 
     private static String blankToNull(String s) {
-        return (s == null || s.isBlank()) ? null : s.trim();
+        if (s == null) return null;
+        String t = s.trim();
+        // Tolerate LLMs (esp. qwen) that pass the literal string "null" for a
+        // nullable @ToolParam described as "可传 null" — normalize to absent so
+        // the card never renders a stray "null" header/background line.
+        if (t.isEmpty() || t.equalsIgnoreCase("null")) return null;
+        return t;
     }
 
     private static List<AskUserOption> parseOptions(String optionsJson) {
