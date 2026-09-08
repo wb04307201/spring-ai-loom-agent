@@ -402,16 +402,14 @@
     assignTarget = { username, type };
     assignErr.style.display = "none";
     assignTitle.textContent = `分配角色：${username}`;
-    if (type === "ADMIN") {
-      assignHint.textContent =
-        "管理员账号默认拥有全部 MCP 服务，无需分配角色。";
-      assignList.innerHTML = "";
-      assignSave.style.display = "none";
-      assignModal.style.display = "flex";
-      return;
-    }
+    // §3: admin 也走 strict RBAC(M3 起无 bypass,admin 的 MCP/工具按角色过滤)——
+    // 与普通用户完全相同的分配流程;旧版这里对 ADMIN early-return 并显示
+    // "管理员默认拥有全部 MCP 服务"的过时文案,已删除。
     assignHint.textContent =
-      "勾选要分配给该用户的角色（可多选）。用户实际可用的 MCP = 所有已选角色授权 MCP 的并集。";
+      "勾选要分配给该用户的角色（可多选）。用户实际可用的 MCP = 所有已选角色授权 MCP 的并集。" +
+      (type === "ADMIN"
+        ? "管理员同样受角色授权约束（strict RBAC），未分配角色时仅平台默认能力（universal 工具）可用。"
+        : "");
     assignSave.style.display = "";
     assignList.innerHTML = '<div class="loading-indicator">加载中...</div>';
     assignModal.style.display = "flex";

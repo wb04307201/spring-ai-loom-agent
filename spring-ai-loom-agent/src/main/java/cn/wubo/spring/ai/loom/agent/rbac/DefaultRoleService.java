@@ -104,6 +104,7 @@ public class DefaultRoleService implements IRoleService {
      * 这里不再跳过 admin。如果 admin 之前没分配任何角色,登录后看不到任何
      * MCP / tool —— 需要 admin 控制台手动授权。
      */
+    @Deprecated
     @Override
     public void setUserRolesOrSkipAdmin(String username, List<String> roleCodes) {
         String type = findUserType(username);
