@@ -459,6 +459,7 @@ public class LoomAgentConfiguration {
                 properties.setAuth(bound.getAuth());
                 properties.setMaven(bound.getMaven());
                 properties.setCompile(bound.getCompile());
+                properties.setAskuser(bound.getAskuser());
             }
             return properties;
         }
