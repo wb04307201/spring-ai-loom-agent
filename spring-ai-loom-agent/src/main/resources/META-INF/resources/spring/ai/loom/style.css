@@ -3951,7 +3951,7 @@ textarea::placeholder {
 }
 
 /* ===== #1 AskUser 提问卡片 ===== */
-.askuser-card { margin: 12px 16px; min-width: 320px; max-width: 560px; }
+.askuser-card { margin: 12px 16px; min-width: 0; max-width: 560px; box-sizing: border-box; }
 .askuser-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .askuser-header-chip {
   background: var(--primary-color, #6366f1); color: #fff; border-radius: 10px;

@@ -45,4 +45,19 @@ class AskUserCardStyleContractTest {
         assertThat(block).contains("var(--text-secondary");
         assertThat(block).contains("var(--success-color");
     }
+
+    @Test
+    void askUserCardIsResponsiveNoRigidMinWidth() throws IOException {
+        // B3 (2026-09-08 全面测试): 卡片曾用 min-width:320px,在 390px 手机视口下
+        // 撑破 bubble 并被视口裁切(cardFits=false)。改为 min-width:0 + box-sizing:border-box
+        // 后卡片随 bubble 收缩。锁死该回归:不得再出现刚性 min-width。
+        String css = readStyleCss();
+        int idx = css.indexOf("/* ===== #1 AskUser 提问卡片 ===== */");
+        String block = css.substring(idx);
+        String cardRule = block.substring(block.indexOf(".askuser-card {"),
+                block.indexOf("}", block.indexOf(".askuser-card {")) + 1);
+        assertThat(cardRule).contains("min-width: 0");
+        assertThat(cardRule).contains("box-sizing: border-box");
+        assertThat(cardRule).doesNotContain("min-width: 320px");
+    }
 }
