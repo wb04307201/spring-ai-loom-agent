@@ -1626,6 +1626,10 @@ const askUserCards = (() => {
     active.delete(qid);
     card.el.classList.add("askuser-frozen");
     card.el.querySelectorAll("input,button").forEach((n) => (n.disabled = true));
+    // 终态隐藏提交按钮:否则按钮会永远停在"提交中..."(submit 在 fetch 前设的
+    // 在飞标签,freeze 只 disable 不复位)—— 看起来像卡死。终态语义由徽章表达
+    // (已答 ✓ / 已超时 / 已取消 / 已失效),四种终态共用本函数,无单一合适按钮文案。
+    if (card.submitBtn) card.submitBtn.style.display = "none";
     const badge = card.el.querySelector(".askuser-state");
     if (badge) {
       badge.textContent = stateText;
