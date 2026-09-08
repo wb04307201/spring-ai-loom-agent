@@ -1812,6 +1812,48 @@ public class LoomAgentConfiguration {
             return builder.build();
         }
 
+        /**
+         * §2 提问卡片日志只读查询(spec 2026-09-08-askuser-followups-design.md):
+         * 数据已由 LoggingToolCallback 写入 loom_tool_call_log,本 bean 只读取+解析。
+         * 放 WebConfiguration(而非 brief 建议的 ToolConfiguration):嵌套 member
+         * @Configuration 在 LoomAgentConfiguration 自身注册阶段评估,早于
+         * JdbcTemplateAutoConfiguration,任何 @ConditionalOnBean(JdbcTemplate) 恒为
+         * false;本类的 loomAgentBaseRouter / marketAnnouncementRepository 同款
+         * 无条件注入 JdbcTemplate,时序已被既有测试验证。
+         */
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.askuser.IAskUserLogQuery.class)
+        public cn.wubo.spring.ai.loom.agent.askuser.IAskUserLogQuery jdbcAskUserLogQuery(
+                JdbcTemplate jdbcTemplate) {
+            return new cn.wubo.spring.ai.loom.agent.askuser.JdbcAskUserLogQuery(jdbcTemplate);
+        }
+
+        /**
+         * §2 admin 日志页"提问卡片"区块数据源(spec 2026-09-08-askuser-followups-design.md)。
+         * 路径落在 adminPathPatterns(/spring/ai/loom/admin/**)门禁内,自动 admin-only,
+         * 无需路由内校验。limit 非法 → 400(镜像 stats/tokens/monthly 的 year/month 先例)。
+         */
+        @Bean("loomAgentAskLogRouter")
+        public RouterFunction<ServerResponse> loomAgentAskLogRouter(
+                cn.wubo.spring.ai.loom.agent.askuser.IAskUserLogQuery askUserLogQuery) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("spring/ai/loom/admin/ask-logs", request -> {
+                int limit = 50;
+                String l = request.param("limit").orElse(null);
+                if (l != null && !l.isBlank()) {
+                    try {
+                        limit = Integer.parseInt(l.trim());
+                    } catch (NumberFormatException nfe) {
+                        return ServerResponse.badRequest().body(Map.of(
+                                "error", "limit 必须是数字: limit=" + l));
+                    }
+                }
+                String username = request.param("username").orElse(null);
+                return ServerResponse.ok().body(askUserLogQuery.recent(limit, username));
+            });
+            return builder.build();
+        }
+
         @Bean("loomAgentBaseRouter")
         public RouterFunction<ServerResponse> loomAgentBaseRouter(IUser user, LoomAgentProperties properties,
                                                                   IUserConversation userConversation,
