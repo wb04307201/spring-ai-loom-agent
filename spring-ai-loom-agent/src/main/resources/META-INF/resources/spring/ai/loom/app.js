@@ -1611,7 +1611,7 @@ const conversation = {
  * 卡片仅活于当前流:提交/超时/取消后就地定格;刷新页面不重建(历史里只有文本)。
  */
 const askUserCards = (() => {
-  const active = new Map(); // questionId -> { el, timer, submitBtn, countdownEl }
+  const active = new Map(); // questionId -> { el, timer, submitBtn, countdownEl, summaryEl }
 
   function fmtRemaining(sec) {
     const m = Math.floor(sec / 60);
@@ -1619,7 +1619,10 @@ const askUserCards = (() => {
     return `${m}:${String(s).padStart(2, "0")}`;
   }
 
-  function freeze(qid, stateText, ok) {
+  // §1 终态折叠:freeze 后卡片隐藏,显示一行摘要(点击 toggle 展开回看)。
+  // answerText 仅"已答"路径传(提交成功时的答案);其余终态传 null。
+  // restorePending(可重试失败)不调用本函数 —— 卡片保持可交互(spec D8)。
+  function freeze(qid, stateText, ok, answerText) {
     const card = active.get(qid);
     if (!card) return;
     clearInterval(card.timer);
@@ -1634,6 +1637,26 @@ const askUserCards = (() => {
     if (badge) {
       badge.textContent = stateText;
       badge.classList.toggle("askuser-state-ok", !!ok);
+    }
+    // 折叠成摘要行(问题文本来自卡片 DOM 的 textContent —— 天然已转义;
+    // 摘要行用 textContent 赋值,LLM 问题/用户答案均不可信,不得 innerHTML)
+    const summary = card.summaryEl;
+    if (summary) {
+      const qEl = card.el.querySelector(".askuser-question");
+      const question = qEl ? qEl.textContent : "";
+      const icon = ok ? "✓" : stateText === "已超时" ? "⏳" : "✗";
+      const tail = ok
+        ? answerText || ""
+        : stateText === "已超时"
+          ? "已超时，未作答"
+          : stateText === "已失效(超时或已取消)"
+            ? "已失效"
+            : stateText;
+      const textEl = summary.querySelector(".askuser-summary-text");
+      if (textEl) textEl.textContent = `${icon} ${question} → ${tail}`;
+      summary.classList.toggle("askuser-summary-ok", !!ok);
+      card.el.style.display = "none";
+      summary.style.display = "flex";
     }
   }
 
@@ -1675,7 +1698,7 @@ const askUserCards = (() => {
         },
       );
       if (r.ok) {
-        freeze(qid, "已答 ✓", true);
+        freeze(qid, "已答 ✓", true, vals.join("、"));
       } else if (r.status === 404) {
         // 404 = 已超时/已取消/已失效(spec §5 竞态行)—— 唯一不可重试的情况
         freeze(qid, "已失效(超时或已取消)", false);
@@ -1716,6 +1739,10 @@ const askUserCards = (() => {
     item.innerHTML = `
       <div class="avatar"><img src="${aiImage}" alt="AI"/></div>
       <div class="bubble">
+        <div class="askuser-wrap">
+        <div class="askuser-summary" style="display: none;">
+          <span class="askuser-summary-text"></span><span class="askuser-summary-arrow">▸</span>
+        </div>
         <div class="askuser-card" id="askuser-${qid}">
           <div class="askuser-head">
             ${ev.header ? `<span class="askuser-header-chip">${escapeHtml(ev.header)}</span>` : ""}
@@ -1727,11 +1754,19 @@ const askUserCards = (() => {
           <div class="askuser-options">${optionsHtml}${customHtml}</div>
           <button class="askuser-submit">提交答案</button>
         </div>
+        </div>
       </div>`;
     ui.mainContent.appendChild(item);
     ui.scrollToBottom();
 
     const el = item.querySelector(".askuser-card");
+    const summaryEl = item.querySelector(".askuser-summary");
+    // 摘要行点击 toggle 展开/收起完整卡片(终态只读回看;卡片保持冻结态)
+    summaryEl.addEventListener("click", () => {
+      const cardHidden = el.style.display === "none";
+      el.style.display = cardHidden ? "" : "none";
+      summaryEl.querySelector(".askuser-summary-arrow").textContent = cardHidden ? "▾" : "▸";
+    });
     const submitBtn = el.querySelector(".askuser-submit");
     const countdownEl = el.querySelector(".askuser-countdown-num");
     submitBtn.addEventListener("click", () => submit(qid, ev));
@@ -1763,7 +1798,7 @@ const askUserCards = (() => {
       countdownEl.textContent = fmtRemaining(remaining);
     }, 1000);
 
-    active.set(qid, { el, timer, submitBtn, countdownEl });
+    active.set(qid, { el, timer, submitBtn, countdownEl, summaryEl });
   }
 
   /** 流结束(complete/error/stop)时把仍在等待的卡片定格。 */

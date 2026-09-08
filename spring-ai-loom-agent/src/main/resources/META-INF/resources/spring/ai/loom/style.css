@@ -3984,3 +3984,18 @@ textarea::placeholder {
 .askuser-frozen { opacity: .65; }
 .askuser-frozen .askuser-opt { cursor: default; }
 .askuser-frozen .askuser-opt:hover { border-color: var(--border-color, #e2e8f0); background: none; }
+/* §1 终态折叠摘要行(点击展开回看完整卡片) */
+.askuser-wrap { min-width: 0; }
+.askuser-summary {
+  display: none; align-items: center; gap: 8px; margin: 12px 16px;
+  max-width: 560px; min-width: 0; box-sizing: border-box;
+  padding: 8px 12px; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;
+  font-size: 13px; color: var(--text-secondary, #64748b); cursor: pointer;
+  transition: border-color .15s;
+}
+.askuser-summary:hover { border-color: var(--primary-color, #6366f1); }
+.askuser-summary-ok { color: var(--success-color, #22c55e); }
+.askuser-summary-text {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.askuser-summary-arrow { flex: none; font-size: 12px; }
