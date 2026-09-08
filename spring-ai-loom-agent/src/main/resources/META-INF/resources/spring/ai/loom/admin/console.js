@@ -402,7 +402,7 @@
     assignTarget = { username, type };
     assignErr.style.display = "none";
     assignTitle.textContent = `分配角色：${username}`;
-    // §3: admin 也走 strict RBAC(M3 起无 bypass,admin 的 MCP/工具按角色过滤)——
+    // §3: admin 也走 strict RBAC(M5 起无 bypass,admin 的 MCP/工具按角色过滤)——
     // 与普通用户完全相同的分配流程;旧版这里对 ADMIN early-return 并显示
     // "管理员默认拥有全部 MCP 服务"的过时文案,已删除。
     assignHint.textContent =

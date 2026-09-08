@@ -1251,11 +1251,12 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | GET | `/admin/conversations/{conversationId}/messages` | List raw `ChatMessage`s |
 | POST | `/admin/conversations/clean-batch` | Hard-delete soft-deleted conversations in batch |
 
-### 10.3 Token Usage Statistics
+### 10.3 Token Usage Statistics & Logs
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
+| GET | `/admin/ask-logs?limit=&username=` | AskUser question-card logs (read-only view over `loom_tool_call_log` where `tool_name='askUser'`; `limit` default 50, max 200; `status`: ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN). Powers the "提问卡片" block on `admin/stats.html` |
 
 ### 10.4 Role / MCP / Skill / Knowledge Management
 

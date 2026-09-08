@@ -72,7 +72,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IChat` | `DefaultChat` | Chat streaming (SSE), MCP tool orchestration, RAG augmentation. `stream(record, username, request)` — username injected by filter |
 | `IKnowledge` | `DefaultKnowledge` | Knowledge base CRUD (stored in H2) |
 | `IMcp` | `SyncMcp` / `ASyncMcp` | MCP client wrapper (sync or async), tool discovery & invocation |
-| `ISkillStorage` | `DefaultSkillStorage` | Per-user `user_skill` storage (DB). Auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow (M4/#4): market submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submit archives old row to `market_skill_archive` / `loom_market_knowledge_archive` (id-preserving) + new PENDING row; same-name PENDING/APPROVED re-submit = in-place content update, status untouched; admin create (`createApproved`) → APPROVED immediately + created_by_kind='ADMIN'; pull requires APPROVED else 403. pull rejects overwriting USER_CREATED same-name; remove blocked when `market_skill_id` set; admin sees only own `user_skill` (no union view). Pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
+| `ISkillStorage` | `DefaultSkillStorage` | Per-user `user_skill` storage (DB). Auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow (M4/#4): market submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submit archives old row to `market_skill_archive` / `loom_market_knowledge_archive` (id-preserving) + new PENDING row; same-name PENDING/APPROVED re-submit = in-place content update, status untouched; admin create (`createApproved`) → APPROVED immediately + created_by_kind='ADMIN'; pull requires APPROVED else 403. pull rejects overwriting USER_CREATED same-name; remove blocked when `market_skill_id` set; admin sees only own `user_skill` (no union view). Pairs with `ISkillMarketService` and `ISkillRoleAdmin`. V1.0 尾部种子 2 条官方技能 market_skill(STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事,author=system,APPROVED,is_official=TRUE,category=表达沟通)。 |
 | `IFile` | `DefaultFile` | File metadata storage (H2) — 仅用于知识空间文件、文件预览/下载桥接、聊天附件 |
 | `IUpload` | `DefaultUpload` | File upload pipeline: 上传文件存储到 `fileBasePath/{username}/`，知识库文件存储到 `knowledgeBasePath/{username}/{knowledgeId}/`，重名自动追加序号 |
 | `IUser` | `DefaultUser` | BFF + HttpOnly cookie session auth + auto-login |
@@ -176,10 +176,12 @@ Organized into 7 nested static `@Configuration` classes:
    - `IRoleService.getVisibleMcpsForUser` 不再走 `if ("ADMIN".equals(type)) return ALL`
    - `setUserRolesOrSkipAdmin` 删掉 admin 短路(普通 user / admin 都走同一路径)
    - **新装 admin 没有任何 role → 0 capability → 必须进 admin 控制台手动授权**
+   - **admin 也可在控制台被分配角色**(2026-09-08 起):`console.js` 的 ADMIN early-return 已删,分配角色弹窗对 ADMIN 用户同样打开(附 strict RBAC 提示句);`IRoleService.setUserRolesOrSkipAdmin` 已标 `@Deprecated`(其内部 admin 短路已移除)
 
 8. **admin UI 整合**(M6 + M7):
    - 聊天面板 `🔧 MCP服务` 按钮 → `🔧 工具` 按钮,带类型徽章("本地" / "MCP")
    - admin 角色管理页 "授权本地工具组" section,真实从 `/admin/capabilities` 拉动态列表(替换之前的硬编码 `KNOWN_TOOL_GROUPS` 9 行)
+   - admin 日志页 `stats.html`(stats.js)除月度 Token 用量外,含"提问卡片"(askUser)日志区块(时间/用户/问题/答案或状态/等待时长/会话),数据源 `GET /spring/ai/loom/admin/ask-logs` —— `loom_tool_call_log` 表(tool_name='askUser')的只读视图,adminPathPatterns 门禁
    - `app.js` 所有 fetch 显式 `Content-Type: application/json; charset=UTF-8`(解决 GBK 解析错)
 
 #### Universal 工具(M6:平台默认能力,不受 RBAC 控制)
@@ -217,7 +219,7 @@ Organized into 7 nested static `@Configuration` classes:
 ### Data Layer
 
 - **Schema** (单一 V1.0 一站式 init,**项目只跑全新库**;任何已有 V1/V2 历史部署必须 `flyway baseline` 或 `rm -rf ~/.loom/datasource` 重跑):
- - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool / market_skill_archive / loom_market_knowledge_archive / loom_vector_store)+ RBAC 3 张子表 CASCADE FK(user_role.role_code → role.code, role_mcp.role_code → role.code, role_tool.role_code → role.code, user_role.username → user_info.username)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号。`*_archive` 两表(M4/#4 审批流)存 REJECTED 重投时归档的旧行(保留原 id + 拒绝评论/审核人/时间)
+ - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool / market_skill_archive / loom_market_knowledge_archive / loom_vector_store)+ RBAC 3 张子表 CASCADE FK(user_role.role_code → role.code, role_mcp.role_code → role.code, role_tool.role_code → role.code, user_role.username → user_info.username)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号 + 尾部种子 2 条官方 market_skill 行(STAR-IJ / 靶心人公式,author=system,APPROVED,is_official=TRUE,category=表达沟通)。`*_archive` 两表(M4/#4 审批流)存 REJECTED 重投时归档的旧行(保留原 id + 拒绝评论/审核人/时间)
  - **保持稳定,不再拆分增量**:所有 schema 演进(loom_scheduled_task / loom_schedule_execution / loom_subtask_history / user_conversation 三列 / SPRING_AI_CHAT_MEMORY.conversation_id 加宽 / loom_market_knowledge / loom_user_knowledge / loom_role_knowledge / loom_file_content / loom_tool_call_log / loom_chat_usage / loom_chat_reasoning / tool_call_log + chat_token_usage 替换等)都已合并入 V1.0 单一文件;V12~V17 历史也已 inline 进 V1.0
  - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据:12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill。test 模块独立 Flyway,与库主 schema 物理隔离(`./target/test-ds`)
  - Flyway 在同实例按版本号顺序执行:`V1.0__init.sql`(库)→ `V1.1__init_app_data.sql`(业务)

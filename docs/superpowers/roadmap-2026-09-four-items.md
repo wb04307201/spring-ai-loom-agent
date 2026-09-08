@@ -197,6 +197,23 @@
 - **Chrome 端到端复验(T7b,真实 DashScope qwen3.8-max,全新库)**:happy-path 单选 ✅、自定义输入(C1 回归)✅、多选 ✅、刷新后文本持久化(ChatMemory ON_COMPLETE 跨刷新)✅、stop→cancelAll 同毫秒释放阻塞线程(D7)✅、超时→卡片冻结"已超时"+LLM 收"用户未作答"继续不重复提问+ChatMemory 仍落库 ✅、universal 工具正确隐藏于 /api/capabilities 但 LLM 可自由调用 ✅、askuser.timeout-seconds 配置生效(25s override → 倒计时 ~0:25 而非默认 5:00,binding fix 经验确认)✅。
 - **概览图**:工具组 9→10,**布局脚本已改**(`generate.py` EN_LAYOUT/ZH_LAYOUT:胶囊 09→10 TOOLS、07→08 ON,卡片区 +Ask-user/问答 第 10 张 + 徽章 1);**PNG 重生成 DEFERRED** —— 需 `DASHSCOPE_API_KEY`(当前环境只有 DASHSCOPE_WORKSPACE_ID + PERSON_TOKEN,变量名不匹配),用户裁定"改布局脚本,稍后生成"。下次持凭据时按 project-overview-image skill 触发流程跑 generate.py 重生成 `docs/project-overview-{en,zh}.png`。
 
+### 四项后续调整落地记录(2026-09-08)
+
+AskUser 主功能落地后追加的四项调整(卡片折叠 / 日志页提问记录 / admin 可分配角色 / 两个官方种子技能):
+
+- **设计文档(spec)**:`docs/superpowers/specs/2026-09-08-askuser-followups-design.md`
+- **实现计划(plan)**:`docs/superpowers/plans/2026-09-08-askuser-followups.md`
+- **Commits(按执行序 §3→§1→§2→§4)**:
+  - T1 `dee7749` — §3 admin 用户可被分配角色(删 console.js ADMIN early-return + hint 附 strict RBAC 提示句;`IRoleService`/`DefaultRoleService.setUserRolesOrSkipAdmin` 标 `@Deprecated`,下一 minor 删除)
+  - T2 `491e1a9` — §1 askUser 卡片终态折叠成一行摘要(app.js `freeze()` 加 answerText 参 + `.askuser-wrap`/`.askuser-summary` DOM + style.css 摘要行样式;点击摘要展开回看,escapeHtml 安全)
+  - T3 `1c0e73d` — §2 后端只读查询(`IAskUserLogQuery` + `JdbcAskUserLogQuery`,读 `loom_tool_call_log` WHERE tool_name='askUser',不新增表不改写入路径)+ `GET /spring/ai/loom/admin/ask-logs` 路由(adminPathPatterns 门禁;limit 默认 50 钳制 [1,200];status ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN)
+  - T4 `1b93cb7` — §2 admin 日志页 stats.html/stats.js 新增"提问卡片"区块(时间/用户/问题/答案或状态徽章/等待时长"等待 Ns"/会话;username 过滤)
+  - T5 `7b3fa27` — §4 V1.0__init.sql 尾部种子 2 条官方技能 market_skill(author=system / APPROVED / is_official=TRUE / created_by_kind=ADMIN / category=表达沟通):"STAR-IJ 讲清一件事"(六步)+ "靶心人公式 讲好一个故事"(七步,原词"转弯";含努力人/意外人 4 步变体)
+  - T6 本 commit — 文档同步(CLAUDE.md 4 处 + docs/API.md/API.zh-CN.md 补 ask-logs 端点行 + 本落地记录)+ console.js 注释口径统一(M3→M5)+ 全量回归门
+- **回归门(2026-09-08,四段全绿)**:库单元 `mvn test -pl spring-ai-loom-agent` → **183 run, 0 failures**(175 基线 + 8 AskUserLogParsingTest,首跑即过无 flaky);`mvn clean install -DskipTests`(排除 4 个 MCP 模块,既定先例)→ BUILD SUCCESS;test 模块单元 → **411 run, 0 failures**(397 基线 + T1 的 2 + T2 的 3 + T3 的 4 + T5 的 5);清库(`rm -rf ~/.loom/datasource` + `target/test-ds` + `target/surefire-reports`)后 IT gate → **127 run, 0 failures, 3 skipped**(123 基线 + SeedSkillIT 2 + JdbcAskUserLogQueryIT 2;skip 为既有 Maven 工具 IT 条件跳过)。
+- **升级提醒**:§4 种子行在 V1.0__init.sql 内 —— **已运行实例需清库重启**(`rm -rf ~/.loom/datasource`)才能拿到 2 条官方种子技能(项目"只跑全新库"政策,无增量迁移)。
+- **Chrome 复验**:controller 另行执行(见第三轮全面测试),不在本落地记录范围内。
+
 ---
 
 ## 维护约定
