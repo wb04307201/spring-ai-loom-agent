@@ -13,8 +13,8 @@
 | 1 | #4 控制台 CRUD + 复活审批流 | ✅ 完成(2026-09-07,10 Task 全部落地) | 中-大 |
 | 2 | #2 文档清理(删 CHANGELOG + md 对齐) | ✅ 完成(2026-09-07) | 小 |
 | 3 | #3 H2 向量存储(H2JVectorStore) | ✅ 完成(2026-09-07) | 大 |
-| 4 | #1 AskUser 交互工具 | 🔵 | 大 |
-| 末 | 概览图重生成(#1 工具组 8→9 + #3 JVector→H2 会让图失真;全部代码完成后一次性重生成,**需提醒用户**) | 🔵 | 小 |
+| 4 | #1 AskUser 交互工具 | ✅ 完成(2026-09-08,代码+文档;Chrome 复验与概览图重生成收尾中) | 大 |
+| 末 | 概览图重生成(#1 工具组 8→9 + #3 JVector→H2 会让图失真;全部代码完成后一次性重生成,**需提醒用户**) | 🔵(依赖 T7b:Chrome 复验 + 概览图重生成,需用户确认 + DASHSCOPE 凭据) | 小 |
 
 #2 排在 #4 之后、#1/#3 之前的原因:#1/#3 会实质改 README/CLAUDE 技术栈描述,文档对齐放在代码改动后才有意义;但 #4 也改文档(admin 控制台职责),所以 #2 在 #4 落地后做,再随 #1/#3 增量更新。
 
@@ -168,7 +168,7 @@
 
 ---
 
-## #1 AskUser 交互工具(🔵)
+## #1 AskUser 交互工具(✅ 完成 2026-09-08)
 
 ### 调研结论(子 agent 完整报告要点)
 
@@ -186,6 +186,15 @@
 - 路径 3(subtask 式轮询):体验差,仅退路。
 - 工具组 8→9(File/Git/Maven/Deploy/Time/Skill/SubTask/Schedule + **AskUser**)→ **概览图重生成,提醒用户**。
 - 问题卡片数据模型草案:`{questionId, question, header?, multiSelect:bool, options:[{label, description?}], allowCustomInput:bool}` —— 对齐 Claude CLI AskUserQuestion 的 question/header/options/multiSelect 结构。
+
+### 落地记录(2026-09-08)
+
+- **最终形态**:路径 1 阻塞同流落地。新包 `askuser`:IAskUserTool(@ToolGroup universal)+ DefaultAskUserTool(future.get 阻塞,timeoutSeconds 可注入)+ AskUserRegistry(纯内存);ChatResponseRecord 第 3 组件 askUser(2-arg 兼容构造器);`POST /ask/{questionId}/answer`(跨用户/未知/已失效统一 404);stop 路径 cancelAll 哨兵释放阻塞线程;子任务/定时任务 schema 级排除(DefaultSubTaskExecutor 过滤器 + 委派契约文案);前端内嵌卡片(单选即点即交/多选显式提交/自定义输入/倒计时/已答·已超时·已取消定格)。
+- **Commits(按 Task 序)**:T1 `f14006d`(AskUserEvent/AskUserOption/ChatResponseRecord 第 3 组件)/ T2 `41605ec`(AskUserRegistry)/ T3 `5187685`(IAskUserTool+DefaultAskUserTool+properties+beans)+ fix `2aaf7bb`(null-element 守卫)+ fix `b59ccf5`(LoomAgentToolAutoConfigTest 上下文 bean)/ T4 `dc26d48`(answer 端点+stop cancelAll)/ T5 `0f5fc50`(子任务 schema 级排除+契约文档)/ T6 `2511053`(前端内嵌卡片)/ T7a 本 commit。
+- **与 spec 偏差**:(1) spec §6 的"接线 IT"以 AskUserRouterTest(真 router+真 Registry,无 Spring 上下文,AdminRouterSpotTest 先例)等价交付;(2) answer 路由 body 解析用 `request.body(Map.class)`(仓库 ~40 处同款约定;LoomAgentTestUtil 无 StringHttpMessageConverter),状态码/响应体/join 语义与 spec 完全一致;(3) T3 补 null-element 守卫(fix round,spec 零异常逃逸硬约束的 plan 自身漏洞)。
+- **回归门**(2026-09-08,四段全绿):库单元 `mvn test -pl spring-ai-loom-agent` → **173 run, 0 failures**(151 基线 + 22 新增);`mvn clean install -DskipTests`(排除 4 个 MCP 模块 —— 运行中 MCP JVM 持有 Windows 文件锁,既定先例;4 模块零改动)→ BUILD SUCCESS;test 模块单元 → **392 run, 0 failures**(382 基线 + 10 新增);清库后 IT gate → **123 run, 0 failures, 3 skipped**(skip 为既有 Maven 工具 IT 条件跳过)。
+- **D9 线程预案**:Chrome 复验待执行(T7b),预案未触发/未验证 —— 复验后回填。
+- **概览图**:工具组 9→10,待 T7b 重生成(需用户确认 + DASHSCOPE 凭据)。
 
 ---
 

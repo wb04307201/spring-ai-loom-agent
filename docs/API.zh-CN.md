@@ -203,6 +203,20 @@ Accept: text/event-stream
 |---|---|---|
 | `content` | string | AI 回复的文本片段 |
 | `reasoningContent` | string | 推理/思考过程（可选） |
+| `askUser` | object \| null | 第 3 组件。`null` = 普通内容帧；非空 = askUser 提问卡片事件（`AskUserEvent`，字段见下表），前端渲染内嵌选择卡片，`askUser` 工具阻塞等待作答 |
+
+**`askUser`（`AskUserEvent`）字段**:
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `questionId` | string | UUID，answer 端点按此索引 |
+| `question` | string | 问题正文 |
+| `header` | string | 短标题/chip（可空） |
+| `background` | string | 背景说明（可空） |
+| `options` | object[] | 2-4 个选项，每项 `{label, description}` |
+| `multiSelect` | boolean | 是否多选 |
+| `allowCustomInput` | boolean | 是否允许"其他"自定义输入 |
+| `timeoutSeconds` | number | 前端倒计时用（与工具阻塞超时同值） |
 
 **SSE 事件示例**:
 
@@ -215,6 +229,20 @@ data: {"content":"有什么","reasoningContent":""}
 
 data: {"content":"可以帮你的？","reasoningContent":""}
 ```
+
+### 3.2 AskUser 答案提交端点
+
+```
+POST /spring/ai/loom/ask/{questionId}/answer
+Content-Type: application/json
+```
+
+提交问题卡片的答案（askUser 工具阻塞等待中）。
+
+- 请求体：`{"answer": "选项label"}`（单选/自定义）或 `{"answer": ["label1","label2"]}`（多选）
+- `200 {"ok":true}` — 答案已送达，工具线程被唤醒
+- `400 {"error":"invalid answer"}` — body 非法 / answer 缺失或空白
+- `404 {"error":"not found"}` — 未知 questionId、跨用户提交、或问题已超时/已取消（三者同响应，防存在性泄露）
 
 ---
 
@@ -1463,9 +1491,12 @@ GET /spring/ai/chat/loom/mcp
 ```json
 {
  "content": "string",
- "reasoningContent": "string"
+ "reasoningContent": "string",
+ "askUser": null
 }
 ```
+
+`askUser` 普通帧为 `null`；非空时携带 `AskUserEvent` 提问卡片（见 § 3.1/3.2）。
 
 ### ConversationRecord
 

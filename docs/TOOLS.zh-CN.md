@@ -21,7 +21,8 @@
  - [8.5 端到端对话示例](#85-端到端对话示例)
 - [9. `ISubTaskTool` — 子任务委派](#9-isubtasktool--子任务委派)
 - [10. `IScheduleTool` — 定时任务](#10-ischeduletool--定时任务)
-- [11. 替换子工具](#11-替换子工具)
+- [14. `IAskUserTool` — 用户提问（askUser）](#14-iaskusertool--用户提问askuser)
+- [15. 替换子工具](#15-替换子工具)
 
 ---
 
@@ -59,7 +60,7 @@ spring:
 
 ## 2. `IEmbedTool` 总览
 
-`IEmbedTool` 是聚合标记接口。子接口（`ITimeTool`、`ISkillTool`、`IFileTool`、`ISubTaskTool`、`IScheduleTool`、`IGitTool`、`IMavenTool`）各自向 LLM 提供独立的 `@Tool` 方法。`ICompileAndDeployTool` 同样继承 `IEmbedTool`，是部署场景的推荐入口。
+`IEmbedTool` 是聚合标记接口。子接口（`ITimeTool`、`ISkillTool`、`IFileTool`、`ISubTaskTool`、`IScheduleTool`、`IAskUserTool`、`IGitTool`、`IMavenTool`）各自向 LLM 提供独立的 `@Tool` 方法。`ICompileAndDeployTool` 同样继承 `IEmbedTool`，是部署场景的推荐入口。
 
 | 子接口 | 默认实现 | 方法数 | 默认状态 | 备注 |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
@@ -68,6 +69,7 @@ spring:
 | `IFileTool` | `DefaultFileTool` | 16 | 启用 | 基于路径；根目录 = `{fileBasePath}/{username}/` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | 启用 | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | 启用 | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
+| `IAskUserTool` | `DefaultAskUserTool` | 1 | 启用 | `askUser` — 聊天流内嵌选择卡片阻塞提问；子任务/定时任务 schema 级排除 |
 | `IGitTool` | `DefaultGitTool`（JGit 7.6） | 28 | **禁用** | 通过 `git.enabled=true` 开启 |
 | `IMavenTool` | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用** | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | 启用 | 端到端 `git clone → build → docker run → health check` |
@@ -203,7 +205,7 @@ spring:
 
 ## 11. `ISubTaskTool` — 子任务委派
 
-`ISubTaskTool` 让主对话把一段任务委派给同步运行的"子模型"，跑在独立线程池上。子任务不能再触发子任务或定时任务（递归防御）。
+`ISubTaskTool` 让主对话把一段任务委派给同步运行的"子模型"，跑在独立线程池上。子任务不能再触发子任务或定时任务（递归防御），也不能直接向用户提问（`IAskUserTool` schema 级排除 —— 子任务只做主任务规划好的执行并返回结果，疑问写进执行结果由主任务决定是否提问）。
 
 | 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
@@ -213,7 +215,7 @@ spring:
 | **状态** | 默认启用；通过 `spring.ai.loom.agent.subtask.enabled` 切换 |
 | **方法(4)** | `start_sub_task(prompt, systemContext?)`（在 `loomSubTaskExecutor` 上启动子任务）；`list_sub_tasks()`（列出当前会话的活跃子任务）；`cancel_sub_task(subTaskId)`（取消运行中的子任务）；`get_sub_task_history(limit?)`（最近已完成/已取消的子任务） |
 | **隔离** | 严格按 `(username, conversationId)` 隔离；子任务 memory 用 `{conversationId}--sub--{subTaskId}` 命名空间，避免污染父会话历史 |
-| **工具过滤** | 子任务运行时 self-tools（`ISubTaskTool` / `IScheduleTool`）被过滤掉，防止递归 |
+| **工具过滤** | 子任务运行时 self-tools（`ISubTaskTool` / `IScheduleTool` / `IAskUserTool` —— 子任务不能向用户提问）被过滤掉，防止递归 |
 | **并发** | 通过 `spring.ai.loom.agent.subtask.max-concurrent`（默认 4）控制；历史通过 `max-history`（默认 200）控制 |
 
 ---
@@ -470,7 +472,52 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ---
 
-## 14. 替换子工具
+## 14. `IAskUserTool` — 用户提问（askUser）
+
+| 项目 | 内容 |
+|----------|------------------------------------------------------------------------|
+| **接口** | `cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool` |
+| **默认实现** | `DefaultAskUserTool` |
+| **覆盖方式** | 自定义 `@Bean IAskUserTool` |
+| **状态** | **Universal** — `@ToolGroup(defaultGranted=true)`。仅向当前流内的本人提问，答案回同一流，无越权风险；子任务/定时任务 schema 级排除。 |
+| **方法（1）** | `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — 在聊天流中渲染内嵌选择卡片，阻塞等待用户作答 |
+
+**工具入参**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `question` | string | 是 | 问题正文 — 一句话，清晰具体 |
+| `header` | string | 否 | 短标题/chip（2-6 字，如"部署方式"），可传 null |
+| `background` | string | 否 | 为什么问这个问题的背景说明（1-2 句），可传 null |
+| `optionsJson` | string | 是 | 选项 JSON 数组字符串，2-4 个：`[{"label":"选项A","description":"补充说明"},{"label":"选项B"}]`（用 String 而非类型化 List —— 对 qwen 系模型的 tool-args JSON 容错更好；服务端用 Spring AI 宽容 `JsonParser` 解析） |
+| `multiSelect` | boolean | 否 | 是否允许多选（null = false） |
+| `allowCustomInput` | boolean | 否 | 是否允许"其他"自定义输入（null = false） |
+
+**卡片形态**：问题以 SSE 帧推入当前聊天流（`ChatResponseRecord.askUser` = `AskUserEvent`，见 [API.zh-CN.md](./API.zh-CN.md) § 3.1）。前端渲染内嵌卡片 —— 单选即点即交、多选显式提交按钮、可选自定义输入、倒计时，以及"已答 / 已超时 / 已取消"定格状态。答案 POST 到 `/spring/ai/loom/ask/{questionId}/answer`（见 [API.zh-CN.md](./API.zh-CN.md) § 3.2），唤醒阻塞的工具线程；答案以 tool_result 回到同一条流。
+
+**返回文本契约**（所有失败路径都返回文本、不抛异常 —— 保住 SSE Flux 正常 complete，让 ChatMemory 落库）：
+
+| 返回前缀 | 触发条件 |
+|---|---|
+| `[用户已回答] {answer}` | 用户在超时前作答 |
+| `[用户未作答] ...` | 超时（`askuser.timeoutSeconds`，默认 300），或用户点了停止（stop 路径会取消该会话全部挂起提问） |
+| `[提问失败] ...` | 校验错误（question 空白 / optionsJson 解析失败 / 选项数不在 2-4 / 选项 label 空白）、缺少会话上下文、会话流不可用、或等待异常 —— 每条消息都告诉 LLM 如何纠正后重试 |
+
+（另有罕见的 `[提问被中断]` 前缀 —— 等待线程被中断时返回。）
+
+**超时与 stop 行为**：超时后工具返回"用户未作答"文本，指示 LLM 基于现有信息自行合理决策继续；点停止会按 `(username, conversationId)` 取消全部挂起问题，不泄漏阻塞线程。
+
+**子任务/定时任务排除契约**（#1 spec D6，见 `ISubTaskTool` javadoc）：子任务只做主任务规划好的执行并返回结果，不能直接向用户提问 —— 需要用户决策的疑问必须写进子任务的返回结果，由主对话决定是否向用户提问。`DefaultSubTaskExecutor` 在子任务工具 schema 中过滤掉 `IAskUserTool`；定时任务触发时走同一条子任务路径，继承此排除。
+
+**配置**：
+
+| 属性 | 默认值 | 说明 |
+|--------------------------|-------|---------------------------------|
+| `askuser.timeoutSeconds` | `300` | askUser 工具阻塞等待用户作答的最长秒数；超时返回"用户未作答"文本，Flux 正常 complete |
+
+---
+
+## 15. 替换子工具
 
 每个子工具接口都通过 `@ConditionalOnMissingBean` 注册，自定义实现自动优先生效：
 

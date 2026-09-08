@@ -27,10 +27,11 @@
 - **🔧 MCP 工具集成** — 同步/异步双模式；可用工具按**角色授权**下发，会话内按需勾选启用
 - **🧠 技能市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权）；审批流：提交 → PENDING → admin 审批通过/拒绝，REJECTED 重新提交时旧行归档；拉取拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 可新建（直发 APPROVED）/ 编辑 / 审批 / 下架；去掉 version 字段；技能用 `@工具名` 调用 MCP
 - **🧩 子任务 & ⏰ 定时任务** — 主对话把任务委派给"子模型"同步执行；LLM 可创建定时任务，触发时以子任务运行，重启自动恢复
+- **🙋 AskUser 交互工具** — AI 在聊天流中以选项卡片向你提问（单选/多选/自定义输入），作答后无缝继续；子任务与定时任务不会打扰你
 - **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
 - **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / 知识库市场 / MCP 描述 / 日志（原用量统计）六大模块，admin 路径鉴权
 - **📁 文件管理** — 磁盘存储 + H2 元数据，上传 / 预览 / 下载，聊天附件自动桥接
-- **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 端到端部署（默认启用），Git / Maven（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
+- **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 用户提问 / 端到端部署（默认启用），Git / Maven（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
 - **⚙️ 开箱即用工程化** — Spring Boot 自动配置，全组件 `@ConditionalOnMissingBean` 可替换，Flyway 迁移，广泛支持各类聊天 / 嵌入 / 向量存储后端
 
 ## 内置工具
@@ -45,6 +46,7 @@
 | 知识库 | `IKnowledgeTool` | 1 | ✅ 启用 | `knowledge.enabled` |
 | 子任务 | `ISubTaskTool` | 4 | ✅ 启用 | `subtask.enabled` |
 | 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
+| 用户提问 | `IAskUserTool` | 1 | ✅ 启用 | `askuser.timeoutSeconds` |
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
 | 编译部署 | `ICompileAndDeployTool` | 1 | ✅ 启用 | `compile.enabled` |

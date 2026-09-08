@@ -87,9 +87,10 @@ All components follow an **interface + default implementation** pattern. Every b
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → 按 buildTool 打包（maven / npm / npm-frontend / pip）→ Docker 镜像构建 → 容器启动 → 健康检查（**默认 enabled**）。支持 Spring Boot / Node（前后端） / Python 等多栈项目。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
-| `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call`; tools filtered to exclude self-tools (no `ISubTaskTool`/`IScheduleTool`) to prevent recursion. Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
+| `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call`; tools filtered to exclude self-tools (no `ISubTaskTool`/`IScheduleTool`/`IAskUserTool` — 子任务不能向用户提问,疑问写进执行结果由主任务决定) to prevent recursion. Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` + `list_sub_tasks` + `cancel_sub_task(subTaskId)` + `get_sub_task_history(limit)` — 委派/查询/取消/历史子任务，全部按 `(username, conversationId)` 严格隔离，防跨会话越权。默认 enabled (`subtask.enabled=true`) |
 | `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
+| `IAskUserTool` | `DefaultAskUserTool` | LLM-callable `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — 聊天流内嵌选择卡片向当前用户提问,工具方法阻塞等待作答(默认 `askuser.timeoutSeconds=300`),答案以 tool_result 回同一条流。超时/stop 返回"用户未作答"文本保 ChatMemory ON_COMPLETE。默认 enabled(universal) |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
 
@@ -101,7 +102,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `ChatConfiguration` | ChatClient, IChat, SseController |
 | `RagConfiguration` | VectorStore (H2-backed JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **9 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
+| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **10 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 14 RouterFunctions + `SseController` |
 | `CapabilityConfiguration` | `CapabilityService` (统一 list 本地 + MCP capability) + `IRoleService` 的 tool/mcp/skill/knowledge 授权方法 |
@@ -111,7 +112,7 @@ Organized into 7 nested static `@Configuration` classes:
 新增 4 个组件来替代旧的"9 个 I*Tool + 5 个 MCP server 各管各的"混乱:
 
 1. **`@ToolGroup` 注解**(`cn.wubo.spring.ai.loom.agent.tool.ToolGroup`)
-   放在 9 个 `I*Tool` 接口上,声明所属 capability group:
+   放在 10 个 `I*Tool` 接口上,声明所属 capability group:
    ```java
    @ToolGroup(value = "file", description = "readTextFile / writeFile / listDirectory ...")
    public interface IFileTool extends IEmbedTool { ... }
@@ -140,7 +141,7 @@ Organized into 7 nested static `@Configuration` classes:
    - **`MCP name 必须原样保留**(`role_mcp.mcp_name = McpSyncClient.getClientInfo().name()`,不做 REPLACE / 不加 prefix)
 
 4. **API 端点**:
-   - `GET  /spring/ai/loom/api/capabilities` — 聊天面板用(返回 9 LOCAL + N MCP,带 effectiveEnabled)
+   - `GET  /spring/ai/loom/api/capabilities` — 聊天面板用(返回 10 LOCAL + N MCP,带 effectiveEnabled)
    - `GET  /spring/ai/loom/admin/capabilities` — admin 角色授权用(只 LOCAL,无 effectiveEnabled)
    - `GET  /admin/roles/{code}/tools` + `PUT` — 角色授权 tool 增删
    - `GET  /admin/roles/{code}/mcps` + `PUT` — 角色授权 MCP 增删
@@ -193,13 +194,14 @@ Organized into 7 nested static `@Configuration` classes:
 | `ITimeTool` | `tool_time` | 只读返回时间,无副作用 |
 | `ISkillTool` | `tool_skill` | 允许用户自由创建/编辑自建 skill |
 | `IFileTool` | `tool_file` | 默认放开本地文件访问(⚠️ 含 `deleteFileOrDirectory` 递归删除,LLM 端需谨慎 prompt 约束) |
+| `IAskUserTool` | `tool_askUser` | 仅向当前流内的本人提问,答案回同一流,无越权风险;子任务/定时任务 schema 级排除 |
 
 **RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行,必须显式授权。
 
 **实现机制**:
 - 元数据单一源 = `@ToolGroup(defaultGranted=true)` 注解,**DB 端无 `loom_universal_tool` 表**
 - `CapabilityService.universalToolGroups()` 反射所有 `@ToolGroup` 注解,返回默认授予的 group_name 集合
-- `visibleToolGroupsFor(username) = role_granted ∪ universal` —— 新装 admin / 普通用户也能至少调用 6 个 universal 工具
+- `visibleToolGroupsFor(username) = role_granted ∪ universal` —— 新装 admin / 普通用户也能至少调用 7 个 universal 工具
 - `allowedCapabilityIdsFor(...)` 在 `role ∩ user_pick` 之外再 `addAll(universalGroups)`,user_pick 不能拒绝 universal
 - 聊天面板"工具"弹窗**完全不展示** universal 工具的 checkbox(无感调用)
 - admin 角色授权页"已授权本地工具"列表**完全不展示** universal 工具入口(没有"移除"按钮,只有 RBAC 工具可操作)
@@ -254,6 +256,7 @@ All under `spring.ai.loom.agent`:
 - `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
 - `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)
 - `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
+- `askuser` — `timeoutSeconds`(default 300):askUser 工具阻塞等待用户作答的最长秒数;超时返回"用户未作答"文本,Flux 正常 complete
 - `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative）
 - `knowledgeBasePath` — 知识库文件存储根目录，默认 `${user.home}/.loom/knowledge`
 - `datasourceDir` — H2 文件存储目录，默认 `${user.home}/.loom/datasource`（在 `application.yml` 的 `spring.datasource.url` 里通过 `${user.home}/.loom/datasource/db` 拼接）

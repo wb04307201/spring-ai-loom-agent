@@ -31,10 +31,11 @@
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
 - **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted); approval flow (submit → PENDING → admin approve/reject, rejected re-submits archive the old row); pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` is set; admin can create (lands APPROVED immediately) / edit / approve / reject; no version field. Skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
+- **🙋 AskUser Interactive Tool** — the AI asks you questions inline in the chat stream via option cards (single-select / multi-select / custom input), then seamlessly continues after you answer; sub-tasks and scheduled tasks never interrupt you
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
-- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / end-to-end deploy (on by default), git / maven (opt-in); see [TOOLS.md](docs/TOOLS.md)
+- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / askUser / end-to-end deploy (on by default), git / maven (opt-in); see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
@@ -49,6 +50,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Knowledge | `IKnowledgeTool` | 1 | ✅ enabled | `knowledge.enabled` |
 | Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
 | Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
+| AskUser | `IAskUserTool` | 1 | ✅ enabled | `askuser.timeoutSeconds` |
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
 | Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |

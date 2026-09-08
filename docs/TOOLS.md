@@ -17,7 +17,8 @@
 - [9. `ICompileAndDeployTool` — End-to-End Deployment](#9-icompileanddeploytool--end-to-end-deployment)
 - [10. `ISubTaskTool` — Sub-task Delegation](#10-isubtasktool--sub-task-delegation)
 - [11. `IScheduleTool` — Scheduled Tasks](#11-ischeduletool--scheduled-tasks)
-- [12. Replacing a Sub-Tool](#12-replacing-a-sub-tool)
+- [12. `IAskUserTool` — AskUser Interactive Question](#12-iaskusertool--askuser-interactive-question)
+- [13. Replacing a Sub-Tool](#13-replacing-a-sub-tool)
  - [8.1 Tool-call Parameters](#81-tool-call-parameters)
  - [8.2 Configuration](#82-configuration)
  - [8.3 Base-image Templates (built-in)](#83-base-image-templates-built-in)
@@ -31,9 +32,9 @@
 
 ## 1. Tool Visibility & RBAC
 
-Since M3, all 9 `I*Tool` beans are **always created** regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
+Since M3, all 10 `I*Tool` beans are **always created** regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
 
-1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 6 universal tools are listed below.
+1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 7 universal tools are listed below.
 2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 3 RBAC tools are listed below.
 
 ### Universal tools (always visible)
@@ -46,6 +47,7 @@ Since M3, all 9 `I*Tool` beans are **always created** regardless of any `*.enabl
 | `IKnowledgeTool` | `tool_knowledge` | KB access is independently gated by `role_knowledge` table — the tool itself needs no extra RBAC |
 | `ISubTaskTool` | `tool_subtask` | Sub-task runs inherit user identity — no privilege escalation surface |
 | `IScheduleTool` | `tool_schedule` | Per-user namespace `loom-sched-{user}-{conv}-{name}`; fires as sub-task — no privilege escalation |
+| `IAskUserTool` | `tool_askUser` | Asks only the current user within the current stream; the answer returns to the same stream — no privilege escalation; excluded at schema level from sub-tasks/scheduled tasks |
 
 ### RBAC tools (require `role_tool` authorization)
 
@@ -76,7 +78,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. 9 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. 10 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
 | Sub-Interface | Default Impl | Methods | Visibility | Notes |
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
@@ -86,6 +88,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
+| `IAskUserTool` | `DefaultAskUserTool` | 1 | **universal** | `askUser` — blocking same-stream question card; excluded from sub-task/scheduled-task tool schema |
 | `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **RBAC** | Requires `role_tool.tool_git` authorization; opt-in via `@Bean IGitTool` replacement |
 | `IMavenTool` | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **RBAC** | Requires `role_tool.tool_maven`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | **RBAC** | Requires `role_tool.tool_compile`; end-to-end `git clone → build → docker run → health check` |
@@ -453,7 +456,7 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Sub-task runs inherit user identity — no privilege escalation surface. |
 | **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
 
-The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool`) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
+The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool` / `IAskUserTool` — a sub-task cannot ask the user questions; anything needing user decision must be written into the sub-task's returned result and the main conversation decides whether to ask) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
 
 **Configuration**:
 
@@ -519,7 +522,52 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 
 ---
 
-## 12. Replacing a Sub-Tool
+## 12. `IAskUserTool` — AskUser Interactive Question
+
+| Item | Details |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface** | `cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool` |
+| **Default** | `DefaultAskUserTool` |
+| **Override** | Custom `@Bean IAskUserTool` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Asks only the current user within the current stream; the answer returns to the same stream — no privilege escalation surface. |
+| **Methods (1)** | `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — renders an inline choice card in the chat stream and blocks until the user answers |
+
+**Tool-call parameters**:
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `question` | string | Yes | Question text — one sentence, clear and specific |
+| `header` | string | No | Short title/chip (2-6 words, e.g. "Deployment method"); may be null |
+| `background` | string | No | Why the question is asked (1-2 sentences); may be null |
+| `optionsJson` | string | Yes | JSON array of 2-4 options: `[{"label":"Option A","description":"extra note"},{"label":"Option B"}]` (a string, not a typed list — better tool-args JSON tolerance for qwen-family models; parsed server-side with Spring AI's lenient `JsonParser`) |
+| `multiSelect` | boolean | No | Allow selecting multiple options (null = false) |
+| `allowCustomInput` | boolean | No | Allow a free-text "other" answer (null = false) |
+
+**Card behavior**: the question is pushed into the current chat stream as an SSE frame (`ChatResponseRecord.askUser` = `AskUserEvent`, see [API.md](./API.md) § 3.1). The frontend renders an inline card — single-select submits on click, multi-select uses an explicit submit button, optional custom input, countdown timer, and frozen "answered / timed out / cancelled" states. The answer is POSTed to `/spring/ai/loom/ask/{questionId}/answer` (see [API.md](./API.md) § 3.2), which wakes the blocked tool thread; the answer returns to the same stream as the tool result.
+
+**Return-text contract** (every failure path returns text — never throws — so the SSE Flux completes normally and ChatMemory persists the turn):
+
+| Return prefix | Trigger |
+|---|---|
+| `[用户已回答] {answer}` | User answered within the timeout |
+| `[用户未作答] ...` | Timeout (`askuser.timeoutSeconds`, default 300), or the user pressed stop (the stop path cancels all pending questions for the conversation) |
+| `[提问失败] ...` | Validation error (blank question / unparseable `optionsJson` / option count outside 2-4 / blank option label), missing conversation context, stream unavailable, or a wait exception — each message tells the LLM how to correct and retry |
+
+(There is also a rare `[提问被中断]` prefix if the waiting thread is interrupted.)
+
+**Timeout & stop behavior**: on timeout the tool returns a "user did not answer" text instructing the LLM to proceed with its own reasonable decision; pressing stop cancels every pending question for `(username, conversationId)` so no blocked thread leaks.
+
+**Sub-task / scheduled-task exclusion contract** (#1 spec D6, see `ISubTaskTool` javadoc): a sub-task only executes what the main task planned and returns its result. It cannot ask the user questions — anything needing user decision must be written into the sub-task's returned result, and the main conversation decides whether to ask the user. `DefaultSubTaskExecutor` filters `IAskUserTool` out of the sub-task tool schema, and scheduled tasks fire through the same sub-task path, inheriting this exclusion.
+
+**Configuration**:
+
+| Property | Default | Description |
+|--------------------------------|---------|------------------------------------------|
+| `askuser.timeoutSeconds` | `300` | Max seconds the tool blocks waiting for the user's answer; on timeout it returns a "user did not answer" text and the Flux completes normally |
+
+---
+
+## 13. Replacing a Sub-Tool
 
 Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a custom implementation wins automatically:
 

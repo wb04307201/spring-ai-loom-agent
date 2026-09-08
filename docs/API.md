@@ -201,6 +201,20 @@ Each event returns a `ChatResponseRecord`:
 |--------------------|--------|--------------------------------|
 | `content` | string | AI response text fragment |
 | `reasoningContent` | string | Reasoning/thinking trace (optional) |
+| `askUser` | object \| null | 3rd component. `null` = normal content frame; non-null = an askUser question-card event (`AskUserEvent`, fields below). The frontend renders an inline choice card and the `askUser` tool blocks until answered |
+
+**`askUser` (`AskUserEvent`) fields**:
+
+| Field | Type | Description |
+|---|---|---|
+| `questionId` | string | UUID; index for the answer endpoint |
+| `question` | string | Question body |
+| `header` | string | Short title/chip (nullable) |
+| `background` | string | Background context (nullable) |
+| `options` | object[] | 2-4 options, each `{label, description}` |
+| `multiSelect` | boolean | Whether multiple options can be selected |
+| `allowCustomInput` | boolean | Whether a custom "other" input is allowed |
+| `timeoutSeconds` | number | Frontend countdown; same value as the tool's blocking timeout |
 
 **SSE Event Example**:
 
@@ -213,6 +227,20 @@ data: {"content":"How can","reasoningContent":""}
 
 data: {"content":"I help you?","reasoningContent":""}
 ```
+
+### 3.2 AskUser answer endpoint
+
+```
+POST /spring/ai/loom/ask/{questionId}/answer
+Content-Type: application/json
+```
+
+Submits the answer to a question card (the `askUser` tool is blocking and waiting).
+
+- Request body: `{"answer": "option label"}` (single-select / custom input) or `{"answer": ["label1","label2"]}` (multi-select)
+- `200 {"ok":true}` — answer delivered, the blocked tool thread is woken up
+- `400 {"error":"invalid answer"}` — malformed body / `answer` missing or blank
+- `404 {"error":"not found"}` — unknown questionId, cross-user submission, or the question already timed out / was cancelled (all three share one response to prevent existence leaks)
 
 ---
 
@@ -1272,9 +1300,12 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 ```json
 {
  "content": "string",
- "reasoningContent": "string"
+ "reasoningContent": "string",
+ "askUser": null
 }
 ```
+
+`askUser` is `null` for normal frames; when non-null it carries an `AskUserEvent` question card (see § 3.1/3.2).
 
 ### ConversationRecord
 
