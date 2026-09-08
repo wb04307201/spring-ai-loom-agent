@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.http.MediaType;
 
 import java.util.List;
@@ -71,8 +72,12 @@ public class DefaultAskUserTool implements IAskUserTool {
             + "等待期间当前回复会暂停,这是正常的。仅在确实需要用户决策时使用;"
             + "能自行合理决定的不要问。一次只问一个问题,需要多个答案时分多次调用。")
     @Override
-    public String askUser(String question, String header, String background,
-                          String optionsJson, Boolean multiSelect, Boolean allowCustomInput,
+    public String askUser(@ToolParam(description = "要问用户的问题文本,一句话,清晰具体") String question,
+                          @ToolParam(description = "问题的短标题(2-6 字,如'部署方式'),可传 null") String header,
+                          @ToolParam(description = "为什么问这个问题的背景说明(1-2 句),可传 null") String background,
+                          @ToolParam(description = "选项 JSON 数组,2-4 个,形如 [{\"label\":\"选项A\",\"description\":\"补充说明\"},{\"label\":\"选项B\"}]") String optionsJson,
+                          @ToolParam(description = "是否允许多选,默认 false") Boolean multiSelect,
+                          @ToolParam(description = "是否允许用户自由输入自定义答案,默认 false") Boolean allowCustomInput,
                           ToolContext toolContext) {
         String username = readContextString(toolContext, "username");
         String conversationId = readContextString(toolContext, "parentConversationId");
