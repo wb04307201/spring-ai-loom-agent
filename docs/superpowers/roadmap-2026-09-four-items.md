@@ -13,8 +13,8 @@
 | 1 | #4 控制台 CRUD + 复活审批流 | ✅ 完成(2026-09-07,10 Task 全部落地) | 中-大 |
 | 2 | #2 文档清理(删 CHANGELOG + md 对齐) | ✅ 完成(2026-09-07) | 小 |
 | 3 | #3 H2 向量存储(H2JVectorStore) | ✅ 完成(2026-09-07) | 大 |
-| 4 | #1 AskUser 交互工具 | ✅ 完成(2026-09-08,代码+文档;Chrome 复验与概览图重生成收尾中) | 大 |
-| 末 | 概览图重生成(#1 工具组 8→9 + #3 JVector→H2 会让图失真;全部代码完成后一次性重生成,**需提醒用户**) | 🔵(依赖 T7b:Chrome 复验 + 概览图重生成,需用户确认 + DASHSCOPE 凭据) | 小 |
+| 4 | #1 AskUser 交互工具 | ✅ 完成(2026-09-08,代码+文档+Chrome 端到端复验全绿;3 个复验缺陷已修) | 大 |
+| 末 | 概览图重生成(#1 工具组 9→10 + #3 JVector→H2 会让图失真;全部代码完成后一次性重生成,**需提醒用户**) | 🟡(布局脚本 generate.py 已改 9→10 工具组;PNG 重生成待 `DASHSCOPE_API_KEY` —— 当前环境只有 WORKSPACE_ID + PERSON_TOKEN) | 小 |
 
 #2 排在 #4 之后、#1/#3 之前的原因:#1/#3 会实质改 README/CLAUDE 技术栈描述,文档对齐放在代码改动后才有意义;但 #4 也改文档(admin 控制台职责),所以 #2 在 #4 落地后做,再随 #1/#3 增量更新。
 
@@ -190,11 +190,12 @@
 ### 落地记录(2026-09-08)
 
 - **最终形态**:路径 1 阻塞同流落地。新包 `askuser`:IAskUserTool(@ToolGroup universal)+ DefaultAskUserTool(future.get 阻塞,timeoutSeconds 可注入)+ AskUserRegistry(纯内存);ChatResponseRecord 第 3 组件 askUser(2-arg 兼容构造器);`POST /ask/{questionId}/answer`(跨用户/未知/已失效统一 404);stop 路径 cancelAll 哨兵释放阻塞线程;子任务/定时任务 schema 级排除(DefaultSubTaskExecutor 过滤器 + 委派契约文案);前端内嵌卡片(单选即点即交/多选显式提交/自定义输入/倒计时/已答·已超时·已取消定格)。
-- **Commits(按 Task 序)**:T1 `f14006d`(AskUserEvent/AskUserOption/ChatResponseRecord 第 3 组件)/ T2 `41605ec`(AskUserRegistry)/ T3 `5187685`(IAskUserTool+DefaultAskUserTool+properties+beans)+ fix `2aaf7bb`(null-element 守卫)+ fix `b59ccf5`(LoomAgentToolAutoConfigTest 上下文 bean)/ T4 `dc26d48`(answer 端点+stop cancelAll)/ T5 `0f5fc50`(子任务 schema 级排除+契约文档)/ T6 `2511053`(前端内嵌卡片)/ T7a 本 commit。
-- **与 spec 偏差**:(1) spec §6 的"接线 IT"以 AskUserRouterTest(真 router+真 Registry,无 Spring 上下文,AdminRouterSpotTest 先例)等价交付;(2) answer 路由 body 解析用 `request.body(Map.class)`(仓库 ~40 处同款约定;LoomAgentTestUtil 无 StringHttpMessageConverter),状态码/响应体/join 语义与 spec 完全一致;(3) T3 补 null-element 守卫(fix round,spec 零异常逃逸硬约束的 plan 自身漏洞)。
-- **回归门**(2026-09-08,四段全绿):库单元 `mvn test -pl spring-ai-loom-agent` → **173 run, 0 failures**(151 基线 + 22 新增);`mvn clean install -DskipTests`(排除 4 个 MCP 模块 —— 运行中 MCP JVM 持有 Windows 文件锁,既定先例;4 模块零改动)→ BUILD SUCCESS;test 模块单元 → **392 run, 0 failures**(382 基线 + 10 新增);清库后 IT gate → **123 run, 0 failures, 3 skipped**(skip 为既有 Maven 工具 IT 条件跳过)。
-- **D9 线程预案**:终审字节码核验(spring-ai-alibaba-dashscope 1.1.2.3,DashScopeChatModel.internalStream):tool 执行 continuation 实际跑在 **Schedulers.boundedElastic()**(Reactor 官方阻塞池),非 spec §2 推测的 ForkJoinPool common —— 兜底方案即现状,无需引入。Chrome 复验(T7b)仍按原计划执行后回填。
-- **概览图**:工具组 9→10,待 T7b 重生成(需用户确认 + DASHSCOPE 凭据)。
+- **Commits(按 Task 序)**:T1 `f14006d`(AskUserEvent/AskUserOption/ChatResponseRecord 第 3 组件)/ T2 `41605ec`(AskUserRegistry)/ T3 `5187685`(IAskUserTool+DefaultAskUserTool+properties+beans)+ fix `2aaf7bb`(null-element 守卫)+ fix `b59ccf5`(LoomAgentToolAutoConfigTest 上下文 bean)/ T4 `dc26d48`(answer 端点+stop cancelAll)/ T5 `0f5fc50`(子任务 schema 级排除+契约文档)/ T6 `2511053`(前端内嵌卡片)/ T7a `0028f53`(文档同步+回归门)/ 终审 fix wave `af8110f`(C1 前端单选+自定义提交空串 → trim+filter 空值 & 非 404 失败可重试;I1 流 onError/onTimeout/onCompletion 补 cancelAll;M1 D9 记录)/ **浏览器复验抓到并修复 3 个缺陷**:`9fce0c9`(-parameters + impl @ToolParam — LLM 原本只看到 arg0..arg5 无名无描述,反复猜参数映射且首调失败)、`6e6e516`(blankToNull 归一化字面 "null" — qwen 间歇把可空 header/background 传成字符串 "null" 致卡片渲染出 "null" 字样)、`2bd0b5d`(loomAgentProperties 补 setAskuser — 原本 yml/cmdline 的 askuser.timeout-seconds 被手动逐字段拷贝静默丢弃)+ T7b 本 commit(generate.py 布局 9→10 工具组 + 本回填)。
+- **与 spec 偏差**:(1) spec §6 的"接线 IT"以 AskUserRouterTest(真 router+真 Registry,无 Spring 上下文,AdminRouterSpotTest 先例)等价交付;(2) answer 路由 body 解析用 `request.body(Map.class)`(仓库 ~40 处同款约定;LoomAgentTestUtil 无 StringHttpMessageConverter),状态码/响应体/join 语义与 spec 完全一致;(3) T3 补 null-element 守卫(fix round,spec 零异常逃逸硬约束的 plan 自身漏洞);(4) **复验暴露 3 个单测/IT/终审都看不到的缺陷**(见 Commits 行 `9fce0c9`/`6e6e516`/`2bd0b5d`)—— 印证 spec §6 把 Chrome 手动复验列为门禁的必要性;其中 `-parameters` 缺失是**全项目潜在 bug**(连既有 startSubTask 都编译成 arg0/arg1,只因参数少+描述清晰一直没暴露),本次顺手修正全工具参数名。
+- **回归门**(2026-09-08,fix wave 后复跑四段全绿):库单元 `mvn test -pl spring-ai-loom-agent` → **175 run, 0 failures**(173 + fixwave3 的 2 个 null 归一化测试;首跑曾现 1 个 flaky 失败但 surefire XML 无失败记录、连跑两次均 175/0,系既有 BatchedCounterService/LoggingToolCallback 模拟 DB 故障的计时型 flake,与本次改动无关 —— -parameters 仅元数据、null/binding 改动 askuser-local);`mvn clean install -DskipTests`(排除 4 个 MCP 模块 —— 运行中 MCP JVM 持有 Windows 文件锁,既定先例;4 模块零改动)→ BUILD SUCCESS;test 模块单元 → **394 run, 0 failures**(392 + fixwave4 的 LoomAgentPropertiesBindingTest ×2);清库后 IT gate → **123 run, 0 failures, 3 skipped**(skip 为既有 Maven 工具 IT 条件跳过)。
+- **D9 线程预案**:**经验证实无需兜底**。终审字节码核验(spring-ai-alibaba-dashscope 1.1.2.3,DashScopeChatModel.internalStream)预测 tool 执行 continuation 跑在 `Schedulers.boundedElastic()`(非 spec §2 推测的 ForkJoinPool common);**Chrome 复验实测吻合** —— 日志 `Executing tool call: askUser` 出现在 `[boundedElastic-N]` 线程,工具阻塞期间主流内容帧无卡顿,D9 兜底方案(外包 boundedElastic)即现状,未引入。
+- **Chrome 端到端复验(T7b,真实 DashScope qwen3.8-max,全新库)**:happy-path 单选 ✅、自定义输入(C1 回归)✅、多选 ✅、刷新后文本持久化(ChatMemory ON_COMPLETE 跨刷新)✅、stop→cancelAll 同毫秒释放阻塞线程(D7)✅、超时→卡片冻结"已超时"+LLM 收"用户未作答"继续不重复提问+ChatMemory 仍落库 ✅、universal 工具正确隐藏于 /api/capabilities 但 LLM 可自由调用 ✅、askuser.timeout-seconds 配置生效(25s override → 倒计时 ~0:25 而非默认 5:00,binding fix 经验确认)✅。
+- **概览图**:工具组 9→10,**布局脚本已改**(`generate.py` EN_LAYOUT/ZH_LAYOUT:胶囊 09→10 TOOLS、07→08 ON,卡片区 +Ask-user/问答 第 10 张 + 徽章 1);**PNG 重生成 DEFERRED** —— 需 `DASHSCOPE_API_KEY`(当前环境只有 DASHSCOPE_WORKSPACE_ID + PERSON_TOKEN,变量名不匹配),用户裁定"改布局脚本,稍后生成"。下次持凭据时按 project-overview-image skill 触发流程跑 generate.py 重生成 `docs/project-overview-{en,zh}.png`。
 
 ---
 
