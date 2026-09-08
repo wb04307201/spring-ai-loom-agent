@@ -140,8 +140,9 @@ askUser 调用行里:
    ```java
    record AskUserLogRecord(long logId, String conversationId, String username,
                            String question, String header, String answerText,
-                           String status, long durationMs, java.time.LocalDateTime createdAt) {}
+                           String status, long durationMs, java.time.Instant createdAt) {}
    ```
+   (`createdAt` 用 `Instant` 与既有 `ToolCallLog` record 一致,Jackson 默认 ISO-8601 序列化)
    - `question` / `header`:从 `arguments_json` 解析(Jackson `readTree`,解析失败 → question 置 `"(解析失败)"`,不抛)
    - `status`:从 `result_text` 前缀推导 —— `[用户已回答]`→`ANSWERED` / `[用户未作答]`→`TIMEOUT` / `[提问被中断]`→`CANCELLED` / `[提问失败]`→`FAILED` / 其它→`UNKNOWN`
    - `answerText`:ANSWERED 时取前缀之后的正文;其余为 null
