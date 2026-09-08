@@ -73,4 +73,28 @@ class AskUserLogParsingTest {
         assertThat(JdbcAskUserLogQuery.parseQuestion("{}")).isEqualTo("(解析失败)");
         assertThat(JdbcAskUserLogQuery.parseHeader("{\"question\":\"q\"}")).isNull();
     }
+
+    @Test
+    void quotedJsonStringLiteralFormIsNormalized() {
+        // 生产形态:MethodToolCallback 把 String 返回值 JSON 序列化成带引号 literal 后
+        // LoggingToolCallback 才落库(Fix round 1,Chrome 复验抓到的"未知"状态缺陷)
+        String answered = "\"[用户已回答] PostgreSQL\"";
+        assertThat(JdbcAskUserLogQuery.deriveStatus(answered)).isEqualTo("ANSWERED");
+        assertThat(JdbcAskUserLogQuery.extractAnswer(answered)).isEqualTo("PostgreSQL");
+        String stopped = "\"[用户未作答] 用户已停止本次对话,未作答。\"";
+        assertThat(JdbcAskUserLogQuery.deriveStatus(stopped)).isEqualTo("CANCELLED");
+        assertThat(JdbcAskUserLogQuery.extractAnswer(stopped)).isNull();
+    }
+
+    @Test
+    void unwrapJsonStringIsSafeAndIdempotent() {
+        // 非引号开头 → 原样返回
+        assertThat(JdbcAskUserLogQuery.unwrapJsonString("[用户已回答] x")).isEqualTo("[用户已回答] x");
+        // null 安全
+        assertThat(JdbcAskUserLogQuery.unwrapJsonString(null)).isNull();
+        // 畸形(引号不闭合)→ 不抛,原样返回
+        assertThat(JdbcAskUserLogQuery.unwrapJsonString("\"abc")).isEqualTo("\"abc");
+        // 合法引号形态 → 解出原始字符串
+        assertThat(JdbcAskUserLogQuery.unwrapJsonString("\"a\\\"b\"")).isEqualTo("a\"b");
+    }
 }

@@ -34,13 +34,15 @@ class JdbcAskUserLogQueryIT {
     void seed() {
         conv = "conv-asklog-" + System.nanoTime();
         String user = "u-" + System.nanoTime();
-        // 一答一超时两行(模拟 LoggingToolCallback 写入形态)
+        // 一答一超时两行 —— result_text 用带引号 JSON string literal 形态,
+        // 模拟生产 LoggingToolCallback 落库形态(Fix round 1:MethodToolCallback
+        // 对 @Tool String 返回值先做 JSON 序列化)
         insert(user, conv + "-1",
                 "{\"question\":\"用哪种数据库?\",\"header\":\"选型\"}",
-                "[用户已回答] MySQL", 42_000L, Instant.now().minusSeconds(120));
+                "\"[用户已回答] MySQL\"", 42_000L, Instant.now().minusSeconds(120));
         insert(user, conv + "-2",
                 "{\"question\":\"部署到哪个环境?\"}",
-                "[用户未作答] 用户未在 5 分钟内作答。请基于现有信息自行合理决策并继续,或改用其他方式推进。",
+                "\"[用户未作答] 用户未在 5 分钟内作答。请基于现有信息自行合理决策并继续,或改用其他方式推进。\"",
                 300_000L, Instant.now().minusSeconds(60));
         // 干扰行:非 askUser 工具,不得混入结果
         jdbcTemplate.update("insert into loom_tool_call_log (conversation_id, username, "

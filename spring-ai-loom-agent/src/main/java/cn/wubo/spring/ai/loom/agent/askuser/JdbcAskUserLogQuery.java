@@ -44,7 +44,9 @@ public class JdbcAskUserLogQuery implements IAskUserLogQuery {
 
     private static AskUserLogRecord mapRow(ResultSet rs, int rowNum) throws SQLException {
         String args = rs.getString("arguments_json");
-        String result = rs.getString("result_text");
+        // 生产形态:MethodToolCallback 把 @Tool 方法的 String 返回值 JSON 序列化成
+        // 带引号的 string literal 后 LoggingToolCallback 才落库 → 先规范化再解析
+        String result = unwrapJsonString(rs.getString("result_text"));
         String status = deriveStatus(result);
         long duration = rs.getObject("duration_ms") == null ? 0L : rs.getLong("duration_ms");
         java.time.Instant createdAt = rs.getTimestamp("created_at") == null
@@ -62,8 +64,24 @@ public class JdbcAskUserLogQuery implements IAskUserLogQuery {
                 createdAt);
     }
 
+    /**
+     * 规范化 result_text 的两种存储形态:
+     * 生产 = JSON string literal(首字符 ASCII 34,Spring AI MethodToolCallback
+     * 对 String 返回值做 JSON 序列化的产物);IT/裸文本 = 原始字符串。
+     * 引号开头 → Jackson 解出原始字符串;解失败(引号不闭合等畸形)原样返回;null 安全。
+     */
+    static String unwrapJsonString(String text) {
+        if (text == null || !text.startsWith("\"")) return text;
+        try {
+            return MAPPER.readValue(text, String.class);
+        } catch (Exception e) {
+            return text; // 畸形引号形态兜底,不抛
+        }
+    }
+
     /** result_text 前缀 → status(前缀逐字对齐 DefaultAskUserTool 返回值,spec §2.2)。 */
     static String deriveStatus(String resultText) {
+        resultText = unwrapJsonString(resultText);
         if (resultText == null || resultText.isEmpty()) return "UNKNOWN";
         if (resultText.startsWith("[用户已回答]")) return "ANSWERED";
         if (resultText.startsWith("[用户未作答]")) {
@@ -77,6 +95,7 @@ public class JdbcAskUserLogQuery implements IAskUserLogQuery {
 
     /** ANSWERED 时取前缀之后的正文;其余状态 null。 */
     static String extractAnswer(String resultText) {
+        resultText = unwrapJsonString(resultText);
         if (resultText == null) return null;
         String prefix = "[用户已回答] ";
         if (!resultText.startsWith(prefix)) return null;
