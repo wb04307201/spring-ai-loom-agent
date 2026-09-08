@@ -224,7 +224,7 @@ AskUser 主功能落地后追加的四项调整(卡片折叠 / 日志页提问�
   - V7 种子技能 ✅:admin 市场页 2 条官方技能(APPROVED + 🏛️ 官方徽章 + category=表达沟通);普通视角 pull STAR-IJ 成功
   - V8 STAR-IJ 真实 LLM 一问一答 ✅:选中技能发"讲清楚上周项目上线" → LLM 第 1 问 S情境(header"情境",4 引导选项+自由输入)→ 作答折叠 → 自动第 2 问 T任务(header"任务"),**逐步推进、不自问自答、不描述计划**;stop 后第 2 卡冻结"已结束"
   - V9 回归 ✅:工具弹窗(RBAC 3 工具+MCP 列表)/文件模态框/textarea/send 全正常,console 零 error/warn
-  - 截图:`.superpowers/sdd/2026-09-08-askuser-followups/v1-summary-answered.png`、`v4-asklog-fixed.png`
+  - 截图:`docs/superpowers/reports/assets/v1-summary-answered.png`、`v4-asklog-fixed.png`
 
 ---
 
