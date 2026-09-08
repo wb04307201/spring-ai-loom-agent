@@ -225,6 +225,12 @@ AskUser 主功能落地后追加的四项调整(卡片折叠 / 日志页提问�
   - V8 STAR-IJ 真实 LLM 一问一答 ✅:选中技能发"讲清楚上周项目上线" → LLM 第 1 问 S情境(header"情境",4 引导选项+自由输入)→ 作答折叠 → 自动第 2 问 T任务(header"任务"),**逐步推进、不自问自答、不描述计划**;stop 后第 2 卡冻结"已结束"
   - V9 回归 ✅:工具弹窗(RBAC 3 工具+MCP 列表)/文件模态框/textarea/send 全正常,console 零 error/warn
   - 截图:`docs/superpowers/reports/assets/v1-summary-answered.png`、`v4-asklog-fixed.png`
+- **全分支终审(opus,fb6b33b..d447e1e,2026-09-09)**:裁决 **可合并**,0 Critical / 0 Important;安全面(XSS textContent+5 字符 escapeHtml、SQL 全参数化、门禁零路由内校验、种子 SQL 幂等)逐字核实通过;AskUserLogRecord 9 字段/status 5 枚举在后端·路由·前端·文档四处一致。
+- **Follow-ups(终审 N1-N6 + 缓议 Minor,归 3 组,本期不做)**:
+  - **组 A(下一 minor 删 `setUserRolesOrSkipAdmin` 时同一 commit)**:DefaultRoleService 实现侧补 `@deprecated` javadoc 标签;迁移 `LoomAgentConfiguration` L2154 + `DefaultRoleServiceErrorMappingTest` 两处调用点(删方法时编译告警即硬提醒)。
+  - **组 B(测试补齐)**:`recent(500)` → 上限钳制 200 断言(锁 `MAX_LIMIT`);`extractAnswer` 前缀后纯空白边界用例。
+  - **组 C(前端/文档小清扫)**:CLAUDE.md L107 "14 RouterFunctions" 计数陈旧(实测 19)→ 改数字或去数字化措辞;stats.js FAILED 徽章硬编码 `#ef4444` → 换 danger token;stats.js 旧 `load()` catch 的 `${e.message}` 补 escapeHtml(新 `loadAskLogs` 已是正确范本);`q.slice(0,60)` emoji 代理对截断(纯观感,可留);`fmtWait` Math.round 60s 边界舍入(可留);`map[status]` 原型键理论 TypeError(`Object.hasOwn` 一行加固,可留)。
+  - **组 D(schema,触发式)**:loom_tool_call_log 增长到 10⁵+ 行时,V1.0 补 `(tool_name, created_at)` 索引(fresh-DB 政策下零成本);当前 admin-only + LIMIT≤200 全表扫可接受。
 
 ---
 
