@@ -905,3 +905,47 @@ SELECT '靶心人公式 讲好一个故事',
        'system', 'APPROVED', CURRENT_TIMESTAMP, 'system',
        TRUE, 'ADMIN', '表达沟通'
 WHERE NOT EXISTS (SELECT 1 FROM market_skill WHERE author = 'system' AND name = '靶心人公式 讲好一个故事');
+
+-- =============================================================
+-- ==== 默认基础角色 base(4 常用 MCP + 2 官方表达技能)+ 授予默认 admin ====
+-- 放在 market_skill 种子之后:role_skill 按名查 market_skill.id(不硬编码自增值)。
+-- role_mcp.mcp_name = 运行时 SDK client 名(spring-ai-mcp-client - X),无 FK 到
+-- mcp_server;getVisibleMcpsForUser 运行时与活跃 client 名匹配,mcp_server 元数据
+-- (title/description)在 V1.1 seed。is_system=FALSE(可在控制台删除,CASCADE 清子表)。
+-- default_enabled / default_loaded = TRUE(聊天面板默认勾选启动 / 技能默认加载)。
+-- 全部 INSERT...SELECT...WHERE NOT EXISTS 幂等(镜像上方 admin / market_skill 种子风格)。
+-- =============================================================
+
+INSERT INTO role (code, name, is_system, description)
+SELECT 'base', '基础角色', FALSE, '默认基础角色:4 个常用 MCP + 2 个官方表达技能,默认启用/加载'
+WHERE NOT EXISTS (SELECT 1 FROM role WHERE code = 'base');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - sequential-thinking', 0, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - sequential-thinking');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - bing-search', 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - bing-search');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - memory', 2, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - memory');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch', 3, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch');
+
+INSERT INTO role_skill (role_code, market_skill_id, sort_order, default_loaded)
+SELECT 'base', ms.id, 0, TRUE FROM market_skill ms
+WHERE ms.author = 'system' AND ms.name = '靶心人公式 讲好一个故事'
+  AND NOT EXISTS (SELECT 1 FROM role_skill rs WHERE rs.role_code = 'base' AND rs.market_skill_id = ms.id);
+
+INSERT INTO role_skill (role_code, market_skill_id, sort_order, default_loaded)
+SELECT 'base', ms.id, 1, TRUE FROM market_skill ms
+WHERE ms.author = 'system' AND ms.name = 'STAR-IJ 讲清一件事'
+  AND NOT EXISTS (SELECT 1 FROM role_skill rs WHERE rs.role_code = 'base' AND rs.market_skill_id = ms.id);
+
+INSERT INTO user_role (username, role_code)
+SELECT 'wb04307201', 'base'
+WHERE NOT EXISTS (SELECT 1 FROM user_role WHERE username = 'wb04307201' AND role_code = 'base');
