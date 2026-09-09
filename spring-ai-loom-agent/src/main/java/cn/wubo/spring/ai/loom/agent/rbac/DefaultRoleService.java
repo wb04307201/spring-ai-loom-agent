@@ -52,11 +52,16 @@ public class DefaultRoleService implements IRoleService {
     @Override
     public void delete(String code) {
         // B.2.1 修复:显式 cascade 删子表,避免 role 删除后子行变成 dangling 引用。
-        // V2.2__role_cascade.sql 加了 FK ON DELETE CASCADE,DB 层也会兜底,
+        // V1.0 FK 块加了 ON DELETE CASCADE,DB 层也会兜底,
         // 这里显式 DELETE 让 SQL 路径可见、易追踪(也防止某些 DB 不严格 cascade 时漏删)。
+        // DEFECT-Q3-1 修复(2026-09-09 第四轮全面测试):B.2.1 清单漏了后加的两张授权
+        // 子表 role_skill(M4)与 loom_role_knowledge(知识库市场),dangling 行会在
+        // 同 code 重建角色时被 role_skill→user_skill 自动同步捡走 —— 陈旧授权复活。
         jdbcTemplate.update("DELETE FROM user_role WHERE role_code = ?", code);
         jdbcTemplate.update("DELETE FROM role_mcp WHERE role_code = ?", code);
         jdbcTemplate.update("DELETE FROM role_tool WHERE role_code = ?", code);
+        jdbcTemplate.update("DELETE FROM role_skill WHERE role_code = ?", code);
+        jdbcTemplate.update("DELETE FROM loom_role_knowledge WHERE role_code = ?", code);
         jdbcTemplate.update("DELETE FROM role WHERE code = ? AND is_system = FALSE", code);
     }
 

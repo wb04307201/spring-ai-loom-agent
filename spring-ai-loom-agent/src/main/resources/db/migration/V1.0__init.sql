@@ -592,6 +592,20 @@ ALTER TABLE role_tool
     ADD CONSTRAINT fk_role_tool_role
     FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
 
+-- 4. role_skill.role_code → role.code
+--    DEFECT-Q3-1 修复(2026-09-09 第四轮全面测试):B.2.1 的 FK 块漏了后加的
+--    role_skill(M4 技能授权)与 loom_role_knowledge(知识库市场授权)两张子表,
+--    角色删除后 dangling 行在同 code 重建时让陈旧授权复活。DB 层补 CASCADE 兜底
+--    (应用层 DefaultRoleService.delete() 同步补显式 DELETE,双保险对齐前三表)。
+ALTER TABLE role_skill
+    ADD CONSTRAINT fk_role_skill_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
+-- 5. loom_role_knowledge.role_code → role.code(同 DEFECT-Q3-1)
+ALTER TABLE loom_role_knowledge
+    ADD CONSTRAINT fk_role_knowledge_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
 
 -- =============================================================
 -- V2.3: user_role.username 加 FK + CASCADE 修 P0.3.3 bug
