@@ -62,6 +62,7 @@
         <jgit.version>7.6.0.202603022253-r</jgit.version>
         <maven.version>3.3.0</maven.version>
         <flex-schedule.version>1.2.2</flex-schedule.version>
+        <playwright.version>1.50.0</playwright.version>
     </properties>
 
     <dependencyManagement>
@@ -119,6 +120,11 @@
                 <groupId>io.github.wb04307201</groupId>
                 <artifactId>flex-schedule-spring-boot-starter</artifactId>
                 <version>${flex-schedule.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.microsoft.playwright</groupId>
+                <artifactId>playwright</artifactId>
+                <version>${playwright.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
