@@ -113,7 +113,7 @@ Organized into 7 nested static `@Configuration` classes:
 新增 4 个组件来替代旧的"9 个 I*Tool + 5 个 MCP server 各管各的"混乱:
 
 1. **`@ToolGroup` 注解**(`cn.wubo.spring.ai.loom.agent.tool.ToolGroup`)
-   放在 10 个 `I*Tool` 接口上,声明所属 capability group:
+   放在 11 个 `I*Tool` 接口上,声明所属 capability group:
    ```java
    @ToolGroup(value = "file", description = "readTextFile / writeFile / listDirectory ...")
    public interface IFileTool extends IEmbedTool { ... }

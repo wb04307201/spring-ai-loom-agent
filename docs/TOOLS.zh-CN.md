@@ -550,7 +550,8 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 **安全约束:** 全部外部网络请求被双重屏蔽(context route abort + 注入 CSP
 `default-src 'none'`);HTML 必须自包含(内联 CSS/JS)。输入路径沙箱限定在用户文件目录内;
-输出只落在其 `prototypes/` 子目录。渲染串行执行(同一时刻一个),30s 超时;HTML 大小上限 2MB。
+输出只落在其 `prototypes/` 子目录。渲染串行执行(同一时刻一个);`timeout-seconds` 约束排队获取
+(渲染本体另由 Playwright 每操作默认超时与 60s 启动超时限界);HTML 大小上限 2MB。
 
 **配置(`spring.ai.loom.agent.render.*`):**
 
@@ -558,7 +559,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 |----------|---------|-------------|
 | `chromium-path` | _(空)_ | 显式 Chromium 二进制路径(如 `/usr/bin/chromium-browser`);空 = Playwright 探测(托管缓存 → 系统 channel) |
 | `device-scale-factor` | `2` | 截图缩放(2 = Retina) |
-| `timeout-seconds` | `30` | 单次渲染超时(含排队等待) |
+| `timeout-seconds` | `30` | 排队获取超时秒;渲染本体另由 Playwright 每操作默认超时与 60s 启动超时限界 |
 | `render-wait-ms` | `1500` | `setContent` 后等待内联 JS 完成的固定时长 |
 | `network-blocked` | `true` | route-abort 全部外部请求(false 时 CSP 仍注入) |
 | `max-html-bytes` | `2097152` | HTML 文件大小上限 |

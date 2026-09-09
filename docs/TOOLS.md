@@ -604,7 +604,8 @@ text with the provisioning hint — it never throws.
 **Security:** all external network requests are blocked twice (context route abort + injected CSP
 `default-src 'none'`); the HTML must be self-contained (inline CSS/JS). Input paths are sandboxed to
 the user's file directory; output only ever lands in its `prototypes/` subdirectory. Renders are
-serialized (one at a time) with a 30s timeout; HTML size cap 2MB.
+serialized (one at a time); `timeout-seconds` bounds the queue wait (the render itself is bounded by
+Playwright per-operation timeouts and the 60s browser-launch timeout); HTML size cap 2MB.
 
 **Configuration (`spring.ai.loom.agent.render.*`):**
 
@@ -612,7 +613,7 @@ serialized (one at a time) with a 30s timeout; HTML size cap 2MB.
 |----------|---------|-------------|
 | `chromium-path` | _(empty)_ | Explicit Chromium binary (e.g. `/usr/bin/chromium-browser`); empty = Playwright probe (managed cache → system channel) |
 | `device-scale-factor` | `2` | Screenshot scale (2 = Retina) |
-| `timeout-seconds` | `30` | Per-render timeout including queue wait |
+| `timeout-seconds` | `30` | Queue-acquisition timeout in seconds; the render itself is bounded by Playwright per-op timeouts + 60s launch timeout |
 | `render-wait-ms` | `1500` | Fixed wait after `setContent` for inline JS to finish |
 | `network-blocked` | `true` | Route-abort all external requests (CSP stays injected even when false) |
 | `max-html-bytes` | `2097152` | HTML file size cap |
