@@ -35,6 +35,9 @@ import cn.wubo.spring.ai.loom.agent.tool.knowledge.DefaultKnowledgeTool;
 import cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.DefaultMavenTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
+import cn.wubo.spring.ai.loom.agent.tool.render.DefaultHtmlRenderTool;
+import cn.wubo.spring.ai.loom.agent.tool.render.HtmlRenderEngine;
+import cn.wubo.spring.ai.loom.agent.tool.render.IHtmlRenderTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.DefaultSkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.DefaultTimeTool;
@@ -894,6 +897,35 @@ public class LoomAgentConfiguration {
                 LoomAgentProperties properties) {
             return new cn.wubo.spring.ai.loom.agent.askuser.DefaultAskUserTool(
                     askUserRegistry, sseEmitterRegistry, properties.getAskuser().getTimeoutSeconds());
+        }
+
+        /**
+         * HTML 渲染截图引擎(spec 2026-09-09-html-render-tool-design D4/D5)。
+         * @ConditionalOnClass 字符串形式:消费者 classpath 无 playwright → bean 不创建,
+         * 且不触发 HtmlRenderEngine 类加载(镜像 IMavenTool/maven-invoker 先例)。
+         * 构造器不启动浏览器(懒启动,首次 render 才 acquireBrowser);
+         * destroyMethod="close" 在容器关闭时释放 Chromium 进程(engine 是普通类
+         * 不是 @Component,@PreDestroy 不生效,必须显式声明)。
+         */
+        @ConditionalOnClass(name = "com.microsoft.playwright.Playwright")
+        @ConditionalOnMissingBean(HtmlRenderEngine.class)
+        @Bean(destroyMethod = "close")
+        public HtmlRenderEngine htmlRenderEngine(LoomAgentProperties properties) {
+            return new HtmlRenderEngine(properties.getRender());
+        }
+
+        /**
+         * IHtmlRenderTool(spec D2/D3):RBAC 工具 tool_render(role_tool 表显式授权,
+         * 非 universal)。@ConditionalOnMissingBean 保证消费者可整体替换。
+         */
+        @ConditionalOnClass(name = "com.microsoft.playwright.Playwright")
+        @ConditionalOnMissingBean(IHtmlRenderTool.class)
+        @Bean
+        public IHtmlRenderTool defaultHtmlRenderTool(HtmlRenderEngine htmlRenderEngine,
+                                                     IFile file,
+                                                     LoomAgentProperties properties) {
+            return new DefaultHtmlRenderTool(htmlRenderEngine, file,
+                    properties.getFileBasePath(), properties.getRender());
         }
     }
 

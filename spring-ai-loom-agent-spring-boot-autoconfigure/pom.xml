@@ -48,6 +48,13 @@
             <version>8.10.1</version>
             <optional>true</optional>
         </dependency>
+        <!-- IHtmlRenderTool/HtmlRenderEngine bean 定义编译期需要(lib 侧是 optional 不传递);
+             optional=true:starter/消费者不引入,运行时门控靠 @ConditionalOnClass(name=...) 字符串形式 -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 
 </project>
