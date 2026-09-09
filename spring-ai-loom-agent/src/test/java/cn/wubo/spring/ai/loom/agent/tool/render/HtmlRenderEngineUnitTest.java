@@ -45,6 +45,18 @@ class HtmlRenderEngineUnitTest {
     }
 
     @Test
+    @DisplayName("injectCsp:<head 出现在 <script 字符串之后 → 走包裹分支(CSP 不可被诱骗,最终评审 finding 3)")
+    void injectCspNotFooledByHeadInsideScriptString() {
+        String attack = "<script>var s = \"<head>\";</script><html><head><title>t</title></head><body>b</body></html>";
+        String out = HtmlRenderEngine.injectCsp(attack);
+        assertThat(out).startsWith("<!doctype html><html><head>");
+        assertThat(out).contains("default-src 'none'");
+        // meta 必须在真正的文档 head 里(包裹层),而不是 script 字符串里
+        assertThat(out.indexOf("Content-Security-Policy"))
+                .isLessThan(out.indexOf("<script"));
+    }
+
+    @Test
     @DisplayName("pngSize:从 IHDR(offset 16/20,big-endian)解析宽高;坏输入 {0,0}")
     void pngSizeReadsIhdr() {
         byte[] fake = new byte[32];

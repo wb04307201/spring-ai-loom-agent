@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -131,7 +132,7 @@ public class HtmlRenderEngine {
             } catch (RenderUnavailableException e) {
                 throw e;
             } catch (Exception e) {
-                throw new RenderUnavailableException(String.valueOf(e.getMessage()), INSTALL_HINT);
+                throw new RenderUnavailableException(describe(e), INSTALL_HINT);
             }
             try (BrowserContext ctx = holder.browser().newContext(new Browser.NewContextOptions()
                     .setViewportSize(vp.width(), vp.height())
@@ -152,7 +153,7 @@ public class HtmlRenderEngine {
                 return new RenderResult(png, size[0], size[1]);
             } catch (Exception e) {
                 // message 保持裸原因,工具层负责加 "[渲染失败] " 前缀(避免双重前缀)
-                throw new RuntimeException(e.getMessage(), e);
+                throw new RuntimeException(describe(e), e);
             }
         } finally {
             semaphore.release();
@@ -182,7 +183,25 @@ public class HtmlRenderEngine {
             if (this.browserHolder != null && this.browserHolder.browser().isConnected()) {
                 return this.browserHolder;
             }
-            FutureTask<BrowserHolder> task = new FutureTask<>(this::launchWithProbe);
+            // fix(最终评审 finding 1): 浏览器崩溃后恢复时,旧 holder 的 Playwright
+            // node-driver 子进程必须先关闭再覆盖引用 —— 否则每次 crash-recovery 泄漏一个进程,
+            // 破坏 spec §4.4 "单例浏览器 destroyMethod 释放" 的资源承诺。
+            // BrowserHolder.close() 内部吞异常,对已死浏览器安全。
+            BrowserHolder stale = this.browserHolder;
+            if (stale != null) {
+                stale.close();
+                this.browserHolder = null;
+            }
+            FutureTask<BrowserHolder> task = new FutureTask<>(() -> {
+                BrowserHolder h = launchWithProbe();
+                if (Thread.currentThread().isInterrupted()) {
+                    // 等待侧已超时 cancel(true),但 launch 恰好完成 —— 就地关闭,
+                    // 不留孤儿 Chromium/node-driver 进程(最终评审 M1)。
+                    h.close();
+                    throw new IllegalStateException("Chromium launch 在超时取消后完成,已就地关闭");
+                }
+                return h;
+            });
             ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "loom-html-render-launch");
                 t.setDaemon(true);
@@ -202,7 +221,7 @@ public class HtmlRenderEngine {
                 if (c instanceof RenderUnavailableException rue) {
                     throw rue;
                 }
-                throw new RenderUnavailableException(String.valueOf(c.getMessage()), INSTALL_HINT);
+                throw new RenderUnavailableException(describe(c), INSTALL_HINT);
             } finally {
                 executor.shutdownNow();
             }
@@ -216,33 +235,50 @@ public class HtmlRenderEngine {
      */
     private BrowserHolder launchWithProbe() {
         Playwright pw = Playwright.create();
-        List<String> reasons = new ArrayList<>();
-        String configured = cfg.getChromiumPath();
-        if (configured != null && !configured.isBlank()) {
+        boolean handedOff = false;
+        try {
+            List<String> reasons = new ArrayList<>();
+            String configured = cfg.getChromiumPath();
+            if (configured != null && !configured.isBlank()) {
+                try {
+                    Browser b = pw.chromium().launch(baseLaunch().setExecutablePath(Paths.get(configured.trim())));
+                    log.info("HtmlRenderEngine Chromium 启动成功(chromium-path={})", configured);
+                    handedOff = true;
+                    return new BrowserHolder(pw, b, "chromium-path");
+                } catch (Exception e) {
+                    reasons.add("chromium-path(" + configured + "): " + e.getMessage());
+                }
+            }
             try {
-                Browser b = pw.chromium().launch(baseLaunch().setExecutablePath(Paths.get(configured.trim())));
-                log.info("HtmlRenderEngine Chromium 启动成功(chromium-path={})", configured);
-                return new BrowserHolder(pw, b, "chromium-path");
+                Browser b = pw.chromium().launch(baseLaunch());
+                log.info("HtmlRenderEngine Chromium 启动成功(Playwright 默认缓存)");
+                handedOff = true;
+                return new BrowserHolder(pw, b, "playwright-default");
             } catch (Exception e) {
-                reasons.add("chromium-path(" + configured + "): " + e.getMessage());
+                reasons.add("Playwright 默认缓存: " + e.getMessage());
+            }
+            try {
+                Browser b = pw.chromium().launch(baseLaunch().setChannel("chromium"));
+                log.info("HtmlRenderEngine Chromium 启动成功(系统 channel=chromium)");
+                handedOff = true;
+                return new BrowserHolder(pw, b, "channel:chromium");
+            } catch (Exception e) {
+                reasons.add("channel=chromium: " + e.getMessage());
+            }
+            throw new IllegalStateException("Chromium 三级探测全部失败 — " + String.join(" | ", reasons));
+        } finally {
+            // fix(最终评审 M2): 任何非成功路径(含 Error,如驱动解压 OOM)都关闭 pw,
+            // 原实现只在"全失败"分支 close,Exception/Error 从探测缝隙抛出时泄漏。
+            if (!handedOff) {
+                try { pw.close(); } catch (Exception ignore) { }
             }
         }
-        try {
-            Browser b = pw.chromium().launch(baseLaunch());
-            log.info("HtmlRenderEngine Chromium 启动成功(Playwright 默认缓存)");
-            return new BrowserHolder(pw, b, "playwright-default");
-        } catch (Exception e) {
-            reasons.add("Playwright 默认缓存: " + e.getMessage());
-        }
-        try {
-            Browser b = pw.chromium().launch(baseLaunch().setChannel("chromium"));
-            log.info("HtmlRenderEngine Chromium 启动成功(系统 channel=chromium)");
-            return new BrowserHolder(pw, b, "channel:chromium");
-        } catch (Exception e) {
-            reasons.add("channel=chromium: " + e.getMessage());
-        }
-        try { pw.close(); } catch (Exception ignore) { }
-        throw new IllegalStateException("Chromium 三级探测全部失败 — " + String.join(" | ", reasons));
+    }
+
+    /** 异常描述兜底:message 为 null 时用 toString(),避免工具层文本出现 "[渲染失败] null"(最终评审 M3)。 */
+    private static String describe(Throwable t) {
+        String m = t.getMessage();
+        return (m != null && !m.isBlank()) ? m : t.toString();
     }
 
     private BrowserType.LaunchOptions baseLaunch() {
@@ -259,11 +295,22 @@ public class HtmlRenderEngine {
     static String injectCsp(String html) {
         String meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"" + CSP + "\">";
         String src = html == null ? "" : html;
+        String lower = src.toLowerCase(Locale.ROOT);
         Matcher m = HEAD_OPEN.matcher(src);
         if (m.find()) {
-            int gt = src.indexOf('>', m.end() - 1);
-            if (gt >= 0) {
-                return src.substring(0, gt + 1) + meta + src.substring(gt + 1);
+            int headIdx = m.start();
+            int scriptIdx = lower.indexOf("<script");
+            int bodyIdx = lower.indexOf("<body");
+            // fix(最终评审 finding 3): 首个 <head 若出现在 <script>/<body 之后,
+            // 它可能位于 JS 字符串内 —— 插进去的 meta 不会被解析,CSP 失效。
+            // 此时改走整页包裹分支,保证 CSP 从第 0 字节生效。
+            boolean headIsReal = (scriptIdx < 0 || headIdx < scriptIdx)
+                    && (bodyIdx < 0 || headIdx < bodyIdx);
+            if (headIsReal) {
+                int gt = src.indexOf('>', m.end() - 1);
+                if (gt >= 0) {
+                    return src.substring(0, gt + 1) + meta + src.substring(gt + 1);
+                }
             }
         }
         return "<!doctype html><html><head><meta charset=\"utf-8\">" + meta + "</head><body>" + src + "</body></html>";

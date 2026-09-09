@@ -390,7 +390,7 @@ public class LoomAgentProperties {
  * <li>{@code chromiumPath} — 可选:显式 Chromium 二进制路径(如系统包
  * {@code /usr/bin/chromium-browser});空 = Playwright 默认探测(三级探测的第 2/3 级)</li>
  * <li>{@code deviceScaleFactor} — 截图清晰度倍数(2 = Retina,默认 2)</li>
- * <li>{@code timeoutSeconds} — 单次渲染超时秒(含 Semaphore 排队,默认 30)</li>
+ * <li>{@code timeoutSeconds} — 渲染排队获取超时秒(Semaphore 入口,默认 30);渲染本体另由 Playwright 每操作默认超时与 60s 启动超时限界</li>
  * <li>{@code renderWaitMs} — setContent 后固定等待毫秒,让内联 JS 渲染完成(默认 1500)</li>
  * <li>{@code networkBlocked} — 是否 route abort 屏蔽全部外部网络(默认 true;
  * 关掉只去掉 route abort,CSP 仍然注入 —— 这是逃生门不是常规配置)</li>
