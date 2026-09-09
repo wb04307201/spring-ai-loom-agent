@@ -22,7 +22,8 @@
 - [9. `ISubTaskTool` — 子任务委派](#9-isubtasktool--子任务委派)
 - [10. `IScheduleTool` — 定时任务](#10-ischeduletool--定时任务)
 - [14. `IAskUserTool` — 用户提问（askUser）](#14-iaskusertool--用户提问askuser)
-- [15. 替换子工具](#15-替换子工具)
+- [15. `IHtmlRenderTool` — HTML 渲染截图](#15-ihtmlrendertool--html-渲染截图)
+- [16. 替换子工具](#16-替换子工具)
 
 ---
 
@@ -40,6 +41,7 @@
 | `git.enabled` | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作，基于 JGit）。**opt-in** — 端到端部署走 `ICompileAndDeployTool`。 |
 | `maven.enabled` | boolean | `false` | Maven 构建工具（`IMavenTool` — 同时要求 classpath 上有 `maven-invoker`）。**opt-in** — 编译/打包走 `ICompileAndDeployTool`。 |
 | `compile.enabled` | boolean | `true` | 端到端部署工具（`ICompileAndDeployTool` — git clone → 按 buildTool 打包 [maven/npm/pip] → docker build → docker run → health check）。支持 Spring Boot、Node（后端 + 静态前端 → nginx）、Python 等多栈项目。 |
+| _(无 enabled 开关)_ | — | — | HTML 渲染截图(`IHtmlRenderTool` — 无头 Chromium 把本地单页 HTML 渲染成 PNG 原型图)。**classpath 门控**:引入 `com.microsoft.playwright:playwright:1.50.0`(库侧 optional)才创建 bean;RBAC 工具,需在角色授权页勾选 `tool_render`。Linux 裸机先跑 `docs/provision-chromium.sh`。 |
 
 > 即便工具组被禁用，你仍可注册自己的 `@Bean IGitTool` / `@Bean IMavenTool` 来重新启用 — `@ConditionalOnMissingBean` 优先使用用户提供的 Bean。
 
@@ -73,6 +75,7 @@ spring:
 | `IGitTool` | `DefaultGitTool`（JGit 7.6） | 28 | **禁用** | 通过 `git.enabled=true` 开启 |
 | `IMavenTool` | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **禁用** | 通过 `maven.enabled=true` 开启；classpath 需有 `maven-invoker` |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | 启用 | 端到端 `git clone → build → docker run → health check` |
+| `IHtmlRenderTool` | `DefaultHtmlRenderTool`(Playwright 1.50.0) | 1 | **classpath 门控** | `renderHtmlFile` — HTML→PNG 截图;需 playwright 依赖 + `tool_render` 角色授权 |
 
 ---
 
@@ -517,7 +520,52 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ---
 
-## 15. 替换子工具
+## 15. `IHtmlRenderTool` — HTML 渲染截图
+
+用无头 Chromium(Playwright)把本地自包含单页 HTML 文件渲染成 PNG 截图 —— 面向 LLM 编写的界面原型图(嵌入需求文档)、数据分析单页与报告可视化。
+
+| 方法 | 参数 | 说明 |
+|--------|-----------|-------------|
+| `renderHtmlFile` | `htmlFilePath`(必填)、`imageName?`、`device?`(desktop/tablet/mobile)、`fullPage?`(默认 true) | 把 `{fileBasePath}/{username}/{htmlFilePath}` 渲染成 `{fileBasePath}/{username}/prototypes/{name}-{timestamp}.png`,桥接一条 `usage='temp'` 的 file 记录,返回预览链接 + markdown 嵌入片段 |
+
+**启用方式(2 个条件):**
+
+1. 引入 optional 依赖(库不会传递引入):
+
+```xml
+<dependency>
+    <groupId>com.microsoft.playwright</groupId>
+    <artifactId>playwright</artifactId>
+    <version>1.50.0</version>
+</dependency>
+```
+
+2. 管理控制台 → 角色 → 为该角色授权 `tool_render` 工具组(RBAC 工具,非 universal)。
+
+**Linux 裸机部署(jar 不走 Docker):** 以 root 执行一次 `docs/provision-chromium.sh /path/to/app.jar`
+(安装系统 so 库 + `fonts-noto-cjk`,避免中文截图渲染成豆腐块 □□□,并下载 Playwright 管理的 Chromium),
+然后以**非 root** 用户启动 jar。开发机(Windows/macOS)无需 provision —— Playwright 首次使用时自动
+下载浏览器(需要网络)。渲染时若 Chromium 不可用,工具返回 `[渲染不可用]` 文本并附 provision 提示 ——
+绝不抛异常。
+
+**安全约束:** 全部外部网络请求被双重屏蔽(context route abort + 注入 CSP
+`default-src 'none'`);HTML 必须自包含(内联 CSS/JS)。输入路径沙箱限定在用户文件目录内;
+输出只落在其 `prototypes/` 子目录。渲染串行执行(同一时刻一个),30s 超时;HTML 大小上限 2MB。
+
+**配置(`spring.ai.loom.agent.render.*`):**
+
+| 属性 | 默认值 | 说明 |
+|----------|---------|-------------|
+| `chromium-path` | _(空)_ | 显式 Chromium 二进制路径(如 `/usr/bin/chromium-browser`);空 = Playwright 探测(托管缓存 → 系统 channel) |
+| `device-scale-factor` | `2` | 截图缩放(2 = Retina) |
+| `timeout-seconds` | `30` | 单次渲染超时(含排队等待) |
+| `render-wait-ms` | `1500` | `setContent` 后等待内联 JS 完成的固定时长 |
+| `network-blocked` | `true` | route-abort 全部外部请求(false 时 CSP 仍注入) |
+| `max-html-bytes` | `2097152` | HTML 文件大小上限 |
+
+---
+
+## 16. 替换子工具
 
 每个子工具接口都通过 `@ConditionalOnMissingBean` 注册，自定义实现自动优先生效：
 

@@ -35,7 +35,7 @@
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
-- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / askUser / end-to-end deploy (on by default), git / maven (opt-in); see [TOOLS.md](docs/TOOLS.md)
+- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / askUser / end-to-end deploy (on by default), git / maven / html-render (opt-in); see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
@@ -54,6 +54,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
 | Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |
+| Html Render | `IHtmlRenderTool` | 1 | ❌ classpath-gated | add `playwright` dep + `tool_render` grant |
 
 For full `@Tool` method signatures, parameter details, and configuration reference, see [TOOLS.md](docs/TOOLS.md).
 

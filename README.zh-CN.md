@@ -31,7 +31,7 @@
 - **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
 - **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / 知识库市场 / MCP 描述 / 日志（原用量统计）六大模块，admin 路径鉴权
 - **📁 文件管理** — 磁盘存储 + H2 元数据，上传 / 预览 / 下载，聊天附件自动桥接
-- **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 用户提问 / 端到端部署（默认启用），Git / Maven（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
+- **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 用户提问 / 端到端部署（默认启用），Git / Maven / HTML 渲染截图（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
 - **⚙️ 开箱即用工程化** — Spring Boot 自动配置，全组件 `@ConditionalOnMissingBean` 可替换，Flyway 迁移，广泛支持各类聊天 / 嵌入 / 向量存储后端
 
 ## 内置工具
@@ -50,6 +50,7 @@
 | Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
 | Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
 | 编译部署 | `ICompileAndDeployTool` | 1 | ✅ 启用 | `compile.enabled` |
+| HTML 渲染截图 | `IHtmlRenderTool` | 1 | ❌ classpath 门控 | 引入 playwright 依赖 + tool_render 授权 |
 
 完整的 `@Tool` 方法签名、参数说明和配置参考见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)——### 编译部署工具
 ![img_7.png](docs/img_7.png)

@@ -18,7 +18,8 @@
 - [10. `ISubTaskTool` — Sub-task Delegation](#10-isubtasktool--sub-task-delegation)
 - [11. `IScheduleTool` — Scheduled Tasks](#11-ischeduletool--scheduled-tasks)
 - [12. `IAskUserTool` — AskUser Interactive Question](#12-iaskusertool--askuser-interactive-question)
-- [13. Replacing a Sub-Tool](#13-replacing-a-sub-tool)
+- [13. `IHtmlRenderTool` — HTML Render Screenshot](#13-ihtmlrendertool--html-render-screenshot)
+- [14. Replacing a Sub-Tool](#14-replacing-a-sub-tool)
  - [8.1 Tool-call Parameters](#81-tool-call-parameters)
  - [8.2 Configuration](#82-configuration)
  - [8.3 Base-image Templates (built-in)](#83-base-image-templates-built-in)
@@ -32,10 +33,10 @@
 
 ## 1. Tool Visibility & RBAC
 
-Since M3, all 10 `I*Tool` beans are **always created** regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
+Since M3, all 10 always-on `I*Tool` beans are **always created** (plus `IHtmlRenderTool`, which is created only when `com.microsoft.playwright:playwright` is on the classpath) regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
 
 1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 7 universal tools are listed below.
-2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 3 RBAC tools are listed below.
+2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 4 RBAC tools are listed below.
 
 ### Universal tools (always visible)
 
@@ -56,6 +57,7 @@ Since M3, all 10 `I*Tool` beans are **always created** regardless of any `*.enab
 | `IGitTool` | `tool_git` | `git push` writes to remote repositories; end-to-end deployment via `ICompileAndDeployTool` covers the common case |
 | `IMavenTool` | `tool_maven` | Arbitrary `mvn` builds; compile/package goes through `ICompileAndDeployTool` |
 | `ICompileAndDeployTool` | `tool_compile` | Spawns Docker containers; runs build pipelines; consumes network & disk resources |
+| `IHtmlRenderTool` | `tool_render` | Spawns a headless Chromium process (~150-300MB RAM per instance); requires the optional `com.microsoft.playwright:playwright` dependency on the classpath — without it the bean is not created at all |
 
 ### Why the yml `*.enabled` switches no longer gate tools
 
@@ -567,7 +569,56 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 
 ---
 
-## 13. Replacing a Sub-Tool
+## 13. `IHtmlRenderTool` — HTML Render Screenshot
+
+Renders a local self-contained single-page HTML file into a PNG screenshot with headless
+Chromium (Playwright) — designed for LLM-written UI prototypes embedded in requirement docs,
+data-analysis one-pagers, and report visuals.
+
+| Method | Parameters | Description |
+|--------|-----------|-------------|
+| `renderHtmlFile` | `htmlFilePath` (required), `imageName?`, `device?` (desktop/tablet/mobile), `fullPage?` (default true) | Renders `{fileBasePath}/{username}/{htmlFilePath}` into `{fileBasePath}/{username}/prototypes/{name}-{timestamp}.png`, bridges a `usage='temp'` file record, and returns a preview URL + markdown embed snippet |
+
+**Enable it (2 requirements):**
+
+1. Add the optional dependency (the library does not pull it transitively):
+
+```xml
+<dependency>
+    <groupId>com.microsoft.playwright</groupId>
+    <artifactId>playwright</artifactId>
+    <version>1.50.0</version>
+</dependency>
+```
+
+2. Admin console → Roles → authorize the `tool_render` group for the role (RBAC tool, not universal).
+
+**Bare-metal Linux deployment (jar without Docker):** run `docs/provision-chromium.sh /path/to/app.jar`
+once as root (installs system shared libraries + `fonts-noto-cjk` so Chinese text does not render as
+tofu boxes, then downloads the Playwright-managed Chromium), then start the jar as a **non-root** user.
+Dev machines (Windows/macOS) need no provisioning — Playwright downloads the browser on first use
+(requires network). If Chromium is unavailable at render time the tool returns an `[渲染不可用]`
+text with the provisioning hint — it never throws.
+
+**Security:** all external network requests are blocked twice (context route abort + injected CSP
+`default-src 'none'`); the HTML must be self-contained (inline CSS/JS). Input paths are sandboxed to
+the user's file directory; output only ever lands in its `prototypes/` subdirectory. Renders are
+serialized (one at a time) with a 30s timeout; HTML size cap 2MB.
+
+**Configuration (`spring.ai.loom.agent.render.*`):**
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `chromium-path` | _(empty)_ | Explicit Chromium binary (e.g. `/usr/bin/chromium-browser`); empty = Playwright probe (managed cache → system channel) |
+| `device-scale-factor` | `2` | Screenshot scale (2 = Retina) |
+| `timeout-seconds` | `30` | Per-render timeout including queue wait |
+| `render-wait-ms` | `1500` | Fixed wait after `setContent` for inline JS to finish |
+| `network-blocked` | `true` | Route-abort all external requests (CSP stays injected even when false) |
+| `max-html-bytes` | `2097152` | HTML file size cap |
+
+---
+
+## 14. Replacing a Sub-Tool
 
 Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a custom implementation wins automatically:
 

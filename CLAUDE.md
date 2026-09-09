@@ -91,6 +91,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` + `list_sub_tasks` + `cancel_sub_task(subTaskId)` + `get_sub_task_history(limit)` — 委派/查询/取消/历史子任务，全部按 `(username, conversationId)` 严格隔离，防跨会话越权。默认 enabled (`subtask.enabled=true`) |
 | `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
 | `IAskUserTool` | `DefaultAskUserTool` | LLM-callable `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — 聊天流内嵌选择卡片向当前用户提问,工具方法阻塞等待作答(默认 `askuser.timeoutSeconds=300`),答案以 tool_result 回同一条流。超时/stop 返回"用户未作答"文本保 ChatMemory ON_COMPLETE。默认 enabled(universal) |
+| `IHtmlRenderTool` | `DefaultHtmlRenderTool` | HTML 渲染截图:`renderHtmlFile(htmlFilePath, imageName?, device?, fullPage?)` 用无头 Chromium(Playwright,lib 侧 optional 依赖 + `@ConditionalOnClass` 门控)把用户目录下自包含单页 HTML 渲染成 PNG(界面原型图/数据分析单页),存 `{fileBasePath}/{username}/prototypes/` 并经 FileIdBridge 桥接 fileId 返回预览链接 + markdown 片段;route abort + CSP 双保险屏蔽全部外联;Semaphore(1) 串行 + 30s 超时;失败一律返回文本(D8)。RBAC 工具 `tool_render`;Linux 裸机部署先跑 `docs/provision-chromium.sh` |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
 
@@ -102,7 +103,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `ChatConfiguration` | ChatClient, IChat, SseController |
 | `RagConfiguration` | VectorStore (H2-backed JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
-| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool — **10 个 I*Tool bean 总是创建**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
+| `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool, IHtmlRenderTool(+ HtmlRenderEngine) — **10 个 I*Tool bean 总是创建;IHtmlRenderTool/HtmlRenderEngine 由 `@ConditionalOnClass(playwright)` 门控(optional 依赖,消费者引入才创建)**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
 | `WebConfiguration` | AuthenticationFilter, 14 RouterFunctions + `SseController` |
 | `CapabilityConfiguration` | `CapabilityService` (统一 list 本地 + MCP capability) + `IRoleService` 的 tool/mcp/skill/knowledge 授权方法 |
@@ -198,7 +199,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `IFileTool` | `tool_file` | 默认放开本地文件访问(⚠️ 含 `deleteFileOrDirectory` 递归删除,LLM 端需谨慎 prompt 约束) |
 | `IAskUserTool` | `tool_askUser` | 仅向当前流内的本人提问,答案回同一流,无越权风险;子任务/定时任务 schema 级排除 |
 
-**RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行,必须显式授权。
+**RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`(无头浏览器吃 ~150-300MB RAM/实例,且需 optional playwright 依赖) —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行,必须显式授权。
 
 **实现机制**:
 - 元数据单一源 = `@ToolGroup(defaultGranted=true)` 注解,**DB 端无 `loom_universal_tool` 表**
@@ -260,6 +261,7 @@ All under `spring.ai.loom.agent`:
 - `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)
 - `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
 - `askuser` — `timeoutSeconds`(default 300):askUser 工具阻塞等待用户作答的最长秒数;超时返回"用户未作答"文本,Flux 正常 complete
+- `render` — chromiumPath(空=Playwright 三级探测)/ deviceScaleFactor(2)/ timeoutSeconds(30)/ renderWaitMs(1500)/ networkBlocked(true)/ maxHtmlBytes(2MB)。无 enabled 开关:bean 门控 = playwright optional 依赖 + `@ConditionalOnClass`
 - `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative）
 - `knowledgeBasePath` — 知识库文件存储根目录，默认 `${user.home}/.loom/knowledge`
 - `datasourceDir` — H2 文件存储目录，默认 `${user.home}/.loom/datasource`（在 `application.yml` 的 `spring.datasource.url` 里通过 `${user.home}/.loom/datasource/db` 拼接）
@@ -289,3 +291,5 @@ To swap the vector store, simply add a Spring AI vector store starter dependency
 `IGitTool` uses both `@ConditionalOnProperty` (`matchIfMissing=false`; set `git.enabled=true` to enable) and `@ConditionalOnMissingBean` — users can replace it with a custom implementation (e.g., CLI-based git) while keeping the feature on. Disabled by default; `ICompileAndDeployTool` is the supported end-to-end entry point.
 
 `IMavenTool` uses `@ConditionalOnClass` (maven-invoker on classpath) + `@ConditionalOnProperty` (default off) + `@ConditionalOnMissingBean`. Disabled by default; same opt-in pattern.
+
+`IHtmlRenderTool` follows the same pattern with `com.microsoft.playwright.Playwright`: add the optional `playwright` dependency (1.50.0) to enable the bean, then grant `tool_render` to a role. On bare-metal Linux run `docs/provision-chromium.sh` once (system so-libs + fonts-noto-cjk + Playwright-managed Chromium); dev machines auto-download on first use.
