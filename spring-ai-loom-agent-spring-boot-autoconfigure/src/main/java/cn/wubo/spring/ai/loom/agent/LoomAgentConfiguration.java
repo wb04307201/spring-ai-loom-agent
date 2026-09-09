@@ -460,6 +460,7 @@ public class LoomAgentConfiguration {
                 properties.setMaven(bound.getMaven());
                 properties.setCompile(bound.getCompile());
                 properties.setAskuser(bound.getAskuser());
+                properties.setRender(bound.getRender());
             }
             return properties;
         }

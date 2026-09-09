@@ -75,4 +75,14 @@ class LoomAgentPropertiesDefaultsTest {
         LoomAgentProperties props = new LoomAgentProperties();
         assertThat(props.getAskuser().getTimeoutSeconds()).isEqualTo(300L);
     }
+
+    @Test
+    void renderProperty_defaultsMatchSpec() {
+        LoomAgentProperties props = new LoomAgentProperties();
+        assertThat(props.getRender().getDeviceScaleFactor()).isEqualTo(2);
+        assertThat(props.getRender().getTimeoutSeconds()).isEqualTo(30);
+        assertThat(props.getRender().getRenderWaitMs()).isEqualTo(1500);
+        assertThat(props.getRender().isNetworkBlocked()).isTrue();
+        assertThat(props.getRender().getMaxHtmlBytes()).isEqualTo(2L * 1024 * 1024);
+    }
 }

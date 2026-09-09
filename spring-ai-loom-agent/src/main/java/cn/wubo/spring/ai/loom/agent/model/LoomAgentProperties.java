@@ -95,6 +95,8 @@ public class LoomAgentProperties {
 
  private AskUserProperty askuser = new AskUserProperty();
 
+ private RenderProperty render = new RenderProperty();
+
  @Data
  public static class RagProperty {
  private double similarityThreshold = 0.0F;
@@ -379,5 +381,31 @@ public class LoomAgentProperties {
  @Data
  public static class AskUserProperty {
  private long timeoutSeconds = 300;
+ }
+
+ /**
+ * HTML 渲染截图工具配置(IHtmlRenderTool,spec 2026-09-09 D5/D6/D9)。
+ * yml 前缀 {@code spring.ai.loom.agent.render.*}。
+ * <ul>
+ * <li>{@code chromiumPath} — 可选:显式 Chromium 二进制路径(如系统包
+ * {@code /usr/bin/chromium-browser});空 = Playwright 默认探测(三级探测的第 2/3 级)</li>
+ * <li>{@code deviceScaleFactor} — 截图清晰度倍数(2 = Retina,默认 2)</li>
+ * <li>{@code timeoutSeconds} — 单次渲染超时秒(含 Semaphore 排队,默认 30)</li>
+ * <li>{@code renderWaitMs} — setContent 后固定等待毫秒,让内联 JS 渲染完成(默认 1500)</li>
+ * <li>{@code networkBlocked} — 是否 route abort 屏蔽全部外部网络(默认 true;
+ * 关掉只去掉 route abort,CSP 仍然注入 —— 这是逃生门不是常规配置)</li>
+ * <li>{@code maxHtmlBytes} — HTML 文件大小上限字节(默认 2MB)</li>
+ * </ul>
+ * 无 enabled 开关:M3 起工具 bean 总是创建,启停由 role_tool RBAC 表控制;
+ * bean 是否创建取决于 classpath 有没有 playwright(optional 依赖)。
+ */
+ @Data
+ public static class RenderProperty {
+ private String chromiumPath;
+ private int deviceScaleFactor = 2;
+ private int timeoutSeconds = 30;
+ private int renderWaitMs = 1500;
+ private boolean networkBlocked = true;
+ private long maxHtmlBytes = 2 * 1024 * 1024;
  }
 }
