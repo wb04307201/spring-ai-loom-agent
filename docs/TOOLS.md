@@ -80,7 +80,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. 10 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. 11 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
 | Sub-Interface | Default Impl | Methods | Visibility | Notes |
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
@@ -94,6 +94,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **RBAC** | Requires `role_tool.tool_git` authorization; opt-in via `@Bean IGitTool` replacement |
 | `IMavenTool` | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **RBAC** | Requires `role_tool.tool_maven`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | **RBAC** | Requires `role_tool.tool_compile`; end-to-end `git clone → build → docker run → health check` |
+| `IHtmlRenderTool` | `DefaultHtmlRenderTool` (Playwright 1.50.0) | 1 | **RBAC** | Requires `role_tool.tool_render`; bean created only when the optional `playwright` dependency is on the classpath; headless-Chromium HTML→PNG screenshots (UI prototypes / data-analysis one-pagers) |
 
 > Each tool's individual section below still lists any remaining yml flags as **legacy** — they are kept for backward compatibility only and have no functional effect since M3.
 
