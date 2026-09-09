@@ -131,7 +131,7 @@ Organized into 7 nested static `@Configuration` classes:
    ALTER TABLE role_tool ADD CONSTRAINT fk_role_tool_role
      FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
    ```
-   **role 删除时自动 cascade 清 role_tool**(B.2.1 修复 — `V1.0` 中加 FK,应用层 `DefaultRoleService.delete` 也显式 DELETE 兜底)。
+   **role 删除时自动 cascade 清 role_tool**(B.2.1 修复 — `V1.0` 中加 FK,应用层 `DefaultRoleService.delete` 也显式 DELETE 兜底;DEFECT-Q3-1 修复后 delete() 清单覆盖全部 5 张子表:role_tool/role_mcp/user_role/role_skill/loom_role_knowledge)。
 
 3. **`CapabilityService` 服务**(`cn.wubo.spring.ai.loom.agent.capability`)
    - `list(username)` — 当前用户可见 capability(含 effectiveEnabled,从 `IRoleService.getVisibleToolsForUser` / `getVisibleMcpsForUser` 算)
@@ -219,7 +219,8 @@ Organized into 7 nested static `@Configuration` classes:
 ### Data Layer
 
 - **Schema** (单一 V1.0 一站式 init,**项目只跑全新库**;任何已有 V1/V2 历史部署必须 `flyway baseline` 或 `rm -rf ~/.loom/datasource` 重跑):
- - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool / market_skill_archive / loom_market_knowledge_archive / loom_vector_store)+ RBAC 3 张子表 CASCADE FK(user_role.role_code → role.code, role_mcp.role_code → role.code, role_tool.role_code → role.code, user_role.username → user_info.username)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号 + 尾部种子 2 条官方 market_skill 行(STAR-IJ / 靶心人公式,author=system,APPROVED,is_official=TRUE,category=表达沟通)。`*_archive` 两表(M4/#4 审批流)存 REJECTED 重投时归档的旧行(保留原 id + 拒绝评论/审核人/时间)
+ - 库 `src/main/resources/db/migration/V1.0__init.sql` — **完整 schema 一站式 init**(knowledge / file / user / conversation / token / skill / role / mcp_server / mcp_tool / market_skill / user_skill / role_skill / role_mcp / role_tool / market_skill_archive / loom_market_knowledge_archive / loom_vector_store)+ RBAC **5 张子表 CASCADE FK**(user_role.role_code / role_mcp.role_code / role_tool.role_code / role_skill.role_code / loom_role_knowledge.role_code → role.code,加 user_role.username → user_info.username;后两张为 DEFECT-Q3-1 修复补加,2026-09-09)+ M6 universal tools DELETE-from-role_tool 一并落地 + 默认 admin 账号 + 尾部种子:2 条官方 market_skill(STAR-IJ / 靶心人公式,author=system,APPROVED,is_official=TRUE,category=表达沟通)+ **默认基础角色 base**(is_system=FALSE,授权 4 常用 MCP `spring-ai-mcp-client - {sequential-thinking,bing-search,memory,@tokenizin-agency/mcp-npx-fetch}` default_enabled + 2 官方技能 default_loaded,role_skill 按名子查询 market_skill.id;并 user_role 授予 wb04307201 —— 开箱即用)。`*_archive` 两表(M4/#4 审批流)存 REJECTED 重投时归档的旧行(保留原 id + 拒绝评论/审核人/时间)
+ - **角色删除级联(DEFECT-Q3-1 修复)**:`DefaultRoleService.delete` 显式清 user_role/role_mcp/role_tool/**role_skill/loom_role_knowledge**(后两张原被 B.2.1 遗漏 → 删角色后 dangling 行在同 code 重建时经 role_skill→user_skill 自动同步"复活"陈旧授权;现 delete() 补 DELETE + V1.0 补 FK CASCADE 双保险)。回归锁:`DefaultRoleServiceDeleteCascadeTest`(mock 清理清单)+ `RoleDeleteCascadeIT`(真 DB 复活场景)
  - **保持稳定,不再拆分增量**:所有 schema 演进(loom_scheduled_task / loom_schedule_execution / loom_subtask_history / user_conversation 三列 / SPRING_AI_CHAT_MEMORY.conversation_id 加宽 / loom_market_knowledge / loom_user_knowledge / loom_role_knowledge / loom_file_content / loom_tool_call_log / loom_chat_usage / loom_chat_reasoning / tool_call_log + chat_token_usage 替换等)都已合并入 V1.0 单一文件;V12~V17 历史也已 inline 进 V1.0
  - 业务 `spring-ai-loom-agent-test/src/main/resources/db/migration/V1.1__init_app_data.sql` — 业务 demo 数据:12 个 mcp_server + 14 个 mcp_tool + 6 个 system skill。test 模块独立 Flyway,与库主 schema 物理隔离(`./target/test-ds`)
  - Flyway 在同实例按版本号顺序执行:`V1.0__init.sql`(库)→ `V1.1__init_app_data.sql`(业务)

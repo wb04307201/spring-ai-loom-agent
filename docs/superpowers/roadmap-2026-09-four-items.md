@@ -242,6 +242,18 @@ AskUser 主功能落地后追加的四项调整(卡片折叠 / 日志页提问�
 
 ---
 
+## 默认基础角色 base 种子(2026-09-09)
+
+四项调整 + 三轮测试后,用户要求 V1.0 开箱即带一个可用角色(此前 admin 无角色 → 0 capability,需手动授权)。
+
+- **commit `01a6236`**:V1.0 尾部(market_skill 种子之后,role_skill 按名子查询依赖)追加幂等种子:role `base`(is_system=FALSE)+ 4 role_mcp(sequential-thinking/bing-search/memory/@tokenizin-agency/mcp-npx-fetch,default_enabled=TRUE,mcp_name 用运行时 SDK client 名)+ 2 role_skill(靶心人 sort 0 / STAR-IJ sort 1,default_loaded=TRUE,market_skill_id 按 (author='system',name) 子查询不硬编码)+ user_role(wb04307201→base)。全部 INSERT...SELECT...WHERE NOT EXISTS。
+- 设计裁决:放 **V1.0 库文件**(用户指定;role_mcp 无 FK 到 mcp_server,运行时与活跃 client 匹配,死 grant 无害);is_system=**FALSE**(用户拍板,可删);不 seed role_tool(未要求,admin 仍有 7 universal 工具)。
+- **第四轮全面测试**(报告 `docs/superpowers/reports/2026-09-09-round4-comprehensive-test.md`):Q1 开箱(4 MCP 预勾+2 技能零配置)/ Q2 ROLE_GRANTED 锁定 / Q4 多用户(carol 0/8+302 拦截、dave base 4/8)/ Q5 **靶心人完整七步教科书级**(转弯放慢节奏+骨架表)/ Q6 样式 / Q7 安全 / Q8 回归 全绿。
+- **DEFECT-Q3-1(Important,pre-existing,本轮首曝,commit `f1a20c8` 已修)**:`DefaultRoleService.delete()` 的 B.2.1 显式清理清单 + V1.0 FK CASCADE 块都只覆盖 user_role/role_mcp/role_tool,**漏了后加的 role_skill(M4)/loom_role_knowledge(知识库市场)** → 删角色后 dangling 授权行在同 code 重建时经 role_skill→user_skill 自动同步"复活"(活体复现:重建 temp-x 后 carol 凭空获得 STAR-IJ)。修复对齐 B.2.1 双保险:delete() 补 2 行 DELETE + V1.0 补 fk_role_skill_role/fk_role_knowledge_role ON DELETE CASCADE;回归锁 mock 单测(6 语句清单)+ 真 DB IT(复活场景)。修复后回归门:lib 185/0 · test 412/0 · IT 128/0/3skip;活体复验 eve 技能列表 [](修复前 carol 同场景复活 STAR-IJ)。
+- 四轮累计抓缺陷:4 + 2 + 1 + **1**(DEFECT-Q3-1)= 8,全部已修。
+
+---
+
 ## 维护约定
 
 - 每完成一项,更新本文件对应小节状态 🔵→🟡→✅ + 追加"落地记录"(commit 号、偏差决策)。

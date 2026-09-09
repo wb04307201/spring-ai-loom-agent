@@ -8,14 +8,14 @@
 
 ## 结论
 
-**发现 1 个 Important 缺陷(DEFECT-Q3-1,pre-existing,本轮首曝)**;其余维度全绿。缺陷已活体复现 + 根因定位 + 修复方案就绪,待裁决。
+**发现 1 个 Important 缺陷(DEFECT-Q3-1,pre-existing,本轮首曝)—— 已修复(commit `f1a20c8`),三层验证全绿**;其余维度全绿。
 
 | 维度 | 结果 | 说明 |
 |------|------|------|
-| Q0 基线回归门 | ✅(继承) | test 411/0 · IT 127/0/3skip(seed commit 时验证,本轮无代码改动) |
+| Q0 基线回归门 | ✅ | 修复后全量:lib **185/0** · test **412/0** · 清库 IT **128/0/3skip**(+RoleDeleteCascadeIT) |
 | Q1 开箱首跑 | ✅ | base 种子 → admin 开箱 4 MCP 预勾 + 2 技能,零配置可用 |
 | Q2 ROLE_GRANTED 生命周期 | ✅ | locked 不可编辑/删除;pull 转换行为记录 |
-| Q3 角色删除级联(破坏性) | ❌ **DEFECT-Q3-1** | delete() 漏清 role_skill + loom_role_knowledge → 陈旧授权复活 |
+| Q3 角色删除级联(破坏性) | ❌→✅ **DEFECT-Q3-1 已修** | delete() 漏清 role_skill + loom_role_knowledge → 陈旧授权复活;fix `f1a20c8` |
 | Q4 多用户 + 非 admin 安全 | ✅ | carol(无角色)0 能力 + admin 端点 302 拦截;dave(base)4/8 + 2 技能 |
 | Q5 靶心人完整七步 | ✅✅ | 教科书级(七问序列精确 + 转弯放慢节奏 + 骨架表 + 停顿建议) |
 | Q6 样式/视觉/响应式 | ✅ | 工具弹窗预勾态/技能徽章/admin 授权面板/390px 摘要行/token 一致性 |
@@ -37,12 +37,17 @@
 
 **影响评估**:Important(非 Critical)—— 触发需"删角色 + 重建同 code"两步;后果是新角色静默继承旧技能/知识库授权(意外能力面,非 admin 提权)。base 种子 is_system=FALSE 可删,含 2 条 role_skill,正落在此路径上。
 
-**修复方案**(对齐既有 B.2.1 双保险模式):
-1. `delete()` 补 2 行:`DELETE FROM role_skill WHERE role_code=?` + `DELETE FROM loom_role_knowledge WHERE role_code=?`
+**修复方案**(对齐既有 B.2.1 双保险模式)—— **已修复,commit `f1a20c8`**(用户裁决"立即修"):
+1. `delete()` 补 2 行:`DELETE FROM role_skill WHERE role_code=?` + `DELETE FROM loom_role_knowledge WHERE role_code=?`(注释记录 DEFECT-Q3-1 缘由)
 2. V1.0 FK 块补 2 条:`fk_role_skill_role` + `fk_role_knowledge_role`(ON DELETE CASCADE)
-3. 回归测试:建角色→授权→删→断言两表清 0 + 重建同码不复活(mock 单测 + 真 DB IT 各一)
+3. 回归测试 ×2:`DefaultRoleServiceDeleteCascadeTest`(mock,锁 delete() 清理清单 6 语句)+ `RoleDeleteCascadeIT`(真 DB:授权→删→两表清 0→重建同码→sync→不复活)
 
-**测试卫生**:temp-x dangling 行 + carol 泄漏技能已手动清理,role 表恢复仅 base。
+**修复验证(三层)**:
+- 单元 GREEN:9/9(新 1 + 既有 ErrorMapping 8)
+- 回归门全绿:lib **185/0** · test 模块 **412/0**(411+1)· 清库 IT gate **128/0/3skip**(127+1,含 RoleDeleteCascadeIT)
+- **活体复验**:修复后重跑复活场景 —— 建 temp-x 授权 STAR-IJ → 删 → 重建同名(不授权)→ 新用户 eve 分配 → eve 技能列表 **`[]`**(修复前 carol 同场景凭空获得 STAR-IJ)
+
+**测试卫生**:temp-x dangling 行 + carol 泄漏技能已手动清理;修复验证的 temp-x/eve 残留经清库重启归零,最终环境恢复纯净种子态。
 
 ---
 
