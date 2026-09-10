@@ -648,7 +648,7 @@ class SubTaskRbacFilterIT {
         executor.execute(new SubTaskRequest(subId, "conv-it", null, USER, "do", null, false));
         ArgumentCaptor<Object[]> captor = ArgumentCaptor.forClass(Object[].class);
         verify(spec).tools(captor.capture());
-        return List.of(captor.getValue());
+        return java.util.Arrays.asList(captor.getValue());
     }
 
     @Test
@@ -657,6 +657,11 @@ class SubTaskRbacFilterIT {
         // 授权前:role_tool 空 → git 不在子任务工具集
         ChatClient.ChatClientRequestSpec spec1 = stubChain();
         List<Object> beforeTools = captureTools(spec1, "it-before");
+        // 防空过断言(fix round 1):captured 数组若为空,noneMatch 平凡通过 ——
+        // 先正向 pin universal 工具(ITimeTool 恒在 visibleToolGroupsFor)确实进了子任务集。
+        assertThat(beforeTools)
+                .as("universal 工具(ITimeTool)必须恒在子任务工具集(防空过断言)")
+                .anyMatch(t -> t instanceof cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool);
         assertThat(beforeTools)
                 .as("未授权 tool_git 时 IGitTool 不得进子任务工具集(RBAC 绕过修复)")
                 .noneMatch(t -> t instanceof IGitTool);
