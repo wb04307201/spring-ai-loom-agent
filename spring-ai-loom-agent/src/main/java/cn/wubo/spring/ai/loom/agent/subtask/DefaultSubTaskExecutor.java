@@ -46,6 +46,11 @@ import java.util.concurrent.Future;
  * Lazy {@code @Lazy} resolution of the list breaks the bean-graph cycle that
  * would otherwise appear when both this executor and {@code defaultSubTaskTool}
  * are part of {@code List<IEmbedTool>} auto-collection.</li>
+ * <li>RBAC 过滤(spec 2026-09-10-subtask-rbac-filter):embed 工具列表先经
+ * {@code CapabilityService.visibleToolGroupsFor(username)} 过滤 —— 子任务/定时任务
+ * 继承用户角色授权,未授权的 RBAC 工具(render/git/maven/compile)不进子任务工具集
+ * (修复此前"universal 的 subtask/schedule 入口绕过 role_tool 授权"的越权面)。
+ * 剔除按 (username, droppedSet) 去重记 WARN(Caffeine 有界缓存),同组合再犯降 DEBUG。</li>
  * <li>Propagates the full tool set available to the user: {@link IMcp} callbacks
  * for every MCP server the user can see, plus the filtered {@code embedTools}
  * list.</li>
@@ -64,6 +69,19 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
     private final SubTaskRegistry subTaskRegistry;
+    private final cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService;
+
+    /**
+     * RBAC 剔除日志去重(spec 2026-09-10-subtask-rbac-filter D6):
+     * key = username + "|" + 排序后 dropped 集,值仅占位。多数用户常态无 RBAC 授权 →
+     * dropped 几乎每次非空,逐次 WARN 会刷爆日志;有界缓存把 WARN 封顶在
+     * "不同用户 × 不同授权集",授权变更 → dropped 集变 → 新 key → 重新 WARN 一次。
+     */
+    private final com.github.benmanes.caffeine.cache.Cache<String, Boolean> rbacWarned =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .maximumSize(512)
+                    .expireAfterWrite(java.time.Duration.ofHours(1))
+                    .build();
 
     /**
      * Active in-flight sub-task futures, keyed by {@code req.subTaskId()}. Cleared in the worker's finally block.
@@ -75,13 +93,15 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
                                   ExecutorService executor,
                                   IMcp mcp,
                                   List<IEmbedTool> embedTools,
-                                  SubTaskRegistry subTaskRegistry) {
+                                  SubTaskRegistry subTaskRegistry,
+                                  cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
         this.chatClient = chatClient;
         this.memoryAdvisor = memoryAdvisor;
         this.executor = executor;
         this.mcp = mcp;
         this.embedTools = embedTools;
         this.subTaskRegistry = subTaskRegistry;
+        this.capabilityService = capabilityService;
     }
 
     /**
@@ -200,13 +220,37 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
             props.put("parentConversationId", req.parentConversationId());
             spec.toolContext(props);
 
-            // Attach embedTools (filtered to exclude ISubTaskTool/IScheduleTool so the
-            // sub-task cannot recursively spawn sub-tasks or schedules, and IAskUserTool
-            // so sub-tasks / scheduled runs can never block on a user question — spec #1 D6:
-            // 子任务只做主任务规划好的执行并返回结果,疑问写进结果由主任务决定是否提问。
-            // 定时任务经子任务路径执行,自动继承本排除)。
-            List<Object> filtered = new ArrayList<>();
+            // 第一步:RBAC 过滤(spec 2026-09-10-subtask-rbac-filter)—— 子任务/定时任务
+            // 继承用户角色授权,未授权的 RBAC 工具(render/git/maven/compile)不进列表。
+            // universal 工具因 visibleToolGroupsFor = 角色授权 ∪ universal 恒在集合内,照常可用。
+            java.util.Set<String> visibleGroups = capabilityService.visibleToolGroupsFor(req.username());
+            List<IEmbedTool> authorized =
+                    capabilityService.filterEmbedToolsByCapabilityIds(embedTools, visibleGroups);
+
+            // D6:被剔除时按 (username, droppedSet) 去重记 WARN(仅首次),同组合再犯降 DEBUG
+            java.util.List<String> dropped = new java.util.ArrayList<>();
             for (var t : embedTools) {
+                String id = cn.wubo.spring.ai.loom.agent.capability.CapabilityService.toolGroupIdOf(t);
+                if (id != null && !visibleGroups.contains(id)) dropped.add(id);
+            }
+            if (!dropped.isEmpty()) {
+                java.util.Collections.sort(dropped);
+                String dedupKey = req.username() + "|" + String.join(",", dropped);
+                if (rbacWarned.asMap().putIfAbsent(dedupKey, Boolean.TRUE) == null) {
+                    log.warn("Sub-task RBAC filter: user={} conv={} fromScheduler={} dropped={} visible={}",
+                            req.username(), req.parentConversationId(), req.fromScheduler(), dropped, visibleGroups);
+                } else {
+                    log.debug("Sub-task RBAC filter(已警告过,降级 DEBUG): user={} dropped={}",
+                            req.username(), dropped);
+                }
+            }
+
+            // 第二步:自身工具排除(既有,保持不动)—— 防递归 + 子任务不打断用户提问
+            // (ISubTaskTool/IScheduleTool 防递归;IAskUserTool 见 #1 spec D6:
+            //  子任务只做主任务规划好的执行并返回结果,疑问写进结果由主任务决定是否提问。
+            //  定时任务经子任务路径执行,自动继承本排除。)
+            List<Object> filtered = new ArrayList<>();
+            for (var t : authorized) {
                 if (t instanceof cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool) continue;
                 if (t instanceof cn.wubo.spring.ai.loom.agent.schedule.IScheduleTool) continue;
                 if (t instanceof cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool) continue;

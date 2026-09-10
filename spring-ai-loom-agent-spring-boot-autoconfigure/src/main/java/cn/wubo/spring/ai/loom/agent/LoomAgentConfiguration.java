@@ -1043,10 +1043,15 @@ public class LoomAgentConfiguration {
                 // List<IEmbedTool> -> defaultSubTaskTool -> defaultSubTaskExecutor ->
                 // [embedTools] would force eager resolution of the still-creating
                 // defaultSubTaskTool bean.
-                @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools) {
+                @Lazy java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools,
+                // @Lazy 破环(spec D4):CapabilityService 构造器注入 List<IEmbedTool>,
+                // 该 list 含 defaultSubTaskTool → defaultSubTaskExecutor → CapabilityService,
+                // 构造器注入的环 Spring 不可解。@Lazy 代理在 worker 线程首次 doExecute 时
+                // 解析(与本 bean 既有 @Lazy embedTools / @Lazy SubTaskRegistry 同一手法)。
+                @Lazy cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
                     chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools,
-                    subTaskRegistry);
+                    subTaskRegistry, capabilityService);
         }
 
         /**
