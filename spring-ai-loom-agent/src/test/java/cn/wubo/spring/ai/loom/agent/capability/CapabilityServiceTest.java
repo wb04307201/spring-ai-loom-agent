@@ -335,4 +335,54 @@ class CapabilityServiceTest {
             assertEquals("1 个本地工具", ci.description());
         }
     }
+
+    // ============================================================
+    //  toolGroupIdOf / filterEmbedToolsByCapabilityIds — 子任务 RBAC 过滤共享 helper
+    //  (spec 2026-09-10-subtask-rbac-filter §2.1)
+    // ============================================================
+    @Nested
+    @DisplayName("embed 工具过滤 helper")
+    class EmbedToolFilter {
+
+        @Test
+        @DisplayName("toolGroupIdOf:@ToolGroup 接口 → tool_+value;未标注 bean → null")
+        void groupIdOf() {
+            assertEquals("tool_file", CapabilityService.toolGroupIdOf(mock(ITestFileTool.class)));
+            assertEquals("tool_skill", CapabilityService.toolGroupIdOf(mock(ITestUniversalSkillTool.class)));
+            assertNull(CapabilityService.toolGroupIdOf(new IEmbedTool() {}));
+        }
+
+        @Test
+        @DisplayName("filter:RBAC 工具不在 allowed → 剔除;在 allowed → 保留;保序")
+        void filtersByAllowedIds() {
+            ITestFileTool file = mock(ITestFileTool.class);
+            ITestUniversalSkillTool skill = mock(ITestUniversalSkillTool.class);
+            CapabilityService svc = newService(file, skill);
+
+            List<IEmbedTool> onlyUniversal =
+                    svc.filterEmbedToolsByCapabilityIds(List.of(file, skill), Set.of("tool_skill"));
+            assertEquals(List.of(skill), onlyUniversal);
+
+            List<IEmbedTool> both =
+                    svc.filterEmbedToolsByCapabilityIds(List.of(file, skill), Set.of("tool_file", "tool_skill"));
+            assertEquals(List.of(file, skill), both);
+        }
+
+        @Test
+        @DisplayName("filter:未标注 bean 放行(老实现兼容,与 DefaultChat 既有语义一致)")
+        void unannotatedPassesThrough() {
+            IEmbedTool legacy = new IEmbedTool() {};
+            List<IEmbedTool> out = newService().filterEmbedToolsByCapabilityIds(List.of(legacy), Set.of());
+            assertEquals(List.of(legacy), out);
+        }
+
+        @Test
+        @DisplayName("filter:空 allowed → 只剩未标注 bean")
+        void emptyAllowedKeepsOnlyLegacy() {
+            ITestFileTool file = mock(ITestFileTool.class);
+            IEmbedTool legacy = new IEmbedTool() {};
+            List<IEmbedTool> out = newService().filterEmbedToolsByCapabilityIds(List.of(file, legacy), Set.of());
+            assertEquals(List.of(legacy), out);
+        }
+    }
 }
