@@ -288,6 +288,7 @@ git commit -m "refactor: DefaultChat 内联 @ToolGroup 过滤切换为 Capabilit
 
 (MCP 分支无需 stub:`mcp` 是 mock,`getVisibleToolCallbackProvider` 默认返回 null,executor 的 `if (mcpProvider != null)` 自然跳过 `spec.toolCallbacks(...)` 调用。)
 
+```java
     private SubTaskRequest req(String user) {
         return new SubTaskRequest("sub-" + user, "conv-" + user, null, user, "do X", null, false);
     }
