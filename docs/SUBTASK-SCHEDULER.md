@@ -8,7 +8,7 @@ Spring AI LoomAgent supports two async/delegation capabilities that the LLM can 
 
 In the main conversation, the LLM may call the tool `start_sub_task(prompt, systemContext)` to delegate a piece of work to a "sub-model" for execution:
 
-- The sub-task has the same tool access as the main conversation (files / MCP / Skill / time, etc.), but it **cannot** spawn another sub-task or create a scheduled task (filtered at the tool-collection level to prevent self-recursion).
+- The sub-task's tool access is **role-authorized just like the main conversation**: it gets the universal tools (file / skill / knowledge / time, etc.) plus whatever RBAC tools (render / git / maven / compile) the user's roles grant — unauthorized RBAC tools never enter the sub-task tool set. It also **cannot** spawn another sub-task or create a scheduled task (filtered at the tool-collection level to prevent self-recursion).
 - The main conversation **waits synchronously** while the sub-task runs; once the sub-task completes (or is cancelled), its final text is returned to the main conversation.
 - The sub-task runs on the dedicated thread pool `loomSubTaskExecutor` and can be interrupted.
 - The sub-task's ChatMemory is written under the namespace `{conversationId}--sub--{subTaskId}`.

@@ -8,7 +8,7 @@ Spring AI LoomAgent 支持两种由 LLM 主动发起的异步/委派能力：**�
 
 主对话中，LLM 可调用工具 `start_sub_task(prompt, systemContext)` 把一段任务委派给一个"子模型"执行：
 
-- 子任务拥有与主对话相同的工具访问（文件 / MCP / Skill / 时间等），**但不能**再次启动子任务或创建定时器（从工具集合层面过滤，杜绝自递归）。
+- 子任务的工具访问**与主对话一样受角色授权约束**：获得通用工具（文件 / Skill / 知识库 / 时间等）+ 该用户角色已授权的 RBAC 工具（render / git / maven / compile），未授权的 RBAC 工具绝不进入子任务工具集。同时**不能**再次启动子任务或创建定时器（从工具集合层面过滤，杜绝自递归）。
 - 主对话在子任务运行期间**同步等待**，子任务完成（或被取消）后把最终文本返回主对话继续。
 - 子任务在专用线程池 `loomSubTaskExecutor` 上运行，可被中断。
 - 子任务的 ChatMemory 写入命名空间 `{conversationId}--sub--{subTaskId}`。
