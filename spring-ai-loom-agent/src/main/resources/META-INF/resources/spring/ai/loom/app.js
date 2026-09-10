@@ -56,6 +56,8 @@ const API = {
     `/spring/ai/loom/knowledge/${knowledgeId}/file/${fileId}`,
   uploadFile: "/spring/ai/loom/file/upload",
   checkKnowledgeUpload: "/spring/ai/loom/knowledge/checkKnowledgeUpload",
+  // 功能开关探测（知识空间全局关闭：RAG 关闭时 features.knowledge=false → 隐藏 ks 按钮）
+  features: "/spring/ai/loom/api/features",
   // Knowledge market
   // M4 T2: KB 市场 tab 默认分支改走 v2 分页路由（0-based，返回 Page{items,total,page,size}）。
   // 旧 v1 /api/knowledge-market（1-based）不再被本 SPA 调用；pull/my-submitted 等仍走各自 v1 路由。
@@ -83,6 +85,7 @@ const state = {
   capabilities: [],     // M5:统一 capability 列表(本地 tool group + MCP server),从 /api/capabilities 拉
   selectedToolGroups: [], // M5:用户在前端勾选的本地 tool group 名列表(纯 group_name,如 "tool_file")
   enabledKnowledgeIds: [],
+  features: { knowledge: true }, // 功能开关(features 端点);默认 true,init 探测后覆写
   selectedSkill: null, // {name, description} | null，用户通过 / 命令精准选中的 Skill
   isStreaming: false,
   controller: null, // AbortController for SSE
@@ -692,6 +695,20 @@ const api = {
   async checkKnowledgeUpload() {
     const r = await apiFetch(API.checkKnowledgeUpload);
     return r.ok;
+  },
+  /**
+   * 功能开关探测。失败/网络异常 → fail-open 返回 {knowledge:true}(探测失败不该
+   * 误藏入口;RAG 真关闭时后端必返回 200 {knowledge:false},信号是确定的)。
+   */
+  async loadFeatures() {
+    try {
+      const r = await apiFetch(API.features);
+      if (!r.ok) return { knowledge: true };
+      return await r.json();
+    } catch (e) {
+      console.warn("[api.loadFeatures] failed, fail-open:", e);
+      return { knowledge: true };
+    }
   },
   async listFileTree() {
     const r = await apiFetch("/spring/ai/loom/file/tree");
@@ -6197,6 +6214,18 @@ const init = async () => {
     await mcp.loadList();
   } catch (e) {
     console.warn("[init] mcp.loadList failed, continuing:", e);
+  }
+
+  // 知识空间全局关闭开关(RAG 关闭: spring.ai.loom.agent.rag.enabled=false 或无 EmbeddingModel)
+  // features.knowledge=false → 隐藏 #ks-button(知识空间入口);fail-open(探测失败保持显示)
+  try {
+    state.features = await api.loadFeatures();
+    if (state.features && state.features.knowledge === false) {
+      const ks = document.getElementById("ks-button");
+      if (ks) ks.style.display = "none";
+    }
+  } catch (e) {
+    console.warn("[init] loadFeatures failed, continuing:", e);
   }
 
   try {

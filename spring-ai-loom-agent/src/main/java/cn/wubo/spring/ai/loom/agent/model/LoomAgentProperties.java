@@ -99,6 +99,15 @@ public class LoomAgentProperties {
 
  @Data
  public static class RagProperty {
+ /**
+  * RAG / 知识空间全局开关(yml: {@code spring.ai.loom.agent.rag.enabled},默认 true)。
+  * false → RagConfiguration 整段不激活:不创建 VectorStore(H2 JVector 不初始化、
+  * 零 embedding API 调用)、IUpload / IDocumentRead / H2VectorStoreReloader 与下游
+  * @ConditionalOnBean(VectorStore) 链(IKnowledgeTool、knowledge/upload 路由)全部消失。
+  * 前端据 features.knowledge=false 隐藏知识空间按钮。IKnowledge 元数据与知识库市场
+  * 不依赖 VectorStore,不受影响;loom_vector_store 表仍由 V1.0 schema 建立(不写不读)。
+  */
+ private boolean enabled = true;
  private double similarityThreshold = 0.0F;
  private int topK = 4;
  }

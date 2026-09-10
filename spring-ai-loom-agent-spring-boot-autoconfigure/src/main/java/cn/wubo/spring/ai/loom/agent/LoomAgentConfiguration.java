@@ -715,8 +715,19 @@ public class LoomAgentConfiguration {
 
     @Configuration
     @Conditional(AnyEmbeddingProviderCondition.class)
+    @ConditionalOnProperty(name = "spring.ai.loom.agent.rag.enabled", havingValue = "true", matchIfMissing = true)
     static class RagConfiguration {
 
+        /**
+         * @ConditionalOnBean(EmbeddingModel.class):崩溃防护 —— 用户用 Spring AI 标准开关
+         * (如 {@code spring.ai.model.embedding.text=none})关掉 embedding 时,容器里没有
+         * EmbeddingModel bean;此前本方法参数强制注入会直接 NoSuchBeanDefinition 启动失败。
+         * 顺序安全:LoomAgentConfiguration 的 @AutoConfigureAfter 已列出全部 embedding
+         * autoconfig(含 DashScopeEmbeddingAutoConfiguration),条件评估时对方 bean 定义已注册。
+         * 缺席时 VectorStore 不创建 → 下游 @ConditionalOnBean(VectorStore) 链(reloader /
+         * DocumentRead / Upload / KnowledgeTool / knowledge & upload 路由)整体干净消失。
+         */
+        @ConditionalOnBean(EmbeddingModel.class)
         @ConditionalOnMissingBean(VectorStore.class)
         @Bean
         public VectorStore h2VectorStore(EmbeddingModel embeddingModel,
@@ -4383,11 +4394,19 @@ public class LoomAgentConfiguration {
             }
         }
 
-        @ConditionalOnBean(VectorStore.class)
+        /**
+         * 知识库路由。RAG 全局关闭(spring.ai.loom.agent.rag.enabled=false 或无
+         * EmbeddingModel)时 IUpload 缺席,但 KB 元数据 CRUD(IKnowledge,不依赖
+         * VectorStore)保留 —— IUpload 走 ObjectProvider 降级注入:
+         * checkKnowledgeUpload 如实返回 false,上传/删除文件类端点 503,
+         * DELETE KB 降级为仅删元数据行。前端据 features.knowledge 隐藏知识空间按钮。
+         */
         @Bean("loomAgentKnowledgeRouter")
-        public RouterFunction<ServerResponse> loomAgentKnowledgeRouter(IKnowledge knowledge, IUpload upload, IFile file) {
+        public RouterFunction<ServerResponse> loomAgentKnowledgeRouter(IKnowledge knowledge,
+                                                                       org.springframework.beans.factory.ObjectProvider<IUpload> uploadProvider,
+                                                                       IFile file) {
             RouterFunctions.Builder builder = RouterFunctions.route();
-            builder.GET("/spring/ai/loom/knowledge/checkKnowledgeUpload", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(true));
+            builder.GET("/spring/ai/loom/knowledge/checkKnowledgeUpload", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(uploadProvider.getIfAvailable() != null));
             builder.GET("/spring/ai/loom/knowledge", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.list()));
             builder.PUT("/spring/ai/loom/knowledge", request -> {
                 KnowledgeRecord knowledgeRecord = request.body(KnowledgeRecord.class);
@@ -4447,9 +4466,19 @@ public class LoomAgentConfiguration {
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}", request -> {
                 String knowledgeId = request.pathVariable("knowledgeId");
-                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.deleteAllKnowledge(knowledgeId));
+                IUpload upload = uploadProvider.getIfAvailable();
+                if (upload != null) {
+                    return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(upload.deleteAllKnowledge(knowledgeId));
+                }
+                // RAG 关闭:无文件/向量可清,降级为仅删 knowledge 元数据行(同 BUG-12 用户域约束)
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.delete(knowledgeId));
             });
             builder.POST("/spring/ai/loom/knowledge/{knowledgeId}/upload", request -> {
+                IUpload upload = uploadProvider.getIfAvailable();
+                if (upload == null) {
+                    return ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库文件功能未启用(RAG 已关闭)"));
+                }
                 // 与 /file/upload 同理：缺 multipart header / body 走 400 而不是 500
                 String fileErrMsg = "上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件";
                 Part part;
@@ -4471,6 +4500,11 @@ public class LoomAgentConfiguration {
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(file.list(knowledgeId, UserContextHolder.getCurrentUser()));
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}", request -> {
+                IUpload upload = uploadProvider.getIfAvailable();
+                if (upload == null) {
+                    return ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("message", "知识库文件功能未启用(RAG 已关闭)"));
+                }
                 String fileId = request.pathVariable("fileId");
                 // upload.delete 内部调 file.getById，row 不存在抛 EmptyResultDataAccessException → 404
                 try {
@@ -4480,6 +4514,29 @@ public class LoomAgentConfiguration {
                 } catch (org.springframework.dao.IncorrectResultSizeDataAccessException e) {
                     return ServerResponse.notFound().build();
                 }
+            });
+            return builder.build();
+        }
+
+        /**
+         * 功能开关探测端点:前端启动时据此决定 UI 元素显隐(知识空间全局关闭开关,方案 A+B)。
+         * knowledge=true 当且仅当容器存在 VectorStore bean(RAG 链激活)。
+         * 降级容错与 /api/capabilities 同款:异常 → 保守返回 false,页面 init 不卡死。
+         */
+        @Bean("loomAgentFeaturesRouter")
+        public RouterFunction<ServerResponse> loomAgentFeaturesRouter(
+                org.springframework.beans.factory.ObjectProvider<VectorStore> vectorStoreProvider) {
+            RouterFunctions.Builder builder = RouterFunctions.route();
+            builder.GET("/spring/ai/loom/api/features", request -> {
+                boolean knowledge;
+                try {
+                    knowledge = vectorStoreProvider.getIfAvailable() != null;
+                } catch (Exception e) {
+                    log.warn("/api/features degraded, knowledge=false: {}", e.getMessage());
+                    knowledge = false;
+                }
+                return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
+                        .body(java.util.Map.of("knowledge", knowledge));
             });
             return builder.build();
         }

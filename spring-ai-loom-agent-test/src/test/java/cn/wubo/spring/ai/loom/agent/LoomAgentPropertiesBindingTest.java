@@ -43,6 +43,28 @@ class LoomAgentPropertiesBindingTest {
     }
 
     @Test
+    void ragEnabledDefaultsToTrue() {
+        // 知识空间全局开关(方案 A):默认 true —— 不配置时 RAG 链照常激活
+        MockEnvironment env = new MockEnvironment();
+        LoomAgentProperties props =
+                new LoomAgentConfiguration.InfrastructureConfiguration().loomAgentProperties(env);
+        assertThat(props.getRag()).isNotNull();
+        assertThat(props.getRag().isEnabled()).isTrue();
+    }
+
+    @Test
+    void ragEnabledFalseFromEnvironmentIsBound() {
+        // 守卫 loomAgentProperties 手动拷贝块(setRag 在 :451,漏拷则 false 被静默丢回 true)
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.ai.loom.agent.rag.enabled", "false");
+        LoomAgentProperties props =
+                new LoomAgentConfiguration.InfrastructureConfiguration().loomAgentProperties(env);
+        assertThat(props.getRag().isEnabled()).isFalse();
+        // 同段既有键不受影响
+        assertThat(props.getRag().getTopK()).isEqualTo(4);
+    }
+
+    @Test
     void renderDefaultsSurviveManualCopy() {
         // 守卫 2bd0b5d 类缺陷:loomAgentProperties 手动拷贝块漏 setRender() 时,
         // bound 实例的 render 会被丢掉,返回默认实例 —— 默认值断言能过但覆盖值会丢,
