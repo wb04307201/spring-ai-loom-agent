@@ -370,13 +370,21 @@ GET /spring/ai/loom/file/{id}/download
 
 ## 5. Knowledge Base Management
 
+### 5.0 Feature Flags
+
+```
+GET /spring/ai/loom/api/features
+```
+
+**Response**: `{ "knowledge": boolean }` — `knowledge` is `true` iff the container has a `VectorStore` bean (RAG chain active). When `spring.ai.loom.agent.rag.enabled=false` (or no `EmbeddingModel` bean exists), it is `false` and the frontend hides the knowledge-space (📚) button.
+
 ### 5.1 Check Knowledge Upload Status
 
 ```
 GET /spring/ai/loom/knowledge/checkKnowledgeUpload
 ```
 
-**Response**: `boolean` — Whether knowledge upload functionality is available.
+**Response**: `boolean` — Whether knowledge upload functionality is available (`false` when RAG is globally disabled).
 
 ---
 

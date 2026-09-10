@@ -145,9 +145,12 @@ spring:
  loom:
  agent:
  rag:
+ enabled: true # 知识空间全局开关,默认 true。设 false 跳过 VectorStore/H2 JVector 初始化(零 embedding 调用)并隐藏 📚 知识空间按钮
  similarityThreshold: 0.50 # 相似度阈值,默认0.0
  top-k: 4 # top-k，默认4
 ```
+
+> `rag.enabled=false`(或容器内无 `EmbeddingModel` bean,例如 `spring.ai.model.embedding.text=none`)会干净地关闭整条 RAG 链 —— 应用照常启动,知识库元数据 CRUD 保留,前端隐藏知识空间入口。`GET /spring/ai/loom/api/features` 返回 `{ "knowledge": false }`。
 
 ## MCP服务
 以时间MCP服务为例，添加依赖：

@@ -101,7 +101,7 @@ Organized into 7 nested static `@Configuration` classes:
 |-------------|----------------|
 | `InfrastructureConfiguration` | Properties binding, Flyway, ChatMemory, BeanFactoryPostProcessors |
 | `ChatConfiguration` | ChatClient, IChat, SseController |
-| `RagConfiguration` | VectorStore (H2-backed JVector fallback), DocumentRead, IUpload (all conditional on VectorStore) |
+| `RagConfiguration` | VectorStore (H2-backed JVector fallback), DocumentRead, IUpload (all conditional on VectorStore). Gated by `@ConditionalOnProperty(spring.ai.loom.agent.rag.enabled, matchIfMissing=true)` (全局知识空间开关) + `h2VectorStore` 另带 `@ConditionalOnBean(EmbeddingModel.class)`(embedding 缺席防护);knowledge 路由 `IUpload` 走 `ObjectProvider` 降级(KB 元数据 CRUD 保留,上传腿 503),`GET /spring/ai/loom/api/features` → `{knowledge: VectorStore 存在性}` 供前端隐藏知识空间按钮 |
 | `McpConfiguration` | SyncMcp / ASyncMcp |
 | `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool, IHtmlRenderTool(+ HtmlRenderEngine) — **10 个 I*Tool bean 总是创建;IHtmlRenderTool/HtmlRenderEngine 由 `@ConditionalOnClass(playwright)` 门控(optional 依赖,消费者引入才创建)**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
@@ -248,7 +248,7 @@ All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wip
 ### Configuration Properties
 
 All under `spring.ai.loom.agent`:
-- `rag` — similarity threshold, top-k, prompt templates
+- `rag` — `enabled` (boolean, default **true**; set `false` to globally disable the knowledge space: `RagConfiguration` won't activate, no VectorStore/H2 JVector is built, zero embedding API calls, `IUpload`/`IKnowledgeTool`/knowledge-upload chain disappear, frontend hides the 📚 知识空间 button via `/api/features`; KB metadata CRUD via `IKnowledge` survives, `loom_vector_store` table still created but untouched), similarity threshold, top-k, prompt templates. The vector chain is also auto-disabled when the container has no `EmbeddingModel` bean (e.g. Spring AI standard `spring.ai.model.embedding.text=none`) — `h2VectorStore` is gated by `@ConditionalOnBean(EmbeddingModel.class)` so startup no longer fails
 - `jvector` — HNSW params (m, efConstruction, efSearch);持久化在 H2 表 `loom_vector_store`(#3 起,原 indexPath/json 目录已退役)
 - `mcps` — list of MCP service configs (name, title, description, tools, default-selected)
 - ~~`skills`~~ — **no longer read from yml**. Skill data lives in the database now (tables `market_skill` / `user_skill` / `role_skill`); 6 system skills are seeded by the init migration. Manage via the admin console → **Skill Market** page.

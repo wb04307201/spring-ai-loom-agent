@@ -368,13 +368,21 @@ GET /spring/ai/loom/file/{id}/download
 
 ## 5. 知识库管理
 
+### 5.0 功能开关探测
+
+```
+GET /spring/ai/loom/api/features
+```
+
+**响应**: `{ "knowledge": boolean }` — 当容器存在 `VectorStore` bean(RAG 链激活)时为 `true`;`spring.ai.loom.agent.rag.enabled=false`(或无 `EmbeddingModel` bean)时为 `false`,前端据此隐藏知识空间(📚)按钮。
+
 ### 5.1 检查知识库上传状态
 
 ```
 GET /spring/ai/loom/knowledge/checkKnowledgeUpload
 ```
 
-**响应**: `boolean` — 知识库上传功能是否可用
+**响应**: `boolean` — 知识库上传功能是否可用(RAG 全局关闭时为 `false`)
 
 ---
 

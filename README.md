@@ -167,9 +167,12 @@ spring:
  loom:
  agent:
  rag:
+ enabled: true # Global knowledge-space switch, default true. Set false to skip VectorStore/H2 JVector init (zero embedding calls) and hide the 📚 knowledge-space button
  similarityThreshold: 0.50 # Similarity threshold, default 0.0
  top-k: 4 # Top-k results, default 4
 ```
+
+> Setting `rag.enabled=false` (or providing no `EmbeddingModel` bean, e.g. `spring.ai.model.embedding.text=none`) cleanly disables the whole RAG chain — the app still starts, knowledge-base metadata CRUD survives, and the frontend hides the knowledge-space entry. `GET /spring/ai/loom/api/features` reports `{ "knowledge": false }`.
 
 ## MCP Services
 
