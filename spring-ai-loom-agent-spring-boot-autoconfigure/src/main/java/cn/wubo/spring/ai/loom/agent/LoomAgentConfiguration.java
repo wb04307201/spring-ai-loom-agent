@@ -719,15 +719,21 @@ public class LoomAgentConfiguration {
     static class RagConfiguration {
 
         /**
-         * @ConditionalOnBean(EmbeddingModel.class):崩溃防护 —— 用户用 Spring AI 标准开关
-         * (如 {@code spring.ai.model.embedding.text=none})关掉 embedding 时,容器里没有
-         * EmbeddingModel bean;此前本方法参数强制注入会直接 NoSuchBeanDefinition 启动失败。
-         * 顺序安全:LoomAgentConfiguration 的 @AutoConfigureAfter 已列出全部 embedding
-         * autoconfig(含 DashScopeEmbeddingAutoConfiguration),条件评估时对方 bean 定义已注册。
-         * 缺席时 VectorStore 不创建 → 下游 @ConditionalOnBean(VectorStore) 链(reloader /
-         * DocumentRead / Upload / KnowledgeTool / knowledge & upload 路由)整体干净消失。
+         * Embedding 可用性守卫(方案 B 崩溃防护):用户用 Spring AI 标准开关
+         * ({@code spring.ai.model.embedding.text=none} 或 {@code spring.ai.dashscope.enabled=false})
+         * 关掉 embedding 时,本 bean 跳过 → VectorStore 不创建 → 下游
+         * @ConditionalOnBean(VectorStore) 链(reloader/DocumentRead/Upload/KnowledgeTool/
+         * knowledge & upload 路由)整体干净消失,不再 NoSuchBeanDefinition 启动失败。
+         * <p>
+         * <b>为什么不用 @ConditionalOnBean(EmbeddingModel.class)</b>(2026-09-10 活体冒烟实证):
+         * test app 与 lib 共享根包 {@code cn.wubo.spring.ai.loom.agent},组件扫描会把本嵌套类
+         * 提前注册(AutoConfigurationExcludeFilter 只排除外层 FQCN,不排除嵌套类),此时
+         * deferred auto-config(DashScopeEmbeddingAutoConfiguration)尚未注册 embedding bean 定义
+         * → @ConditionalOnBean 评估过早 → 默认配置下 VectorStore 被静默跳过、知识空间整体失效。
+         * {@code EmbeddingModelAvailableCondition} 顺序无关:bean 在场直接过,缺席时按属性判定;
+         * 实例化晚于全部定义注册,构造器注入届时总能解析。
          */
-        @ConditionalOnBean(EmbeddingModel.class)
+        @Conditional(EmbeddingModelAvailableCondition.class)
         @ConditionalOnMissingBean(VectorStore.class)
         @Bean
         public VectorStore h2VectorStore(EmbeddingModel embeddingModel,
@@ -799,6 +805,59 @@ public class LoomAgentConfiguration {
 
         @ConditionalOnClass(name = "org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiEmbeddingAutoConfiguration")
         static class ZhiPuAiEmbeddingPresent {
+        }
+    }
+
+    /**
+     * Embedding 可用性守卫(方案 B 崩溃防护)—— {@code @ConditionalOnBean(EmbeddingModel.class)}
+     * 的<b>顺序无关</b>替代。
+     * <p>
+     * <b>为什么不能用 @ConditionalOnBean</b>(2026-09-10 活体冒烟实证,根因经 bean 定义注册序探针确认):
+     * 消费方应用与库共享根包 {@code cn.wubo.spring.ai.loom.agent} 时(本仓 test app 即如此),
+     * 组件扫描会把 LoomAgentConfiguration 的嵌套 @Configuration 类当作独立候选提前注册 ——
+     * AutoConfigurationExcludeFilter 只排除 imports 清单里的外层类,不排除嵌套类。扫描配置的
+     * bean 方法条件在 ConfigurationClassBeanDefinitionReader 加载阶段评估,<b>早于全部 deferred
+     * auto-config</b>(含 DashScopeEmbeddingAutoConfiguration)注册各自 bean 定义 →
+     * @ConditionalOnBean(EmbeddingModel) 恒评估过早 → 默认配置下 VectorStore 被静默跳过、
+     * 知识空间整体失效。外层类的 @AutoConfigureAfter 对扫描注册路径无效。
+     * <p>
+     * 判定顺序(前两级确定性,第三级与既有 matchIfMissing 语义对齐):
+     * <ol>
+     *   <li>EmbeddingModel bean 定义已在场(正常 auto-config 排序路径 / 消费方自定义 provider)→ match;</li>
+     *   <li>标准关闭开关命中({@code spring.ai.model.embedding.text=none} 或
+     *       {@code spring.ai.dashscope.enabled=false})→ no-match,整条 RAG 链干净跳过,不再
+     *       NoSuchBeanDefinition 启动失败;</li>
+     *   <li>否则乐观放行:provider autoconfig(matchIfMissing=true)稍后总会注册 EmbeddingModel;
+     *       bean 实例化晚于全部定义注册,h2VectorStore 的构造器注入届时可解析。
+     *       残余边界:provider 被 {@code spring.autoconfigure.exclude} 等属性外手段排除时
+     *       维持与修复前相同的启动失败(eager 注入),不做静默降级。</li>
+     * </ol>
+     */
+    static class EmbeddingModelAvailableCondition extends SpringBootCondition {
+
+        @Override
+        public ConditionOutcome getMatchOutcome(org.springframework.context.annotation.ConditionContext context,
+                                                org.springframework.core.type.AnnotatedTypeMetadata metadata) {
+            ConditionMessage.Builder message = ConditionMessage.forCondition("EmbeddingModelAvailable");
+            // 1) bean 定义已在场 → 确定性通过(allowEagerInit=false,不触发 FactoryBean 初始化)
+            org.springframework.beans.factory.ListableBeanFactory beanFactory = context.getBeanFactory();
+            if (beanFactory != null
+                    && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, false).length > 0) {
+                return ConditionOutcome.match(message.because("EmbeddingModel bean definition present"));
+            }
+            // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)
+            org.springframework.core.env.Environment env = context.getEnvironment();
+            if ("none".equalsIgnoreCase(env.getProperty("spring.ai.model.embedding.text"))) {
+                return ConditionOutcome.noMatch(message.because(
+                        "spring.ai.model.embedding.text=none disables all embedding providers"));
+            }
+            if ("false".equalsIgnoreCase(env.getProperty("spring.ai.dashscope.enabled"))) {
+                return ConditionOutcome.noMatch(message.because(
+                        "spring.ai.dashscope.enabled=false disables the bundled DashScope embedding provider"));
+            }
+            // 3) 乐观放行:实例化时点晚于全部定义注册,构造器注入届时解析(与改造前 eager 注入行为一致)
+            return ConditionOutcome.match(message.because(
+                    "no explicit embedding disable switch; deferring to provider auto-configuration (matchIfMissing)"));
         }
     }
 
