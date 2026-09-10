@@ -151,19 +151,10 @@ public class DefaultChat implements IChat {
                   : new java.util.HashSet<>(chatRequestRecord.enabledToolGroups())  // 新路径:∩ user_pick
   );
   log.debug("DefaultChat username={} visibleToolGroups={}", username, visibleToolGroups);
-  java.util.List<IEmbedTool> filteredEmbedTools = embedTools.stream()
-          .filter(t -> {
-              // 找带 @ToolGroup 注解的接口(可能在多层接口里)
-              Class<?> iface = null;
-              for (Class<?> i : t.getClass().getInterfaces()) {
-                  if (i.isAnnotationPresent(cn.wubo.spring.ai.loom.agent.tool.ToolGroup.class)) { iface = i; break; }
-              }
-              if (iface == null) return true; // 没标 @ToolGroup 的 bean 强制通过（兼容老实现）
-              cn.wubo.spring.ai.loom.agent.tool.ToolGroup ann = iface.getAnnotation(cn.wubo.spring.ai.loom.agent.tool.ToolGroup.class);
-              if (ann == null) return true;
-              return visibleToolGroups.contains("tool_" + ann.value());
-          })
-          .toList();
+  // 2026-09-10 起走 CapabilityService 共享 helper(spec §2.2,语义逐字等价:
+  // 未标 @ToolGroup 的 bean 放行(兼容老实现)+ 不在 visibleToolGroups 的 group 剔除)。
+  java.util.List<IEmbedTool> filteredEmbedTools =
+          capabilityService.filterEmbedToolsByCapabilityIds(embedTools, visibleToolGroups);
 
   ToolCallback[] embedToolCallbacks = cn.wubo.spring.ai.loom.agent.tool.ToolCallbacks.from(filteredEmbedTools.toArray());
   ToolCallback[] wrappedEmbedTools = new ToolCallback[embedToolCallbacks.length];
