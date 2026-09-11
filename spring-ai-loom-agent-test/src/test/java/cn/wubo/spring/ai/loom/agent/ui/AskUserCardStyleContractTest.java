@@ -40,7 +40,11 @@ class AskUserCardStyleContractTest {
         int idx = css.indexOf("/* ===== #1 AskUser 提问卡片 ===== */");
         assertThat(idx).as("askUser card CSS block must exist").isGreaterThan(0);
         String block = css.substring(idx);
-        assertThat(block).contains("var(--primary-color, #6366f1)");
+        // 契约 = 消费真实 token 名(--primary-color,而非未定义的 --primary),不钉具体 hex 值:
+        // fallback 色值属设计决策(2026-09-11 F-2 a11y 将 #6366f1→#4f46e5 达 WCAG AA),
+        // 权威值锁定交给 StyleTokenBrowserIT 的 computed-style 断言;此处只校验 var 名,
+        // 与下方 --border-color / --text-secondary / --success-color 断言同一粒度,避免随换肤再次脆裂。
+        assertThat(block).contains("var(--primary-color");
         assertThat(block).contains("var(--border-color");
         assertThat(block).contains("var(--text-secondary");
         assertThat(block).contains("var(--success-color");
