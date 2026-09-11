@@ -3968,7 +3968,7 @@ textarea::placeholder {
   border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; cursor: pointer;
   transition: border-color .15s, background .15s;
 }
-.askuser-opt:hover { border-color: var(--primary-color, #4f46e5); background: rgba(99,102,241,.04); }
+.askuser-opt:hover { border-color: var(--primary-color, #4f46e5); background: rgba(79,70,229,.04); }
 .askuser-opt-label { font-size: 13px; font-weight: 500; }
 .askuser-opt-desc { font-size: 12px; color: var(--text-secondary, #475569); }
 .askuser-custom { display: flex; flex-direction: column; gap: 6px; }
