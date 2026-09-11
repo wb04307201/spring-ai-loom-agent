@@ -91,7 +91,7 @@ body {
 
 .admin-sidebar-subtitle {
   font-size: 11px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
 }
 
 .admin-sidebar-nav {
@@ -116,12 +116,12 @@ body {
 
 .admin-sidebar-link:hover {
   background: var(--bg-secondary, #f1f5f9);
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
 }
 
 .admin-sidebar-link.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--primary-color, #6366f1);
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--primary-color, #4f46e5);
   font-weight: 500;
 }
 
@@ -176,7 +176,7 @@ body {
 
 .admin-subtitle {
   font-size: 12px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   margin-left: 12px;
 }
 
@@ -188,12 +188,12 @@ body {
 
 .admin-username {
   font-size: 13px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
 }
 
 .header-link {
   font-size: 13px;
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
   text-decoration: none;
 }
 
@@ -255,7 +255,7 @@ table.user-table {
 
 .user-table th {
   background: #f8fafc;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 12px;
   font-weight: 500;
   text-transform: uppercase;
@@ -289,7 +289,7 @@ table.user-table {
 }
 
 .role-empty {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 12px;
   font-style: italic;
 }
@@ -327,7 +327,7 @@ table.user-table {
 }
 
 .user-link {
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
   text-decoration: none;
 }
 .user-link:hover {
@@ -337,7 +337,7 @@ table.user-table {
 .usage-cell {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
 }
 
 .batch-list {
@@ -367,7 +367,7 @@ table.user-table {
 }
 
 .batch-conv {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-family: ui-monospace, monospace;
   font-size: 11px;
 }
@@ -380,7 +380,7 @@ table.user-table {
 }
 
 .batch-date {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 11px;
 }
 
@@ -424,7 +424,7 @@ table.user-table {
 }
 
 .bar-label {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-variant-numeric: tabular-nums;
 }
 
@@ -436,7 +436,7 @@ table.user-table {
 }
 
 .bar-fill {
-  background: linear-gradient(90deg, var(--primary-color, #6366f1), #a855f7);
+  background: linear-gradient(90deg, var(--primary-color, #4f46e5), #a855f7);
   height: 100%;
   border-radius: 4px;
   transition: width 0.3s;
@@ -445,22 +445,22 @@ table.user-table {
 .bar-value {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
   font-weight: 500;
 }
 
 .clean-btn {
   padding: 4px 12px;
   background: transparent;
-  color: var(--primary-color, #6366f1);
-  border: 1px solid var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
+  border: 1px solid var(--primary-color, #4f46e5);
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .clean-btn:hover {
-  background: var(--primary-color, #6366f1);
+  background: var(--primary-color, #4f46e5);
   color: white;
 }
 
@@ -479,12 +479,12 @@ table.user-table {
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   padding-top: 2px;
 }
 
 .msg-role.role-user {
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
 }
 .msg-role.role-assistant {
   color: #059669;
@@ -504,7 +504,7 @@ table.user-table {
 .empty-state {
   padding: 40px;
   text-align: center;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
 }
 
 .error-msg {
@@ -581,7 +581,7 @@ table.user-table {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 20px;
 }
 .close-button:hover {
@@ -638,7 +638,7 @@ table.user-table {
 }
 .conv-meta-table th {
   width: 120px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-weight: 500;
 }
 
@@ -684,7 +684,7 @@ table.user-table {
 .flow-round-divider {
   text-align: center;
   font-size: 11px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #475569);
   padding: 12px 0 6px 0;
   margin: 6px 0 2px 0;
   border-top: 1px dashed var(--border-color, #e2e8f0);
@@ -724,7 +724,7 @@ table.user-table {
   text-align: center;
 }
 .flow-time {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 12px;
   font-family: ui-monospace, monospace;
   padding-top: 2px;
@@ -734,7 +734,7 @@ table.user-table {
   padding: 2px 6px;
   border-radius: 3px;
   background: var(--bg-secondary, #f1f5f9);
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #475569);
   text-align: center;
   align-self: start;
   font-family: ui-monospace, monospace;
@@ -755,7 +755,7 @@ table.user-table {
   margin-bottom: 2px;
 }
 .flow-meta {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 11px;
   font-family: ui-monospace, monospace;
   margin-top: 2px;
@@ -778,7 +778,7 @@ table.user-table {
 .flow-prompt summary,
 .flow-error summary {
   cursor: pointer;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-weight: 500;
 }
 .flow-thinking pre,
@@ -801,7 +801,7 @@ table.user-table {
 
 /* 类型着色：背景色块 + 左边框 */
 .flow-event-USER {
-  border-left: 3px solid #94a3b8;
+  border-left: 3px solid #64748b;
   padding-left: 5px;
 }
 .flow-event-ASSISTANT {
@@ -880,7 +880,7 @@ table.user-table {
 .flow-markdown blockquote {
   border-left: 3px solid #cbd5e1;
   padding-left: 12px;
-  color: #64748b;
+  color: #475569;
   margin: 0.5em 0;
 }
 .flow-markdown table {
@@ -918,7 +918,7 @@ table.user-table {
 }
 /* V5.4 P3：SYSTEM 事件 — 系统提示词，紫色调区分 */
 .flow-event-SYSTEM {
-  border-left: 3px solid #6366f1;
+  border-left: 3px solid #4f46e5;
   padding-left: 5px;
   background: #f5f3ff;
   border-radius: 4px;
@@ -932,7 +932,7 @@ table.user-table {
 }
 .flow-event-SYSTEM .flow-system summary {
   cursor: pointer;
-  color: var(--primary, #6366f1);
+  color: var(--primary, #4f46e5);
   font-weight: 500;
   padding: 4px 0;
 }
@@ -988,7 +988,7 @@ table.user-table {
 }
 .approval-meta {
   font-size: 12px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #475569);
 }
 .approval-comment {
   margin-top: 4px;
@@ -1014,7 +1014,7 @@ table.user-table {
 }
 .tag-edit-list-empty {
   font-size: 12px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-style: italic;
   padding: 6px;
 }
@@ -1027,7 +1027,7 @@ table.user-table {
 }
 .tag-edit-hint {
   font-size: 11px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   margin-top: 4px;
   line-height: 1.5;
 }

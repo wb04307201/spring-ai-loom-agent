@@ -8,7 +8,8 @@
 
 **结论:四层测试全部完成,回归全绿(单元 457 + IT 186,0 失败;3 skip 均为 env 门控合法跳过)。**
 过程中发现并当场修复 2 个**测试自身的顺序依赖缺陷**(`d1ba5e1`);产品侧发现 1 个 P1(admin 无移动断点)、
-1 个 critical a11y(色彩对比度系统性不达标)与 3 个 P2 —— 全部登记 §4 follow-up,本轮未修。
+1 个 critical a11y(色彩对比度系统性不达标)与 3 个 P2 —— 登记 §4 follow-up。
+**状态更新(2026-09-11 当日 follow-up):F-2(a11y 对比度 3 token)与 F-3(roles.html 导航文案)已修复**(单 `fix:` 提交,见 §4 与 git log);F-1/F-4/F-5 仍开放,复测另登记 F-6(admin 红绿语义色对比度)。
 
 | 层 | 结果 | 说明 |
 |----|------|------|
@@ -80,13 +81,21 @@ Lighthouse `color-contrast` 在**全部 6 次审计**中失败，根因是 3 个
 两者均为 "good" 区间（LCP < 2.5s、CLS < 0.1）。login mobile 的 558ms render delay 主要来自品牌卡织线纹理背景 + 字体首绘，本地 H2 场景可接受。
 trace 另提示：index 首文档响应未压缩（wasted ~15.7kB）、静态资源无长缓存（`Cache` insight）——内网单实例影响有限，记录备查。
 
-## 4. 建议修复项（**不在本轮修**，立项 follow-up）
+## 4. 建议修复项
 
-1. **F-1（P1，响应式）**：admin 布局加移动断点——`@media (max-width: 768px)` 下 `.admin-sidebar` 转 off-canvas 抽屉（对齐主应用 index 的 ☰ 模式）或折叠为 icon rail；`.table-container` 保留 `overflow-x:auto` 并给 main 区 `min-width:0`。验收：390px 下 main 内容区 ≥ 320px。
-2. **F-2（🔴 a11y）**：替换 3 个不达标 token——弱化灰 `#94a3b8` → `#64748b`(4.76:1) 或更深；主色文字用途 → `#4f46e5`(6.0:1)；主色按钮底 → `#4f46e5` 保白字 6.0:1。改 `style.css` / `console.css` / `login.css` 变量后重跑 L2 对比度 IT + Lighthouse。
-3. **F-3（P2）**：`roles.html:35` 导航文案统一为 "MCP 描述维护"。
-4. **F-4（P2）**：6 页补 `<meta name="description">`。
-5. **F-5（P2）**：index mobile 工具按钮行改横向滚动条或 3×2 网格，消除两行参差换行。
+> **状态更新(2026-09-11 follow-up):F-2 / F-3 已修复**,单 `fix:` 提交落地(全站 token 同步替换
+> `#6366f1→#4f46e5`、`#4f46e5→#4338ca`、`#94a3b8→#64748b`、`#64748b→#475569`,含 rgba 形式与 console.css
+> fallback;10 张截图基线重建;`StyleTokenBrowserIT` 契约同步;BrowserIT gate 52/52 绿)。
+> 复测:Lighthouse login desktop a11y **93→100**、index desktop a11y **95→100**(仅剩 meta-description = F-4);
+> admin/console a11y 仍 92 —— 失败项已换成**红绿语义色**(`.role-badge` #16a34a ≈3.3:1、`.delete-btn` #ef4444 ≈3.8:1),
+> 不在 F-2 三 token 范围内,登记为 **F-6**。
+
+1. **F-1(P1,响应式)**:admin 布局加移动断点——`@media (max-width: 768px)` 下 `.admin-sidebar` 转 off-canvas 抽屉(对齐主应用 index 的 ☰ 模式)或折叠为 icon rail;`.table-container` 保留 `overflow-x:auto` 并给 main 区 `min-width:0`。验收:390px 下 main 内容区 ≥ 320px。**开放**(建议与 F-5 合并为一个响应式专项)。
+2. **F-2(🔴 a11y)**:替换 3 个不达标 token——弱化灰 `#94a3b8` → `#64748b`(4.76:1) 或更深;主色文字用途 → `#4f46e5`(6.0:1);主色按钮底 → `#4f46e5` 保白字 6.0:1。改 `style.css` / `console.css` / `login.css` 变量后重跑 L2 对比度 IT + Lighthouse。**✅ 已修复(follow-up)**。
+3. **F-3(P2)**:`roles.html:35` 导航文案统一为 "MCP 描述维护"。**✅ 已修复(follow-up)**。
+4. **F-4(P2)**:6 页补 `<meta name="description">`。**开放**。
+5. **F-5(P2)**:index mobile 工具按钮行改横向滚动条或 3×2 网格,消除两行参差换行。**开放**。
+6. **F-6(P2,a11y,复测新登记)**:admin 红绿语义色不达 4.5:1——`.role-badge` 文字 `#16a34a`(绿底白卡 ≈3.3:1)、`.delete-btn` / `.danger-btn` 文字与边框 `#ef4444`(≈3.8:1)。建议:绿 → `#15803d`(4.9:1)、红 → `#dc2626`(4.5:1) 或按钮改红底白字。**开放**。
 
 > 产品 bug（如有）走 `superpowers:systematic-debugging` 单独立项，不在本报告修。
 

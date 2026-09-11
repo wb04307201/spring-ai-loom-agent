@@ -131,10 +131,10 @@
     // 语义/配色与聊天卡片摘要行一致(spec §2.2:已答绿/超时灰/取消灰/失败红)
     const map = {
       ANSWERED: ["已答", "var(--success-color, #22c55e)"],
-      TIMEOUT: ["已超时", "var(--text-muted, #94a3b8)"],
-      CANCELLED: ["已取消", "var(--text-muted, #94a3b8)"],
+      TIMEOUT: ["已超时", "var(--text-muted, #64748b)"],
+      CANCELLED: ["已取消", "var(--text-muted, #64748b)"],
       FAILED: ["失败", "#ef4444"],
-      UNKNOWN: ["未知", "var(--text-muted, #94a3b8)"],
+      UNKNOWN: ["未知", "var(--text-muted, #64748b)"],
     };
     const [label, color] = map[status] || map.UNKNOWN;
     return `<span style="color: ${color}; font-weight: 600; font-size: 12px;">${label}</span>`;

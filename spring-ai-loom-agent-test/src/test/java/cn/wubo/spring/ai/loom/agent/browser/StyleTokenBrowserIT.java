@@ -12,12 +12,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>真值来源(单一真源 = 源码):
  * <ul>
- *   <li>{@code style.css} :root — --primary-color #6366f1 / --primary-hover #4f46e5 /
+ *   <li>{@code style.css} :root — --primary-color #4f46e5 / --primary-hover #4338ca /
  *       --bg-primary #ffffff / --bg-secondary #f8fafc / --text-primary #1e293b /
- *       --text-secondary #64748b / --error-color #ef4444 / --success-color #10b981 /
+ *       --text-secondary #475569 / --text-muted #64748b / --error-color #ef4444 / --success-color #10b981 /
  *       --header-height 60px / --border-color #e2e8f0;主应用顶栏 {@code header.header}。</li>
  *   <li>{@code login.css} :root — 登录页 token 名为 {@code --primary}(非 --primary-color),
- *       值同为 #6366f1;顶栏 {@code header.app-header}(白底 --bg-card #ffffff,60px);
+ *       值同为 #4f46e5;顶栏 {@code header.app-header}(白底 --bg-card #ffffff,60px);
  *       品牌卡 {@code .login-card} 含圆形 {@code .brand-logo}(border-radius 50%)+ h1「灵梭」。</li>
  * </ul>
  */
@@ -68,12 +68,12 @@ class StyleTokenBrowserIT extends BrowserTestBase {
             Page page = newPage(ctx);
             page.navigate(baseUrl + UI + "index.html");
             page.waitForSelector("#textarea");
-            assertThat(cssVar(page, "--primary-color")).isEqualTo("#6366f1");
-            assertThat(cssVar(page, "--primary-hover")).isEqualTo("#4f46e5");
+            assertThat(cssVar(page, "--primary-color")).isEqualTo("#4f46e5");
+            assertThat(cssVar(page, "--primary-hover")).isEqualTo("#4338ca");
             assertThat(cssVar(page, "--bg-primary")).isEqualTo("#ffffff");
             assertThat(cssVar(page, "--bg-secondary")).isEqualTo("#f8fafc");
             assertThat(cssVar(page, "--text-primary")).isEqualTo("#1e293b");
-            assertThat(cssVar(page, "--text-secondary")).isEqualTo("#64748b");
+            assertThat(cssVar(page, "--text-secondary")).isEqualTo("#475569");
             assertThat(cssVar(page, "--error-color")).isEqualTo("#ef4444");
             assertThat(cssVar(page, "--success-color")).isEqualTo("#10b981");
             assertThat(cssVar(page, "--border-color")).isEqualTo("#e2e8f0");
@@ -158,7 +158,7 @@ class StyleTokenBrowserIT extends BrowserTestBase {
     }
 
     @Test
-    @DisplayName("无感切换契约:login(--primary)与 index(--primary-color)主色一致 = #6366f1")
+    @DisplayName("无感切换契约:login(--primary)与 index(--primary-color)主色一致 = #4f46e5")
     void primaryTokenConsistentBetweenLoginAndIndex() {
         // 校准:login.css 的 token 名是 --primary(login.html 不加载 style.css),
         // 主应用是 --primary-color;契约是"值一致",按各自实际变量名读取。
@@ -172,8 +172,8 @@ class StyleTokenBrowserIT extends BrowserTestBase {
 
             String loginPrimary = cssVar(login, "--primary");
             String indexPrimary = cssVar(index, "--primary-color");
-            assertThat(loginPrimary).as("login --primary").isEqualTo("#6366f1");
-            assertThat(indexPrimary).as("index --primary-color").isEqualTo("#6366f1");
+            assertThat(loginPrimary).as("login --primary").isEqualTo("#4f46e5");
+            assertThat(indexPrimary).as("index --primary-color").isEqualTo("#4f46e5");
             assertThat(loginPrimary).isEqualTo(indexPrimary);
         }
     }
