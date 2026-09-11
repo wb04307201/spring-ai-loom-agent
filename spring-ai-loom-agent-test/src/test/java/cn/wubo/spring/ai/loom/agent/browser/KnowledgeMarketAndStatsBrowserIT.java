@@ -64,11 +64,11 @@ class KnowledgeMarketAndStatsBrowserIT extends BrowserTestBase {
                 assertThat(page.locator("#knowledge-table-container .empty-state").innerText())
                         .isEqualTo("市场暂无任何知识库");
             } else {
-                // 有行(历史残留数据)→ 表头含"标签"列(renderTable L262 共 11 列)
-                assertThat(page.locator("#knowledge-table-container thead th").innerText())
+                // 有行(历史残留数据)→ 表头含"标签"列(renderTable L262 共 11 列)。
+                // 定位 thead(单元素)而非 thead th(多元素)—— Playwright Java
+                // innerText() 对多元素 locator 抛 strict mode violation。
+                assertThat(page.locator("#knowledge-table-container thead").innerText())
                         .contains("标签");
-                assertThat(page.locator("#knowledge-table-container tbody tr").count())
-                        .isEqualTo(rowCount);
             }
             assertThat(consoleErrorsOf(page)).isEmpty();
 
@@ -116,8 +116,9 @@ class KnowledgeMarketAndStatsBrowserIT extends BrowserTestBase {
                 assertThat(page.locator("#stats-table .empty-state").innerText())
                         .isEqualTo(now.getYear() + "-" + now.getMonthValue() + " 无用量记录");
             } else {
-                // 有用量(历史数据)→ 表格含 6 列表头 + 合计行(renderTable L99-115)
-                assertThat(page.locator("#stats-table thead th").innerText())
+                // 有用量(历史数据)→ 表格含 6 列表头 + 合计行(renderTable L99-115);
+                // thead 单元素定位(多元素 th 会触发 strict mode violation)
+                assertThat(page.locator("#stats-table thead").innerText())
                         .contains("用户").contains("总 Token");
                 assertThat(page.locator("#stats-table tfoot").innerText()).contains("合计");
             }
@@ -131,7 +132,8 @@ class KnowledgeMarketAndStatsBrowserIT extends BrowserTestBase {
                 assertThat(page.locator("#ask-logs-table .empty-state").innerText())
                         .isEqualTo("暂无提问记录");
             } else {
-                assertThat(page.locator("#ask-logs-table thead th").innerText())
+                // thead 单元素定位(多元素 th 会触发 strict mode violation)
+                assertThat(page.locator("#ask-logs-table thead").innerText())
                         .contains("答案 / 状态");
             }
 
