@@ -6,6 +6,7 @@ import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.ScreenshotAnimations;
 import com.microsoft.playwright.options.ScreenshotCaret;
 import com.microsoft.playwright.options.ScreenshotType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -14,6 +15,9 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,6 +79,30 @@ class VisualBaselineBrowserIT extends BrowserTestBase {
     private final Path baselineDir = Path.of("src/test/resources/browser-baselines");
     private final Path actualDir = Path.of("target/visual-actual");
     private final Path diffDir = Path.of("target/visual-diffs");
+
+    /**
+     * 全量 {@code -Dtest='*IT'} gate 下,本类按字母序排在 ChatSmoke / IndexInteractions 等
+     * 写数据的 IT 之后,共享 ./target/test-ds 会残留会话与 token 用量行 → stats / user 页
+     * 渲染非空态,与干净库基线像素不符(2026-09-11 全量 gate 实测 diff 3.16% / 2.45%)。
+     * 基线编码的是干净库形态,故截图前直连 H2(AUTO_SERVER=TRUE 允许第二连接)把易变表
+     * 清空,恢复干净库渲染;本类字母序最后,清空不影响后续 IT。
+     */
+    @BeforeAll
+    static void resetVolatileTables() throws Exception {
+        // test-side application.yml 只覆写 url 不覆写凭据 → Spring Boot 对
+        // embedded H2 默认空用户名/空密码(实测 current_user='' 可连);勿用
+        // main yml 的 sa/123456(那是 ~/.loom/datasource 库的凭据)
+        try (Connection c = DriverManager.getConnection(
+                "jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE",
+                "", "");
+             Statement s = c.createStatement()) {
+            for (String t : new String[]{"loom_chat_usage", "loom_chat_reasoning",
+                    "loom_tool_call_log", "loom_subtask_history",
+                    "SPRING_AI_CHAT_MEMORY", "user_conversation"}) {
+                s.executeUpdate("DELETE FROM " + t);
+            }
+        }
+    }
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {

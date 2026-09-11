@@ -117,9 +117,11 @@ class KnowledgeMarketAndStatsBrowserIT extends BrowserTestBase {
                         .isEqualTo(now.getYear() + "-" + now.getMonthValue() + " 无用量记录");
             } else {
                 // 有用量(历史数据)→ 表格含 6 列表头 + 合计行(renderTable L99-115);
-                // thead 单元素定位(多元素 th 会触发 strict mode violation)
+                // thead 单元素定位(多元素 th 会触发 strict mode violation);
+                // console.css 对 th 施加 text-transform:uppercase → innerText 返回
+                // "总 TOKEN" 等大写形态,断言一律大小写不敏感
                 assertThat(page.locator("#stats-table thead").innerText())
-                        .contains("用户").contains("总 Token");
+                        .contains("用户").containsIgnoringCase("总 Token");
                 assertThat(page.locator("#stats-table tfoot").innerText()).contains("合计");
             }
 
