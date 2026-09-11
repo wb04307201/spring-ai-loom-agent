@@ -6,14 +6,22 @@
 
 ## 执行摘要
 
-<!-- TASK 17 STEP 3 填写：四层测试结果 + 总体结论 -->
+**结论:四层测试全部完成,回归全绿(单元 457 + IT 186,0 失败;3 skip 均为 env 门控合法跳过)。**
+过程中发现并当场修复 2 个**测试自身的顺序依赖缺陷**(`d1ba5e1`);产品侧发现 1 个 P1(admin 无移动断点)、
+1 个 critical a11y(色彩对比度系统性不达标)与 3 个 P2 —— 全部登记 §4 follow-up,本轮未修。
 
 | 层 | 结果 | 说明 |
 |----|------|------|
-| L1 单元 | 待填 | `mvn test -pl spring-ai-loom-agent-test`（清库重跑） |
-| L2 计算样式 / 截图基线 | 待填 | `VisualBaselineBrowserIT` + `ComputedStyleBrowserIT` 等 |
-| L3 浏览器行为 IT | 待填 | `-Dtest='*IT'` 全量（env 守卫可跳过项除外） |
-| L4 AI 视觉 + Lighthouse | 见下 | 本报告 §1–§4 |
+| L1 单元 | ✅ 457/457 绿 | `mvn test -pl spring-ai-loom-agent-test`(wiped `~/.loom/datasource` 重跑,2026-09-11 20:57) |
+| L2 计算样式 / 截图基线 | ✅ 全绿 | `StyleTokenBrowserIT` + `VisualBaselineBrowserIT` 10 页 diff=0.0000%(修复后) |
+| L3 浏览器行为 IT | ✅ 186 run / 0 fail / 3 skip | `-Dtest='*IT'` wiped test-ds 全量 gate(21:38);skip = MarketAcceptanceIT×1 + DefaultMavenTool×2(env 门控) |
+| L4 AI 视觉 + Lighthouse | ✅ 完成 | 20 截图 + 6 Lighthouse + 2 perf trace;findings V-1..V-6(§1) |
+
+**IT gate 首跑发现并修复(测试缺陷,非产品 bug,commit `d1ba5e1`):**
+1. `KnowledgeMarketAndStatsBrowserIT.statsPageRendersBothSections` — stats 表头断言 `contains("总 Token")`,但 `console.css` 对 th 施加 `text-transform:uppercase`,`innerText` 实际返回 "总 TOKEN";仅在前序 ChatSmoke IT 写入真实用量、表格走非空分支时暴露 → 改 `containsIgnoringCase`。
+2. `VisualBaselineBrowserIT` admin-stats(3.16%)/admin-user(2.45%)超阈 — 全量 gate 下本类字母序靠后,`test-ds` 已残留前序 IT 的会话与 token 用量行,页面渲染非空态偏离干净库基线 → 新增 `@BeforeAll` 直连 H2 清空 6 张易变表(loom_chat_usage / loom_chat_reasoning / loom_tool_call_log / loom_subtask_history / SPRING_AI_CHAT_MEMORY / user_conversation)。
+
+**产品 findings 分级**(详见 §1 / §4):P0 = 0;**P1 = 1**(V-1 admin 无移动断点);**critical a11y = 1**(§3.1 对比度 3 token 全站不达标);P2 = 3(V-2 文案不一致、meta-description 缺失、V-3 工具按钮换行)。
 
 ## 1. L4 视觉问题清单（页面 × 严重度 × 截图）
 

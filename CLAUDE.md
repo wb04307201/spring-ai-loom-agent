@@ -39,7 +39,15 @@ mvn test -pl spring-ai-loom-agent-test -Dtest=ChatTest
 
 # Package for release (includes GPG signing)
 mvn clean deploy
+
+# 浏览器 E2E / 样式回归(Java Playwright,Chromium 缺失自动 skip;首跑需下载 Chromium)
+mvn test -pl spring-ai-loom-agent-test -Dtest='*BrowserIT' -Dsurefire.failIfNoSpecifiedTests=false
+
+# 重建截图基线(UI 有意改版后)
+mvn test -pl spring-ai-loom-agent-test -Dtest='VisualBaselineBrowserIT' -DupdateBaselines=true
 ```
+
+浏览器 IT 隔离约定：文件目录用 `./target/e2e-files`、数据库用 `./target/test-ds`（均相对 `spring-ai-loom-agent-test`，`mvn clean` 即清）；截图基线在 `src/test/resources/browser-baselines/`（同机更新约定——跨机器像素渲染差异由 `VisualBaselineBrowserIT` 的 0.5% diff 阈值吸收，超阈值需在本机 `-DupdateBaselines=true` 重建）。
 
 ## M0/M1/M2 Market Upgrade (v1.2.0)
 
