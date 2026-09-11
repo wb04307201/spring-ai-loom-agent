@@ -133,3 +133,7 @@ logging:
 
 server:
   port: 8080
+  compression:
+    enabled: true
+    mime-types: text/html,text/css,application/javascript,application/json,image/svg+xml
+    min-response-size: 2048
