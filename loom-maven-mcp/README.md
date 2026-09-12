@@ -40,7 +40,7 @@ All properties under `loom.maven.mcp`:
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `basePath` | `.local/file` | Root directory for resolving relative paths |
+| `basePath` | `~/.loom/mcp` | Root directory for resolving relative paths (shared MCP sandbox; flat config, not the main-lib user tree) |
 | `mavenHome` | *(auto-detect)* | Maven installation directory |
 | `localRepository` | *(default ~/.m2)* | Local Maven repository path |
 | `maxOutputLines` | `200` | Max lines of Maven output returned |

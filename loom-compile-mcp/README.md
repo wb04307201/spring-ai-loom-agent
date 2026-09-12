@@ -40,7 +40,7 @@ All properties under `loom.compile.mcp`:
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `basePath` | `.local/file` | Root directory for workspaces |
+| `basePath` | `~/.loom/mcp` | Root directory for compile-deploy workspaces (shared MCP sandbox; flat config, not the main-lib user tree) |
 | `mavenHome` | *(auto-detect)* | Maven installation directory |
 | `mavenTimeoutMs` | `600000` (10 min) | Maven build timeout |
 | `dockerBuildTimeoutMs` | `600000` (10 min) | Docker build timeout |

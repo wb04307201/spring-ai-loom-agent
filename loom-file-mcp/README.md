@@ -40,7 +40,7 @@ All properties under `loom.file.mcp`:
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `basePath` | `.local/file` | Root directory for all file operations |
+| `basePath` | `~/.loom/mcp` | Root directory for all file operations (shared MCP sandbox; flat config, not the main-lib user tree) |
 | `maxFileSize` | `10485760` (10 MB) | Max text file size (bytes) |
 | `maxMediaSize` | `52428800` (50 MB) | Max media file size (bytes) |
 | `maxWalkDepth` | `5` | Max directory traversal depth |

@@ -40,7 +40,7 @@ java -jar target/loom-maven-mcp-1.0-SNAPSHOT.jar
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `basePath` | `.local/file` | 相对路径解析的根目录 |
+| `basePath` | `~/.loom/mcp` | 相对路径解析的根目录（MCP 共享沙箱；扁平配置，非主库用户树） |
 | `mavenHome` | *（自动检测）* | Maven 安装目录 |
 | `localRepository` | *（默认 ~/.m2）* | 本地 Maven 仓库路径 |
 | `maxOutputLines` | `200` | Maven 输出最大返回行数 |

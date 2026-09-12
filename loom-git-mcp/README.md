@@ -40,7 +40,7 @@ All properties under `loom.git.mcp`:
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `basePath` | `.local/file` | Root directory for git operations |
+| `basePath` | `~/.loom/mcp` | Root directory for git operations (shared MCP sandbox; flat config, not the main-lib user tree) |
 | `gitUsername` | `""` | Git username for remote authentication |
 | `gitToken` | `""` | Git token/password for remote authentication |
 | `remoteTimeoutSeconds` | `60` | Timeout for clone/pull/fetch/push (seconds) |

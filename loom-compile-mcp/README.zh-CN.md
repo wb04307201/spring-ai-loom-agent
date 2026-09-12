@@ -40,7 +40,7 @@ java -jar target/loom-compile-mcp-1.0-SNAPSHOT.jar
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `basePath` | `.local/file` | 工作区根目录 |
+| `basePath` | `~/.loom/mcp` | 编译部署工作区根目录（MCP 共享沙箱；扁平配置，非主库用户树） |
 | `mavenHome` | *（自动检测）* | Maven 安装目录 |
 | `mavenTimeoutMs` | `600000`（10 分钟） | Maven 构建超时 |
 | `dockerBuildTimeoutMs` | `600000`（10 分钟） | Docker 构建超时 |
