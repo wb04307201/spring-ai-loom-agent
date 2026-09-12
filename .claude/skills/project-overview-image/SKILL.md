@@ -1,6 +1,6 @@
 ---
 name: project-overview-image
-description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目概览图。当前用 wan2.7-image（generate.py PRIMARY_MODEL，需 DASHSCOPE_WORKSPACE_ID）生成，文字清晰；docs/project-overview-{en,zh}.png 即由本 skill 产出。generate.py 的 EN_LAYOUT/ZH_LAYOUT 是布局单一真源（含 8 工具组 + RBAC + 管理控制台）。
+description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目概览图。当前用 wan2.7-image（generate.py PRIMARY_MODEL，需 DASHSCOPE_WORKSPACE_ID）生成，文字清晰；docs/project-overview-{en,zh}.png 即由本 skill 产出。generate.py 的 EN_LAYOUT/ZH_LAYOUT 是布局单一真源（含 11 个工具卡：7 universal + 4 RBAC + 管理控制台）。
 ---
 
 # project-overview-image
@@ -16,8 +16,8 @@ description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目
      - 一句话定位：Spring Boot AI Agent · Out-of-the-Box Solution
      - 核心 4 大功能：Chat UI / Knowledge Base / MCP Tools / Skill Library + Market
      - RBAC + 用户类型
-     - Admin 控制台（sidebar 5 区块）
-     - 8 个工具组（File 16 / Git 28 / Maven 6 / Compile & Deploy / Time / Skill / Sub-task / Schedule）
+     - Admin 控制台（sidebar 6 区块：用户 / 角色 / 技能市场 / 知识库市场 / MCP 描述 / 日志）
+     - 11 个工具卡（File 16 / Knowledge 1 / Git 28 / Maven 6 / Deploy 1 / Time 2 / Skill 2 / Sub-task 4 / Schedule 4 / Ask-user 1 / Html render 1）——7 universal（file / knowledge / time / skill / subtask / schedule / askUser）+ 4 RBAC（git / maven / compile / render）；`*.enabled` yml 开关已废弃
      - 文件管理
      - 数据层（H2 + Flyway 双版本 V1.0 / V1.1）
      - 底层栈（Spring Boot 3.x / Spring AI 1.x / JDK 17+ / JVector / JGit）
@@ -29,22 +29,22 @@ description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目
    - 风格：现代信息图（深色背景 / 霓虹色块 / 卡片式布局），中英风格**完全一致**
 
 3. **调用阿里云百炼 万相 API 生成图**
-   - 模型：`wanx2.1-t2i-turbo`（基础）或 `qwen-image`（更好支持中英文）— 用 `qwen-image`
-   - 端点：`https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-generation`
-   - Header: `Authorization: Bearer ${DASHSCOPE_API_KEY}`（环境变量）
+   - 模型：`wan2.7-image`（PRIMARY_MODEL，同步端点，文字清晰）；未设 `DASHSCOPE_WORKSPACE_ID` 或调用失败时回退 `qwen-image`（legacy 异步端点）
+   - 端点：`https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`
+   - Header: `Authorization: Bearer ${DASHSCOPE_PERSON_TOKEN_API_KEY}`（环境变量，personal token `sk-` 前缀）
    - 请求：
      ```json
      {
-       "model": "qwen-image",
-       "input": {"prompt": "..."},
-       "parameters": {"size": "1328*1328", "n": 1}
+       "model": "wan2.7-image",
+       "input": {"messages": [{"role": "user", "content": [{"text": "..."}]}]},
+       "parameters": {"n": 1, "size": "1280*1280"}
      }
      ```
    - 输出：URL → curl 下载 → 保存
 
 4. **检查图片（必须通过才能结束，否则重试）**
    - **单图内容检查**：
-     - 包含关键信息（项目名、核心 4 大功能、8 工具组、RBAC / Admin / 数据层 等关键词）
+     - 包含关键信息（项目名、核心 4 大功能、11 个工具卡、RBAC / Admin / 数据层 等关键词）
      - 无版本号 / 日期 / 年份 / 时间戳
      - 中文版含中文字符、英文版含英文词
    - **跨图一致性**：
@@ -85,7 +85,7 @@ skill 触发（任意一种）：
 
 ## 依赖
 
-- 环境变量 `DASHSCOPE_API_KEY`（阿里云百炼 API key）
+- 环境变量 `DASHSCOPE_PERSON_TOKEN_API_KEY`（阿里云百炼 personal token，`sk-` 前缀）+ `DASHSCOPE_WORKSPACE_ID`（业务空间 ID）
 - Python 3.x + `requests`（已预装）
 - `mcp__MiniMax__understand_image` 工具（用于视觉分析）
 
@@ -93,7 +93,7 @@ skill 触发（任意一种）：
 
 - [ ] 中英双图都已生成
 - [ ] 包含项目名 `Spring AI LoomAgent`
-- [ ] 包含核心 4 大功能 + 8 工具组（含子任务 / 定时）
+- [ ] 包含核心 4 大功能 + 11 个工具卡（7 universal + 4 RBAC）
 - [ ] 包含 RBAC / Admin 控制台 / 数据层
 - [ ] **无版本号 / 日期 / 年份**（生成 prompt 明确禁止）
 - [ ] 中文版主要中文 + 英文版主要英文

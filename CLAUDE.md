@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview Images
 
-`docs/project-overview-en.png` and `docs/project-overview-zh.png` (shown at the top of `README.md` / `README.zh-CN.md`) are generated from project source + `README.md` + this `CLAUDE.md` by the project skill at **`.claude/skills/project-overview-image/`** using DashScope `wan2.7-image` (`generate.py` PRIMARY_MODEL; requires `DASHSCOPE_WORKSPACE_ID` + `DASHSCOPE_API_KEY`). The infographic layout (single source of truth) lives in `generate.py`'s `EN_LAYOUT` / `ZH_LAYOUT` — edit those, not the PNGs. Regenerate via the skill trigger phrases ("更新项目概览图", "刷新 README 顶部的 overview 图", "生成 docs/project-overview-{en,zh}.png") whenever the architecture changes meaningfully — never hand-edit the PNGs.
+`docs/project-overview-en.png` and `docs/project-overview-zh.png` (shown at the top of `README.md` / `README.zh-CN.md`) are generated from project source + `README.md` + this `CLAUDE.md` by the project skill at **`.claude/skills/project-overview-image/`** using DashScope `wan2.7-image` (`generate.py` PRIMARY_MODEL; requires `DASHSCOPE_WORKSPACE_ID` + `DASHSCOPE_PERSON_TOKEN_API_KEY`). The infographic layout (single source of truth) lives in `generate.py`'s `EN_LAYOUT` / `ZH_LAYOUT` — edit those, not the PNGs. Regenerate via the skill trigger phrases ("更新项目概览图", "刷新 README 顶部的 overview 图", "生成 docs/project-overview-{en,zh}.png") whenever the architecture changes meaningfully — never hand-edit the PNGs.
 
 ## Module Structure
 
