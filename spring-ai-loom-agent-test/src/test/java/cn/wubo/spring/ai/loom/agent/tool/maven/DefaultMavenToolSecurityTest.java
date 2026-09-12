@@ -36,6 +36,8 @@ class DefaultMavenToolSecurityTest {
     private DefaultMavenTool tool;
     private MavenProperty props;
     private Path tmpRoot;
+    private Path cleanupRoot;
+    private Path sandbox;
     private String username;
 
     private static ToolContext ctx(String username) {
@@ -50,15 +52,20 @@ class DefaultMavenToolSecurityTest {
         props.setDefaultTimeoutMs(30000L);
         props.setMaxOutputLines(50);
 
-        tmpRoot = Files.createTempDirectory("loom-mvn-sec-");
-        username = tmpRoot.getFileName().toString();
-        tool = new DefaultMavenTool(props, tmpRoot.getParent().toString());
+        // 沙箱 = {usersBase}/{username}/file；tmpRoot 指向沙箱本身
+        Path userTmp = Files.createTempDirectory("loom-mvn-sec-");
+        cleanupRoot = userTmp;
+        username = userTmp.getFileName().toString();
+        tmpRoot = userTmp.resolve("file");
+        sandbox = tmpRoot;
+        Files.createDirectories(tmpRoot);
+        tool = new DefaultMavenTool(props, userTmp.getParent().toString());
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        if (tmpRoot != null && Files.exists(tmpRoot)) {
-            Files.walkFileTree(tmpRoot, new SimpleFileVisitor<>() {
+        if (cleanupRoot != null && Files.exists(cleanupRoot)) {
+            Files.walkFileTree(cleanupRoot, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     Files.delete(file);

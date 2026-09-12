@@ -52,6 +52,7 @@ class DefaultFileToolTest {
     private DefaultFileTool tool;
     private IFile fileService;
     private Path tmpRoot;
+    private Path cleanupRoot;
     private String username;
     private LoomAgentProperties.FileToolProperty cfg;
 
@@ -73,13 +74,16 @@ class DefaultFileToolTest {
         fileService = mock(IFile.class);
         when(fileService.getByExactPath(anyString(), anyString())).thenReturn(null);
 
-        // DefaultFileTool 通过 Paths.get(fileBasePath, username) 拼出用户目录
-        // 为了让 username 路径与 tmpRoot 一致，把 fileBasePath 设为 tmpRoot.parent，
-        // 并把 username 设为 tmpRoot.fileName。
-        tmpRoot = Files.createTempDirectory("loom-filetool-test-");
-        username = tmpRoot.getFileName().toString();
+        // DefaultFileTool 沙箱 = LoomPaths.userFileDir(usersBasePath, username)
+        // = {usersBasePath}/{username}/file。构造：usersBasePath = 临时目录的父级，
+        // username = 临时目录名，tmpRoot 指向沙箱本身（.../{username}/file）。
+        Path userTmp = Files.createTempDirectory("loom-filetool-test-");
+        cleanupRoot = userTmp;
+        username = userTmp.getFileName().toString();
+        tmpRoot = userTmp.resolve("file");
+        Files.createDirectories(tmpRoot);
         cfg = new LoomAgentProperties.FileToolProperty();
-        tool = new DefaultFileTool(fileService, tmpRoot.getParent().toString(), cfg);
+        tool = new DefaultFileTool(fileService, userTmp.getParent().toString(), cfg);
 
         // 准备一个基础目录
         Files.createDirectories(tmpRoot.resolve("notes"));
@@ -89,8 +93,8 @@ class DefaultFileToolTest {
 
     @AfterEach
     void tearDown() throws IOException {
-        if (tmpRoot != null && Files.exists(tmpRoot)) {
-            Files.walkFileTree(tmpRoot, new SimpleFileVisitor<>() {
+        if (cleanupRoot != null && Files.exists(cleanupRoot)) {
+            Files.walkFileTree(cleanupRoot, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs) throws IOException {
                     Files.delete(file);
@@ -582,7 +586,7 @@ class DefaultFileToolTest {
     void deleteFileOrDirectory_customToken() {
         cfg.setDeleteConfirmToken("PLEASE_DELETE");
         // 重新创建 tool 以确保新 token 生效
-        tool = new DefaultFileTool(fileService, tmpRoot.getParent().toString(), cfg);
+        tool = new DefaultFileTool(fileService, cleanupRoot.getParent().toString(), cfg);
         String result = tool.deleteFileOrDirectory("readme.md", "I_CONFIRM_DELETE", ctx(username));
         assertTrue(result.contains("需要确认"), "应要求新 token: " + result);
         String result2 = tool.deleteFileOrDirectory("readme.md", "PLEASE_DELETE", ctx(username));

@@ -41,11 +41,13 @@ class FileByPathBridgeTest {
     @BeforeEach
     void setUp() throws Exception {
         UserContextHolder.setCurrentUser("alice");
-        Files.createDirectories(tempDir.resolve("alice"));
-        Files.writeString(tempDir.resolve("alice").resolve("hello.txt"), "hi");
+        // 沙箱根 = {usersBasePath}/alice/file
+        Path sandbox = tempDir.resolve("alice").resolve("file");
+        Files.createDirectories(sandbox);
+        Files.writeString(sandbox.resolve("hello.txt"), "hi");
         file = mock(IFile.class);
         LoomAgentProperties properties = new LoomAgentProperties();
-        properties.setFileBasePath(tempDir.toString());
+        properties.setUsersBasePath(tempDir.toString());
         router = new LoomAgentConfiguration.WebConfiguration().loomAgentFileRouter(file, properties);
     }
 
@@ -82,7 +84,7 @@ class FileByPathBridgeTest {
     @DisplayName("已登记文件：复用既有 id，不重复插入")
     void registeredFileReusesId() throws Exception {
         FileRecord existing = new FileRecord("known-id", null, "hello.txt", 2,
-                LocalDateTime.now(), tempDir.resolve("alice").resolve("hello.txt").toString(), "conversation", "text/plain");
+                LocalDateTime.now(), tempDir.resolve("alice").resolve("file").resolve("hello.txt").toString(), "conversation", "text/plain");
         when(file.getByExactPath(anyString(), anyString())).thenReturn(existing);
 
         ServerResponse response = route("/spring/ai/loom/file/by-path/view", "hello.txt");
@@ -94,7 +96,7 @@ class FileByPathBridgeTest {
     @Test
     @DisplayName("路径越界（../）：404 且不插入")
     void traversalIsRejected() throws Exception {
-        Files.writeString(tempDir.resolve("escape.txt"), "secret");
+        Files.writeString(tempDir.resolve("alice").resolve("escape.txt"), "secret");
 
         ServerResponse response = route("/spring/ai/loom/file/by-path/view", "../escape.txt");
 

@@ -24,8 +24,8 @@ class LoomHomeCascadeBindingTest {
     @Test
     void noOverride_keepsBuiltInDefaults() {
         LoomAgentProperties p = bind(new MockEnvironment());
-        assertThat(p.getFileBasePath()).startsWith(System.getProperty("user.home"));
-        assertThat(p.getFileBasePath()).endsWith(".loom/file");
+        assertThat(p.getUsersBasePath()).startsWith(System.getProperty("user.home"));
+        assertThat(p.getUsersBasePath()).endsWith(".loom/users");
     }
 
     @Test
@@ -33,7 +33,7 @@ class LoomHomeCascadeBindingTest {
         MockEnvironment env = new MockEnvironment()
                 .withProperty("spring.ai.loom.agent.loom-home", "/data/loom-home");
         LoomAgentProperties p = bind(env);
-        assertThat(p.getFileBasePath()).isEqualTo("/data/loom-home/file");
+        assertThat(p.getUsersBasePath()).isEqualTo("/data/loom-home/users");
         assertThat(p.getDatasourceDir()).isEqualTo("/data/loom-home/datasource");
     }
 
@@ -41,9 +41,9 @@ class LoomHomeCascadeBindingTest {
     void loomHomeOverride_explicitSubPathWins() {
         MockEnvironment env = new MockEnvironment()
                 .withProperty("spring.ai.loom.agent.loom-home", "/data/loom-home")
-                .withProperty("spring.ai.loom.agent.file-base-path", "/mnt/nas/user-files");
+                .withProperty("spring.ai.loom.agent.users-base-path", "/mnt/nas/loom-users");
         LoomAgentProperties p = bind(env);
-        assertThat(p.getFileBasePath()).isEqualTo("/mnt/nas/user-files");
+        assertThat(p.getUsersBasePath()).isEqualTo("/mnt/nas/loom-users");
         // siblings still cascade
         assertThat(p.getDatasourceDir()).isEqualTo("/data/loom-home/datasource");
     }

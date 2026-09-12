@@ -29,13 +29,14 @@ public class LoomAgentProperties {
  * "spring-boot:run from test module vs parent module" inconsistency
  * disappears across the board.
  *
- * <p>Sub-paths ({@link #fileBasePath}, {@link #jvector}, etc.) are derived
- * from this root via field defaults, but Spring's {@code @ConfigurationProperties}
- * does NOT auto-resolve field-init {@code ${...}} placeholders, so the actual
- * integration point is in the consumer side: each property either reads the
- * literal value above OR — when {@code loomHome} is overridden in yml — the
- * consumer rebuilds the path. Override the sub-paths directly in yml if
- * you only need to relocate a specific state category.</p>
+ * <p>Sub-paths ({@link #usersBasePath}, {@link #datasourceDir}, {@link #jvector},
+ * etc.) are derived from this root via field defaults, but Spring's
+ * {@code @ConfigurationProperties} does NOT auto-resolve field-init
+ * {@code ${...}} placeholders, so the actual integration point is in the
+ * consumer side: the {@code loomAgentProperties} binder bean re-derives
+ * sub-paths still at their built-in defaults when {@code loomHome} is
+ * overridden in yml. Override the sub-paths directly in yml if you only
+ * need to relocate a specific state category.</p>
  *
  * <p>Override via {@code spring.ai.loom.agent.loom-home} in
  * application.yml.</p>
@@ -43,16 +44,22 @@ public class LoomAgentProperties {
  private String loomHome = System.getProperty("user.home") + "/.loom";
 
  /**
- * User files root directory. Defaulted to an ABSOLUTE path under the
- * user's home directory (NOT a cwd-relative path) so the directory the
- * file manager UI shows is always the same as the directory IUpload
- * writes to — regardless of whether spring-boot:run is launched from the
- * parent project root or the test module root.
+ * 用户树根目录（per-user aggregation root）。每个登录用户的**全部**文件系统
+ * 足迹都在 {@code {usersBasePath}/{username}/} 之下：
+ * <pre>
+ * {usersBasePath}/{username}/file/                ← 上传 + file/git/maven/render 工具沙箱
+ * {usersBasePath}/{username}/compile-workspaces/  ← 编译部署 workspace（成功即删）
+ * </pre>
+ * 派生规则单一来源 = {@code cn.wubo.loom.file.core.LoomPaths}，各工具不得
+ * 自行拼接。默认 ABSOLUTE 路径（NOT cwd-relative），保证 spring-boot:run
+ * 从任何模块启动目录都不漂移；{@code rm -rf {usersBasePath}/{username}}
+ * 即清除该用户全部本地文件。
  *
- * <p>Overrideable via {@code spring.ai.loom.agent.file-base-path} in
- * application.yml.</p>
+ * <p>Overrideable via {@code spring.ai.loom.agent.users-base-path} in
+ * application.yml. 取代已删除的 {@code fileBasePath} / {@code knowledgeBasePath}
+ * （老键会被 binder 静默忽略）。</p>
  */
- private String fileBasePath = cn.wubo.loom.file.core.LoomPaths.DEFAULT_FILE_BASE;
+ private String usersBasePath = cn.wubo.loom.file.core.LoomPaths.DEFAULT_USERS_BASE;
 
  /**
  * Absolute root for the H2 file database. Set via yml
@@ -305,14 +312,6 @@ public class LoomAgentProperties {
  private long healthCheckMaxWaitMs = 60000L;
  private long healthCheckIntervalMs = 2000L;
  private boolean keepWorkspace = false;
- /**
- * 编译部署 workspace 根目录（每次运行在其下建 {@code compile-deploy-<user>-<ts>-<uuid>} 子目录，
- * 再按 username 分命名空间）。null → 派生自 {@link #loomHome}：
- * {@code {loomHome}/compile-deploy-workspaces}（默认即 {@code ~/.loom/compile-deploy-workspaces}）。
- * 显式配置后可把编译临时目录挪到独立磁盘/大盘，与用户数据分离。
- * yml: {@code spring.ai.loom.agent.compile.workspace-base-path}。
- */
- private String workspaceBasePath;
  /**
  * 注入到 {@code docker run} 命令的额外参数，例如 {@code ["--network=host", "-e", "TZ=Asia/Shanghai"]}。
  * 顺序敏感，会被插在 {@code -d -p ... --name ...} 之后、镜像名之前。

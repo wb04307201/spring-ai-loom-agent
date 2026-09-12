@@ -61,7 +61,8 @@ class DefaultHtmlRenderToolTest {
     }
 
     private Path writeHtml(String user, String relPath, String content) throws Exception {
-        Path p = baseDir.resolve(user).resolve(relPath);
+        // 沙箱 = {usersBasePath}/{username}/file
+        Path p = baseDir.resolve(user).resolve("file").resolve(relPath);
         Files.createDirectories(p.getParent());
         Files.writeString(p, content, StandardCharsets.UTF_8);
         return p;
@@ -100,8 +101,8 @@ class DefaultHtmlRenderToolTest {
     @DisplayName("路径穿越 ../ → [渲染失败](PathSecurityUtils SecurityException 转文本)")
     void pathTraversalRejected() throws Exception {
         writeHtml("u", "a.html", "<p>x</p>");
-        // 越权目标:baseDir/secret.html(在别的用户目录之外构造一个文件)
-        Files.writeString(baseDir.resolve("secret.html"), "<p>secret</p>");
+        // 越权目标:baseDir/u/secret.html(在沙箱 baseDir/u/file 之外一层)
+        Files.writeString(baseDir.resolve("u").resolve("secret.html"), "<p>secret</p>");
         String out = tool.renderHtmlFile("../secret.html", null, null, null, ctx("u"));
         assertThat(out).startsWith("[渲染失败]");
         assertThat(out).doesNotContain("渲染成功");

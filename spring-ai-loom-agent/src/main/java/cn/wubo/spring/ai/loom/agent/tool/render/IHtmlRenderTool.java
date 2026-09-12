@@ -8,7 +8,7 @@ import org.springframework.ai.chat.model.ToolContext;
  * HTML 渲染截图工具(spec 2026-09-09-html-render-tool-design)。
  * <p>
  * 把用户文件目录里的自包含单页 HTML 用无头 Chromium 渲染成 PNG(界面原型图 / 数据分析单页),
- * 存到 {@code {fileBasePath}/{username}/prototypes/},经 IFile usage='temp' 桥接出 fileId,
+ * 存到 {@code {usersBasePath}/{username}/file/prototypes/},经 IFile usage='temp' 桥接出 fileId,
  * 返回预览链接 + markdown 内嵌片段。
  * <p>
  * <b>RBAC 工具</b>(D3):defaultGranted 缺省 false → capability id {@code tool_render},

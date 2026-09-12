@@ -1,7 +1,7 @@
 loom:
   maven:
     mcp:
-      basePath: ${user.home}/.loom/file
+      basePath: ${user.home}/.loom/mcp
       maxOutputLines: 200
       defaultTimeoutMs: 300000
 

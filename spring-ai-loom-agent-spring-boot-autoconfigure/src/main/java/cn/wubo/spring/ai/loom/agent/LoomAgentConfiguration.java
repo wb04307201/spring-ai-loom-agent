@@ -454,7 +454,7 @@ public class LoomAgentConfiguration {
                 properties.setJvector(bound.getJvector());
                 properties.setTimezone(bound.getTimezone());
                 properties.setLoomHome(bound.getLoomHome());
-                properties.setFileBasePath(bound.getFileBasePath());
+                properties.setUsersBasePath(bound.getUsersBasePath());
                 properties.setDatasourceDir(bound.getDatasourceDir());
                 properties.setGitUsername(bound.getGitUsername());
                 properties.setGitToken(bound.getGitToken());
@@ -471,15 +471,15 @@ public class LoomAgentConfiguration {
                 LoomAgentProperties defaults = new LoomAgentProperties();
                 if (!bound.getLoomHome().equals(defaults.getLoomHome())) {
                     String home = bound.getLoomHome();
-                    if (bound.getFileBasePath().equals(defaults.getFileBasePath())) {
-                        properties.setFileBasePath(home + "/file");
+                    if (bound.getUsersBasePath().equals(defaults.getUsersBasePath())) {
+                        properties.setUsersBasePath(home + "/users");
                     }
                     if (bound.getDatasourceDir().equals(defaults.getDatasourceDir())) {
                         properties.setDatasourceDir(home + "/datasource");
                     }
                     LOG.info("loom-home overridden to {}; sub-paths not explicitly set were re-derived "
-                            + "(fileBasePath={}, datasourceDir={})",
-                            home, properties.getFileBasePath(), properties.getDatasourceDir());
+                            + "(usersBasePath={}, datasourceDir={})",
+                            home, properties.getUsersBasePath(), properties.getDatasourceDir());
                 }
             }
             return properties;
@@ -790,7 +790,7 @@ public class LoomAgentConfiguration {
         @ConditionalOnMissingBean(IUpload.class)
         @Bean
         public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage, LoomAgentProperties properties) {
-            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, fileStorage, properties.getFileBasePath());
+            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, fileStorage, properties.getUsersBasePath());
         }
     }
 
@@ -930,7 +930,7 @@ public class LoomAgentConfiguration {
         @ConditionalOnMissingBean(IFileTool.class)
         @Bean
         public IFileTool defaultFileTool(IFile file, LoomAgentProperties properties) {
-            return new DefaultFileTool(file, properties.getFileBasePath(), properties.getFile());
+            return new DefaultFileTool(file, properties.getUsersBasePath(), properties.getFile());
         }
 
         @ConditionalOnMissingBean(IGitTool.class)
@@ -943,7 +943,7 @@ public class LoomAgentConfiguration {
         @ConditionalOnMissingBean(IMavenTool.class)
         @Bean
         public IMavenTool defaultMavenTool(LoomAgentProperties properties) {
-            return new DefaultMavenTool(properties.getMaven(), properties.getFileBasePath());
+            return new DefaultMavenTool(properties.getMaven(), properties.getUsersBasePath());
         }
 
         @ConditionalOnMissingBean(ICompileAndDeployTool.class)
@@ -1012,7 +1012,7 @@ public class LoomAgentConfiguration {
                                                      IFile file,
                                                      LoomAgentProperties properties) {
             return new DefaultHtmlRenderTool(htmlRenderEngine, file,
-                    properties.getFileBasePath(), properties.getRender());
+                    properties.getUsersBasePath(), properties.getRender());
         }
     }
 
@@ -4282,10 +4282,10 @@ public class LoomAgentConfiguration {
             // 返回目录树（前端文件管理器用）
             builder.GET("/spring/ai/loom/file", request -> ServerResponse.ok()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(buildFileTree(properties.getFileBasePath(), UserContextHolder.getCurrentUser())));
+                    .body(buildFileTree(properties.getUsersBasePath(), UserContextHolder.getCurrentUser())));
             builder.GET("/spring/ai/loom/file/tree", request -> ServerResponse.ok()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(buildFileTree(properties.getFileBasePath(), UserContextHolder.getCurrentUser())));
+                    .body(buildFileTree(properties.getUsersBasePath(), UserContextHolder.getCurrentUser())));
             // 按路径预览：自动注册 temp 记录后重定向到 /file/view/{id}
             builder.GET("/spring/ai/loom/file/by-path/view", request -> {
                 String path = request.param("path").orElse("");
@@ -4293,7 +4293,7 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body("缺少 path 参数");
                 }
                 String username = UserContextHolder.getCurrentUser();
-                String fileId = getOrCreateFileId(properties.getFileBasePath(), path, username, file);
+                String fileId = getOrCreateFileId(properties.getUsersBasePath(), path, username, file);
                 if (fileId == null) {
                     return ServerResponse.notFound().build();
                 }
@@ -4306,7 +4306,7 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body("缺少 path 参数");
                 }
                 String username = UserContextHolder.getCurrentUser();
-                String fileId = getOrCreateFileId(properties.getFileBasePath(), path, username, file);
+                String fileId = getOrCreateFileId(properties.getUsersBasePath(), path, username, file);
                 if (fileId == null) {
                     return ServerResponse.notFound().build();
                 }
@@ -4379,12 +4379,12 @@ public class LoomAgentConfiguration {
         }
 
         /**
-         * 构建用户文件目录树 JSON
+         * 构建用户文件目录树 JSON（沙箱根 = {usersBasePath}/{username}/file）
          */
         @SuppressWarnings("unchecked")
-        private java.util.Map<String, Object> buildFileTree(String fileBasePath, String username) {
+        private java.util.Map<String, Object> buildFileTree(String usersBasePath, String username) {
             java.util.Map<String, Object> node = new java.util.LinkedHashMap<>();
-            Path baseDir = Paths.get(fileBasePath, username);
+            Path baseDir = cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
             // Ensure the per-user directory exists so subsequent IUpload writes
             // (which use the same path) land somewhere — and the UI never sees
             // a 'directory not found' error on first run.
@@ -4432,9 +4432,9 @@ public class LoomAgentConfiguration {
         /**
          * 根据路径获取或创建 fileId，用于预览/下载桥接
          */
-        private String getOrCreateFileId(String fileBasePath, String path, String username, IFile file) {
+        private String getOrCreateFileId(String usersBasePath, String path, String username, IFile file) {
             try {
-                Path baseDir = Paths.get(fileBasePath, username);
+                Path baseDir = cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
                 Path resolved = baseDir.resolve(path).normalize();
                 if (!resolved.startsWith(baseDir) || !Files.exists(resolved) || !Files.isRegularFile(resolved)) {
                     return null;

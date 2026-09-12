@@ -39,8 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(classes = LoomAgentTestApplication.class)
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE",
-        "spring.ai.loom.agent.file-base-path=./target/test-file-base",
-        "spring.ai.loom.agent.knowledge-base-path=./target/test-knowledge-base"
+        "spring.ai.loom.agent.users-base-path=./target/test-users"
 })
 class H2VectorStoreIT {
 

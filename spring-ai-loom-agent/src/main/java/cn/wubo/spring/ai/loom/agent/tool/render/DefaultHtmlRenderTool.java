@@ -42,14 +42,15 @@ public class DefaultHtmlRenderTool implements IHtmlRenderTool {
 
     private final HtmlRenderEngine engine;
     private final FileIdBridge fileIdBridge;
-    private final String fileBasePath;
+    /** 用户树根（沙箱 = {usersBasePath}/{username}/file），null/blank 回退 LoomPaths 默认。 */
+    private final String usersBasePath;
     private final LoomAgentProperties.RenderProperty cfg;
 
-    public DefaultHtmlRenderTool(HtmlRenderEngine engine, IFile file, String fileBasePath,
+    public DefaultHtmlRenderTool(HtmlRenderEngine engine, IFile file, String usersBasePath,
                                  LoomAgentProperties.RenderProperty cfg) {
         this.engine = engine;
         this.fileIdBridge = new FileIdBridge(file);
-        this.fileBasePath = fileBasePath;
+        this.usersBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultUsersBase(usersBasePath);
         this.cfg = cfg;
     }
 
@@ -67,7 +68,7 @@ public class DefaultHtmlRenderTool implements IHtmlRenderTool {
         if (username == null) return "[渲染失败] 缺少用户会话上下文";
         if (htmlFilePath == null || htmlFilePath.isBlank()) return "[渲染失败] htmlFilePath 不能为空";
 
-        Path baseDir = Paths.get(fileBasePath, username);
+        Path baseDir = cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
         Path htmlPath;
         try {
             String normalized = htmlFilePath.replace('\\', java.io.File.separatorChar);

@@ -35,8 +35,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @SpringBootTest(classes = LoomAgentTestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "spring.ai.loom.agent.file-base-path=./target/e2e-files/file",
-                "spring.ai.loom.agent.knowledge-base-path=./target/e2e-files/knowledge"
+                "spring.ai.loom.agent.users-base-path=./target/e2e-files/users"
         })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public abstract class BrowserTestBase {

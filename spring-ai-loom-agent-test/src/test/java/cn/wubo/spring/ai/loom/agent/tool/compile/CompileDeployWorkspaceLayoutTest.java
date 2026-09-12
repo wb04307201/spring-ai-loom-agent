@@ -10,22 +10,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Regression tests pinning the contract that compile-deploy workspaces live
- * OUTSIDE the user upload dir (so they don't pollute the file manager UI) and
- * are namespaced per-user (so per-user cleanup is a single {@code rm -rf}).
+ * OUTSIDE the user upload sandbox (so they don't pollute the file manager UI
+ * and the file-tool sandbox can never reach them) while being SIBLINGS under
+ * the same per-user root (so one {@code rm -rf ~/.loom/users/<username>} wipes
+ * everything for that account).
  *
- * <p>Bug history: previously {@code compile-deploy-&lt;uuid&gt;} lived under the
- * same dir as user uploads ({@code ${fileBasePath}/&lt;username&gt;/}), so the
- * file manager listed tool-state alongside real user files, and the workspace
- * dir name carried no ownership hint.</p>
+ * <p>Bug history: previously {@code compile-deploy-&lt;uuid&gt;} lived under
+ * the same dir as user uploads, so the file manager listed tool-state
+ * alongside real user files, and the workspace dir name carried no ownership
+ * hint.</p>
  */
 class CompileDeployWorkspaceLayoutTest {
 
     @Test
     void getCompileDeployWorkspaceDir_isNamespacedPerUser() {
-        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, ".local/file");
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, null);
         Path dir = tool.getCompileDeployWorkspaceDir("wb04307201");
         Path expected = Paths.get(System.getProperty("user.home"),
-                ".loom", "compile-deploy-workspaces", "wb04307201");
+                ".loom", "users", "wb04307201", "compile-workspaces");
         assertThat(dir).isEqualTo(expected);
         assertThat(dir.toString()).doesNotContain(".local")
                 .describedAs("should be absolute under user.home, NOT cwd-relative .local");
@@ -33,13 +35,15 @@ class CompileDeployWorkspaceLayoutTest {
 
     @Test
     void getCompileDeployWorkspaceDir_doesNotCollideWithUploadDir() {
-        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, ".local/file");
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, null);
         Path uploads = tool.getUserFileDir("wb04307201");
         Path workspaces = tool.getCompileDeployWorkspaceDir("wb04307201");
         assertThat(uploads).isNotEqualTo(workspaces);
         assertThat(workspaces.startsWith(uploads))
                 .as("workspaces MUST NOT live under the upload dir")
                 .isFalse();
+        // siblings under the same user root → single rm -rf target
+        assertThat(workspaces.getParent()).isEqualTo(uploads.getParent());
     }
 
     /**

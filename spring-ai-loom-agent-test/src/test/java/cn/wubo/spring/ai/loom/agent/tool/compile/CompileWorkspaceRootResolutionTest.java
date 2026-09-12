@@ -1,5 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.tool.compile;
 
+import cn.wubo.loom.file.core.LoomPaths;
+import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -8,60 +10,63 @@ import java.nio.file.Paths;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Pins the compile-deploy workspace root resolution priority:
- * explicit {@code compile.workspace-base-path} &gt; {@code loom-home} derivation
- * &gt; legacy {@code user.home/.loom} default. All three coincide at
- * {@code ~/.loom/compile-deploy-workspaces} when nothing is configured
- * (backward compatible).
+ * Pins the user-tree derivation contract in {@link LoomPaths} (single source of
+ * truth) and its wiring through {@link DefaultCompileAndDeployTool}:
+ * file sandbox and compile workspaces are siblings under
+ * {@code {usersBasePath}/{username}}, username is sanitized, and blank config
+ * falls back to the absolute {@code ~/.loom/users} default (never cwd-relative).
  */
 class CompileWorkspaceRootResolutionTest {
 
     @Test
-    void default_whenNothingConfigured_legacyUserHomePath() {
-        DefaultCompileAndDeployTool tool =
-                new DefaultCompileAndDeployTool(null, null, null, null, null);
+    void default_whenNothingConfigured_derivesUnderUserHomeUsers() {
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, null);
+        assertThat(tool.getCompileDeployWorkspaceDir("alice")).isEqualTo(
+                Paths.get(System.getProperty("user.home"), ".loom", "users", "alice", "compile-workspaces"));
+        assertThat(tool.getUserFileDir("alice")).isEqualTo(
+                Paths.get(System.getProperty("user.home"), ".loom", "users", "alice", "file"));
+    }
+
+    @Test
+    void explicitUsersBasePath_derivesBothDirsUnderIt() {
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, "/data/loom-users");
+        assertThat(tool.getCompileDeployWorkspaceDir("alice"))
+                .isEqualTo(Paths.get("/data/loom-users", "alice", "compile-workspaces"));
+        assertThat(tool.getUserFileDir("alice"))
+                .isEqualTo(Paths.get("/data/loom-users", "alice", "file"));
+    }
+
+    @Test
+    void blankConfigValues_fallThroughToAbsoluteDefault() {
+        DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(null, null, "  ");
         Path dir = tool.getCompileDeployWorkspaceDir("alice");
-        assertThat(dir).isEqualTo(Paths.get(System.getProperty("user.home"),
-                ".loom", "compile-deploy-workspaces", "alice"));
-    }
-
-    @Test
-    void loomHomeOverride_derivesWorkspaceUnderIt() {
-        DefaultCompileAndDeployTool tool =
-                new DefaultCompileAndDeployTool(null, null, null, null, "/data/loom-home");
-        assertThat(tool.getCompileDeployWorkspaceDir("alice"))
-                .isEqualTo(Paths.get("/data/loom-home", "compile-deploy-workspaces", "alice"));
-    }
-
-    @Test
-    void explicitWorkspaceBasePath_winsOverLoomHome() {
-        DefaultCompileAndDeployTool tool =
-                new DefaultCompileAndDeployTool(null, null, null, "/mnt/bigdisk/compile-ws", "/data/loom-home");
-        assertThat(tool.getCompileDeployWorkspaceDir("alice"))
-                .isEqualTo(Paths.get("/mnt/bigdisk/compile-ws", "alice"));
-    }
-
-    @Test
-    void blankConfigValues_fallThroughToLegacyDefault() {
-        DefaultCompileAndDeployTool tool =
-                new DefaultCompileAndDeployTool(null, null, "  ", " ", "  ");
-        assertThat(tool.getCompileDeployWorkspaceDir("alice"))
-                .isEqualTo(Paths.get(System.getProperty("user.home"),
-                        ".loom", "compile-deploy-workspaces", "alice"));
-        // blank fileBasePath must NOT resurrect the cwd-relative .local default
+        assertThat(dir.toString())
+                .startsWith(System.getProperty("user.home"))
+                .doesNotContain(".local");
         assertThat(tool.getUserFileDir("alice").toString())
                 .startsWith(System.getProperty("user.home"))
                 .doesNotContain(".local");
     }
 
     @Test
-    void compilePropertyWorkspaceBasePath_flowsThroughPropertiesCtor() {
-        cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties props =
-                new cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties();
-        props.setLoomHome("/data/loom-home");
-        props.getCompile().setWorkspaceBasePath("/mnt/bigdisk/compile-ws");
+    void usernameSanitized_preventsTraversalViaDirName() {
+        // A hostile username must never escape the users root: separators are
+        // squashed to '_', so "../evil" becomes the literal dir name ".._evil"
+        // and the resolved path still starts with the base.
+        Path hostile = LoomPaths.userRoot("/base", "../evil");
+        assertThat(hostile).isEqualTo(Paths.get("/base", ".._evil"));
+        assertThat(hostile.normalize().startsWith(Paths.get("/base"))).isTrue();
+        assertThat(LoomPaths.userFileDir("/base", "a/b")).isEqualTo(Paths.get("/base", "a_b", "file"));
+        assertThat(LoomPaths.userRoot("/base", null)).isEqualTo(Paths.get("/base", "anonymous"));
+        assertThat(LoomPaths.userRoot("/base", " ")).isEqualTo(Paths.get("/base", "anonymous"));
+    }
+
+    @Test
+    void usersBasePath_flowsThroughPropertiesCtor() {
+        LoomAgentProperties props = new LoomAgentProperties();
+        props.setUsersBasePath("/data/loom-users");
         DefaultCompileAndDeployTool tool = new DefaultCompileAndDeployTool(props);
         assertThat(tool.getCompileDeployWorkspaceDir("alice"))
-                .isEqualTo(Paths.get("/mnt/bigdisk/compile-ws", "alice"));
+                .isEqualTo(Paths.get("/data/loom-users", "alice", "compile-workspaces"));
     }
 }

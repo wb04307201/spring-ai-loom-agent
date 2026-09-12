@@ -33,16 +33,16 @@ public class DefaultUpload implements IUpload {
     private final VectorStore vectorStore;
     private final IKnowledge knowledge;
     private final IFileStorage fileStorage;
-    private final String fileBasePath;
+    private final String usersBasePath;
 
-    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, IFileStorage fileStorage, String fileBasePath) {
+    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, IFileStorage fileStorage, String usersBasePath) {
         this.file = file;
         this.fileDocument = fileDocument;
         this.documentRead = documentRead;
         this.vectorStore = vectorStore;
         this.knowledge = knowledge;
         this.fileStorage = fileStorage;
-        this.fileBasePath = fileBasePath;
+        this.usersBasePath = usersBasePath;
     }
 
     /**
@@ -105,7 +105,7 @@ public class DefaultUpload implements IUpload {
     public String upload(InputStream is, String fileName, String mimeType) {
         String username = UserContextHolder.getCurrentUser();
         try {
-            Path userDir = Paths.get(fileBasePath, username);
+            Path userDir = cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
             Files.createDirectories(userDir);
             Path filePath = getUniquePath(userDir, fileName);
             Files.copy(is, filePath, StandardCopyOption.REPLACE_EXISTING);

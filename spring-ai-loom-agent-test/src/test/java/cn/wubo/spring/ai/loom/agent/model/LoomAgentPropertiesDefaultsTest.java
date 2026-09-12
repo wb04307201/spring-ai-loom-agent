@@ -16,11 +16,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LoomAgentPropertiesDefaultsTest {
 
     @Test
-    void fileBasePath_defaultsUnderUserHome_dot_loom() {
+    void usersBasePath_defaultsUnderUserHome_dot_loom() {
         LoomAgentProperties p = new LoomAgentProperties();
-        assertThat(p.getFileBasePath()).startsWith(System.getProperty("user.home"));
-        assertThat(p.getFileBasePath()).contains(".loom").contains("file");
-        assertThat(p.getFileBasePath()).doesNotContain(".local");
+        assertThat(p.getUsersBasePath()).startsWith(System.getProperty("user.home"));
+        assertThat(p.getUsersBasePath()).contains(".loom").contains("users");
+        assertThat(p.getUsersBasePath()).doesNotContain(".local");
     }
 
     @Test
@@ -51,7 +51,7 @@ class LoomAgentPropertiesDefaultsTest {
         // user setup, and the contract we want to pin is purely about the
         // configured default, not the filesystem state.
         for (String path : new String[]{
-                p.getFileBasePath(),
+                p.getUsersBasePath(),
                 p.getDatasourceDir()
         }) {
             assertThat(path)

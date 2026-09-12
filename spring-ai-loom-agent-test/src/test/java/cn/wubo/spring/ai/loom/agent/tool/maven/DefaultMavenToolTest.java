@@ -38,6 +38,7 @@ class DefaultMavenToolTest {
     private DefaultMavenTool tool;
     private MavenProperty props;
     private Path tmpRoot;
+    private Path cleanupRoot;
     private String username;
 
     private static ToolContext ctx(String username) {
@@ -138,15 +139,21 @@ class DefaultMavenToolTest {
         props.setDefaultTimeoutMs(30000L); // 30s for tests
         props.setMaxOutputLines(50);
 
-        tmpRoot = Files.createTempDirectory("loom-mvn-test-");
-        username = tmpRoot.getFileName().toString();
-        tool = new DefaultMavenTool(props, tmpRoot.getParent().toString());
+        // 沙箱 = {usersBase}/{username}/file：userTmp 当 username 目录，
+        // tmpRoot 指向沙箱本身，tool 的 usersBase = userTmp.getParent()。
+        Path userTmp = Files.createTempDirectory("loom-mvn-test-");
+        cleanupRoot = userTmp;
+        username = userTmp.getFileName().toString();
+        tmpRoot = userTmp.resolve("file");
+        Files.createDirectories(tmpRoot);
+        tool = new DefaultMavenTool(props, userTmp.getParent().toString());
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        if (tmpRoot != null && Files.exists(tmpRoot)) {
-            Files.walkFileTree(tmpRoot, new SimpleFileVisitor<>() {
+        Path target = cleanupRoot != null ? cleanupRoot : tmpRoot;
+        if (target != null && Files.exists(target)) {
+            Files.walkFileTree(target, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     Files.delete(file);
@@ -378,7 +385,7 @@ class DefaultMavenToolTest {
         MavenProperty p = new MavenProperty();
         p.setDefaultTimeoutMs(1000L);
         p.setMavenHome(null);
-        assertDoesNotThrow(() -> new DefaultMavenTool(p, tmpRoot.getParent().toString()));
+        assertDoesNotThrow(() -> new DefaultMavenTool(p, cleanupRoot.getParent().toString()));
     }
 
     // ==================== taskkill /F /T 杀进程树回归 ====================
@@ -410,7 +417,10 @@ class DefaultMavenToolTest {
         // 准备一个最小化的工作目录（含 pom.xml）
         // 工具以 {fileBasePath}/{username} 为用户根目录，所以 work 本身要当 username
         Path work = Files.createTempDirectory("fake-user-");
-        Files.writeString(work.resolve("pom.xml"), "<project/>", StandardCharsets.UTF_8);
+        // 沙箱 = {usersBase}/{username}/file：pom 放 work/file 下
+        Path workSandbox = work.resolve("file");
+        Files.createDirectories(workSandbox);
+        Files.writeString(workSandbox.resolve("pom.xml"), "<project/>", StandardCharsets.UTF_8);
 
         try {
             MavenProperty p = new MavenProperty();
@@ -488,7 +498,10 @@ class DefaultMavenToolTest {
                 """, StandardCharsets.UTF_8);
 
         Path work = Files.createTempDirectory("fake-user-");
-        Files.writeString(work.resolve("pom.xml"), "<project/>", StandardCharsets.UTF_8);
+        // 沙箱 = {usersBase}/{username}/file：pom 放 work/file 下
+        Path workSandbox = work.resolve("file");
+        Files.createDirectories(workSandbox);
+        Files.writeString(workSandbox.resolve("pom.xml"), "<project/>", StandardCharsets.UTF_8);
 
         try {
             MavenProperty p = new MavenProperty();
@@ -599,7 +612,10 @@ class DefaultMavenToolTest {
                 """, StandardCharsets.UTF_8);
 
         Path work = Files.createTempDirectory("fake-user-");
-        Files.writeString(work.resolve("pom.xml"), "<project/>", StandardCharsets.UTF_8);
+        // 沙箱 = {usersBase}/{username}/file：pom 放 work/file 下
+        Path workSandbox = work.resolve("file");
+        Files.createDirectories(workSandbox);
+        Files.writeString(workSandbox.resolve("pom.xml"), "<project/>", StandardCharsets.UTF_8);
 
         // 防御：万一测试前已有同 marker 的残留（CI 重试场景），先清一遍
         killAllWithMarker(marker);

@@ -15,8 +15,7 @@ spring:
 loom:
   agent:
     datasource-dir: ./target/test-ds
-    file-base-path: ./target/test-file-base
-    knowledge-base-path: ./target/test-knowledge-base
+    users-base-path: ./target/test-users
 server:
   port: 0
 logging:

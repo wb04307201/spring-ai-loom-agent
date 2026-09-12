@@ -31,8 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "spring.ai.loom.agent.rag.enabled=false",
-                "spring.ai.loom.agent.file-base-path=./target/e2e-files/file",
-                "spring.ai.loom.agent.knowledge-base-path=./target/e2e-files/knowledge"
+                "spring.ai.loom.agent.users-base-path=./target/e2e-files/users"
         })
 class FeatureGateBrowserIT extends BrowserTestBase {
 

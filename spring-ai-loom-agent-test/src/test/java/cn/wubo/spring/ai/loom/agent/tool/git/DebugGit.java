@@ -21,7 +21,7 @@ class DebugGit {
     void debugGetWorkingDir() throws Exception {
         Path tmp = Files.createTempDirectory("dbg-wd-");
         LoomAgentProperties props = new LoomAgentProperties();
-        props.setFileBasePath(tmp.getParent().toString());
+        props.setUsersBasePath(tmp.getParent().toString());
         DefaultGitTool tool = new DefaultGitTool(props);
         Map<String, Object> m = new HashMap<>();
         m.put("username", tmp.getFileName().toString());

@@ -21,7 +21,7 @@ import java.util.Map;
  * 核心文件操作委托给 {@link FileOperations}，本类负责：
  * <ul>
  * <li>从 ToolContext 获取 username</li>
- * <li>拼接 basePath = fileBasePath + username</li>
+ * <li>经 {@link cn.wubo.loom.file.core.LoomPaths} 派生沙箱根 = {usersBasePath}/{username}/file</li>
  * <li>预览/下载链接生成（依赖 IFile 数据库操作）</li>
  * <li>删除后清理 file_info 表中的临时记录</li>
  * </ul>
@@ -29,14 +29,15 @@ import java.util.Map;
 public class DefaultFileTool implements IFileTool {
 
     private final IFile file;
-    private final String fileBasePath;
+    /** 用户树根（沙箱 = {usersBasePath}/{username}/file），null/blank 回退 LoomPaths 默认。 */
+    private final String usersBasePath;
     private final LoomAgentProperties.FileToolProperty cfg;
     private final FileOperations fileOps;
     private final cn.wubo.spring.ai.loom.agent.tool.common.FileIdBridge fileIdBridge;
 
-    public DefaultFileTool(IFile file, String fileBasePath, LoomAgentProperties.FileToolProperty cfg) {
+    public DefaultFileTool(IFile file, String usersBasePath, LoomAgentProperties.FileToolProperty cfg) {
         this.file = file;
-        this.fileBasePath = fileBasePath;
+        this.usersBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultUsersBase(usersBasePath);
         this.cfg = cfg;
         this.fileOps = new FileOperations(new FileOperations.Config(
                 cfg.getMaxFileSize(),
@@ -391,7 +392,7 @@ public class DefaultFileTool implements IFileTool {
     }
 
     private Path getUserFileDir(String username) {
-        return Paths.get(fileBasePath, username);
+        return cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
     }
 
     private Path resolvePathForRead(String path, String username) throws IOException {
