@@ -29,28 +29,45 @@ import java.util.stream.Collectors;
 public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultCompileAndDeployTool.class);
-    private static final String DEFAULT_FILE_BASE_PATH = ".local/file";
 
     private final CompileAndDeployOperations operations;
     private final String fileBasePath;
+    /** 显式配置的 workspace 根目录（compile.workspace-base-path），null → 派生自 loomHome。 */
+    private final String workspaceBasePath;
+    /** loomHome（默认 {@code ~/.loom}），workspace 派生根，null → 老默认 {@code user.home/.loom}。 */
+    private final String loomHome;
 
     public DefaultCompileAndDeployTool(LoomAgentProperties properties) {
         this(properties.getCompile(), properties.getMaven() != null ? properties.getMaven().getMavenHome() : null,
-                properties.getFileBasePath());
+                properties.getFileBasePath(),
+                properties.getCompile() != null ? properties.getCompile().getWorkspaceBasePath() : null,
+                properties.getLoomHome());
     }
 
     /**
      * 供测试直接注入
      */
     DefaultCompileAndDeployTool(LoomAgentProperties.CompileProperty compile, String mavenHome, String fileBasePath) {
-        this.fileBasePath = (fileBasePath != null && !fileBasePath.isBlank()) ? fileBasePath : DEFAULT_FILE_BASE_PATH;
+        this(compile, mavenHome, fileBasePath, null, null);
+    }
+
+    /**
+     * 供测试直接注入（全参）。workspace 解析优先级：
+     * {@code workspaceBasePath} 显式配置 &gt; {@code loomHome} 派生 &gt; 老默认 {@code user.home/.loom}。
+     */
+    DefaultCompileAndDeployTool(LoomAgentProperties.CompileProperty compile, String mavenHome, String fileBasePath,
+                                String workspaceBasePath, String loomHome) {
+        this.fileBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultFileBase(fileBasePath);
+        this.workspaceBasePath = (workspaceBasePath != null && !workspaceBasePath.isBlank()) ? workspaceBasePath : null;
+        this.loomHome = (loomHome != null && !loomHome.isBlank()) ? loomHome : null;
         String configured = compile != null ? compile.getMavenHome() : mavenHome;
         String resolved = MavenHomeResolver.resolve(configured);
 
         CompileConfig config = toCompileConfig(compile);
         this.operations = new CompileAndDeployOperations(resolved, config);
-        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, resolvedMavenHome={}, fileBasePath={}",
-                compile != null && compile.isEnabled(), configured, resolved, this.fileBasePath);
+        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, resolvedMavenHome={}, fileBasePath={}, workspaceBasePath={}",
+                compile != null && compile.isEnabled(), configured, resolved, this.fileBasePath,
+                workspaceRoot());
     }
 
     // ==================== Tool Entry ====================
@@ -115,16 +132,33 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
 
     /**
      * Per-user COMPILE-DEPLOY WORKSPACE directory. Distinct from the upload dir
-     * so users see only their files in the file manager. Lives under
-     * {@code $user.home/.loom/compile-deploy-workspaces/&lt;username&gt;/}, which
-     * gives the user an obvious {@code rm -rf} target per account:
+     * so users see only their files in the file manager. Resolution priority:
+     * <ol>
+     * <li>{@code compile.workspace-base-path} explicit yml config (relocate to
+     * a separate disk/volume);</li>
+     * <li>{@code {loomHome}/compile-deploy-workspaces} — derived from the
+     * {@code loom-home} property;</li>
+     * <li>legacy default {@code $user.home/.loom/compile-deploy-workspaces}.</li>
+     * </ol>
+     * All three coincide at {@code ~/.loom/compile-deploy-workspaces} when
+     * nothing is configured, giving the user an obvious {@code rm -rf} target
+     * per account:
      *
      * <pre>
      * rm -rf ~/.loom/compile-deploy-workspaces/&lt;username&gt; # clean up everything
      * </pre>
      */
     Path getCompileDeployWorkspaceDir(String username) {
-        return Paths.get(System.getProperty("user.home"),
-                ".loom", "compile-deploy-workspaces", username);
+        return workspaceRoot().resolve(username);
+    }
+
+    private Path workspaceRoot() {
+        if (workspaceBasePath != null) {
+            return Paths.get(workspaceBasePath);
+        }
+        if (loomHome != null) {
+            return Paths.get(loomHome, "compile-deploy-workspaces");
+        }
+        return Paths.get(System.getProperty("user.home"), ".loom", "compile-deploy-workspaces");
     }
 }

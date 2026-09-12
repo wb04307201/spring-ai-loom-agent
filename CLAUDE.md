@@ -24,6 +24,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `spring-ai-loom-agent-spring-boot-autoconfigure` | `LoomAgentConfiguration` with 7 nested static `@Configuration` classes (Infrastructure, Chat, Rag, Mcp, Tool, Storage, Web) — `@AutoConfiguration` with `@ConditionalOnMissingBean` on all beans for full replaceability |
 | `spring-ai-loom-agent-spring-boot-starter` | Empty JAR that depends on autoconfigure — the one dependency users add |
 | `spring-ai-loom-agent-test` | Test application with `application.yml` — run locally to verify changes |
+| `loom-{file,git,maven,compile,process}-core` | 无 Spring 依赖的纯操作层（FileOperations / GitOperations / MavenOperations / CompileAndDeployOperations / ProcessUtils）— 主库工具是它们的薄包装；`loom-file-core` 另含 `PathSecurityUtils`（沙箱/ symlink 校验）+ `LoomPaths`（全仓共享的 `~/.loom` 路径默认常量） |
+| `loom-{file,git,maven,compile}-mcp` | 独立可运行的 MCP server（各自 `*McpProperties` + application.yml，basePath 默认 `~/.loom/file`，compile-mcp 为 `~/.loom/compile-deploy-workspaces`），与主库 RBAC 工具链平行 |
 
 ## Key Commands
 
@@ -246,7 +248,7 @@ All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wip
 | `~/.loom/file/{username}/` | 用户上传的文件（聊天附件、文件管理 UI 列出）| `fileBasePath` 默认 `${user.home}/.loom/file` |
 | `~/.loom/knowledge/{username}/{knowledgeId}/` | 知识库文档原文件 | `knowledgeBasePath` 默认 `${user.home}/.loom/knowledge` |
 | `~/.loom/datasource/` | H2 文件数据库 `db.mv.db` | `datasourceDir` 默认 `${user.home}/.loom/datasource`（yml 通过 `spring.datasource.url` 拼装）|
-| `~/.loom/compile-deploy-workspaces/{username}/` | 编译部署工具临时 workspace（带 username/timestamp 前缀；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir` |
+| `~/.loom/compile-deploy-workspaces/{username}/` | 编译部署工具临时 workspace（带 username/timestamp 前缀；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir`；可用 `compile.workspace-base-path` 显式改根，否则派生自 `loomHome` |
 
 **重名处理**: 同名文件自动追加序号，如 `file.txt` → `file(1).txt` → `file(2).txt`
 **预览/下载桥接**: 路径操作的预览/下载通过 `IFile.getByExactPath` 查询，不存在时自动插入 `usage='temp'` 记录获取 fileId
@@ -263,14 +265,15 @@ All under `spring.ai.loom.agent`:
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `init` — **Note**: The actual runtime gate for `ChatClient` creation is `spring.ai.chat.ui.init` (not `spring.ai.loom.agent.init`). Set `spring.ai.chat.ui.init=false` to prevent ChatClient auto-creation. Default: `true`
 - `user` — default username, nickname, authentication token (legacy)
-- `time` / `file` / `skill` / `compile` — `enabled` (boolean) **已废弃,无实际效果**(M3 起):工具可见性由 universal / `role_tool` RBAC 决定,bean 创建不受这些开关影响(`knowledge.enabled` 属性根本不存在;知识工具由 VectorStore/RAG 链门控)。真正生效的开关只有 `rag.enabled` / `auth.enabled` / `spring.ai.chat.ui.init`
+- `time` / `file` / `skill` / `compile` — `enabled` (boolean) **已废弃,无实际效果**(M3 起):工具可见性由 universal / `role_tool` RBAC 决定,bean 创建不受这些开关影响(`knowledge.enabled` 属性根本不存在;知识工具由 VectorStore/RAG 链门控)。真正生效的开关只有 `rag.enabled` / `auth.enabled` / `spring.ai.chat.ui.init`。`compile` 下其余字段生效：`workspace-base-path`（编译 workspace 根目录，null → `{loomHome}/compile-deploy-workspaces`）/ 各超时 / `keepWorkspace` / `extraRunArgs` / `imageTemplates`
 - `git` — `username` / `token` for remote git authentication (`enabled` flag **deprecated since M3, no effect** — visibility is RBAC-gated via `role_tool.tool_git`). Top-level `gitUsername` / `gitToken` are kept for backward compatibility
 - `maven` — `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000) (`enabled` flag **deprecated since M3, no effect** — visibility is RBAC-gated via `role_tool.tool_maven`)
 - `subtask` — `max-concurrent` (default 4), `max-history` (default 200) 生效;`enabled` 已废弃无效果(universal 工具)
 - `schedule` — `enabled` 已废弃无效果(universal 工具); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
 - `askuser` — `timeoutSeconds`(default 300):askUser 工具阻塞等待用户作答的最长秒数;超时返回"用户未作答"文本,Flux 正常 complete
 - `render` — chromiumPath(空=Playwright 三级探测)/ deviceScaleFactor(2)/ timeoutSeconds(30)/ renderWaitMs(1500)/ networkBlocked(true)/ maxHtmlBytes(2MB)。无 enabled 开关:bean 门控 = playwright optional 依赖 + `@ConditionalOnClass`
-- `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative）
+- `loomHome` — 全部本地状态单根，默认 `${user.home}/.loom`。**级联生效**：yml 覆盖 `loom-home` 后，`fileBasePath` / `knowledgeBasePath` / `datasourceDir` 中仍是内置默认值的会自动按新根重建（`loomAgentProperties` binder bean 内做级联）；显式配置过的子路径永远优先。compile workspace 同样派生自 loomHome
+- `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative；兜底常量单一来源 `loom-file-core` 的 `LoomPaths.DEFAULT_FILE_BASE`，`.local/file` cwd 相对默认已全仓清除）
 - `knowledgeBasePath` — 知识库文件存储根目录，默认 `${user.home}/.loom/knowledge`
 - `datasourceDir` — H2 文件存储目录，默认 `${user.home}/.loom/datasource`（在 `application.yml` 的 `spring.datasource.url` 里通过 `${user.home}/.loom/datasource/db` 拼接）
 

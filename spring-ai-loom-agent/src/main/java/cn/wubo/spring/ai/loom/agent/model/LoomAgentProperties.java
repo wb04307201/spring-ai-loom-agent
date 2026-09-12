@@ -53,7 +53,8 @@ public class LoomAgentProperties {
  * <p>Overrideable via {@code spring.ai.loom.agent.file-base-path} in
  * application.yml.</p>
  */
- private String fileBasePath = System.getProperty("user.home") + "/.loom/file";
+ private String fileBasePath = cn.wubo.loom.file.core.LoomPaths.DEFAULT_FILE_BASE;
+
  /**
  * Knowledge-base file root. Defaulted to absolute for the same reason as
  * {@link #fileBasePath}. Override via
@@ -311,6 +312,14 @@ public class LoomAgentProperties {
  private long healthCheckMaxWaitMs = 60000L;
  private long healthCheckIntervalMs = 2000L;
  private boolean keepWorkspace = false;
+ /**
+ * 编译部署 workspace 根目录（每次运行在其下建 {@code compile-deploy-<user>-<ts>-<uuid>} 子目录，
+ * 再按 username 分命名空间）。null → 派生自 {@link #loomHome}：
+ * {@code {loomHome}/compile-deploy-workspaces}（默认即 {@code ~/.loom/compile-deploy-workspaces}）。
+ * 显式配置后可把编译临时目录挪到独立磁盘/大盘，与用户数据分离。
+ * yml: {@code spring.ai.loom.agent.compile.workspace-base-path}。
+ */
+ private String workspaceBasePath;
  /**
  * 注入到 {@code docker run} 命令的额外参数，例如 {@code ["--network=host", "-e", "TZ=Asia/Shanghai"]}。
  * 顺序敏感，会被插在 {@code -d -p ... --name ...} 之后、镜像名之前。

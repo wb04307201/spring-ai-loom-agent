@@ -464,6 +464,28 @@ public class LoomAgentConfiguration {
                 properties.setCompile(bound.getCompile());
                 properties.setAskuser(bound.getAskuser());
                 properties.setRender(bound.getRender());
+
+                // loomHome 级联：@ConfigurationProperties 不会自动按 loom-home 重建
+                // 字段默认值，所以在绑定后手动推导 —— 仅当 yml 覆盖了 loom-home 且
+                // 对应子路径仍是旧默认值（未显式配置）时，才按新 loomHome 重建，
+                // 显式配置的子路径永远优先。
+                LoomAgentProperties defaults = new LoomAgentProperties();
+                if (!bound.getLoomHome().equals(defaults.getLoomHome())) {
+                    String home = bound.getLoomHome();
+                    if (bound.getFileBasePath().equals(defaults.getFileBasePath())) {
+                        properties.setFileBasePath(home + "/file");
+                    }
+                    if (bound.getKnowledgeBasePath().equals(defaults.getKnowledgeBasePath())) {
+                        properties.setKnowledgeBasePath(home + "/knowledge");
+                    }
+                    if (bound.getDatasourceDir().equals(defaults.getDatasourceDir())) {
+                        properties.setDatasourceDir(home + "/datasource");
+                    }
+                    LOG.info("loom-home overridden to {}; sub-paths not explicitly set were re-derived "
+                            + "(fileBasePath={}, knowledgeBasePath={}, datasourceDir={})",
+                            home, properties.getFileBasePath(), properties.getKnowledgeBasePath(),
+                            properties.getDatasourceDir());
+                }
             }
             return properties;
         }
