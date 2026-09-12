@@ -14,9 +14,9 @@ import java.util.Set;
 public class LoomFileMcpProperties {
 
     /**
-     * 文件操作的基础目录路径。
+     * 文件操作的基础目录路径（绝对路径默认，杜绝 cwd 相对漂移）。
      */
-    private String basePath = ".local/file";
+    private String basePath = System.getProperty("user.home") + "/.loom/file";
 
     /**
      * 文本文件最大大小（字节）。

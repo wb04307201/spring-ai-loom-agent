@@ -11,7 +11,8 @@ import java.util.Map;
 @Data
 @ConfigurationProperties(prefix = "loom.compile.mcp")
 public class LoomCompileMcpProperties {
-    private String basePath = ".local/file";
+    /** 编译部署 workspace 根目录（绝对路径默认，杜绝 cwd 相对漂移；语义同主库 compile-deploy-workspaces）。 */
+    private String basePath = System.getProperty("user.home") + "/.loom/compile-deploy-workspaces";
     private String mavenHome;
     private long mavenTimeoutMs = 600000;
     private long dockerBuildTimeoutMs = 600000;

@@ -26,7 +26,7 @@ public class DefaultMavenTool implements IMavenTool {
     private final String fileBasePath;
 
     public DefaultMavenTool(MavenProperty properties, String fileBasePath) {
-        this.fileBasePath = fileBasePath != null ? fileBasePath : ".local/file";
+        this.fileBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultFileBase(fileBasePath);
         this.mavenOps = new MavenOperations(
                 properties.getMavenHome(),
                 properties.getLocalRepository(),
@@ -42,7 +42,7 @@ public class DefaultMavenTool implements IMavenTool {
     public String mavenExecute(
             @ToolParam(description = "要执行的 Maven 目标列表，如 [\"clean\", \"package\"] 或 [\"dependency:tree\"]") List<String> goals,
             @ToolParam(description = "pom.xml 路径（可选，默认在当前工作目录查找）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（可选，默认为用户文件目录 .local/file/{username}/）", required = false) String workingDir,
+            @ToolParam(description = "工作目录（可选，默认为用户文件目录 ~/.loom/file/{username}/）", required = false) String workingDir,
             @ToolParam(description = "Maven 属性（-D 参数），键值对 Map", required = false) Map<String, String> properties,
             @ToolParam(description = "超时时间（毫秒），默认 300000ms（5 分钟）", required = false) Long timeoutMs,
             ToolContext toolContext) {
@@ -63,7 +63,7 @@ public class DefaultMavenTool implements IMavenTool {
     @Override
     public String mavenBuild(
             @ToolParam(description = "pom.xml 路径（可选，默认在当前工作目录查找）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（可选，默认为用户文件目录 .local/file/{username}/）", required = false) String workingDir,
+            @ToolParam(description = "工作目录（可选，默认为用户文件目录 ~/.loom/file/{username}/）", required = false) String workingDir,
             @ToolParam(description = "Maven 属性（-D 参数），如 {\"skipTests\": \"true\"}", required = false) Map<String, String> properties,
             @ToolParam(description = "是否跳过测试，默认 false", required = false) Boolean skipTests,
             ToolContext toolContext) {
@@ -87,7 +87,7 @@ public class DefaultMavenTool implements IMavenTool {
     @Override
     public String mavenPackage(
             @ToolParam(description = "pom.xml 路径（可选，默认在当前工作目录查找）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（可选，默认为用户文件目录 .local/file/{username}/）", required = false) String workingDir,
+            @ToolParam(description = "工作目录（可选，默认为用户文件目录 ~/.loom/file/{username}/）", required = false) String workingDir,
             @ToolParam(description = "Maven 属性（-D 参数）", required = false) Map<String, String> properties,
             @ToolParam(description = "是否跳过测试，默认 true", required = false) Boolean skipTests,
             ToolContext toolContext) {
@@ -112,7 +112,7 @@ public class DefaultMavenTool implements IMavenTool {
     @Override
     public String mavenTest(
             @ToolParam(description = "pom.xml 路径（可选，默认在当前工作目录查找）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（可选，默认为用户文件目录 .local/file/{username}/）", required = false) String workingDir,
+            @ToolParam(description = "工作目录（可选，默认为用户文件目录 ~/.loom/file/{username}/）", required = false) String workingDir,
             @ToolParam(description = "测试类名模式匹配，如 *ServiceTest（对应 -Dtest 参数）", required = false) String testPattern,
             @ToolParam(description = "Maven 属性（-D 参数）", required = false) Map<String, String> properties,
             ToolContext toolContext) {
@@ -136,7 +136,7 @@ public class DefaultMavenTool implements IMavenTool {
     @Override
     public String mavenDependencyTree(
             @ToolParam(description = "pom.xml 路径（可选，默认在当前工作目录查找）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（可选，默认为用户文件目录 .local/file/{username}/）", required = false) String workingDir,
+            @ToolParam(description = "工作目录（可选，默认为用户文件目录 ~/.loom/file/{username}/）", required = false) String workingDir,
             @ToolParam(description = "包含的依赖范围：compile、runtime、test、provided（可选，默认全部）", required = false) String includeScope,
             ToolContext toolContext) {
 
@@ -159,7 +159,7 @@ public class DefaultMavenTool implements IMavenTool {
     @Override
     public String mavenValidate(
             @ToolParam(description = "pom.xml 路径（可选，默认在当前工作目录查找）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（可选，默认为用户文件目录 .local/file/{username}/）", required = false) String workingDir,
+            @ToolParam(description = "工作目录（可选，默认为用户文件目录 ~/.loom/file/{username}/）", required = false) String workingDir,
             ToolContext toolContext) {
 
         String username = getUsername(toolContext);

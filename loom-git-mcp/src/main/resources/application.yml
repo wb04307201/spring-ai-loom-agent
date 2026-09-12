@@ -1,7 +1,7 @@
 loom:
   git:
     mcp:
-      basePath: .local/file
+      basePath: ${user.home}/.loom/file
       gitUsername: ""
       gitToken: ""
       remoteTimeoutSeconds: 60

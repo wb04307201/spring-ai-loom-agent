@@ -87,7 +87,7 @@ public class MavenOperations {
      * Get user file directory: {basePath}/{username}/
      */
     private static Path getUserFileDir(String basePath, String username) {
-        return Paths.get(basePath != null ? basePath : ".local/file", username);
+        return Paths.get(cn.wubo.loom.file.core.LoomPaths.orDefaultFileBase(basePath), username);
     }
 
     // ==================== Path Resolution ====================

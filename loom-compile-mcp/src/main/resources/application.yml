@@ -1,7 +1,7 @@
 loom:
   compile:
     mcp:
-      basePath: .local/file
+      basePath: ${user.home}/.loom/compile-deploy-workspaces
       mavenTimeoutMs: 600000
       dockerBuildTimeoutMs: 600000
       dockerRunTimeoutMs: 60000

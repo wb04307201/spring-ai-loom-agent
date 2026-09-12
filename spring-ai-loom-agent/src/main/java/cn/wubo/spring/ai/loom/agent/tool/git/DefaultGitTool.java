@@ -17,7 +17,7 @@ import java.util.Map;
 public class DefaultGitTool implements IGitTool {
 
     static final String WORKING_DIR_KEY = "gitWorkingDir";
-    private static final String BASE_PATH = ".local/file";
+    private static final String BASE_PATH = cn.wubo.loom.file.core.LoomPaths.DEFAULT_FILE_BASE;
     private static final String GIT_SUBDIR = "git";
     private final GitOperations gitOps;
     private final String fileBasePath;
