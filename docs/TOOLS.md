@@ -40,7 +40,7 @@ Since M3, all 10 always-on `I*Tool` beans are **always created** (plus `IHtmlRen
 | Tool | Group | Reason for defaultGrant |
 |------|-------|-------------------------|
 | `ITimeTool` | `tool_time` | Read-only; returns current time / timezone conversion — no side effects |
-| `IFileTool` | `tool_file` | Per-user file isolation (`{fileBasePath}/{username}/`); LLM prompt guides safe usage; includes `deleteFileOrDirectory` — admins should review any auto-deletion flows |
+| `IFileTool` | `tool_file` | Per-user file isolation (`{usersBasePath}/{username}/file/`); LLM prompt guides safe usage; includes `deleteFileOrDirectory` — admins should review any auto-deletion flows |
 | `ISkillTool` | `tool_skill` | Skill content is per-user; allows self-created skill editing |
 | `IKnowledgeTool` | `tool_knowledge` | KB access is independently gated by `role_knowledge` table — the tool itself needs no extra RBAC |
 | `ISubTaskTool` | `tool_subtask` | Sub-task runs inherit user identity — no privilege escalation surface |
@@ -83,7 +83,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | Read-only current time / timezone conversion |
 | `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); the demo app seeds 6 system skills into the default admin user's `user_skill` (`V1.1` migration) — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
-| `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{fileBasePath}/{username}/` |
+| `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{usersBasePath}/{username}/file/` |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
@@ -130,7 +130,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Default** | `DefaultFileTool` |
 | **Override** | Custom `@Bean IFileTool` |
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user regardless of role. Includes `deleteFileOrDirectory` — admins should review any auto-deletion flows. |
-| **Root path** | All path-based operations use `{fileBasePath}/{username}/` (default `~/.loom/file/{username}/`) |
+| **Root path** | All path-based operations use `{usersBasePath}/{username}/file/` (default `~/.loom/users/{username}/file/`) |
 
 **Methods (16)**:
 
@@ -163,7 +163,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Default** | `DefaultGitTool` (based on Eclipse JGit 7.6.0) |
 | **Override** | Custom `@Bean IGitTool` |
 | **State** | **RBAC**. Bean is always created (`@ConditionalOnMissingBean` only; the `git.enabled` yml flag is deprecated and has no effect). Visible only to users whose roles grant `tool_git` via the `role_tool` table. |
-| **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{fileBasePath}/{username}/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
+| **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{usersBasePath}/{username}/file/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
 
 **Methods (28)**:
 
@@ -235,7 +235,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Override** | Custom `@Bean ICompileAndDeployTool` |
 | **State** | **RBAC** — `@ToolGroup(defaultGranted=false)`. Only visible to users whose roles grant `tool_compile` via the `role_tool` table (admin → `/admin/roles/{code}/tools`). |
 | **Method** | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
-| **Workspace** | Each call creates an isolated work dir under `{fileBasePath}/{username}/compile-deploy-<uuid>/` |
+| **Workspace** | Each call creates an isolated work dir under `{usersBasePath}/{username}/compile-workspaces/compile-deploy-<user>-<ts>-<uuid8>/` |
 
 ### 9.1 Tool-call Parameters
 
@@ -575,7 +575,7 @@ data-analysis one-pagers, and report visuals.
 
 | Method | Parameters | Description |
 |--------|-----------|-------------|
-| `renderHtmlFile` | `htmlFilePath` (required), `imageName?`, `device?` (desktop/tablet/mobile), `fullPage?` (default true) | Renders `{fileBasePath}/{username}/{htmlFilePath}` into `{fileBasePath}/{username}/prototypes/{name}-{timestamp}.png`, bridges a `usage='temp'` file record, and returns a preview URL + markdown embed snippet |
+| `renderHtmlFile` | `htmlFilePath` (required), `imageName?`, `device?` (desktop/tablet/mobile), `fullPage?` (default true) | Renders `{usersBasePath}/{username}/file/{htmlFilePath}` into `{usersBasePath}/{username}/file/prototypes/{name}-{timestamp}.png`, bridges a `usage='temp'` file record, and returns a preview URL + markdown embed snippet |
 
 **Enable it (2 requirements):**
 

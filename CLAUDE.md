@@ -24,8 +24,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `spring-ai-loom-agent-spring-boot-autoconfigure` | `LoomAgentConfiguration` with 7 nested static `@Configuration` classes (Infrastructure, Chat, Rag, Mcp, Tool, Storage, Web) — `@AutoConfiguration` with `@ConditionalOnMissingBean` on all beans for full replaceability |
 | `spring-ai-loom-agent-spring-boot-starter` | Empty JAR that depends on autoconfigure — the one dependency users add |
 | `spring-ai-loom-agent-test` | Test application with `application.yml` — run locally to verify changes |
-| `loom-{file,git,maven,compile,process}-core` | 无 Spring 依赖的纯操作层（FileOperations / GitOperations / MavenOperations / CompileAndDeployOperations / ProcessUtils）— 主库工具是它们的薄包装；`loom-file-core` 另含 `PathSecurityUtils`（沙箱/ symlink 校验）+ `LoomPaths`（全仓共享的 `~/.loom` 路径默认常量） |
-| `loom-{file,git,maven,compile}-mcp` | 独立可运行的 MCP server（各自 `*McpProperties` + application.yml，basePath 默认 `~/.loom/file`，compile-mcp 为 `~/.loom/compile-deploy-workspaces`），与主库 RBAC 工具链平行 |
+| `loom-{file,git,maven,compile,process}-core` | 无 Spring 依赖的纯操作层（FileOperations / GitOperations / MavenOperations / CompileAndDeployOperations / ProcessUtils）— 主库工具是它们的薄包装；`loom-file-core` 另含 `PathSecurityUtils`（沙箱/ symlink 校验）+ `LoomPaths`（**全仓路径派生单一真源**：userRoot（内建 username 消毒）/ userFileDir / userCompileWorkspacesDir / DEFAULT_USERS_BASE） |
+| `loom-{file,git,maven,compile}-mcp` | 独立可运行的 MCP server（各自 `*McpProperties` + application.yml）。**路径双轨制**：主库（多租户）一切用户路径经 `LoomPaths` 从 `usersBasePath` 派生；MCP server（单租户进程）走扁平 `basePath` 参数配置，4 个 server 默认共享沙箱 `~/.loom/mcp`（git clone 的仓库 file/maven MCP 可直接互操作） |
 
 ## Key Commands
 
@@ -49,7 +49,7 @@ mvn test -pl spring-ai-loom-agent-test -Dtest='*BrowserIT' -Dsurefire.failIfNoSp
 mvn test -pl spring-ai-loom-agent-test -Dtest='VisualBaselineBrowserIT' -DupdateBaselines=true
 ```
 
-浏览器 IT 隔离约定：文件目录用 `./target/e2e-files`、数据库用 `./target/test-ds`（均相对 `spring-ai-loom-agent-test`，`mvn clean` 即清）；截图基线在 `src/test/resources/browser-baselines/`（同机更新约定——跨机器像素渲染差异由 `VisualBaselineBrowserIT` 的 0.5% diff 阈值吸收，超阈值需在本机 `-DupdateBaselines=true` 重建）。
+浏览器 IT 隔离约定：用户树目录用 `./target/e2e-files/users`（`users-base-path`）、数据库用 `./target/test-ds`（均相对 `spring-ai-loom-agent-test`，`mvn clean` 即清）；截图基线在 `src/test/resources/browser-baselines/`（同机更新约定——跨机器像素渲染差异由 `VisualBaselineBrowserIT` 的 0.5% diff 阈值吸收，超阈值需在本机 `-DupdateBaselines=true` 重建）。
 
 ## M0/M1/M2 Market Upgrade (v1.2.0)
 
@@ -84,7 +84,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IMcp` | `SyncMcp` / `ASyncMcp` | MCP client wrapper (sync or async), tool discovery & invocation |
 | `ISkillStorage` | `DefaultSkillStorage` | Per-user `user_skill` storage (DB). Auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow (M4/#4): market submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submit archives old row to `market_skill_archive` / `loom_market_knowledge_archive` (id-preserving) + new PENDING row; same-name PENDING/APPROVED re-submit = in-place content update, status untouched; admin create (`createApproved`) → APPROVED immediately + created_by_kind='ADMIN'; pull requires APPROVED else 403. pull rejects overwriting USER_CREATED same-name; remove blocked when `market_skill_id` set; admin sees only own `user_skill` (no union view). Pairs with `ISkillMarketService` and `ISkillRoleAdmin`. V1.0 尾部种子 2 条官方技能 market_skill(STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事,author=system,APPROVED,is_official=TRUE,category=表达沟通)。 |
 | `IFile` | `DefaultFile` | File metadata storage (H2) — 仅用于知识空间文件、文件预览/下载桥接、聊天附件 |
-| `IUpload` | `DefaultUpload` | File upload pipeline: 上传文件存储到 `fileBasePath/{username}/`，知识库文件存储到 `knowledgeBasePath/{username}/{knowledgeId}/`，重名自动追加序号 |
+| `IUpload` | `DefaultUpload` | File upload pipeline: 聊天附件落盘到 `{usersBasePath}/{username}/file/`（重名自动追加序号）；知识库文件内容存数据库（`IFileStorage` 默认 `DatabaseFileStorage` → `loom_file_content` 表，**DiskFileStorage 磁盘实现已移除**，接口保留作 S3/MinIO 替换点） |
 | `IUser` | `DefaultUser` | BFF + HttpOnly cookie session auth + auto-login |
 | `IUserConversation` | `DefaultUserConversation` | User-to-conversation mapping |
 | **登录页 (`login.html` / `login.css`)** | A+B 组合布局：主应用同款 60px 白顶栏（logo + 灵梭 + Spring AI LoomAgent）+ 居中品牌卡（圆形 logo + 灵梭 + English caption + 表单 + 织线纹理背景 + 底部 slogan）。所有视觉 token 复用主应用 `style.css`（`--primary #4f46e5` / `--bg #f8fafc` 等;2026-09-11 F-2 a11y 修复:全站文本/按钮主色 #6366f1→#4f46e5、hover #4f46e5→#4338ca、muted #94a3b8→#64748b、secondary #64748b→#475569,达 WCAG AA 4.5:1），登录后跳 `index.html` 无感切换。 |
@@ -101,7 +101,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` + `list_sub_tasks` + `cancel_sub_task(subTaskId)` + `get_sub_task_history(limit)` — 委派/查询/取消/历史子任务，全部按 `(username, conversationId)` 严格隔离，防跨会话越权。universal 工具(对所有登录用户可见;`subtask.enabled` 已废弃无效) |
 | `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。universal 工具(对所有登录用户可见;`schedule.enabled` 已废弃无效) |
 | `IAskUserTool` | `DefaultAskUserTool` | LLM-callable `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — 聊天流内嵌选择卡片向当前用户提问,工具方法阻塞等待作答(默认 `askuser.timeoutSeconds=300`),答案以 tool_result 回同一条流。超时/stop 返回"用户未作答"文本保 ChatMemory ON_COMPLETE。默认 enabled(universal) |
-| `IHtmlRenderTool` | `DefaultHtmlRenderTool` | HTML 渲染截图:`renderHtmlFile(htmlFilePath, imageName?, device?, fullPage?)` 用无头 Chromium(Playwright,lib 侧 optional 依赖 + `@ConditionalOnClass` 门控)把用户目录下自包含单页 HTML 渲染成 PNG(界面原型图/数据分析单页),存 `{fileBasePath}/{username}/prototypes/` 并经 FileIdBridge 桥接 fileId 返回预览链接 + markdown 片段;route abort + CSP 双保险屏蔽全部外联;Semaphore(1) 串行 + 30s 超时;失败一律返回文本(D8)。RBAC 工具 `tool_render`;Linux 裸机部署先跑 `docs/provision-chromium.sh` |
+| `IHtmlRenderTool` | `DefaultHtmlRenderTool` | HTML 渲染截图:`renderHtmlFile(htmlFilePath, imageName?, device?, fullPage?)` 用无头 Chromium(Playwright,lib 侧 optional 依赖 + `@ConditionalOnClass` 门控)把用户目录下自包含单页 HTML 渲染成 PNG(界面原型图/数据分析单页),存 `{usersBasePath}/{username}/file/prototypes/` 并经 FileIdBridge 桥接 fileId 返回预览链接 + markdown 片段;route abort + CSP 双保险屏蔽全部外联;Semaphore(1) 串行 + 30s 超时;失败一律返回文本(D8)。RBAC 工具 `tool_render`;Linux 裸机部署先跑 `docs/provision-chromium.sh` |
 
 ### Auto-Configuration (`LoomAgentConfiguration`)
 
@@ -241,19 +241,23 @@ Organized into 7 nested static `@Configuration` classes:
 
 ### File System Storage
 
-All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wipe):
+All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wipe). **用户树模型**：每个登录用户的全部文件足迹都在 `~/.loom/users/{username}/` 之下，`rm -rf ~/.loom/users/{username}` 一行清除该用户本地文件（DB 行仍走 admin 删用户 API）：
 
 | 目录 | 内容 | 默认值 |
 |---|---|---|
-| `~/.loom/file/{username}/` | 用户上传的文件（聊天附件、文件管理 UI 列出）| `fileBasePath` 默认 `${user.home}/.loom/file` |
-| `~/.loom/knowledge/{username}/{knowledgeId}/` | 知识库文档原文件 | `knowledgeBasePath` 默认 `${user.home}/.loom/knowledge` |
+| `~/.loom/users/{username}/file/` | 用户上传的文件（聊天附件、文件管理 UI 列出）+ file/git/maven/render 工具沙箱根（render 输出在其下 `prototypes/`）| `usersBasePath` 默认 `${user.home}/.loom/users` |
+| `~/.loom/users/{username}/compile-workspaces/` | 编译部署工具临时 workspace（每次运行建 `compile-deploy-{user}-{ts}-{uuid8}` 子目录；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir`；与 `file/` 平级（兄弟目录，不进沙箱、UI 不混列）|
 | `~/.loom/datasource/` | H2 文件数据库 `db.mv.db` | `datasourceDir` 默认 `${user.home}/.loom/datasource`（yml 通过 `spring.datasource.url` 拼装）|
-| `~/.loom/compile-deploy-workspaces/{username}/` | 编译部署工具临时 workspace（带 username/timestamp 前缀；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir`；可用 `compile.workspace-base-path` 显式改根，否则派生自 `loomHome` |
+| `~/.loom/mcp/` | 独立 MCP server 沙箱（扁平 `basePath` 配置，非用户树；4 个 server 默认共享）| 各 `loom-{file,git,maven,compile}-mcp` 的 `*McpProperties.basePath` |
+
+> **知识库文件不落盘**：KB 文档内容存数据库 `loom_file_content` 表（`DatabaseFileStorage`），向量存 `loom_vector_store` 表；`~/.loom/knowledge/` 目录与 `DiskFileStorage` 磁盘实现已移除（`IFileStorage` 接口保留作 S3/MinIO 替换点）。
+
+**路径双轨制**：主库（多租户嵌入）一切用户路径经 `cn.wubo.loom.file.core.LoomPaths` 从 `usersBasePath` 派生，零逃生门，username 内建消毒；独立 MCP server（单租户进程）走扁平 `basePath`，不使用用户树。
 
 **重名处理**: 同名文件自动追加序号，如 `file.txt` → `file(1).txt` → `file(2).txt`
 **预览/下载桥接**: 路径操作的预览/下载通过 `IFile.getByExactPath` 查询，不存在时自动插入 `usage='temp'` 记录获取 fileId
 
-> 历史注意：早期版本把以上全都放在 cwd-relative `.local/` 下，导致 `mvn spring-boot:run -pl test-module` 时路径漂到 test 模块下、UI 列出项目源码而不是用户文件。Fix A/B/C 把路径统一到 `~/.loom/` 之后这种事不再发生。
+> 历史注意：早期版本把以上全都放在 cwd-relative `.local/` 下，导致 `mvn spring-boot:run -pl test-module` 时路径漂到 test 模块下、UI 列出项目源码而不是用户文件。Fix A/B/C 把路径统一到 `~/.loom/`；后续进一步反转为用户树 `~/.loom/users/{username}/{file,compile-workspaces}`，按用户聚合。所有默认值均为绝对路径，cwd 漂移不再发生。
 
 ### Configuration Properties
 
@@ -265,16 +269,15 @@ All under `spring.ai.loom.agent`:
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `init` — **Note**: The actual runtime gate for `ChatClient` creation is `spring.ai.chat.ui.init` (not `spring.ai.loom.agent.init`). Set `spring.ai.chat.ui.init=false` to prevent ChatClient auto-creation. Default: `true`
 - `user` — default username, nickname, authentication token (legacy)
-- `time` / `file` / `skill` / `compile` — `enabled` (boolean) **已废弃,无实际效果**(M3 起):工具可见性由 universal / `role_tool` RBAC 决定,bean 创建不受这些开关影响(`knowledge.enabled` 属性根本不存在;知识工具由 VectorStore/RAG 链门控)。真正生效的开关只有 `rag.enabled` / `auth.enabled` / `spring.ai.chat.ui.init`。`compile` 下其余字段生效：`workspace-base-path`（编译 workspace 根目录，null → `{loomHome}/compile-deploy-workspaces`）/ 各超时 / `keepWorkspace` / `extraRunArgs` / `imageTemplates`
+- `time` / `file` / `skill` / `compile` — `enabled` (boolean) **已废弃,无实际效果**(M3 起):工具可见性由 universal / `role_tool` RBAC 决定,bean 创建不受这些开关影响(`knowledge.enabled` 属性根本不存在;知识工具由 VectorStore/RAG 链门控)。真正生效的开关只有 `rag.enabled` / `auth.enabled` / `spring.ai.chat.ui.init`。`compile` 下生效字段：各超时 / `keepWorkspace` / `extraRunArgs` / `imageTemplates`（workspace 根不再可配，恒派生自用户树）
 - `git` — `username` / `token` for remote git authentication (`enabled` flag **deprecated since M3, no effect** — visibility is RBAC-gated via `role_tool.tool_git`). Top-level `gitUsername` / `gitToken` are kept for backward compatibility
 - `maven` — `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000) (`enabled` flag **deprecated since M3, no effect** — visibility is RBAC-gated via `role_tool.tool_maven`)
 - `subtask` — `max-concurrent` (default 4), `max-history` (default 200) 生效;`enabled` 已废弃无效果(universal 工具)
 - `schedule` — `enabled` 已废弃无效果(universal 工具); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
 - `askuser` — `timeoutSeconds`(default 300):askUser 工具阻塞等待用户作答的最长秒数;超时返回"用户未作答"文本,Flux 正常 complete
 - `render` — chromiumPath(空=Playwright 三级探测)/ deviceScaleFactor(2)/ timeoutSeconds(30)/ renderWaitMs(1500)/ networkBlocked(true)/ maxHtmlBytes(2MB)。无 enabled 开关:bean 门控 = playwright optional 依赖 + `@ConditionalOnClass`
-- `loomHome` — 全部本地状态单根，默认 `${user.home}/.loom`。**级联生效**：yml 覆盖 `loom-home` 后，`fileBasePath` / `knowledgeBasePath` / `datasourceDir` 中仍是内置默认值的会自动按新根重建（`loomAgentProperties` binder bean 内做级联）；显式配置过的子路径永远优先。compile workspace 同样派生自 loomHome
-- `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative；兜底常量单一来源 `loom-file-core` 的 `LoomPaths.DEFAULT_FILE_BASE`，`.local/file` cwd 相对默认已全仓清除）
-- `knowledgeBasePath` — 知识库文件存储根目录，默认 `${user.home}/.loom/knowledge`
+- `loomHome` — 全部本地状态单根，默认 `${user.home}/.loom`。**级联生效**：yml 覆盖 `loom-home` 后，`usersBasePath` / `datasourceDir` 中仍是内置默认值的会自动按新根重建（`loomAgentProperties` binder bean 内做级联）；显式配置过的子路径永远优先。compile workspace 从用户树派生，同样跟随 loomHome
+- `usersBasePath` — 用户树根，默认 `${user.home}/.loom/users`（绝对路径，不再 cwd-relative；派生单一来源 `loom-file-core` 的 `LoomPaths`，内建 username 消毒）。每用户目录 = `{usersBasePath}/{username}/`，其下 `file/`（上传 + 工具沙箱）+ `compile-workspaces/`（编译 workspace）。**取代已删除的 `fileBasePath` / `knowledgeBasePath` / `compile.workspace-base-path`；老键被 binder 静默忽略（不报错、不生效）**
 - `datasourceDir` — H2 文件存储目录，默认 `${user.home}/.loom/datasource`（在 `application.yml` 的 `spring.datasource.url` 里通过 `${user.home}/.loom/datasource/db` 拼接）
 
 ### Frontend
@@ -286,7 +289,7 @@ Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring
 - Uses marked.js for Markdown rendering (sanitized by a tiny inline `markdown-renderer.js` allowlist), and a minimal inline SSE parser in `app.js`
 - 全部 10 页（index/login + 8 admin）带 `<meta name="description">` + `<link rel="icon" href="/static/logo.png">`(2026-09-12 第五轮测试 O-2/O-3 补齐;此前真实 Chrome 每页 `/favicon.ico` 404 + console error,headless Playwright 不请求 favicon 故 IT 从未捕获);a11y 色板漂移由 `A11yTokenDriftContractTest` 守卫(F-2 已废弃 token `#6366f1`/`#94a3b8`/`rgba(99,102,241`/`rgba(148,163,184` 不得复现)。test app yml 已开 `server.compression`(gzip, min 2KB)
 
-**文件管理模态框**: 显示 `{fileBasePath}/{username}/`（例如 `C:\Users\<you>\.loom\file\<username>\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/datasource/`、`~/.loom/compile-deploy-workspaces/` 这些工具/系统目录。
+**文件管理模态框**: 显示 `{usersBasePath}/{username}/file/`（例如 `C:\Users\<you>\.loom\users\<username>\file\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/datasource/`、`~/.loom/users/<username>/compile-workspaces/` 这些工具/系统目录。
 
 ## Extension Points
 

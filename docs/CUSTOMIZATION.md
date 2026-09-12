@@ -157,8 +157,7 @@ spring:
 
 | Property | Type | Default | Description |
 |----------------------------|---------|----------------|-----------------------------------------------------------------------------|
-| `fileBasePath` | String | `~/.loom/file` | Root directory for uploaded files (chat attachments, file tool operations) |
-| `knowledgeBasePath` | String | `~/.loom/knowledge` | Root directory for knowledge base files |
+| `usersBasePath` | String | `~/.loom/users` | User-tree root (chat attachments + file tool sandbox under `{usersBasePath}/{username}/file/`) |
 
 Files with duplicate names in the same directory are auto-renamed: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -350,7 +349,7 @@ public IChat customChat(
 | **Override** | Custom `@Bean IUpload` |
 | **Controls** | File upload (plain/knowledge-base), file download, file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
 
-**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `~/.loom/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `~/.loom/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
+**Default behavior**: Chat-uploaded files saved to `{usersBasePath}/{username}/file/` (e.g., `~/.loom/users/username/file/`); knowledge-base file contents are stored in the database (`loom_file_content` table via `DatabaseFileStorage`), not on disk. Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
 
 **Common use case**: Upload to cloud storage (S3/OSS), integrate third-party OCR, async document parsing.
 

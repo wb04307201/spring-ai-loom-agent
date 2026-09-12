@@ -1027,7 +1027,7 @@ Start a terminal process or REPL session. Supports two modes: **Shell mode** (on
 | Parameter | Type | Required | Description |
 |--------------|---------|----------|-------------------------------------------------------------------------------------------------|
 | `command` | string | Yes | Command to execute. Shell mode: any shell command. REPL mode: interpreter (e.g. `python`, `node`) |
-| `workingDir` | string | No | Working directory (default: `~/.loom/file/{username}/`) |
+| `workingDir` | string | No | Working directory (default: `~/.loom/users/{username}/file/`) |
 | `repl` | boolean | No | Whether REPL mode. `true` = long interactive session; `false`/omitted = one-shot command |
 | `timeout` | long | No | Wait timeout in milliseconds (default 30000ms) |
 
@@ -1463,8 +1463,7 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.fileBasePath` | string | `~/.loom/file` | Root directory for uploaded files |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `~/.loom/knowledge` | Root directory for knowledge base files |
+| `spring.ai.loom.agent.usersBasePath` | string | `~/.loom/users` | User-tree root; per-user sandbox = `{usersBasePath}/{username}/file/` |
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -1592,7 +1591,7 @@ spring:
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | Maximum output lines (truncated when exceeded) |
 | `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | Default execution timeout in milliseconds (5 minutes) |
 
-> All Maven tool operations are scoped to `{fileBasePath}/{username}/`; paths outside that range are rejected.
+> All Maven tool operations are scoped to `{usersBasePath}/{username}/file/`; paths outside that range are rejected.
 >
 > **Troubleshooting tip — `MavenInvocationException: Error configuring command line`**: this means `maven-invoker` could not find a usable `mvn` / `mvn.cmd`. The tool startup log prints the resolved `mavenHome` together with a diagnostic hint listing every path it searched, the environment variables it looked at, and how to fix it. The most common cause is a broken or shadowing `mvn` on `PATH` (e.g. a global npm `mvn` wrapper); in that case, explicitly set `spring.ai.loom.agent.maven.mavenHome` in `application.yml` to point at the real Maven install directory to bypass it.
 >

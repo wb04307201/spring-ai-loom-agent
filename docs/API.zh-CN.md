@@ -1031,7 +1031,7 @@ GET /spring/ai/chat/loom/mcp
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `command` | `String` | ✅ | 要执行的命令 |
-| `workingDir` | `String` | | 工作目录（默认 `~/.loom/file/{username}/`） |
+| `workingDir` | `String` | | 工作目录（默认 `~/.loom/users/{username}/file/`） |
 | `repl` | `Boolean` | | 是否 REPL 模式（`true`= 长期交互；`false`/省略 = 一次性命令） |
 | `timeout` | `Long` | | 等待超时（毫秒，默认 30000） |
 
@@ -1164,7 +1164,7 @@ GET /spring/ai/chat/loom/mcp
 
 ## 11. Maven 构建工具
 
-所有 Maven 工具的操作范围限定在用户文件目录（`{fileBasePath}/{username}/`）内。超出该范围的绝对路径将被拒绝。
+所有 Maven 工具的操作范围限定在用户文件目录（`{usersBasePath}/{username}/file/`）内。超出该范围的绝对路径将被拒绝。
 
 ### 11.1 通用执行
 
@@ -1268,7 +1268,7 @@ GET /spring/ai/chat/loom/mcp
 
 ## 11.7 文件工具（@Tool 注解）
 
-所有文件工具均限定在用户文件目录（`{fileBasePath}/{username}/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
+所有文件工具均限定在用户文件目录（`{usersBasePath}/{username}/file/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
 
 **资源约束**（详见 [11.7.1](#1171-文件工具配置ifiletool)）：`readTextFile` / `writeFile` / `editFile` 走 `file.maxFileSize`（默认 5 MB）；`readMediaFile` 走 `file.maxMediaSize`（默认 1 MB）；`directoryTree` / `searchFiles` 走 `file.maxWalkDepth` / `file.maxWalkEntries` / `file.excludedDirs`；`searchFiles` 还受 `file.maxSearchResults` 限制。
 
@@ -1652,8 +1652,7 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.fileBasePath` | string | `~/.loom/file` | 上传文件的根目录 |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `~/.loom/knowledge` | 知识库文件的根目录 |
+| `spring.ai.loom.agent.usersBasePath` | string | `~/.loom/users` | 用户树根目录；每用户沙箱 = `{usersBasePath}/{username}/file/` |
 
 > 同目录下同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
@@ -1691,7 +1690,7 @@ GET /spring/ai/chat/loom/mcp
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | 输出最大行数（超出截断） |
 | `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | 默认执行超时（毫秒），5 分钟 |
 
-> 所有 Maven 工具的操作范围限定在 `{fileBasePath}/{username}/` 内，超出该范围的路径将被拒绝。
+> 所有 Maven 工具的操作范围限定在 `{usersBasePath}/{username}/file/` 内，超出该范围的路径将被拒绝。
 >
 > **排错提示 — `MavenInvocationException: Error configuring command line`**：表示 `maven-invoker` 找不到可用的 `mvn` / `mvn.cmd`。工具启动日志会打印实际解析到的 `mavenHome` 和一份诊断提示（包含所有搜索过的路径、环境变量、修好方法）。最常见原因是 `PATH` 上有损坏或遮蔽的 `mvn`（例如 npm 全局 mvn 包装脚本），此时在 `application.yml` 显式设置 `spring.ai.loom.agent.maven.mavenHome` 指向真实 Maven 安装目录即可绕过。
 >

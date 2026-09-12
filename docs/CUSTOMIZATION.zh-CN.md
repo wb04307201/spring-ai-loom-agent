@@ -157,8 +157,7 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `fileBasePath` | String | `~/.loom/file` | 上传文件的根目录（聊天附件、文件工具操作） |
-| `knowledgeBasePath` | String | `~/.loom/knowledge` | 知识库文件的根目录 |
+| `usersBasePath` | String | `~/.loom/users` | 用户树根目录（聊天附件 + 文件工具沙箱在 `{usersBasePath}/{username}/file/` 下） |
 
 同目录下的同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
@@ -341,7 +340,7 @@ public IChat customChat(
 | **覆盖方式** | 自定义 `@Bean IUpload` |
 | **控制内容** | 文件上传（普通/知识库）、文件下载、文件删除（关联知识库）、知识库文件批量删除 |
 
-**默认行为**: 聊天上传的文件保存到 `{fileBasePath}/{username}/`（如 `~/.loom/file/username/`），知识库文件保存到 `{knowledgeBasePath}/{username}/{knowledgeId}/`（如 `~/.loom/knowledge/username/{knowledgeId}/`）。同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
+**默认行为**: 聊天上传的文件保存到 `{usersBasePath}/{username}/file/`（如 `~/.loom/users/username/file/`）；知识库文件内容存数据库（`DatabaseFileStorage` → `loom_file_content` 表），不落盘。同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
 
 **常见自定义场景**: 上传到云存储（S3/OSS）、接入第三方 OCR、异步文档解析等。
 

@@ -40,7 +40,7 @@
 | 工具 | Group | defaultGrant 理由 |
 |------|-------|-------------------|
 | `ITimeTool` | `tool_time` | 只读;返回当前时间 / 时区转换 — 无副作用 |
-| `IFileTool` | `tool_file` | 按用户隔离(`{fileBasePath}/{username}/`);LLM prompt 引导安全使用;含 `deleteFileOrDirectory` — 管理员应审查任何自动删除流程 |
+| `IFileTool` | `tool_file` | 按用户隔离(`{usersBasePath}/{username}/file/`);LLM prompt 引导安全使用;含 `deleteFileOrDirectory` — 管理员应审查任何自动删除流程 |
 | `ISkillTool` | `tool_skill` | 技能内容按用户隔离;允许编辑自建技能 |
 | `IKnowledgeTool` | `tool_knowledge` | 知识库访问已由 `role_knowledge` 表独立门控 — 工具本身无需额外 RBAC |
 | `ISubTaskTool` | `tool_subtask` | 子任务运行继承用户身份 — 无提权面 |
@@ -83,7 +83,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | 只读当前时间 / 时区转换 |
 | `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | 从 `user_skill`（数据库）读取；演示应用由 `V1.1` 迁移把 6 个系统技能 seed 进默认 admin 用户的 `user_skill` —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
-| `IFileTool` | `DefaultFileTool` | 16 | **universal** | 基于路径；根目录 = `{fileBasePath}/{username}/` |
+| `IFileTool` | `DefaultFileTool` | 16 | **universal** | 基于路径；根目录 = `{usersBasePath}/{username}/file/` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
 | `IAskUserTool` | `DefaultAskUserTool` | 1 | **universal** | `askUser` — 聊天流内嵌选择卡片阻塞提问；子任务/定时任务 schema 级排除 |
@@ -128,7 +128,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **默认实现** | `DefaultFileTool` |
 | **覆盖方式** | 自定义 `@Bean IFileTool` |
 | **状态** | **universal** — `@ToolGroup(defaultGranted=true)`,对每个登录用户可见,与角色无关（`file.enabled` 已废弃无效）。含 `deleteFileOrDirectory` — 管理员应审查任何自动删除流程 |
-| **根路径** | 所有基于路径的操作以 `{fileBasePath}/{username}/`（默认 `~/.loom/file/{username}/`）为根目录 |
+| **根路径** | 所有基于路径的操作以 `{usersBasePath}/{username}/file/`（默认 `~/.loom/users/{username}/file/`）为根目录 |
 
 **方法（16 个）**：
 
@@ -161,7 +161,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **默认实现** | `DefaultGitTool`（基于 Eclipse JGit 7.6.0） |
 | **覆盖方式** | 自定义 `@Bean IGitTool` |
 | **状态** | **RBAC** — bean 总是创建（仅 `@ConditionalOnMissingBean`;`git.enabled` yml 开关已废弃无效）;仅当角色经 `role_tool.tool_git` 授权后用户可见 |
-| **工作目录** | 通过 `gitSetWorkingDir` 设置（绝对路径或相对于 `{fileBasePath}/{username}/` 的相对路径）；`gitInit` / `gitClone` 也接受绝对路径或用户文件目录下的相对路径 |
+| **工作目录** | 通过 `gitSetWorkingDir` 设置（绝对路径或相对于 `{usersBasePath}/{username}/file/` 的相对路径）；`gitInit` / `gitClone` 也接受绝对路径或用户文件目录下的相对路径 |
 
 **方法（28 个）**：
 
@@ -250,7 +250,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **覆盖方式** | 自定义 `@Bean ICompileAndDeployTool` |
 | **状态** | **RBAC** — `@ToolGroup(defaultGranted=false)`。Bean 总是创建（`compile.enabled` 已废弃无效）;仅当角色经 `role_tool.tool_compile` 授权后用户可见（admin → `/admin/roles/{code}/tools`） |
 | **方法** | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
-| **工作区** | 每次调用在 `{fileBasePath}/{username}/compile-deploy-<uuid>/` 下创建独立工作区 |
+| **工作区** | 每次调用在 `{usersBasePath}/{username}/compile-workspaces/compile-deploy-<uuid>/` 下创建独立工作区 |
 
 ### 10.1 工具入参
 
@@ -542,7 +542,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 | 方法 | 参数 | 说明 |
 |--------|-----------|-------------|
-| `renderHtmlFile` | `htmlFilePath`(必填)、`imageName?`、`device?`(desktop/tablet/mobile)、`fullPage?`(默认 true) | 把 `{fileBasePath}/{username}/{htmlFilePath}` 渲染成 `{fileBasePath}/{username}/prototypes/{name}-{timestamp}.png`,桥接一条 `usage='temp'` 的 file 记录,返回预览链接 + markdown 嵌入片段 |
+| `renderHtmlFile` | `htmlFilePath`(必填)、`imageName?`、`device?`(desktop/tablet/mobile)、`fullPage?`(默认 true) | 把 `{usersBasePath}/{username}/file/{htmlFilePath}` 渲染成 `{usersBasePath}/{username}/file/prototypes/{name}-{timestamp}.png`,桥接一条 `usage='temp'` 的 file 记录,返回预览链接 + markdown 嵌入片段 |
 
 **启用方式(2 个条件):**
 
