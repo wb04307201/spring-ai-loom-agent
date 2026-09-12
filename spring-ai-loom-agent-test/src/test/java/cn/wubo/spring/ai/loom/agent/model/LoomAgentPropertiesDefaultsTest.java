@@ -24,15 +24,6 @@ class LoomAgentPropertiesDefaultsTest {
     }
 
     @Test
-    void knowledgeBasePath_defaultsUnderUserHome_dot_loom() {
-        LoomAgentProperties p = new LoomAgentProperties();
-        assertThat(p.getKnowledgeBasePath())
-                .startsWith(System.getProperty("user.home"))
-                .contains(".loom").contains("knowledge")
-                .doesNotContain(".local");
-    }
-
-    @Test
     void datasourceDir_defaultsUnderUserHome_dot_loom() {
         LoomAgentProperties p = new LoomAgentProperties();
         assertThat(p.getDatasourceDir())
@@ -61,7 +52,6 @@ class LoomAgentPropertiesDefaultsTest {
         // configured default, not the filesystem state.
         for (String path : new String[]{
                 p.getFileBasePath(),
-                p.getKnowledgeBasePath(),
                 p.getDatasourceDir()
         }) {
             assertThat(path)

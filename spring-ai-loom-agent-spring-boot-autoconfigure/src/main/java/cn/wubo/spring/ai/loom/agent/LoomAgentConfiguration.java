@@ -455,7 +455,6 @@ public class LoomAgentConfiguration {
                 properties.setTimezone(bound.getTimezone());
                 properties.setLoomHome(bound.getLoomHome());
                 properties.setFileBasePath(bound.getFileBasePath());
-                properties.setKnowledgeBasePath(bound.getKnowledgeBasePath());
                 properties.setDatasourceDir(bound.getDatasourceDir());
                 properties.setGitUsername(bound.getGitUsername());
                 properties.setGitToken(bound.getGitToken());
@@ -475,16 +474,12 @@ public class LoomAgentConfiguration {
                     if (bound.getFileBasePath().equals(defaults.getFileBasePath())) {
                         properties.setFileBasePath(home + "/file");
                     }
-                    if (bound.getKnowledgeBasePath().equals(defaults.getKnowledgeBasePath())) {
-                        properties.setKnowledgeBasePath(home + "/knowledge");
-                    }
                     if (bound.getDatasourceDir().equals(defaults.getDatasourceDir())) {
                         properties.setDatasourceDir(home + "/datasource");
                     }
                     LOG.info("loom-home overridden to {}; sub-paths not explicitly set were re-derived "
-                            + "(fileBasePath={}, knowledgeBasePath={}, datasourceDir={})",
-                            home, properties.getFileBasePath(), properties.getKnowledgeBasePath(),
-                            properties.getDatasourceDir());
+                            + "(fileBasePath={}, datasourceDir={})",
+                            home, properties.getFileBasePath(), properties.getDatasourceDir());
                 }
             }
             return properties;

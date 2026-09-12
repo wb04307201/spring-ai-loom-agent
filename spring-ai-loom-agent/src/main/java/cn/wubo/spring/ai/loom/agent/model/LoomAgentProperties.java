@@ -29,12 +29,11 @@ public class LoomAgentProperties {
  * "spring-boot:run from test module vs parent module" inconsistency
  * disappears across the board.
  *
- * <p>Sub-paths ({@link #fileBasePath}, {@link #knowledgeBasePath},
- * {@link #jvector}, etc.) are derived from this root via field defaults,
- * but Spring's {@code @ConfigurationProperties} does NOT auto-resolve
- * field-init {@code ${...}} placeholders, so the actual integration
- * point is in the consumer side: each property either reads the literal
- * value above OR — when {@code loomHome} is overridden in yml — the
+ * <p>Sub-paths ({@link #fileBasePath}, {@link #jvector}, etc.) are derived
+ * from this root via field defaults, but Spring's {@code @ConfigurationProperties}
+ * does NOT auto-resolve field-init {@code ${...}} placeholders, so the actual
+ * integration point is in the consumer side: each property either reads the
+ * literal value above OR — when {@code loomHome} is overridden in yml — the
  * consumer rebuilds the path. Override the sub-paths directly in yml if
  * you only need to relocate a specific state category.</p>
  *
@@ -55,12 +54,6 @@ public class LoomAgentProperties {
  */
  private String fileBasePath = cn.wubo.loom.file.core.LoomPaths.DEFAULT_FILE_BASE;
 
- /**
- * Knowledge-base file root. Defaulted to absolute for the same reason as
- * {@link #fileBasePath}. Override via
- * {@code spring.ai.loom.agent.knowledge-base-path}.
- */
- private String knowledgeBasePath = System.getProperty("user.home") + "/.loom/knowledge";
  /**
  * Absolute root for the H2 file database. Set via yml
  * {@code spring.datasource.url} as

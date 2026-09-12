@@ -34,7 +34,6 @@ class LoomHomeCascadeBindingTest {
                 .withProperty("spring.ai.loom.agent.loom-home", "/data/loom-home");
         LoomAgentProperties p = bind(env);
         assertThat(p.getFileBasePath()).isEqualTo("/data/loom-home/file");
-        assertThat(p.getKnowledgeBasePath()).isEqualTo("/data/loom-home/knowledge");
         assertThat(p.getDatasourceDir()).isEqualTo("/data/loom-home/datasource");
     }
 
@@ -46,7 +45,6 @@ class LoomHomeCascadeBindingTest {
         LoomAgentProperties p = bind(env);
         assertThat(p.getFileBasePath()).isEqualTo("/mnt/nas/user-files");
         // siblings still cascade
-        assertThat(p.getKnowledgeBasePath()).isEqualTo("/data/loom-home/knowledge");
         assertThat(p.getDatasourceDir()).isEqualTo("/data/loom-home/datasource");
     }
 }
