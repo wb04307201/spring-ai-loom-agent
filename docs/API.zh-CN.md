@@ -1031,7 +1031,7 @@ GET /spring/ai/chat/loom/mcp
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `command` | `String` | ✅ | 要执行的命令 |
-| `workingDir` | `String` | | 工作目录（默认 `.local/file/{username}/`） |
+| `workingDir` | `String` | | 工作目录（默认 `~/.loom/file/{username}/`） |
 | `repl` | `Boolean` | | 是否 REPL 模式（`true`= 长期交互；`false`/省略 = 一次性命令） |
 | `timeout` | `Long` | | 等待超时（毫秒，默认 30000） |
 
@@ -1652,8 +1652,8 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.fileBasePath` | string | `.local/file` | 上传文件的根目录 |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge` | 知识库文件的根目录 |
+| `spring.ai.loom.agent.fileBasePath` | string | `~/.loom/file` | 上传文件的根目录 |
+| `spring.ai.loom.agent.knowledgeBasePath` | string | `~/.loom/knowledge` | 知识库文件的根目录 |
 
 > 同目录下同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
@@ -1663,7 +1663,7 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | 是否启用文件工具 |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **M3 起已废弃** — 无实际效果;`IFileTool` 是 universal 工具（总是可见） |
 | `spring.ai.loom.agent.file.maxFileSize` | long | `5242880`（5 MB） | 单次读取 / 写入文件大小上限（字节）。超过直接拒绝，**避免 OOM 和 LLM context 溢出**。 |
 | `spring.ai.loom.agent.file.maxMediaSize` | long | `1048576`（1 MB） | 媒体文件（图片 / 音频）大小上限。base64 编码后体积 ≈ 4/3，比文本更严。 |
 | `spring.ai.loom.agent.file.maxWalkDepth` | int | `5` | 目录树 / 递归列出 / 搜索的深度上限。 |
@@ -1685,7 +1685,7 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | 是否启用 Maven 工具（**opt-in**）—— 部署场景的编译/打包由 `ICompileAndDeployTool` 处理 |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **M3 起已废弃** — 无实际效果;bean 在 classpath 有 `maven-invoker`（库默认依赖）时创建,可见性由 `role_tool.tool_maven` RBAC 控制。部署场景的编译/打包由 `ICompileAndDeployTool` 处理 |
 | `spring.ai.loom.agent.maven.mavenHome` | string | — | Maven 安装目录。**为空时工具会自动探测**：依次尝试 `MAVEN_HOME` / `M2_HOME` 环境变量，再扫描 Windows 常见路径（如 `C:\developer\apache-maven-*`、`C:\Program Files\Apache Maven`）。自动探测**不依赖系统 PATH**，避免被损坏的 mvn 包装脚本（如 npm 全局 mvn）遮蔽而让 `maven-invoker` 抛 `Error configuring command line`。 |
 | `spring.ai.loom.agent.maven.localRepository` | string | — | 本地仓库路径（为空时使用默认路径） |
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | 输出最大行数（超出截断） |
@@ -1697,34 +1697,25 @@ GET /spring/ai/chat/loom/mcp
 >
 > **排错提示 — Windows 上删除项目目录报"文件被锁定"**：旧版本是因为 `maven-invoker 3.3.0` / `plexus-utils 3.3.0`（a）在异常/取消路径上注册的 JVM shutdown hook 永不释放持有的 `Process` 引用，（b）`Invoker.execute` 拿不到子进程句柄、无法把取消/超时向下传播给 mvn 子进程。结果是：一次被取消或超时的 Maven 调用会留下 mvn 子进程继续运行，持续对 `target/classes`、`~/.m2/repository/*.jar` 持有 mmap 句柄，在 Windows 上锁住这些文件。**新版本不再用 `Invoker.execute` 跑进程**——直接用 `ProcessBuilder` fork mvn、用 `Process.waitFor(timeout, unit)` 做干净超时、超时后 `Process.destroyForcibly` + 显式关闭流。**不再注册任何 JVM shutdown hook，mvn 子进程在超时/取消时一定被杀。** 升级后如果还看到锁，多半是上一次 JVM 留下的孤儿 mvn 进程，用 `tasklist /FI "IMAGENAME eq cmd.exe"` 找到并 `taskkill /F /PID <pid>` 即可。
 
-### 11.9 工具组开关
+### 11.9 工具组开关（已废弃）
 
-所有内置工具组**默认全部启用**（`matchIfMissing=true`）。在 yml 中将下列任一属性设为 `false` 即可关闭对应工具组。
+> **自 M3 起,下列 `*.enabled` 开关不再控制工具 bean 的创建。** 所有常开 `I*Tool` bean 无条件创建（外加 `IHtmlRenderTool` — 仅由 classpath 上的 playwright 门控）。可见性由两种机制决定:**universal 工具**（`@ToolGroup(defaultGranted=true)` — 对所有登录用户可见）与 **RBAC 工具**（`tool_git` / `tool_maven` / `tool_compile` / `tool_render` — 由管理员经 `/admin/roles/{code}/tools` 按角色授予,持久化在 `role_tool` 表）。完整模型见 [TOOLS.zh-CN.md §1](./TOOLS.zh-CN.md)。以下属性仅为向后兼容保留。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |-----------------------------------------------|----------|-------|-------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.time.enabled` | boolean | `true` | 时间工具（`ITimeTool` — 获取当前时间、时区转换） |
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/搜索/删除操作） |
-| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情） |
-| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Maven 工具（同时需要 classpath 上有 `maven-invoker`）。**opt-in** —— 部署场景的编译/打包走 `ICompileAndDeployTool`。 |
+| `spring.ai.loom.agent.time.enabled` | boolean | `true` | **已废弃** — 无实际效果（`ITimeTool` 是 universal 工具） |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **已废弃** — 无实际效果（`IFileTool` 是 universal 工具） |
+| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | **已废弃** — 无实际效果（`ISkillTool` 是 universal 工具） |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | **已废弃** — 无实际效果;`IGitTool` bean 总是创建,可见性由 `role_tool.tool_git` RBAC 控制 |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **已废弃** — 无实际效果;`IMavenTool` bean 在 classpath 有 `maven-invoker`（库默认依赖）时创建,可见性由 `role_tool.tool_maven` RBAC 控制 |
 | `spring.ai.loom.agent.git.username` | string | — | HTTP(S) Git 认证用户名（clone/pull/push） |
 | `spring.ai.loom.agent.git.token` | string | — | HTTP(S) Git 认证 token / 密码 |
 | `spring.ai.loom.agent.gitUsername` | string | — | **遗留**顶层别名，等价于 `git.username` |
 | `spring.ai.loom.agent.gitToken` | string | — | **遗留**顶层别名，等价于 `git.token` |
 
-**示例 — 启用 Git 工具**：
+**示例 — 给角色开放 Git 工具**：无需改 yml;在管理控制台（角色管理 → 编辑/授权 → 授权本地工具组）给角色勾选 `tool_git` 即可。
 
-```yaml
-spring:
- ai:
- loom:
- agent:
- git:
- enabled: true # 默认 false；设为 true 启用
-```
-
-> 即便工具组被关闭，你仍可以通过自定义 `@Bean IGitTool` / `@Bean IMavenTool` 重新启用 —— `@ConditionalOnMissingBean` 始终优先采用用户提供的 Bean。
+> 要替换工具实现,提供自定义 `@Bean IGitTool` / `@Bean IMavenTool` —— `@ConditionalOnMissingBean` 始终优先采用用户提供的 Bean。
 
 ### 11.10 端到端部署配置（`ICompileAndDeployTool`）
 
@@ -1732,7 +1723,7 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | 是否启用端到端部署工具。默认开启，是部署场景的推荐入口。 |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | **M3 起已废弃** — 无实际效果;bean 总是创建,可见性由 `role_tool.tool_compile` RBAC 控制,是部署场景的推荐入口。 |
 | `spring.ai.loom.agent.compile.imageTemplates` | map<string, ImageTemplate> | `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` | 预置基础镜像别名（`ImageTemplate { image, command[] }`），可通过工具入参 `baseImage` 选择。 |
 
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。

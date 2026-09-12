@@ -1,6 +1,6 @@
 # Spring AI LoomAgent — Built-in Tools
 
-> Reference for every tool that LoomAgent exposes to the LLM by default. Each tool group can be enabled/disabled independently, and each sub-tool interface can be replaced with a custom `@Bean`.
+> Reference for every tool that LoomAgent exposes to the LLM by default. Tool visibility is governed by universal / RBAC (`role_tool`) mechanisms, and each sub-tool interface can be replaced with a custom `@Bean`.
 
 ---
 
@@ -15,19 +15,16 @@
 - [7. `IMavenTool` — Maven Build Tools (maven-invoker)](#7-imaventool--maven-build-tools-maven-invoker)
 - [8. `IKnowledgeTool` — Knowledge RAG Retrieval](#8-iknowledgetool--knowledge-rag-retrieval)
 - [9. `ICompileAndDeployTool` — End-to-End Deployment](#9-icompileanddeploytool--end-to-end-deployment)
+ - [9.1 Tool-call Parameters](#91-tool-call-parameters)
+ - [9.2 Configuration](#92-configuration)
+ - [9.3 Base-image Templates (built-in)](#93-base-image-templates-built-in)
+ - [9.4 Example Invocation](#94-example-invocation)
+ - [9.5 End-to-End Conversation Examples](#95-end-to-end-conversation-examples)
 - [10. `ISubTaskTool` — Sub-task Delegation](#10-isubtasktool--sub-task-delegation)
 - [11. `IScheduleTool` — Scheduled Tasks](#11-ischeduletool--scheduled-tasks)
 - [12. `IAskUserTool` — AskUser Interactive Question](#12-iaskusertool--askuser-interactive-question)
 - [13. `IHtmlRenderTool` — HTML Render Screenshot](#13-ihtmlrendertool--html-render-screenshot)
 - [14. Replacing a Sub-Tool](#14-replacing-a-sub-tool)
- - [8.1 Tool-call Parameters](#81-tool-call-parameters)
- - [8.2 Configuration](#82-configuration)
- - [8.3 Base-image Templates (built-in)](#83-base-image-templates-built-in)
- - [8.4 Example Invocation](#84-example-invocation)
- - [8.5 End-to-End Conversation Examples](#85-end-to-end-conversation-examples)
-- [9. `ISubTaskTool` — Sub-task Delegation](#9-isubtasktool--sub-task-delegation)
-- [10. `IScheduleTool` — Scheduled Tasks](#10-ischeduletool--scheduled-tasks)
-- [11. Replacing a Sub-Tool](#11-replacing-a-sub-tool)
 
 ---
 
@@ -133,7 +130,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Default** | `DefaultFileTool` |
 | **Override** | Custom `@Bean IFileTool` |
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user regardless of role. Includes `deleteFileOrDirectory` — admins should review any auto-deletion flows. |
-| **Root path** | All path-based operations use `{fileBasePath}/{username}/` (default `.local/file/{username}/`) |
+| **Root path** | All path-based operations use `{fileBasePath}/{username}/` (default `~/.loom/file/{username}/`) |
 
 **Methods (16)**:
 
@@ -165,7 +162,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool` |
 | **Default** | `DefaultGitTool` (based on Eclipse JGit 7.6.0) |
 | **Override** | Custom `@Bean IGitTool` |
-| **State** | **RBAC + opt-in bean**. Bean is conditional on `spring.ai.loom.agent.git.enabled=true` (default `false`, `matchIfMissing=false`) plus `@ConditionalOnMissingBean`. Once created, only visible to users whose roles grant `tool_git` via the `role_tool` table. |
+| **State** | **RBAC**. Bean is always created (`@ConditionalOnMissingBean` only; the `git.enabled` yml flag is deprecated and has no effect). Visible only to users whose roles grant `tool_git` via the `role_tool` table. |
 | **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{fileBasePath}/{username}/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
 
 **Methods (28)**:
@@ -191,14 +188,14 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool` |
 | **Default** | `DefaultMavenTool` (based on maven-invoker 3.3.0, no shell dependency) |
 | **Override** | Custom `@Bean IMavenTool` |
-| **State** | **RBAC + opt-in bean**. Bean is conditional on `maven-invoker` classpath + `spring.ai.loom.agent.maven.enabled=true` (default `false`) plus `@ConditionalOnMissingBean`. Once created, only visible to users whose roles grant `tool_maven` via the `role_tool` table. |
+| **State** | **RBAC**. Bean is created when `maven-invoker` is on the classpath (`@ConditionalOnClass`; it ships as a default lib dependency) plus `@ConditionalOnMissingBean`; the `maven.enabled` yml flag is deprecated and has no effect. Visible only to users whose roles grant `tool_maven` via the `role_tool` table. |
 | **Methods (6)** | `mavenExecute` (generic Maven goal execution); `mavenBuild` (compile); `mavenPackage` (package JAR/WAR); `mavenTest` (run tests, supports test pattern); `mavenDependencyTree` (dependency tree with scope filter); `mavenValidate` (validate project structure) |
 
 **Configuration**:
 
 | Property | Type | Default | Description |
 |-----------------------------------------------|---------|-------------|----------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Whether to enable Maven tool (opt-in) |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; visibility is RBAC-gated via `role_tool.tool_maven` |
 | `spring.ai.loom.agent.maven.mavenHome` | String | — | Maven install directory (optional, uses PATH if empty) |
 | `spring.ai.loom.agent.maven.localRepository` | String | — | Local repository path (optional) |
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | Max output lines before truncation |
@@ -266,7 +263,7 @@ All settings live under `spring.ai.loom.agent.compile.*`.
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | Whether to register the end-to-end deploy tool (default enabled) |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | **Deprecated since M3** — no functional effect; the bean is always created and visibility is RBAC-gated via `role_tool.tool_compile` |
 | `spring.ai.loom.agent.compile.mavenHome` | string | auto-discover | Optional Maven install dir; falls back to `maven.mavenHome` and PATH |
 | `spring.ai.loom.agent.compile.dockerCmd` | string | `docker` | Optional override for the docker CLI binary |
 | `spring.ai.loom.agent.compile.mavenTimeoutMs` | long | `600000` | Maven build timeout (10 minutes) |
@@ -465,7 +462,7 @@ The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor
 
 | Property | Default | Description |
 |--------------------------------|---------|------------------------------------------|
-| `subtask.enabled` | `true` | Enable the `start_sub_task` tool |
+| `subtask.enabled` | `true` | **Deprecated since M3** — no functional effect; `ISubTaskTool` is a universal tool (always visible) |
 | `subtask.max-concurrent` | `4` | Max concurrent sub-tasks |
 | `subtask.max-history` | `200` | Retained sub-task history entries |
 
@@ -501,7 +498,7 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 
 | Property | Example | Description |
 |--------------------------------|---------|------------------------------------------|
-| `schedule.enabled` | `true` | Enable the schedule tools |
+| `schedule.enabled` | `true` | **Deprecated since M3** — no functional effect; `IScheduleTool` is a universal tool (always visible) |
 | `flex.schedule.limits.min-interval` | `10m` | Minimum trigger interval |
 | `flex.schedule.limits.max-lifetime` | `72h` | Max task lifetime (accumulates across restarts) |
 | `flex.schedule.limits.mode` | `strict`| `strict` = exceeding a limit throws |

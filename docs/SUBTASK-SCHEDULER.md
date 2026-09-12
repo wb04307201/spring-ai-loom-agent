@@ -17,7 +17,7 @@ Config (`spring.ai.loom.agent.subtask.*`):
 
 | key | default | description |
 |---|---|---|
-| `enabled` | `true` | Whether to register sub-task-related beans |
+| `enabled` | `true` | **Deprecated since M3** — no functional effect; `ISubTaskTool` is a universal tool (always visible to logged-in users) |
 | `max-concurrent` | `4` | Maximum in-flight sub-tasks; launch requests beyond this are rejected |
 | `max-history` | `200` | History records kept per user (FIFO eviction of oldest) |
 
@@ -43,7 +43,7 @@ Task name namespace: `loom-sched-{username}-{conversationId}-{name}` — tasks w
 
 > **⚠ Username constraint**: the `{username}-{conversationId}` segment is split on the first `-`, so **`username` MUST NOT contain `-`**. `DefaultUser.createUser` enforces this as of commit `dc20b8f` (July 2026): usernames containing `-` are rejected with `LoomAgentRuntimeException(400, ...)`. The frontend's `schedulePanel._shortName` parser relies on the same invariant (strip prefix + first `-` + 36-char UUID). If usernames with `-` are ever allowed, `_shortName` must be refactored to find the last 36-char UUID-shaped token — never use positional `split('-').slice(4)`.
 
-Config (`spring.ai.loom.agent.schedule.*`): `enabled` (default `true`).
+Config (`spring.ai.loom.agent.schedule.*`): `enabled` (default `true`, **deprecated since M3 — no functional effect**; `IScheduleTool` is a universal tool). Trigger constraints come from `flex.schedule.limits.*`.
 
 ## Frontend panels
 
@@ -59,7 +59,7 @@ When you delete a conversation via `DELETE /spring/ai/loom/conversation/{id}`, *
 1. Kills all in-flight sub-tasks under that conversationId.
 2. Cancels all scheduled tasks under the `loom-sched-{user}-{conv}-` prefix.
 
-Both capabilities can be independently disabled via `enabled=false`; the corresponding cleanup step is skipped when disabled.
+Both cleanup steps run unconditionally when a conversation is deleted (the legacy `enabled=false` switches are deprecated since M3 and no longer skip them).
 
 ## Persistence (Path B — loom-owned)
 

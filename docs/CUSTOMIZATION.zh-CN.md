@@ -157,8 +157,8 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `fileBasePath` | String | `.local/file` | 上传文件的根目录（聊天附件、文件工具操作） |
-| `knowledgeBasePath` | String | `.local/knowledge` | 知识库文件的根目录 |
+| `fileBasePath` | String | `~/.loom/file` | 上传文件的根目录（聊天附件、文件工具操作） |
+| `knowledgeBasePath` | String | `~/.loom/knowledge` | 知识库文件的根目录 |
 
 同目录下的同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
@@ -166,7 +166,7 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |-------------------|--------|-------|--------------------------------------------------------------------|
-| `git.enabled` | boolean | `false` | 是否启用 Git 工具（IGitTool）。**默认禁用**（opt-in）—— 端到端部署请走 `ICompileAndDeployTool`（始终启用）。设为 `true` 时再暴露 28 个 git 命令给 LLM。 |
+| `git.enabled` | boolean | `false` | **M3 起已废弃** — 无实际效果;`IGitTool` bean 总是创建。要把 28 个 git 命令暴露给 LLM 走 RBAC:经 `/admin/roles/{code}/tools` 给角色授权 `tool_git`。端到端部署请走 `ICompileAndDeployTool`。 |
 | `git.username` | String | — | HTTP(S) git 认证用户名（clone/pull/push） |
 | `git.token` | String | — | HTTP(S) git 认证令牌/密码 |
 | `gitUsername` | String | — | **兼容** 顶层字段，等价于 `git.username` |
@@ -180,27 +180,27 @@ spring:
  loom:
  agent:
  git:
- enabled: true # 默认；设为 false 禁用
  username: your-git-username
  token: your-git-token
+# 注意:无 enabled 开关 — 在管理控制台给角色授权 tool_git 即可
 ```
 
 > Git 凭证也可通过 `ToolContext` 按请求传入（`gitUsername` / `gitToken` 键），会覆盖配置的默认值。
 
-### 1.9 工具启用开关（`{time,file,skill,git,maven,compile}.enabled`）
+### 1.9 工具组开关（已废弃,`{time,file,skill,git,maven,compile}.enabled`）
 
-所有内置工具组（`ITimeTool` / `ISkillTool` / `IFileTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`）的完整参考——包括默认状态、所有 `@Tool` 方法签名、配置属性、基础镜像模板、端到端部署参数——见 **[TOOLS.zh-CN.md](./TOOLS.zh-CN.md)**。
+所有内置工具组（`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IAskUserTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`）的完整参考——包括默认状态、所有 `@Tool` 方法签名、配置属性、基础镜像模板、端到端部署参数——见 **[TOOLS.zh-CN.md](./TOOLS.zh-CN.md)**。
 
-开关一览：
+> **自 M3 起,`*.enabled` 开关不再控制任何工具 bean 的创建。** 可见性由两种机制决定:**universal 工具**（`@ToolGroup(defaultGranted=true)`,7 个:`tool_time` / `tool_file` / `tool_skill` / `tool_knowledge` / `tool_subtask` / `tool_schedule` / `tool_askUser`,对所有登录用户可见）与 **RBAC 工具**（4 个:`tool_git` / `tool_maven` / `tool_compile` / `tool_render`,由管理员按角色授权,持久化在 `role_tool` 表）。下表属性仅为向后兼容保留,**均无实际效果**:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |-------------------|--------|-------|----------------------------------------------------------|
-| `time.enabled` | boolean | `true` | `ITimeTool` — 时间与时区工具 |
-| `file.enabled` | boolean | `true` | `IFileTool` — 16 个基于路径的文件工具 |
-| `skill.enabled` | boolean | `true` | `ISkillTool` — 列出技能、获取技能详情 |
-| `git.enabled` | boolean | `false` | `IGitTool`（JGit）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
-| `maven.enabled` | boolean | `false` | `IMavenTool`（需 `maven-invoker`）。**opt-in** —— 编译/打包走 `ICompileAndDeployTool`。 |
-| `compile.enabled` | boolean | `true` | `ICompileAndDeployTool` — 端到端 `git clone → build → docker run → health check` |
+| `time.enabled` | boolean | `true` | **已废弃** — universal 工具,无实际效果 |
+| `file.enabled` | boolean | `true` | **已废弃** — universal 工具,无实际效果 |
+| `skill.enabled` | boolean | `true` | **已废弃** — universal 工具,无实际效果 |
+| `git.enabled` | boolean | `false` | **已废弃** — bean 总是创建;可见性由 `role_tool.tool_git` 控制 |
+| `maven.enabled` | boolean | `false` | **已废弃** — bean 在 classpath 有 `maven-invoker`（库默认依赖）时创建;可见性由 `role_tool.tool_maven` 控制 |
+| `compile.enabled` | boolean | `true` | **已废弃** — bean 总是创建;可见性由 `role_tool.tool_compile` 控制 |
 
 ---
 
@@ -341,7 +341,7 @@ public IChat customChat(
 | **覆盖方式** | 自定义 `@Bean IUpload` |
 | **控制内容** | 文件上传（普通/知识库）、文件下载、文件删除（关联知识库）、知识库文件批量删除 |
 
-**默认行为**: 聊天上传的文件保存到 `{fileBasePath}/{username}/`（如 `.local/file/username/`），知识库文件保存到 `{knowledgeBasePath}/{username}/{knowledgeId}/`（如 `.local/knowledge/username/{knowledgeId}/`）。同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
+**默认行为**: 聊天上传的文件保存到 `{fileBasePath}/{username}/`（如 `~/.loom/file/username/`），知识库文件保存到 `{knowledgeBasePath}/{username}/{knowledgeId}/`（如 `~/.loom/knowledge/username/{knowledgeId}/`）。同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
 
 **常见自定义场景**: 上传到云存储（S3/OSS）、接入第三方 OCR、异步文档解析等。
 
@@ -657,8 +657,8 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | 不提供 `VectorStore` Bean | 不引入任何 VectorStore Starter | 不会创建 `IDocumentRead`、`RetrievalAugmentationAdvisor`、`loomAgentFileRouter`、`loomAgentKnowledgeRouter`，知识库和文件上传功能不可用 |
 | 不提供 `EmbeddingModel` Bean | 不引入 EmbeddingModel Starter | 不会创建 `H2JVectorStore`，向量存储不可用 |
 | 自定义同类型 Bean | Java `@Bean` 配置 | 对应的 `@ConditionalOnMissingBean` Bean 不会被创建 |
-| `spring.ai.loom.agent.git.enabled=true` | application.yml | 创建 `IGitTool` Bean（`DefaultGitTool`，Eclipse JGit 7.6.0）；未配置时 Git 工具不可用 |
-| classpath 上有 `maven-invoker` | 已提供依赖 | 启用 `IMavenTool` Bean 创建；没有时 Maven 工具不可用 |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml | **M3 起已废弃** — 无实际效果;`IGitTool` bean 总是创建。Git 工具可见性由 `role_tool.tool_git` RBAC 控制(在管理控制台授予/移除) |
+| classpath 上有 `maven-invoker` | 已提供依赖 | `IMavenTool` bean 创建的 `@ConditionalOnClass` 门控(它是库默认依赖);可见性由 `role_tool.tool_maven` RBAC 控制 |
 
 ### 8.1 快速禁用功能清单
 
@@ -667,8 +667,8 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | 整个聊天功能 | 设置 `spring.ai.chat.ui.init=false` |
 | RAG/知识库 | 不引入任何 `VectorStore` 或 `EmbeddingModel` Starter |
 | MCP 功能 | 设置 `spring.ai.mcp.client.enabled=false` |
-| Git 工具 | 不设置 `spring.ai.loom.agent.git.enabled=true`（默认禁用） |
-| Maven 工具 | 设置 `spring.ai.loom.agent.maven.enabled=false` |
+| Git 工具 | RBAC 控制:不给任何角色授权 `tool_git`(或在管理控制台移除)。`git.enabled` yml 开关自 M3 起无效果 |
+| Maven 工具 | RBAC 控制:不给任何角色授权 `tool_maven`。`maven.enabled` yml 开关自 M3 起无效果 |
 | 认证过滤器 | 设置 `spring.ai.loom.agent.auth.enabled=false` |
 | 自动登录 | 自定义 `IUser` 的 `isAutoLogin` 返回 `false` |
 

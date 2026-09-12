@@ -67,7 +67,7 @@ v1.2.0 left a tech-debt inventory (named categories `A12 / B1 / B2 / B3 / B4 / B
 | T5 | **Portability / spec drift** — Flyway source-organization split (policy A: keep V1.0 single fresh-init file, segment by SQL comment); spec drift A3/A10 422→403; portable upsert |
 | T6 | **Test cleanup** — extract `LoomAgentTestUtil.safeRoute`; cover async batched flush path |
 
-**Status (2026-09-06): complete.** All 7 phases landed (commits `85f8d66..7f43929`); T5.3 portable upsert deferred per `ADR-T05.3` (reactivates only on PG/MySQL adoption). The T7.1 gate's 3 residuals were closed 2026-09-06 (review chain `<K>` `699c1a1`, announcement String-native + a13 null-safe + CAST join `c0df007`, KB `marketKind()` fix + tags embed `cb8178b`, fix wave `376454d`) — `ADR-T07.1` now records **Pass** (AT1 + AT2 included). **Verification gotcha:** default `mvn test -pl spring-ai-loom-agent-test` runs 380 tests but **no `*IT` classes** (no failsafe plugin); the IT gate (80 tests) requires explicit `-Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false` from wiped `~/.loom/datasource` + `target/test-ds` + `target/surefire-reports`. Post-M3+ follow-ups: spec § Follow-ups FU-1..FU-5.
+**Status (2026-09-06): complete.** All 7 phases landed (commits `85f8d66..7f43929`); T5.3 portable upsert deferred per `ADR-T05.3` (reactivates only on PG/MySQL adoption). The T7.1 gate's 3 residuals were closed 2026-09-06 (review chain `<K>` `699c1a1`, announcement String-native + a13 null-safe + CAST join `c0df007`, KB `marketKind()` fix + tags embed `cb8178b`, fix wave `376454d`) — `ADR-T07.1` now records **Pass** (AT1 + AT2 included). **Verification gotcha:** default `mvn test -pl spring-ai-loom-agent-test` runs 463 tests (as of 2026-09-12; grows every round) but **no `*IT` classes** (no failsafe plugin); the IT gate (186 tests / 3 env-guarded skips as of 2026-09-12) requires explicit `-Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false` from wiped `~/.loom/datasource` + `target/test-ds` + `target/surefire-reports`. Post-M3+ follow-ups: spec § Follow-ups FU-1..FU-5.
 
 ## Architecture
 
@@ -90,14 +90,14 @@ All components follow an **interface + default implementation** pattern. Every b
 | `ISkillTool` | `DefaultSkillTool` | Skill tools: `getSkill(skillName)` 获取技能完整 content（**技能全量列表由 `buildDynamicSystemPrompt` 注入到 system prompt【技能】段，不另提供 list 工具** — 与 `IKnowledgeTool` 删除 `listKnowledgeBases` 对称；详见 `DefaultSkillTool` 顶部 javadoc）；`createOrUpdateSkill(name, description, content)` 创建/更新自建 skill（user 通过 / picker 精准选 skill 时，`ChatRequestRecord.selectedSkillName` 强指令注入到 system prompt，绕过 LLM 工具选择偏差） |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | Knowledge tools: `searchKnowledge(knowledgeId, query, topK?)` 在指定知识库中向量检索（**已删除 `listKnowledgeBases` 工具**：已启用的 KB 列表在 system prompt【知识库】段自动展示，重复调用冗余）。`description` 字段语义：LLM 用的内容摘要（不是用户标签），未来上传文件后由 LLM 自动生成。Tool-based RAG 替代了旧的 RetrievalAugmentationAdvisor |
 | `IFileTool` | `DefaultFileTool` | 16 File tools: 基于路径的读写/编辑/搜索/目录浏览（readTextFile, readMediaFile, readMultipleFiles, writeFile, editFile, createDirectory, moveFile, searchFiles, listAllowedDirectories, listDirectory, listDirectoryWithSizes, directoryTree, getFileInfo, downloadFileUrl, viewFileUrl, deleteFileOrDirectory），预览/下载自动桥接 fileId，删除支持递归 + 显式确认 + 清理临时 file_info 记录 |
-| `IGitTool` | `DefaultGitTool` | 28 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions（**默认 disabled** — `git.enabled=false`；需要单点 git 操作时设 `true`），不依赖 IFile |
-| `IMavenTool` | `DefaultMavenTool` | 6 Maven tools: mavenExecute (generic), mavenBuild (compile), mavenPackage (package), mavenTest (run tests), mavenDependencyTree (dep tree), mavenValidate (validate) — based on maven-invoker, no shell needed（**默认 disabled** — `maven.enabled=false`；编译/打包请走 `ICompileAndDeployTool`，需要单点 mvn 命令时设 `true`） |
-| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → 按 buildTool 打包（maven / npm / npm-frontend / pip）→ Docker 镜像构建 → 容器启动 → 健康检查（**默认 enabled**）。支持 Spring Boot / Node（前后端） / Python 等多栈项目。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
+| `IGitTool` | `DefaultGitTool` | 28 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions（**RBAC 工具** — bean 总是创建,可见性由 `role_tool.tool_git` 控制,admin 授权后用户才可见;`git.enabled` yml 开关已废弃无效），不依赖 IFile |
+| `IMavenTool` | `DefaultMavenTool` | 6 Maven tools: mavenExecute (generic), mavenBuild (compile), mavenPackage (package), mavenTest (run tests), mavenDependencyTree (dep tree), mavenValidate (validate) — based on maven-invoker, no shell needed（**RBAC 工具** — bean 由 `@ConditionalOnClass(maven-invoker)` 门控(库默认依赖,天然满足),可见性由 `role_tool.tool_maven` 控制;`maven.enabled` yml 开关已废弃无效。编译/打包请走 `ICompileAndDeployTool`） |
+| `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → 按 buildTool 打包（maven / npm / npm-frontend / pip）→ Docker 镜像构建 → 容器启动 → 健康检查（**RBAC 工具** — bean 总是创建,可见性由 `role_tool.tool_compile` 控制;base 种子默认未授权,需 admin 授予）。支持 Spring Boot / Node（前后端） / Python 等多栈项目。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 | `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call`; tools filtered two ways — (1) RBAC: `CapabilityService.visibleToolGroupsFor(username)` so sub-tasks inherit the user's role grants (未授权的 render/git/maven/compile 不进子任务;修复此前 universal subtask/schedule 入口绕过 role_tool 的越权面,spec 2026-09-10-subtask-rbac-filter), (2) recursion guard: exclude self-tools (no `ISubTaskTool`/`IScheduleTool`/`IAskUserTool` — 子任务不能向用户提问,疑问写进执行结果由主任务决定). Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
-| `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` + `list_sub_tasks` + `cancel_sub_task(subTaskId)` + `get_sub_task_history(limit)` — 委派/查询/取消/历史子任务，全部按 `(username, conversationId)` 严格隔离，防跨会话越权。默认 enabled (`subtask.enabled=true`) |
-| `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。默认 enabled (`schedule.enabled=true`) |
+| `ISubTaskTool` | `DefaultSubTaskTool` | LLM-callable `start_sub_task(prompt, systemContext)` + `list_sub_tasks` + `cancel_sub_task(subTaskId)` + `get_sub_task_history(limit)` — 委派/查询/取消/历史子任务，全部按 `(username, conversationId)` 严格隔离，防跨会话越权。universal 工具(对所有登录用户可见;`subtask.enabled` 已废弃无效) |
+| `IScheduleTool` | `DefaultScheduleTool` | LLM-callable create/cancel/list/history 定时任务，通过 flex-schedule。任务名命名空间 `loom-sched-{user}-{conv}-{name}`，触发时以子任务方式运行。loom-agent 自管 H2 持久化 (`loom_scheduled_task`，增量，前身 Flyway V13)；`ScheduleRestoreListener` 在 `ApplicationReadyEvent` 时按原 `createdAt` 重新装载，超 72h 的过期行自动清理。间隔/存活上限见 `flex.schedule.limits`。universal 工具(对所有登录用户可见;`schedule.enabled` 已废弃无效) |
 | `IAskUserTool` | `DefaultAskUserTool` | LLM-callable `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — 聊天流内嵌选择卡片向当前用户提问,工具方法阻塞等待作答(默认 `askuser.timeoutSeconds=300`),答案以 tool_result 回同一条流。超时/stop 返回"用户未作答"文本保 ChatMemory ON_COMPLETE。默认 enabled(universal) |
 | `IHtmlRenderTool` | `DefaultHtmlRenderTool` | HTML 渲染截图:`renderHtmlFile(htmlFilePath, imageName?, device?, fullPage?)` 用无头 Chromium(Playwright,lib 侧 optional 依赖 + `@ConditionalOnClass` 门控)把用户目录下自包含单页 HTML 渲染成 PNG(界面原型图/数据分析单页),存 `{fileBasePath}/{username}/prototypes/` 并经 FileIdBridge 桥接 fileId 返回预览链接 + markdown 片段;route abort + CSP 双保险屏蔽全部外联;Semaphore(1) 串行 + 30s 超时;失败一律返回文本(D8)。RBAC 工具 `tool_render`;Linux 裸机部署先跑 `docs/provision-chromium.sh` |
 
@@ -113,7 +113,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `McpConfiguration` | SyncMcp / ASyncMcp |
 | `ToolConfiguration` | ITimeTool, ISkillTool, IKnowledgeTool, IFileTool, IGitTool, IMavenTool, ICompileAndDeployTool, IHtmlRenderTool(+ HtmlRenderEngine) — **10 个 I*Tool bean 总是创建;IHtmlRenderTool/HtmlRenderEngine 由 `@ConditionalOnClass(playwright)` 门控(optional 依赖,消费者引入才创建)**(M3 起废弃 yml enabled 开关;M6 引入 `@ToolGroup(defaultGranted=true)` 后,部分工具标记为"平台默认能力",对所有登录用户可见 — 见下方 Universal 工具表)。`git/maven` 不再默认 opt-in,但 IMavenTool 需要 maven-invoker 在 classpath,IGitTool 需要 Eclipse JGit(已在默认依赖里)。**RBAC 工具启停由 `role_tool` 表控制**;admin 在 `/admin/roles/{code}/tools` 给 role 授权后,只有被分配该 role 的用户才看得到工具。|
 | `StorageConfiguration` | IUser, IUserConversation, ISkillStorage, IFile, IFileDocument, IKnowledge |
-| `WebConfiguration` | AuthenticationFilter, 14 RouterFunctions + `SseController` |
+| `WebConfiguration` | AuthenticationFilter, 20 RouterFunctions + `SseController` |
 | `CapabilityConfiguration` | `CapabilityService` (统一 list 本地 + MCP capability) + `IRoleService` 的 tool/mcp/skill/knowledge 授权方法 |
 
 ### Capability 统一模型(M1-M7 重构)
@@ -220,7 +220,7 @@ Organized into 7 nested static `@Configuration` classes:
   — **历史:已合并入 V1.0 的末尾 DELETE 段,新装环境天然干净**
 
 
-- `IMavenTool` is **disabled by default** (`maven.enabled=false`); same opt-in pattern. Compile/package is handled by `ICompileAndDeployTool`.
+- `IMavenTool` is an **RBAC tool**: bean created when `maven-invoker` is on the classpath (default lib dependency); visibility gated by `role_tool.tool_maven`. Compile/package is handled by `ICompileAndDeployTool`.
 - `ICompileAndDeployTool` is **enabled by default**; the supported entry point for `git clone → buildTool build (maven/npm/pip) → docker build → docker run → health check`. Supports `maven` / `npm` (Node 后端) / `npm-frontend` (Node 前端 → nginx) / `pip` (Python) — selected by `buildTool` param or auto-detected from marker files (`pom.xml` / `package.json` / `requirements.txt` / `pyproject.toml`).
 - REST endpoints under `/spring/ai/loom/*` (RouterFunctions + one `@RestController` for SSE)
 - `AuthenticationFilter` on `/*` (matches all), with `AntPathMatcher` filtering via `auth.pathPatterns` and `auth.excludePathPatterns`
@@ -263,11 +263,11 @@ All under `spring.ai.loom.agent`:
 - `auth` — `enabled` (boolean, default true), `pathPatterns` (Ant-style path list), `excludePathPatterns`, `adminPathPatterns` (gates `/admin/**` to admin users), `cookie` (name, path, domain, secure, sameSite, maxAge)
 - `init` — **Note**: The actual runtime gate for `ChatClient` creation is `spring.ai.chat.ui.init` (not `spring.ai.loom.agent.init`). Set `spring.ai.chat.ui.init=false` to prevent ChatClient auto-creation. Default: `true`
 - `user` — default username, nickname, authentication token (legacy)
-- `time` / `file` / `skill` / `knowledge` / `compile` — `enabled` (boolean, default **true**). Set to `false` to disable that tool group
-- `git` — `enabled` (boolean, default **false** — opt-in), `username` / `token` for remote git authentication. Top-level `gitUsername` / `gitToken` are kept for backward compatibility
-- `maven` — `enabled` (boolean, default **false** — opt-in), `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000)
-- `subtask` — `enabled` (boolean, default **true**), `max-concurrent` (default 4), `max-history` (default 200)
-- `schedule` — `enabled` (boolean, default **true**); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
+- `time` / `file` / `skill` / `compile` — `enabled` (boolean) **已废弃,无实际效果**(M3 起):工具可见性由 universal / `role_tool` RBAC 决定,bean 创建不受这些开关影响(`knowledge.enabled` 属性根本不存在;知识工具由 VectorStore/RAG 链门控)。真正生效的开关只有 `rag.enabled` / `auth.enabled` / `spring.ai.chat.ui.init`
+- `git` — `username` / `token` for remote git authentication (`enabled` flag **deprecated since M3, no effect** — visibility is RBAC-gated via `role_tool.tool_git`). Top-level `gitUsername` / `gitToken` are kept for backward compatibility
+- `maven` — `mavenHome` (optional Maven install dir), `localRepository` (optional local repo path), `maxOutputLines` (default 200), `defaultTimeoutMs` (default 300000) (`enabled` flag **deprecated since M3, no effect** — visibility is RBAC-gated via `role_tool.tool_maven`)
+- `subtask` — `max-concurrent` (default 4), `max-history` (default 200) 生效;`enabled` 已废弃无效果(universal 工具)
+- `schedule` — `enabled` 已废弃无效果(universal 工具); trigger constraints come from `flex.schedule.limits.{min-interval,max-lifetime,mode}` (test app 默认 10m / 72h / strict). Scheduled tasks persist to loom-agent-owned H2 table `loom_scheduled_task` (增量，前身 Flyway `V13`); restore listener rehydrates on ApplicationReadyEvent preserving original `createdAt` so `max-lifetime` accumulates across restarts
 - `askuser` — `timeoutSeconds`(default 300):askUser 工具阻塞等待用户作答的最长秒数;超时返回"用户未作答"文本,Flux 正常 complete
 - `render` — chromiumPath(空=Playwright 三级探测)/ deviceScaleFactor(2)/ timeoutSeconds(30)/ renderWaitMs(1500)/ networkBlocked(true)/ maxHtmlBytes(2MB)。无 enabled 开关:bean 门控 = playwright optional 依赖 + `@ConditionalOnClass`
 - `fileBasePath` — 用户文件存储根目录，默认 `${user.home}/.loom/file`（绝对路径，不再 cwd-relative）
@@ -281,6 +281,7 @@ Static SPA at `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring
 - `app.js` — Vue-based chat UI (SSE streaming, sidebar, modals). **BFF + Cookie auth**: no localStorage token, browser auto-carries HttpOnly cookie
 - `style.css` — styling
 - Uses marked.js for Markdown rendering (sanitized by a tiny inline `markdown-renderer.js` allowlist), and a minimal inline SSE parser in `app.js`
+- 全部 10 页（index/login + 8 admin）带 `<meta name="description">` + `<link rel="icon" href="/static/logo.png">`(2026-09-12 第五轮测试 O-2/O-3 补齐;此前真实 Chrome 每页 `/favicon.ico` 404 + console error,headless Playwright 不请求 favicon 故 IT 从未捕获);a11y 色板漂移由 `A11yTokenDriftContractTest` 守卫(F-2 已废弃 token `#6366f1`/`#94a3b8`/`rgba(99,102,241`/`rgba(148,163,184` 不得复现)。test app yml 已开 `server.compression`(gzip, min 2KB)
 
 **文件管理模态框**: 显示 `{fileBasePath}/{username}/`（例如 `C:\Users\<you>\.loom\file\<username>\`）的目录树，支持展开子目录，每个文件有预览/下载按钮。不显示 `~/.loom/datasource/`、`~/.loom/compile-deploy-workspaces/` 这些工具/系统目录。
 
@@ -296,8 +297,8 @@ public IChat customChat(...) { return new MyChat(...); }
 
 To swap the vector store, simply add a Spring AI vector store starter dependency — `H2JVectorStore` won't be created due to `@ConditionalOnMissingBean(VectorStore.class)`.
 
-`IGitTool` uses both `@ConditionalOnProperty` (`matchIfMissing=false`; set `git.enabled=true` to enable) and `@ConditionalOnMissingBean` — users can replace it with a custom implementation (e.g., CLI-based git) while keeping the feature on. Disabled by default; `ICompileAndDeployTool` is the supported end-to-end entry point.
+`IGitTool` uses only `@ConditionalOnMissingBean` (bean always created; the `git.enabled` yml flag is deprecated since M3 and has no effect) — users can replace it with a custom implementation (e.g., CLI-based git). Visibility is RBAC-gated: grant `tool_git` to a role in the admin console; `ICompileAndDeployTool` is the supported end-to-end entry point.
 
-`IMavenTool` uses `@ConditionalOnClass` (maven-invoker on classpath) + `@ConditionalOnProperty` (default off) + `@ConditionalOnMissingBean`. Disabled by default; same opt-in pattern.
+`IMavenTool` uses `@ConditionalOnClass` (maven-invoker on classpath — a default lib dependency) + `@ConditionalOnMissingBean`. Visibility is RBAC-gated via `role_tool.tool_maven`; the `maven.enabled` yml flag is deprecated since M3 (no effect).
 
 `IHtmlRenderTool` follows the same pattern with `com.microsoft.playwright.Playwright`: add the optional `playwright` dependency (1.50.0) to enable the bean, then grant `tool_render` to a role. On bare-metal Linux run `docs/provision-chromium.sh` once (system so-libs + fonts-noto-cjk + Playwright-managed Chromium); dev machines auto-download on first use.

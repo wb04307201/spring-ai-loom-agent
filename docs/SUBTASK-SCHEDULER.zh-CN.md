@@ -17,7 +17,7 @@ Spring AI LoomAgent 支持两种由 LLM 主动发起的异步/委派能力：**�
 
 | key | 默认 | 说明 |
 |---|---|---|
-| `enabled` | `true` | 是否注册子任务相关 bean |
+| `enabled` | `true` | **M3 起已废弃** — 无实际效果;`ISubTaskTool` 是 universal 工具（对所有登录用户可见） |
 | `max-concurrent` | `4` | 同时在飞子任务上限，超过则启动请求被拒 |
 | `max-history` | `200` | 每用户历史保留条数，FIFO 丢弃最旧 |
 
@@ -43,7 +43,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 
 > **⚠ Username 约束**：namespace 的 `{username}-{conversationId}` 段以第一个 `-` 作为分隔符，因此 **`username` 不得包含 `-`**。`DefaultUser.createUser` 已在 2026-07 测试 commit `dc20b8f` 后强制校验：含 `-` 的 username 会抛 `LoomAgentRuntimeException(400, ...)`。前端 `schedulePanel._shortName` 解析同样依赖此不变式（截掉 prefix + 第一个 `-` + 36 字符 UUID），未来如需放开 username-dash，必须同步把 `_shortName` 改为基于"找最后一个 36 字符 UUID 形串"的解析方式，不能再用 `split('-').slice(4)` 这种按位置切的脆弱做法。
 
-配置（`spring.ai.loom.agent.schedule.*`）：`enabled`（默认 `true`）。
+配置（`spring.ai.loom.agent.schedule.*`）：`enabled`（默认 `true`，**M3 起已废弃 — 无实际效果**;`IScheduleTool` 是 universal 工具）。触发约束见 `flex.schedule.limits.*`。
 
 ## 前端面板
 
@@ -59,7 +59,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 1. 杀掉该 conversationId 名下所有在飞子任务；
 2. 取消该 `loom-sched-{user}-{conv}-` 前缀下的所有定时任务。
 
-两个能力均可通过 `enabled=false` 单独关闭，关闭时对应清理自动跳过。
+两个清理步骤在删除会话时无条件执行（旧的 `enabled=false` 开关自 M3 起已废弃，不再跳过清理）。
 
 ## 持久化 (Path B — loom-owned)
 

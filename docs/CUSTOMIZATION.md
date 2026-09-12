@@ -157,8 +157,8 @@ spring:
 
 | Property | Type | Default | Description |
 |----------------------------|---------|----------------|-----------------------------------------------------------------------------|
-| `fileBasePath` | String | `.local/file` | Root directory for uploaded files (chat attachments, file tool operations) |
-| `knowledgeBasePath` | String | `.local/knowledge` | Root directory for knowledge base files |
+| `fileBasePath` | String | `~/.loom/file` | Root directory for uploaded files (chat attachments, file tool operations) |
+| `knowledgeBasePath` | String | `~/.loom/knowledge` | Root directory for knowledge base files |
 
 Files with duplicate names in the same directory are auto-renamed: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -166,7 +166,7 @@ Files with duplicate names in the same directory are auto-renamed: `file.txt` �
 
 | Property | Type | Default | Description |
 |---------------------|---------|---------|------------------------------------------------------------------------------------------|
-| `git.enabled` | boolean | `false` | Whether to enable Git tool (IGitTool); opt-in. End-to-end deployment uses `ICompileAndDeployTool` (always on) instead. Set to `true` to expose 28 git commands to the LLM. |
+| `git.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; the `IGitTool` bean is always created. Exposing the 28 git commands to the LLM is RBAC-gated: grant `tool_git` to a role via `/admin/roles/{code}/tools`. End-to-end deployment uses `ICompileAndDeployTool` instead. |
 | `git.username` | String | — | Username for HTTP(S) git authentication (clone/pull/push) |
 | `git.token` | String | — | Token/password for HTTP(S) git authentication |
 | `gitUsername` | String | — | **Legacy** top-level alias for `git.username` |
@@ -189,12 +189,14 @@ spring:
 
 ### 1.9 Tool Visibility & RBAC (Universal vs RBAC tools)
 
-For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
+For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IAskUserTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
 
 Since M6 (commit history), tool visibility is governed by two mechanisms instead of the legacy `*.enabled` yml switches:
 
-1. **Universal tools** — annotated `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user, no role needed. The 6 universal groups are: `tool_time`, `tool_file`, `tool_skill`, `tool_knowledge`, `tool_subtask`, `tool_schedule`.
-2. **RBAC tools** — annotated `@ToolGroup(defaultGranted=false)`. Visible only after an admin grants the tool group to a role via `/admin/roles/{code}/tools` (persisted in the `role_tool` table). The 3 RBAC groups are: `tool_git`, `tool_maven`, `tool_compile`. The `IGitTool` and `IMavenTool` beans are also still gated by `spring.ai.loom.agent.{git,maven}.enabled` for bean creation; the `*.enabled` flags on the universal tools are deprecated since M3 and have no effect.
+1. **Universal tools** — annotated `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user, no role needed. The 7 universal groups are: `tool_time`, `tool_file`, `tool_skill`, `tool_knowledge`, `tool_subtask`, `tool_schedule`, `tool_askUser`.
+2. **RBAC tools** — annotated `@ToolGroup(defaultGranted=false)`. Visible only after an admin grants the tool group to a role via `/admin/roles/{code}/tools` (persisted in the `role_tool` table). The 4 RBAC groups are: `tool_git`, `tool_maven`, `tool_compile`, `tool_render` (`IHtmlRenderTool` — bean created only when the optional `playwright` dependency is on the classpath).
+
+> Note: **no `*.enabled` yml flag gates tool bean creation any more** (verified against `LoomAgentConfiguration.ToolConfiguration` — every `I*Tool` bean carries only `@ConditionalOnMissingBean`, plus `@ConditionalOnClass` for maven-invoker / playwright and `@ConditionalOnBean(VectorStore.class)` for `IKnowledgeTool`). `git.enabled` / `maven.enabled` included.
 
 Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
 
@@ -203,8 +205,8 @@ Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
 | `time.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
 | `file.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
 | `skill.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
-| `git.enabled` | boolean | `false` | Gates `IGitTool` bean creation; once created, RBAC via `role_tool` |
-| `maven.enabled` | boolean | `false` | Gates `IMavenTool` bean creation (also requires `maven-invoker` on classpath); once created, RBAC via `role_tool` |
+| `git.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; `IGitTool` bean is always created, visibility RBAC-gated via `role_tool.tool_git` |
+| `maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; `IMavenTool` bean is created when `maven-invoker` is on the classpath (a default lib dependency), visibility RBAC-gated via `role_tool.tool_maven` |
 | `compile.enabled` | boolean | `true` | **Deprecated since M3** — RBAC tool, the `*.enabled` flag has no effect; grant via `role_tool.tool_compile` |
 
 > Pre-existing databases: Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` already cleared any historical RBAC rows for the 6 universal tool groups. New databases start clean. See TOOLS.md §1 for details.
@@ -348,7 +350,7 @@ public IChat customChat(
 | **Override** | Custom `@Bean IUpload` |
 | **Controls** | File upload (plain/knowledge-base), file download, file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
 
-**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `.local/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `.local/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
+**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `~/.loom/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `~/.loom/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
 
 **Common use case**: Upload to cloud storage (S3/OSS), integrate third-party OCR, async document parsing.
 
@@ -664,8 +666,8 @@ Place same-named static resources in your own project to override the defaults, 
 | No `VectorStore` bean provided | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, `loomAgentFileRouter`, and `loomAgentKnowledgeRouter` are not created; knowledge base and file upload features unavailable |
 | No `EmbeddingModel` bean provided | Do not add EmbeddingModel Starter | `H2JVectorStore` is not created; vector storage unavailable |
 | Custom bean of the same type | Java `@Bean` configuration | The corresponding `@ConditionalOnMissingBean` bean will not be created |
-| `spring.ai.loom.agent.git.enabled=true` | application.yml | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.6.0); without this, no Git tool methods are available to the LLM |
-| `maven-invoker` on classpath | Provided dependency | Enables `IMavenTool` bean creation; without it, Maven tool is not available |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml | **Deprecated since M3** — no effect; `IGitTool` bean is always created. Git tool visibility is RBAC-gated via `role_tool.tool_git` (grant/revoke in the admin console) |
+| `maven-invoker` on classpath | Provided dependency | `@ConditionalOnClass` gate for `IMavenTool` bean creation (it ships as a default lib dependency); visibility is RBAC-gated via `role_tool.tool_maven` |
 
 ### 8.1 Quick Feature Disablement Guide
 
@@ -674,8 +676,8 @@ Place same-named static resources in your own project to override the defaults, 
 | Entire chat | Set `spring.ai.chat.ui.init=false` |
 | RAG / Knowledge Base | Do not add any `VectorStore` or `EmbeddingModel` Starter |
 | MCP functionality | Set `spring.ai.mcp.client.enabled=false` |
-| Git tool | Do not set `spring.ai.loom.agent.git.enabled=true` (default is disabled) |
-| Maven tool | Set `spring.ai.loom.agent.maven.enabled=false` |
+| Git tool | RBAC-gated: don't grant `tool_git` to any role (or revoke it in the admin console). The `git.enabled` yml flag has no effect since M3 |
+| Maven tool | RBAC-gated: don't grant `tool_maven` to any role. The `maven.enabled` yml flag has no effect since M3 |
 | Auth filter | Set `spring.ai.loom.agent.auth.enabled=false` |
 | Auto-login | Override `IUser.isAutoLogin` to return `false` |
 

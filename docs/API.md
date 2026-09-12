@@ -1027,7 +1027,7 @@ Start a terminal process or REPL session. Supports two modes: **Shell mode** (on
 | Parameter | Type | Required | Description |
 |--------------|---------|----------|-------------------------------------------------------------------------------------------------|
 | `command` | string | Yes | Command to execute. Shell mode: any shell command. REPL mode: interpreter (e.g. `python`, `node`) |
-| `workingDir` | string | No | Working directory (default: `.local/file/{username}/`) |
+| `workingDir` | string | No | Working directory (default: `~/.loom/file/{username}/`) |
 | `repl` | boolean | No | Whether REPL mode. `true` = long interactive session; `false`/omitted = one-shot command |
 | `timeout` | long | No | Wait timeout in milliseconds (default 30000ms) |
 
@@ -1463,8 +1463,8 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.fileBasePath` | string | `.local/file` | Root directory for uploaded files |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge` | Root directory for knowledge base files |
+| `spring.ai.loom.agent.fileBasePath` | string | `~/.loom/file` | Root directory for uploaded files |
+| `spring.ai.loom.agent.knowledgeBasePath` | string | `~/.loom/knowledge` | Root directory for knowledge base files |
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -1474,7 +1474,7 @@ The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | Whether to enable the file tool |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **Deprecated since M3** — no effect; `IFileTool` is a universal tool (always visible) |
 | `spring.ai.loom.agent.file.maxFileSize` | long | `5242880` (5 MB) | Per-call upper bound on file read/write size (bytes). Exceeding this is rejected outright, **to avoid OOM and LLM context overflow**. |
 | `spring.ai.loom.agent.file.maxMediaSize` | long | `1048576` (1 MB) | Upper bound on media files (images / audio). Base64-encoded size ≈ 4/3 of the original, so the limit is stricter than for text. |
 | `spring.ai.loom.agent.file.maxWalkDepth` | int | `5` | Upper bound on depth for `directoryTree` / recursive listing / search. |
@@ -1498,7 +1498,7 @@ The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | Whether to register the end-to-end deploy tool (default enabled) |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | **Deprecated since M3** — no effect; bean always created, visibility RBAC-gated via `role_tool.tool_compile` |
 | `spring.ai.loom.agent.compile.mavenHome` | string | auto-discover | Optional Maven install dir; falls back to `maven.mavenHome` and PATH |
 | `spring.ai.loom.agent.compile.dockerCmd` | string | `docker` | Optional override for the docker CLI binary |
 | `spring.ai.loom.agent.compile.imageTemplates` | map | (6 pre-set templates) | Pre-set base-image templates keyed by alias; see below |
@@ -1561,11 +1561,11 @@ Example tool invocation:
 
 ### 10.9 Git Configuration (`IGitTool`)
 
-`IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. **Disabled by default** — opt in with `git.enabled=true`.
+`IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. The bean is **always created**; visibility is RBAC-gated — an admin must grant `tool_git` to a role (`/admin/roles/{code}/tools`, persisted in `role_tool`). The `git.enabled` yml flag is **deprecated (no effect)**.
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Whether to register the Git tool (default false; set to true to enable) |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; visibility is RBAC-gated via `role_tool.tool_git` |
 | `spring.ai.loom.agent.git.username` | string | — | Git username for remote authentication |
 | `spring.ai.loom.agent.git.token` | string | — | Git token / password for remote authentication |
 
@@ -1577,16 +1577,16 @@ spring:
  loom:
  agent:
  git:
- enabled: true # default false; set to true to enable
  username: your-username
  token: your-token
+# Note: no 'enabled' flag — grant tool_git to a role in the admin console instead
 ```
 
 ### 10.10 Maven Build Configuration
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Whether to register the Maven tool (**opt-in**) — compile/package for deployment scenarios is handled by `ICompileAndDeployTool` |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; the bean is created when `maven-invoker` is on the classpath (a default lib dependency) and visibility is RBAC-gated via `role_tool.tool_maven`. Compile/package for deployment scenarios is handled by `ICompileAndDeployTool` |
 | `spring.ai.loom.agent.maven.mavenHome` | string | — | Maven install directory. **When empty, the tool auto-discovers**: it tries the `MAVEN_HOME` / `M2_HOME` environment variables first, then scans common Windows paths (e.g. `C:\developer\apache-maven-*`, `C:\Program Files\Apache Maven`). Auto-discovery does **not** rely on the system `PATH`, so a broken or shadowing `mvn` wrapper (e.g. a global npm `mvn`) won't cause `maven-invoker` to throw `Error configuring command line`. |
 | `spring.ai.loom.agent.maven.localRepository` | string | — | Local repository path (uses the default path when empty) |
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | Maximum output lines (truncated when exceeded) |
@@ -1598,34 +1598,25 @@ spring:
 >
 > **Troubleshooting tip — "file is locked" errors when deleting the project directory on Windows**: in older versions this was caused by `maven-invoker 3.3.0` / `plexus-utils 3.3.0` because (a) the JVM shutdown hook they register on the exception/cancel path never releases the held `Process` reference, and (b) `Invoker.execute` does not expose the child-process handle, so it cannot propagate cancel/timeout down to the mvn child process. The result: a cancelled or timed-out Maven call would leave the mvn child running and continuing to hold mmap handles on `target/classes` and `~/.m2/repository/*.jar`, locking those files on Windows. **The new version no longer uses `Invoker.execute` to run the process** — it forks mvn directly with `ProcessBuilder`, does a clean timeout via `Process.waitFor(timeout, unit)`, then calls `Process.destroyForcibly` and explicitly closes the streams on timeout. **No JVM shutdown hook is registered any more, so the mvn child is always killed on timeout/cancel.** If you still see locks after upgrading, it is most likely an orphan mvn process left behind by a previous JVM — find it with `tasklist /FI "IMAGENAME eq cmd.exe"` and `taskkill /F /PID <pid>` it.
 
-### 10.11 Tool Group Switches
+### 10.11 Tool Group Switches (deprecated)
 
-All built-in tool groups are **enabled by default** (`matchIfMissing=true`). Set any of the following properties to `false` in yml to turn off the corresponding tool group.
+> **Since M3, the `*.enabled` switches below no longer gate tool beans.** All always-on `I*Tool` beans are created unconditionally (plus `IHtmlRenderTool`, gated only by `playwright` on the classpath). Visibility is governed by **universal tools** (`@ToolGroup(defaultGranted=true)` — visible to every logged-in user) vs **RBAC tools** (`tool_git` / `tool_maven` / `tool_compile` / `tool_render`, granted per role via `/admin/roles/{code}/tools`, persisted in `role_tool`). See [TOOLS.md §1](./TOOLS.md) for the full model. The properties remain for backward compatibility only.
 
 | Property | Type | Default | Description |
 |-----------------------------------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.time.enabled` | boolean | `true` | Time tool (`ITimeTool` — get current time, convert between timezones) |
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | File tool (`IFileTool` — 16 path-based read/write/edit/search/delete operations) |
-| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | Skill tool (`ISkillTool` — list skills, get skill details) |
-| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Git tool (`IGitTool` — 28 git operations). **Opt-in** — end-to-end deployment goes through `ICompileAndDeployTool`. |
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Maven tool (also requires `maven-invoker` on the classpath). **Opt-in** — compile/package for deployment scenarios goes through `ICompileAndDeployTool`. |
+| `spring.ai.loom.agent.time.enabled` | boolean | `true` | **Deprecated** — no effect (`ITimeTool` is universal) |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **Deprecated** — no effect (`IFileTool` is universal) |
+| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | **Deprecated** — no effect (`ISkillTool` is universal) |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | **Deprecated** — no effect; `IGitTool` bean always created, visibility RBAC-gated via `role_tool.tool_git` |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **Deprecated** — no effect; `IMavenTool` bean created when `maven-invoker` on classpath, visibility RBAC-gated via `role_tool.tool_maven` |
 | `spring.ai.loom.agent.git.username` | string | — | HTTP(S) Git auth username (clone/pull/push) |
 | `spring.ai.loom.agent.git.token` | string | — | HTTP(S) Git auth token / password |
 | `spring.ai.loom.agent.gitUsername` | string | — | **Legacy** top-level alias, equivalent to `git.username` |
 | `spring.ai.loom.agent.gitToken` | string | — | **Legacy** top-level alias, equivalent to `git.token` |
 
-**Example — enable the Git tool**:
+**Example — expose the Git tool to a role**: no yml change needed; in the admin console (角色管理 → base → 编辑/授权 → 授权本地工具组) grant `tool_git` to the role.
 
-```yaml
-spring:
- ai:
- loom:
- agent:
- git:
- enabled: true # default false; set to true to enable
-```
-
-> Even when a tool group is turned off, you can still re-enable it by providing your own `@Bean IGitTool` / `@Bean IMavenTool` — `@ConditionalOnMissingBean` always takes precedence over the auto-configured bean.
+> To replace a tool implementation, provide your own `@Bean IGitTool` / `@Bean IMavenTool` — `@ConditionalOnMissingBean` always gives user-provided beans precedence.
 
 ---
 

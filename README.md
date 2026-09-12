@@ -35,26 +35,28 @@
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
-- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / askUser / end-to-end deploy (on by default), git / maven / html-render (opt-in); see [TOOLS.md](docs/TOOLS.md)
+- **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render; see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
 
 All tools follow the **interface + default implementation** pattern. Every component is registered with `@ConditionalOnMissingBean`, allowing consumers to replace any piece with a custom implementation.
 
-| Tool | Interface | Methods | Default | Config Property |
+| Tool | Interface | Methods | Visibility | Config Property |
 |------|-----------|---------|---------|-----------------|
-| Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
-| File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
-| Skill | `ISkillTool` | 3 | ✅ enabled | `skill.enabled` |
-| Knowledge | `IKnowledgeTool` | 1 | ✅ enabled | `knowledge.enabled` |
-| Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
-| Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
-| AskUser | `IAskUserTool` | 1 | ✅ enabled | `askuser.timeoutSeconds` |
-| Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
-| Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
-| Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |
-| Html Render | `IHtmlRenderTool` | 1 | ❌ classpath-gated | add `playwright` dep + `tool_render` grant |
+| Time | `ITimeTool` | 2 | ✅ universal | — (`time.enabled` deprecated) |
+| File | `IFileTool` | 16 | ✅ universal | `file.*` limits (`file.enabled` deprecated) |
+| Skill | `ISkillTool` | 2 | ✅ universal | — (`skill.enabled` deprecated) |
+| Knowledge | `IKnowledgeTool` | 1 | ✅ universal | gated by `rag.enabled` (VectorStore) |
+| Sub-task | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| Schedule | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
+| AskUser | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
+| Git | `IGitTool` | 28 | 🔐 RBAC (`tool_git`) | `git.username` / `git.token` |
+| Maven | `IMavenTool` | 6 | 🔐 RBAC (`tool_maven`) | `maven.mavenHome` etc. |
+| Compile & Deploy | `ICompileAndDeployTool` | 1 | 🔐 RBAC (`tool_compile`) | `compile.*` |
+| Html Render | `IHtmlRenderTool` | 1 | 🔐 RBAC (`tool_render`) + classpath-gated | add `playwright` dep + grant in admin console |
+
+> **universal** = visible to every logged-in user (`@ToolGroup(defaultGranted=true)`). **RBAC** = visible only after an admin grants the tool group to a role (`role_tool` table). The legacy `*.enabled` yml switches no longer gate any tool since M3 — see [TOOLS.md §1](docs/TOOLS.md).
 
 For full `@Tool` method signatures, parameter details, and configuration reference, see [TOOLS.md](docs/TOOLS.md).
 

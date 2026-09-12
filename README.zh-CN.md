@@ -31,26 +31,28 @@
 - **🛡 RBAC 权限** — 两级：用户类型（管理员 / 普通）+ 业务角色；admin 看全部，普通用户按角色授权取并集
 - **🎛 管理控制台** — 侧边栏 SPA：用户 / 角色 / Skill 市场 / 知识库市场 / MCP 描述 / 日志（原用量统计）六大模块，admin 路径鉴权
 - **📁 文件管理** — 磁盘存储 + H2 元数据，上传 / 预览 / 下载，聊天附件自动桥接
-- **🧰 内置工具** — 时间 / 文件 / 技能 / 子任务 / 定时 / 用户提问 / 端到端部署（默认启用），Git / Maven / HTML 渲染截图（opt-in）；详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
+- **🧰 内置工具** — universal(所有登录用户可见):时间 / 文件 / 技能 / 知识检索 / 子任务 / 定时 / 用户提问;RBAC 控制(admin 按角色授权):Git / Maven / 端到端部署 / HTML 渲染截图;详见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)
 - **⚙️ 开箱即用工程化** — Spring Boot 自动配置，全组件 `@ConditionalOnMissingBean` 可替换，Flyway 迁移，广泛支持各类聊天 / 嵌入 / 向量存储后端
 
 ## 内置工具
 
 所有工具遵循 **接口 + 默认实现** 模式——每个组件均通过 `@ConditionalOnMissingBean` 注册，用户可提供自定义实现替换任意组件——
 
-| 工具 | 接口 | 方法数 | 默认状态 | 配置属性 |
+| 工具 | 接口 | 方法数 | 可见性 | 配置属性 |
 |------|------|--------|----------|----------|
-| 时间 | `ITimeTool` | 2 | ✅ 启用 | `time.enabled` |
-| 文件 | `IFileTool` | 16 | ✅ 启用 | `file.enabled` |
-| 技能 | `ISkillTool` | 3 | ✅ 启用 | `skill.enabled` |
-| 知识库 | `IKnowledgeTool` | 1 | ✅ 启用 | `knowledge.enabled` |
-| 子任务 | `ISubTaskTool` | 4 | ✅ 启用 | `subtask.enabled` |
-| 定时 | `IScheduleTool` | 4 | ✅ 启用 | `schedule.enabled` |
-| 用户提问 | `IAskUserTool` | 1 | ✅ 启用 | `askuser.timeoutSeconds` |
-| Git | `IGitTool` | 28 | ❌ 禁用 | `git.enabled` |
-| Maven | `IMavenTool` | 6 | ❌ 禁用 | `maven.enabled` |
-| 编译部署 | `ICompileAndDeployTool` | 1 | ✅ 启用 | `compile.enabled` |
-| HTML 渲染截图 | `IHtmlRenderTool` | 1 | ❌ classpath 门控 | 引入 playwright 依赖 + tool_render 授权 |
+| 时间 | `ITimeTool` | 2 | ✅ universal | —（`time.enabled` 已废弃） |
+| 文件 | `IFileTool` | 16 | ✅ universal | `file.*` 限额（`file.enabled` 已废弃） |
+| 技能 | `ISkillTool` | 2 | ✅ universal | —（`skill.enabled` 已废弃） |
+| 知识库 | `IKnowledgeTool` | 1 | ✅ universal | 由 `rag.enabled`（VectorStore）门控 |
+| 子任务 | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| 定时 | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
+| 用户提问 | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
+| Git | `IGitTool` | 28 | 🔐 RBAC（`tool_git`） | `git.username` / `git.token` |
+| Maven | `IMavenTool` | 6 | 🔐 RBAC（`tool_maven`） | `maven.mavenHome` 等 |
+| 编译部署 | `ICompileAndDeployTool` | 1 | 🔐 RBAC（`tool_compile`） | `compile.*` |
+| HTML 渲染截图 | `IHtmlRenderTool` | 1 | 🔐 RBAC（`tool_render`）+ classpath 门控 | 引入 playwright 依赖 + 控制台授权 |
+
+> **universal** = 对所有登录用户可见（`@ToolGroup(defaultGranted=true)`）。**RBAC** = 仅当管理员给角色授权该工具组后可见（`role_tool` 表）。旧的 `*.enabled` yml 开关自 M3 起不再控制任何工具 —— 见 [TOOLS.zh-CN.md §1](docs/TOOLS.zh-CN.md)。
 
 完整的 `@Tool` 方法签名、参数说明和配置参考见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)——### 编译部署工具
 ![img_7.png](docs/img_7.png)
