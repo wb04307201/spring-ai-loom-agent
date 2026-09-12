@@ -53,11 +53,11 @@ mvn test -pl spring-ai-loom-agent-test -Dtest='VisualBaselineBrowserIT' -Dupdate
 
 ## M0/M1/M2 Market Upgrade (v1.2.0)
 
-The v1.2.0 cycle (commits `26834b0..dceaddc`, M0 + M1 + M2 milestones) introduced a unified Skill + Knowledge Base market: full CRUD via admin UI, PENDING/APPROVED/REJECTED approval flow, `is_official / featured_rank / category` columns on both `market_skill` and `loom_market_knowledge`, `BatchedCounterService` for stat tracking, 5-star reviews with an `edit_count` gate, per-row announcements, and a KB tag system with filter UI. See [`docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md`](docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md) for the design.
+The v1.2.0 cycle (commits `26834b0..dceaddc`, M0 + M1 + M2 milestones) introduced a unified Skill + Knowledge Base market: full CRUD via admin UI, PENDING/APPROVED/REJECTED approval flow, `is_official / featured_rank / category` columns on both `market_skill` and `loom_market_knowledge`, `BatchedCounterService` for stat tracking, 5-star reviews with an `edit_count` gate, per-row announcements, and a KB tag system with filter UI. (Design spec was archived under `docs/superpowers/specs/2026-09-04-skill-knowledge-market-design.md` — directory since removed; recover via git history if needed.)
 
 ### M3+ Technical Debt (named inventory)
 
-v1.2.0 left a tech-debt inventory (named categories `A12 / B1 / B2 / B3 / B4 / B8` + §10 rulings; not a numbered 24-row catalogue) — spec at [`docs/superpowers/specs/2026-09-05-market-tech-debt-cleanup.md`](docs/superpowers/specs/2026-09-05-market-tech-debt-cleanup.md) and task breakdown at [`docs/superpowers/plans/2026-09-05-market-tech-debt-cleanup.md`](docs/superpowers/plans/2026-09-05-market-tech-debt-cleanup.md). Cleanup is staged across 7 phases (T0–T6 + verification, ~8–12 weeks); each task lands in its own commit (`feat:` / `fix:` / `refactor:` / `docs:` / `test:` prefix) with an IT regression gate at every phase boundary. Task T1.2 / T1.3 share a single commit per plan line 214.
+v1.2.0 left a tech-debt inventory (named categories `A12 / B1 / B2 / B3 / B4 / B8` + §10 rulings; not a numbered 24-row catalogue) — spec/task-breakdown docs were archived under `docs/superpowers/{specs,plans}/2026-09-05-market-tech-debt-cleanup.md` (directory since removed; recover via git history if needed). Cleanup is staged across 7 phases (T0–T6 + verification, ~8–12 weeks); each task lands in its own commit (`feat:` / `fix:` / `refactor:` / `docs:` / `test:` prefix) with an IT regression gate at every phase boundary. Task T1.2 / T1.3 share a single commit per plan line 214.
 
 | Phase | Scope |
 |-------|-------|
