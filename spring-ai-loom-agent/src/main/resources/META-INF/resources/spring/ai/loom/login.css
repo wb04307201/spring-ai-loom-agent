@@ -5,11 +5,11 @@
 }
 
 :root {
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
   --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
   --bg-page: #f8fafc;
   --bg-card: #ffffff;
   --border-color: #e2e8f0;
@@ -121,7 +121,7 @@ body {
   height: 56px;
   border-radius: 50%;
   object-fit: cover;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.28);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.28);
   margin-bottom: 12px;
 }
 
@@ -170,7 +170,7 @@ body {
 .form-group input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
 }
 
 .error-msg {
@@ -203,7 +203,7 @@ body {
 .submit-btn:hover:not(:disabled) {
   background: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.25);
 }
 
 .submit-btn:disabled {

@@ -15,7 +15,7 @@ spring-ai-loom-agent/
 │ ├── skill/ ISkillStorage # 技能存储
 │ ├── file/ IFile / IUpload # 文件存储、上传与下载
 │ ├── user/ IUser / AuthenticationFilter # 认证鉴权
-│ ├── vectorstore/ JVectorStore # 默认向量存储
+│ ├── vectorstore/ H2JVectorStore # 默认向量存储(H2 持久化)
 │ ├── tool/ IEmbedTool (marker) # 聚合工具接口
 │ │ ├── time/ ITimeTool / DefaultTimeTool # 时间工具
 │ │ ├── skill/ ISkillTool / DefaultSkillTool # 技能工具
@@ -64,11 +64,12 @@ spring-ai-loom-agent/
 | `rag.similarityThreshold` | double | `0.0` | 向量检索相似度阈值，低于此值的文档将被过滤 |
 | `rag.topK` | int | `4` | 检索返回的文档数量 |
 
-### 1.3 JVector 向量库配置 (`jvector.*`)
+### 1.3 向量库配置 (`jvector.*`, H2 持久化)
+
+> 持久化:向量存 H2 表 `loom_vector_store`,`ApplicationReadyEvent` 时 hydrate 进内存 JVector HNSW 图 —— 启动不再 re-embed。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |--------------------------|--------|------------------------|----------------------------------|
-| `jvector.indexPath` | String | `.local/jvector-index` | 向量索引持久化路径 |
 | `jvector.m` | int | `16` | HNSW 图参数 M（控制分支因子，越大索引质量越高但构建越慢） |
 | `jvector.efConstruction` | int | `100` | HNSW 构建时的搜索宽度（影响构建质量和速度） |
 | `jvector.efSearch` | int | `10` | HNSW 搜索时的搜索宽度（越大搜索越精确但越慢） |
@@ -86,11 +87,11 @@ spring-ai-loom-agent/
 
 ### 1.5 技能配置（yml 不再读取）
 
-> ⚠️ Skill 配置**不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。init migration 会：
+> ⚠️ Skill 配置**不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。库主 schema（`V1.0__init.sql`）会：
 >
-> 1. 建三张表 —— `market_skill` / `user_skill` / `role_skill`
-> 2. 把旧 `skill` 表的存量数据迁到 `user_skill`（标 `source=USER_CREATED`）
-> 3. Seed 6 个 system skill 进 `market_skill`（author=`system`, status=`APPROVED`, version=`1.0.0`）—— 它们的完整 Prompt 模板内容直接 hardcode 在 init migration 里：
+> 1. 建三张表 —— `market_skill` / `user_skill` / `role_skill`（全新库政策：库层只建 schema，不 seed 业务数据）
+>
+> 随附的演示/test 应用的 `V1.1__init_app_data.sql` 再把 6 个示例系统技能 seed 进**默认 admin 用户**的 `user_skill`（`source=USER_CREATED`、`default_loaded=true`、`locked=false`）—— 它们的完整 Prompt 模板内容直接 hardcode 在迁移脚本里：
 > - 网络月度事件报告
 > - http 测试
 > - 测试保存、下载、预览 1
@@ -156,8 +157,7 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `fileBasePath` | String | `.local/file` | 上传文件的根目录（聊天附件、文件工具操作） |
-| `knowledgeBasePath` | String | `.local/knowledge` | 知识库文件的根目录 |
+| `usersBasePath` | String | `~/.loom/users` | 用户树根目录（聊天附件 + 文件工具沙箱在 `{usersBasePath}/{username}/file/` 下） |
 
 同目录下的同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
@@ -165,7 +165,7 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |-------------------|--------|-------|--------------------------------------------------------------------|
-| `git.enabled` | boolean | `false` | 是否启用 Git 工具（IGitTool）。**默认禁用**（opt-in）—— 端到端部署请走 `ICompileAndDeployTool`（始终启用）。设为 `true` 时再暴露 28 个 git 命令给 LLM。 |
+| `git.enabled` | boolean | `false` | **M3 起已废弃** — 无实际效果;`IGitTool` bean 总是创建。要把 28 个 git 命令暴露给 LLM 走 RBAC:经 `/admin/roles/{code}/tools` 给角色授权 `tool_git`。端到端部署请走 `ICompileAndDeployTool`。 |
 | `git.username` | String | — | HTTP(S) git 认证用户名（clone/pull/push） |
 | `git.token` | String | — | HTTP(S) git 认证令牌/密码 |
 | `gitUsername` | String | — | **兼容** 顶层字段，等价于 `git.username` |
@@ -179,27 +179,27 @@ spring:
  loom:
  agent:
  git:
- enabled: true # 默认；设为 false 禁用
  username: your-git-username
  token: your-git-token
+# 注意:无 enabled 开关 — 在管理控制台给角色授权 tool_git 即可
 ```
 
 > Git 凭证也可通过 `ToolContext` 按请求传入（`gitUsername` / `gitToken` 键），会覆盖配置的默认值。
 
-### 1.9 工具启用开关（`{time,file,skill,git,maven,compile}.enabled`）
+### 1.9 工具组开关（已废弃,`{time,file,skill,git,maven,compile}.enabled`）
 
-所有内置工具组（`ITimeTool` / `ISkillTool` / `IFileTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`）的完整参考——包括默认状态、所有 `@Tool` 方法签名、配置属性、基础镜像模板、端到端部署参数——见 **[TOOLS.zh-CN.md](./TOOLS.zh-CN.md)**。
+所有内置工具组（`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IAskUserTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`）的完整参考——包括默认状态、所有 `@Tool` 方法签名、配置属性、基础镜像模板、端到端部署参数——见 **[TOOLS.zh-CN.md](./TOOLS.zh-CN.md)**。
 
-开关一览：
+> **自 M3 起,`*.enabled` 开关不再控制任何工具 bean 的创建。** 可见性由两种机制决定:**universal 工具**（`@ToolGroup(defaultGranted=true)`,7 个:`tool_time` / `tool_file` / `tool_skill` / `tool_knowledge` / `tool_subtask` / `tool_schedule` / `tool_askUser`,对所有登录用户可见）与 **RBAC 工具**（4 个:`tool_git` / `tool_maven` / `tool_compile` / `tool_render`,由管理员按角色授权,持久化在 `role_tool` 表）。下表属性仅为向后兼容保留,**均无实际效果**:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |-------------------|--------|-------|----------------------------------------------------------|
-| `time.enabled` | boolean | `true` | `ITimeTool` — 时间与时区工具 |
-| `file.enabled` | boolean | `true` | `IFileTool` — 16 个基于路径的文件工具 |
-| `skill.enabled` | boolean | `true` | `ISkillTool` — 列出技能、获取技能详情 |
-| `git.enabled` | boolean | `false` | `IGitTool`（JGit）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
-| `maven.enabled` | boolean | `false` | `IMavenTool`（需 `maven-invoker`）。**opt-in** —— 编译/打包走 `ICompileAndDeployTool`。 |
-| `compile.enabled` | boolean | `true` | `ICompileAndDeployTool` — 端到端 `git clone → build → docker run → health check` |
+| `time.enabled` | boolean | `true` | **已废弃** — universal 工具,无实际效果 |
+| `file.enabled` | boolean | `true` | **已废弃** — universal 工具,无实际效果 |
+| `skill.enabled` | boolean | `true` | **已废弃** — universal 工具,无实际效果 |
+| `git.enabled` | boolean | `false` | **已废弃** — bean 总是创建;可见性由 `role_tool.tool_git` 控制 |
+| `maven.enabled` | boolean | `false` | **已废弃** — bean 在 classpath 有 `maven-invoker`（库默认依赖）时创建;可见性由 `role_tool.tool_maven` 控制 |
+| `compile.enabled` | boolean | `true` | **已废弃** — bean 总是创建;可见性由 `role_tool.tool_compile` 控制 |
 
 ---
 
@@ -340,7 +340,7 @@ public IChat customChat(
 | **覆盖方式** | 自定义 `@Bean IUpload` |
 | **控制内容** | 文件上传（普通/知识库）、文件下载、文件删除（关联知识库）、知识库文件批量删除 |
 
-**默认行为**: 聊天上传的文件保存到 `{fileBasePath}/{username}/`（如 `.local/file/username/`），知识库文件保存到 `{knowledgeBasePath}/{username}/{knowledgeId}/`（如 `.local/knowledge/username/{knowledgeId}/`）。同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
+**默认行为**: 聊天上传的文件保存到 `{usersBasePath}/{username}/file/`（如 `~/.loom/users/username/file/`）；知识库文件内容存数据库（`DatabaseFileStorage` → `loom_file_content` 表），不落盘。同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。文档通过 `IDocumentRead` 解析（PDF/DOCX/XLSX/PPTX/MD 等），文本内容通过 System Prompt 注入对话。
 
 **常见自定义场景**: 上传到云存储（S3/OSS）、接入第三方 OCR、异步文档解析等。
 
@@ -383,9 +383,9 @@ public IChat customChat(
 | **接口** | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage` |
 | **默认实现** | `DefaultSkillStorage` |
 | **覆盖方式** | 自定义 `@Bean ISkillStorage` |
-| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。：去审批流；拉取拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
+| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。审批流：提交 → PENDING，admin 审批通过/拒绝（拒绝必须填评论）；REJECTED 重新提交时旧行归档到 `market_skill_archive` 并新建 PENDING 行；拉取仅允许 APPROVED（否则 403），且拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
 
-**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，含 PENDING / APPROVED / REJECTED / DEPRECATED 四种状态）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `/ ` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
+**默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，三种状态 —— PENDING / APPROVED / REJECTED —— 走审批流；作者重投的 REJECTED 行归档到 `market_skill_archive`）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `V1.0`/`V1.1` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
 
 **常见自定义场景**: 接入第三方技能注册中心（如私有 Nexus / REST 目录），实现 `ISkillStorage` 接口并以 `@Bean` 注册即可替换 `DefaultSkillStorage`。
 
@@ -464,11 +464,11 @@ Spring AI 支持多种持久化后端，通过引入对应依赖自动配置：
 
 ### 3.4 VectorStore（向量存储）
 
-JVector 是项目的回退方案。引入任何 Spring AI VectorStore Starter 即可自动替换：
+H2 持久化 JVector 是项目的回退方案。引入任何 Spring AI VectorStore Starter 即可自动替换：
 
 | 向量库 | 依赖 Starter | 说明 |
 |-------------------|---------------------------------|---------------|
-| **JVector（默认回退）** | 内置 | 本地文件持久化，零外部依赖 |
+| **H2 持久化 JVector（默认回退）** | 内置 | H2 表持久化(loom_vector_store)+ 内存 HNSW，零外部依赖 |
 | Qdrant | `spring-ai-qdrant-store` | 测试模块使用 |
 | Milvus | `spring-ai-milvus-store` | 生产常用 |
 | Redis | `spring-ai-redis-store` | Redis Vector |
@@ -486,7 +486,7 @@ JVector 是项目的回退方案。引入任何 Spring AI VectorStore Starter �
 </dependency>
 ```
 
-引入后 `JVectorStore` 将自动跳过，无需额外代码。
+引入后 `H2JVectorStore` 将自动跳过，无需额外代码。
 
 ### 3.5 ChatModel（AI 模型提供商）
 
@@ -654,10 +654,10 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | `spring.ai.mcp.client.enabled=false`| application.yml | 禁用 MCP 客户端自动配置（当 MCP 服务器不可用时可避免启动失败） |
 | `auth.enabled=false` | application.yml | 禁用鉴权；`AuthenticationFilter` 放行所有请求 |
 | 不提供 `VectorStore` Bean | 不引入任何 VectorStore Starter | 不会创建 `IDocumentRead`、`RetrievalAugmentationAdvisor`、`loomAgentFileRouter`、`loomAgentKnowledgeRouter`，知识库和文件上传功能不可用 |
-| 不提供 `EmbeddingModel` Bean | 不引入 EmbeddingModel Starter | 不会创建 `JVectorStore`，向量存储不可用 |
+| 不提供 `EmbeddingModel` Bean | 不引入 EmbeddingModel Starter | 不会创建 `H2JVectorStore`，向量存储不可用 |
 | 自定义同类型 Bean | Java `@Bean` 配置 | 对应的 `@ConditionalOnMissingBean` Bean 不会被创建 |
-| `spring.ai.loom.agent.git.enabled=true` | application.yml | 创建 `IGitTool` Bean（`DefaultGitTool`，Eclipse JGit 7.6.0）；未配置时 Git 工具不可用 |
-| classpath 上有 `maven-invoker` | 已提供依赖 | 启用 `IMavenTool` Bean 创建；没有时 Maven 工具不可用 |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml | **M3 起已废弃** — 无实际效果;`IGitTool` bean 总是创建。Git 工具可见性由 `role_tool.tool_git` RBAC 控制(在管理控制台授予/移除) |
+| classpath 上有 `maven-invoker` | 已提供依赖 | `IMavenTool` bean 创建的 `@ConditionalOnClass` 门控(它是库默认依赖);可见性由 `role_tool.tool_maven` RBAC 控制 |
 
 ### 8.1 快速禁用功能清单
 
@@ -666,8 +666,8 @@ UI 静态资源位于 `spring-ai-loom-agent/src/main/resources/META-INF/resource
 | 整个聊天功能 | 设置 `spring.ai.chat.ui.init=false` |
 | RAG/知识库 | 不引入任何 `VectorStore` 或 `EmbeddingModel` Starter |
 | MCP 功能 | 设置 `spring.ai.mcp.client.enabled=false` |
-| Git 工具 | 不设置 `spring.ai.loom.agent.git.enabled=true`（默认禁用） |
-| Maven 工具 | 设置 `spring.ai.loom.agent.maven.enabled=false` |
+| Git 工具 | RBAC 控制:不给任何角色授权 `tool_git`(或在管理控制台移除)。`git.enabled` yml 开关自 M3 起无效果 |
+| Maven 工具 | RBAC 控制:不给任何角色授权 `tool_maven`。`maven.enabled` yml 开关自 M3 起无效果 |
 | 认证过滤器 | 设置 `spring.ai.loom.agent.auth.enabled=false` |
 | 自动登录 | 自定义 `IUser` 的 `isAutoLogin` 返回 `false` |
 

@@ -15,7 +15,7 @@ spring-ai-loom-agent/
 │ ├── skill/ ISkillStorage # Skill storage
 │ ├── file/ IFile / IUpload # File storage & upload
 │ ├── user/ IUser / AuthenticationFilter # Auth & filter
-│ ├── vectorstore/ JVectorStore # Default vector store
+│ ├── vectorstore/ H2JVectorStore # Default vector store (H2-backed)
 │ ├── tool/ IEmbedTool (marker) # Aggregate tool interface
 │ │ ├── time/ ITimeTool / DefaultTimeTool # Time tools
 │ │ ├── skill/ ISkillTool / DefaultSkillTool # Skill tools
@@ -64,11 +64,12 @@ All properties are prefixed with `spring.ai.loom.agent`.
 | `rag.similarityThreshold` | double | `0.0` | Vector retrieval similarity threshold; documents below are filtered |
 | `rag.topK` | int | `4` | Number of documents to retrieve |
 
-### 1.3 JVector Vector Store Configuration (`jvector.*`)
+### 1.3 Vector Store Configuration (`jvector.*`, H2-backed)
+
+> Persistence: vectors live in the H2 table `loom_vector_store` and are hydrated into the in-memory JVector HNSW graph on `ApplicationReadyEvent` — no boot-time re-embedding.
 
 | Property | Type | Default | Description |
 |----------------------------|--------|------------------------|-----------------------------------------------------------------------------|
-| `jvector.indexPath` | String | `.local/jvector-index` | Path for vector index persistence |
 | `jvector.m` | int | `16` | HNSW graph parameter M (controls branching factor; higher = better quality but slower build) |
 | `jvector.efConstruction` | int | `100` | HNSW build-time search width (affects build quality and speed) |
 | `jvector.efSearch` | int | `10` | HNSW query-time search width (higher = more accurate but slower) |
@@ -86,11 +87,11 @@ All properties are prefixed with `spring.ai.loom.agent`.
 
 ### 1.5 Skill Configuration (no longer read from yml)
 
-> ⚠️ Skill configuration is **no longer done via yml**. The old `skills[]` block (under `spring.ai.loom.agent`) has been removed. The init migration:
+> ⚠️ Skill configuration is **no longer done via yml**. The old `skills[]` block (under `spring.ai.loom.agent`) has been removed. The library init migration (`V1.0__init.sql`):
 >
-> 1. Creates three tables — `market_skill`, `user_skill`, `role_skill`
-> 2. Migrates any existing data from the old `skill` table into `user_skill` (`source=USER_CREATED`)
-> 3. Seeds 6 system skills into `market_skill` (author=`system`, status=`APPROVED`, version=`1.0.0`) — these are the demo skills with full Prompt template content hard-coded directly in the init migration:
+> 1. Creates three tables — `market_skill`, `user_skill`, `role_skill` (fresh-DB policy: schema only, no data seeding at the library level)
+>
+> The bundled demo/test app's `V1.1__init_app_data.sql` then seeds 6 sample system skills into the **default admin user's** `user_skill` (`source=USER_CREATED`, `default_loaded=true`, `locked=false`) — the full Prompt template content is hard-coded directly in the migration:
 > - `Monthly Event Report` (网络月度事件报告)
 > - `HTTP Test` (http测试)
 > - `Save/Download/Preview Demo 1` (测试保存、下载、预览1)
@@ -156,8 +157,7 @@ spring:
 
 | Property | Type | Default | Description |
 |----------------------------|---------|----------------|-----------------------------------------------------------------------------|
-| `fileBasePath` | String | `.local/file` | Root directory for uploaded files (chat attachments, file tool operations) |
-| `knowledgeBasePath` | String | `.local/knowledge` | Root directory for knowledge base files |
+| `usersBasePath` | String | `~/.loom/users` | User-tree root (chat attachments + file tool sandbox under `{usersBasePath}/{username}/file/`) |
 
 Files with duplicate names in the same directory are auto-renamed: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -165,7 +165,7 @@ Files with duplicate names in the same directory are auto-renamed: `file.txt` �
 
 | Property | Type | Default | Description |
 |---------------------|---------|---------|------------------------------------------------------------------------------------------|
-| `git.enabled` | boolean | `false` | Whether to enable Git tool (IGitTool); opt-in. End-to-end deployment uses `ICompileAndDeployTool` (always on) instead. Set to `true` to expose 28 git commands to the LLM. |
+| `git.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; the `IGitTool` bean is always created. Exposing the 28 git commands to the LLM is RBAC-gated: grant `tool_git` to a role via `/admin/roles/{code}/tools`. End-to-end deployment uses `ICompileAndDeployTool` instead. |
 | `git.username` | String | — | Username for HTTP(S) git authentication (clone/pull/push) |
 | `git.token` | String | — | Token/password for HTTP(S) git authentication |
 | `gitUsername` | String | — | **Legacy** top-level alias for `git.username` |
@@ -188,12 +188,14 @@ spring:
 
 ### 1.9 Tool Visibility & RBAC (Universal vs RBAC tools)
 
-For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
+For the full reference of every built-in tool (`ITimeTool` / `ISkillTool` / `IFileTool` / `IKnowledgeTool` / `ISubTaskTool` / `IScheduleTool` / `IAskUserTool` / `IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`) — including default state, all `@Tool` method signatures, configuration properties, base-image templates, and end-to-end deployment parameters — see **[TOOLS.md](./TOOLS.md)**.
 
 Since M6 (commit history), tool visibility is governed by two mechanisms instead of the legacy `*.enabled` yml switches:
 
-1. **Universal tools** — annotated `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user, no role needed. The 6 universal groups are: `tool_time`, `tool_file`, `tool_skill`, `tool_knowledge`, `tool_subtask`, `tool_schedule`.
-2. **RBAC tools** — annotated `@ToolGroup(defaultGranted=false)`. Visible only after an admin grants the tool group to a role via `/admin/roles/{code}/tools` (persisted in the `role_tool` table). The 3 RBAC groups are: `tool_git`, `tool_maven`, `tool_compile`. The `IGitTool` and `IMavenTool` beans are also still gated by `spring.ai.loom.agent.{git,maven}.enabled` for bean creation; the `*.enabled` flags on the universal tools are deprecated since M3 and have no effect.
+1. **Universal tools** — annotated `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user, no role needed. The 7 universal groups are: `tool_time`, `tool_file`, `tool_skill`, `tool_knowledge`, `tool_subtask`, `tool_schedule`, `tool_askUser`.
+2. **RBAC tools** — annotated `@ToolGroup(defaultGranted=false)`. Visible only after an admin grants the tool group to a role via `/admin/roles/{code}/tools` (persisted in the `role_tool` table). The 4 RBAC groups are: `tool_git`, `tool_maven`, `tool_compile`, `tool_render` (`IHtmlRenderTool` — bean created only when the optional `playwright` dependency is on the classpath).
+
+> Note: **no `*.enabled` yml flag gates tool bean creation any more** (verified against `LoomAgentConfiguration.ToolConfiguration` — every `I*Tool` bean carries only `@ConditionalOnMissingBean`, plus `@ConditionalOnClass` for maven-invoker / playwright and `@ConditionalOnBean(VectorStore.class)` for `IKnowledgeTool`). `git.enabled` / `maven.enabled` included.
 
 Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
 
@@ -202,8 +204,8 @@ Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
 | `time.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
 | `file.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
 | `skill.enabled` | boolean | `true` | **Deprecated since M3** — universal tool, no functional effect |
-| `git.enabled` | boolean | `false` | Gates `IGitTool` bean creation; once created, RBAC via `role_tool` |
-| `maven.enabled` | boolean | `false` | Gates `IMavenTool` bean creation (also requires `maven-invoker` on classpath); once created, RBAC via `role_tool` |
+| `git.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; `IGitTool` bean is always created, visibility RBAC-gated via `role_tool.tool_git` |
+| `maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; `IMavenTool` bean is created when `maven-invoker` is on the classpath (a default lib dependency), visibility RBAC-gated via `role_tool.tool_maven` |
 | `compile.enabled` | boolean | `true` | **Deprecated since M3** — RBAC tool, the `*.enabled` flag has no effect; grant via `role_tool.tool_compile` |
 
 > Pre-existing databases: Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` already cleared any historical RBAC rows for the 6 universal tool groups. New databases start clean. See TOOLS.md §1 for details.
@@ -347,7 +349,7 @@ public IChat customChat(
 | **Override** | Custom `@Bean IUpload` |
 | **Controls** | File upload (plain/knowledge-base), file download, file deletion (knowledge-base-aware), bulk knowledge-base file deletion |
 
-**Default behavior**: Chat-uploaded files saved to `{fileBasePath}/{username}/` (e.g., `.local/file/username/`), knowledge-base files to `{knowledgeBasePath}/{username}/{knowledgeId}/` (e.g., `.local/knowledge/username/{knowledgeId}/`). Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
+**Default behavior**: Chat-uploaded files saved to `{usersBasePath}/{username}/file/` (e.g., `~/.loom/users/username/file/`); knowledge-base file contents are stored in the database (`loom_file_content` table via `DatabaseFileStorage`), not on disk. Duplicate names get a numeric suffix: `file.txt` → `file(1).txt` → `file(2).txt`. Documents are parsed via `IDocumentRead` (PDF/DOCX/XLSX/PPTX/MD etc.) — the extracted text is injected into the conversation as a System Prompt.
 
 **Common use case**: Upload to cloud storage (S3/OSS), integrate third-party OCR, async document parsing.
 
@@ -390,9 +392,9 @@ public IChat customChat(
 | **Interface** | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage` |
 | **Default** | `DefaultSkillStorage` |
 | **Override** | Custom `@Bean ISkillStorage` |
-| **Controls** | Per-user skill list (`user_skill`), save / patch / get / remove; auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. no approval flow; pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` set; admin only sees own `user_skill` (no union view); pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
+| **Controls** | Per-user skill list (`user_skill`), save / patch / get / remove; auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow: submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submits archive the old row to `market_skill_archive` and create a NEW PENDING row; pull requires APPROVED (else 403) and rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` set; admin only sees own `user_skill` (no union view); pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
 
-**Default behavior**: JDBC-backed storage using three tables — `user_skill` (per-user installed skills), `role_skill` (skills granted to a role, automatically locked in `user_skill` for every user holding that role), and `market_skill` (the Skill Market catalog: PENDING / APPROVED / REJECTED / DEPRECATED status). `DefaultSkillStorage` does not load any yml fallback anymore; the `spring.ai.loom.agent.skills.*` properties were removed in favor of seeding via the `/` Flyway migrations and managing through the admin console → Skill Market page.
+**Default behavior**: JDBC-backed storage using three tables — `user_skill` (per-user installed skills), `role_skill` (skills granted to a role, automatically locked in `user_skill` for every user holding that role), and `market_skill` (the Skill Market catalog: three statuses — PENDING / APPROVED / REJECTED — under the approval flow; REJECTED rows re-submitted by their author are archived to `market_skill_archive`). `DefaultSkillStorage` does not load any yml fallback anymore; the `spring.ai.loom.agent.skills.*` properties were removed in favor of seeding via the `V1.0`/`V1.1` Flyway migrations and managing through the admin console → Skill Market page.
 
 **Common use case**: Add a third-party skill registry (e.g., pull from a private Nexus / REST catalog) by implementing `ISkillStorage` and registering it as a `@Bean` to replace `DefaultSkillStorage`.
 
@@ -471,11 +473,11 @@ Spring AI supports multiple persistence backends via auto-configuration based on
 
 ### 3.4 VectorStore
 
-JVector is the fallback. Add any Spring AI VectorStore Starter to auto-replace it:
+H2-backed JVector is the fallback. Add any Spring AI VectorStore Starter to auto-replace it:
 
 | Vector Store | Dependency Starter | Description |
 |-----------------------------|---------------------------------|------------------------------|
-| **JVector (fallback)** | Built-in | Local file persistence, zero external dependencies |
+| **H2-backed JVector (fallback)** | Built-in | H2 table persistence (loom_vector_store), in-memory HNSW, zero external dependencies |
 | Qdrant | `spring-ai-qdrant-store` | Used in the test module |
 | Milvus | `spring-ai-milvus-store` | Commonly used in production |
 | Redis | `spring-ai-redis-store` | Redis Vector |
@@ -493,7 +495,7 @@ JVector is the fallback. Add any Spring AI VectorStore Starter to auto-replace i
 </dependency>
 ```
 
-`JVectorStore` is skipped automatically — no code needed.
+`H2JVectorStore` is skipped automatically — no code needed.
 
 ### 3.5 ChatModel (AI Model Provider)
 
@@ -661,10 +663,10 @@ Place same-named static resources in your own project to override the defaults, 
 | `spring.ai.mcp.client.enabled=false` | application.yml | MCP client auto-configuration disabled (prevents startup failures if MCP servers are unavailable) |
 | `auth.enabled=false` | application.yml | Authentication disabled; `AuthenticationFilter` passes all requests through |
 | No `VectorStore` bean provided | Do not add any VectorStore Starter | `IDocumentRead`, `RetrievalAugmentationAdvisor`, `loomAgentFileRouter`, and `loomAgentKnowledgeRouter` are not created; knowledge base and file upload features unavailable |
-| No `EmbeddingModel` bean provided | Do not add EmbeddingModel Starter | `JVectorStore` is not created; vector storage unavailable |
+| No `EmbeddingModel` bean provided | Do not add EmbeddingModel Starter | `H2JVectorStore` is not created; vector storage unavailable |
 | Custom bean of the same type | Java `@Bean` configuration | The corresponding `@ConditionalOnMissingBean` bean will not be created |
-| `spring.ai.loom.agent.git.enabled=true` | application.yml | Creates `IGitTool` bean (`DefaultGitTool`, Eclipse JGit 7.6.0); without this, no Git tool methods are available to the LLM |
-| `maven-invoker` on classpath | Provided dependency | Enables `IMavenTool` bean creation; without it, Maven tool is not available |
+| `spring.ai.loom.agent.git.enabled=true` | application.yml | **Deprecated since M3** — no effect; `IGitTool` bean is always created. Git tool visibility is RBAC-gated via `role_tool.tool_git` (grant/revoke in the admin console) |
+| `maven-invoker` on classpath | Provided dependency | `@ConditionalOnClass` gate for `IMavenTool` bean creation (it ships as a default lib dependency); visibility is RBAC-gated via `role_tool.tool_maven` |
 
 ### 8.1 Quick Feature Disablement Guide
 
@@ -673,8 +675,8 @@ Place same-named static resources in your own project to override the defaults, 
 | Entire chat | Set `spring.ai.chat.ui.init=false` |
 | RAG / Knowledge Base | Do not add any `VectorStore` or `EmbeddingModel` Starter |
 | MCP functionality | Set `spring.ai.mcp.client.enabled=false` |
-| Git tool | Do not set `spring.ai.loom.agent.git.enabled=true` (default is disabled) |
-| Maven tool | Set `spring.ai.loom.agent.maven.enabled=false` |
+| Git tool | RBAC-gated: don't grant `tool_git` to any role (or revoke it in the admin console). The `git.enabled` yml flag has no effect since M3 |
+| Maven tool | RBAC-gated: don't grant `tool_maven` to any role. The `maven.enabled` yml flag has no effect since M3 |
 | Auth filter | Set `spring.ai.loom.agent.auth.enabled=false` |
 | Auto-login | Override `IUser.isAutoLogin` to return `false` |
 

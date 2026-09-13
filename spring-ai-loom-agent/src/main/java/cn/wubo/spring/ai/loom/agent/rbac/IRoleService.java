@@ -19,6 +19,14 @@ public interface IRoleService {
 
     void setUserRoles(String username, List<String> roleCodes);
 
+    /**
+     * 历史残留名字:M5 起 admin 不再被跳过,行为完全等同 {@link #setUserRoles(String, List)}。
+     * §3(2026-09-08):admin 现可在控制台被分配角色(strict RBAC,admin 的 MCP/工具同样按角色过滤)。
+     *
+     * @deprecated 名字误导(并不 skip admin);请直接调用 {@link #setUserRoles(String, List)}。
+     *             下一 minor 版本删除。
+     */
+    @Deprecated
     void setUserRolesOrSkipAdmin(String username, List<String> roleCodes);
 
     /**

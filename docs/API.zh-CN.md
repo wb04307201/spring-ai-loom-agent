@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API 文档
 
 > **Base URL**: `http://localhost:8080`（测试环境默认端口）
-> **版本**: 1.1.40
+> **版本**: 1.1.41
 > **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
@@ -203,6 +203,20 @@ Accept: text/event-stream
 |---|---|---|
 | `content` | string | AI 回复的文本片段 |
 | `reasoningContent` | string | 推理/思考过程（可选） |
+| `askUser` | object \| null | 第 3 组件。`null` = 普通内容帧；非空 = askUser 提问卡片事件（`AskUserEvent`，字段见下表），前端渲染内嵌选择卡片，`askUser` 工具阻塞等待作答 |
+
+**`askUser`（`AskUserEvent`）字段**:
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `questionId` | string | UUID，answer 端点按此索引 |
+| `question` | string | 问题正文 |
+| `header` | string | 短标题/chip（可空） |
+| `background` | string | 背景说明（可空） |
+| `options` | object[] | 2-4 个选项，每项 `{label, description}` |
+| `multiSelect` | boolean | 是否多选 |
+| `allowCustomInput` | boolean | 是否允许"其他"自定义输入 |
+| `timeoutSeconds` | number | 前端倒计时用（与工具阻塞超时同值） |
 
 **SSE 事件示例**:
 
@@ -215,6 +229,20 @@ data: {"content":"有什么","reasoningContent":""}
 
 data: {"content":"可以帮你的？","reasoningContent":""}
 ```
+
+### 3.2 AskUser 答案提交端点
+
+```
+POST /spring/ai/loom/ask/{questionId}/answer
+Content-Type: application/json
+```
+
+提交问题卡片的答案（askUser 工具阻塞等待中）。
+
+- 请求体：`{"answer": "选项label"}`（单选/自定义）或 `{"answer": ["label1","label2"]}`（多选）
+- `200 {"ok":true}` — 答案已送达，工具线程被唤醒
+- `400 {"error":"invalid answer"}` — body 非法 / answer 缺失或空白
+- `404 {"error":"not found"}` — 未知 questionId、跨用户提交、或问题已超时/已取消（三者同响应，防存在性泄露）
 
 ---
 
@@ -340,13 +368,21 @@ GET /spring/ai/loom/file/{id}/download
 
 ## 5. 知识库管理
 
+### 5.0 功能开关探测
+
+```
+GET /spring/ai/loom/api/features
+```
+
+**响应**: `{ "knowledge": boolean }` — 当容器存在 `VectorStore` bean(RAG 链激活)时为 `true`;`spring.ai.loom.agent.rag.enabled=false`(或无 `EmbeddingModel` bean)时为 `false`,前端据此隐藏知识空间(📚)按钮。
+
 ### 5.1 检查知识库上传状态
 
 ```
 GET /spring/ai/loom/knowledge/checkKnowledgeUpload
 ```
 
-**响应**: `boolean` — 知识库上传功能是否可用
+**响应**: `boolean` — 知识库上传功能是否可用(RAG 全局关闭时为 `false`)
 
 ---
 
@@ -486,9 +522,11 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ### 5.8 知识市场
 
-> 知识市场支持跨用户共享知识库。 起无审批流：提交 → 直接 APPROVED → 其他用户可订阅。
+> 知识市场支持跨用户共享知识库。审批流：提交 → **PENDING** → admin 审批通过/拒绝（`POST /admin/market-knowledge/{id}/approve|reject`）；只有 APPROVED 条目才公开列出、可被订阅。REJECTED 条目重新提交时，旧行整行归档到 `loom_market_knowledge_archive`（保留原 id，含拒绝评论/审核人/时间），主表新建一条 PENDING 行（新 id）。
 
 #### 5.8.1 浏览已审批的市场知识库
+
+> 保留的 v1 腿（roles.js 依赖）：`GET /api/knowledge-market` 仍返回 APPROVED-only 列表；功能更全的 v2 列表（`GET /market-knowledge`，分页 + tag/category 过滤）是前端主浏览端点。
 
 ```
 GET /spring/ai/loom/api/knowledge-market?page=1&size=20
@@ -527,7 +565,7 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
 |------------|--------|----------------|
 | `marketId` | string | 市场知识库 ID |
 
-**响应**: 成功返回 `{"success": true}`。在 `loom_user_knowledge` 表中创建 `source=MARKET_PULLED` 的订阅记录。
+**响应**: 成功返回 `{"success": true}`。在 `loom_user_knowledge` 表中创建 `source=MARKET_PULLED` 的订阅记录。仅 `APPROVED` 条目可订阅 —— 非 APPROVED 返回 `403`。
 
 ---
 
@@ -543,9 +581,9 @@ POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
 |---------------|--------|------------|
 | `knowledgeId` | string | 知识库 ID |
 
-**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status='APPROVED'`（ 起无审批流）。
+**响应**: `MarketKnowledgeRecord` — 创建的市场条目，`status='PENDING'`（等待 admin 审批）。
 
-**行为**: 同一 `(username, name)` 已存在 → UPSERT（更新 description；不新增行）；不存在 → INSERT 全新行（直接 APPROVED）。
+**行为**: 同一 `(username, name)` 已存在 → 视其状态而定：**REJECTED** → 旧行整行归档到 `loom_market_knowledge_archive`（保留原 id，含拒绝评论/审核人/时间），新建一条 PENDING 行（新 id）；**PENDING / APPROVED** → 仅原地更新内容，**状态不动**（APPROVED 永不降级）。不存在 → INSERT 新行（PENDING，`created_by_kind='USER'`）。
 
 ---
 
@@ -585,31 +623,27 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **级联清理**: 自动删除 `loom_user_knowledge`（拉取者订阅）+ `loom_role_knowledge`（角色授权）。
 
-** 移除的端点**:
-- `_已移除_ /api/knowledge-market/{marketId}/approve` — 无审批流
-- `_已移除_ /api/knowledge-market/{marketId}/reject` — 无审批流
+**审批端点**（v2 admin 路由 —— v1 `/api/knowledge-market/{marketId}/approve|reject` 路径已退役；approve/reject 现挂在 `/admin` 下）：
+- `POST /admin/market-knowledge/{id}/approve` — admin 审批通过：`status=APPROVED`，落 `reviewed_at` / `reviewed_by`
+- `POST /admin/market-knowledge/{id}/reject` — admin 拒绝：`status=REJECTED`；请求体 `{"comment": "..."}` **必填**（空/缺失 → `400`，前端与服务端双重校验）
 
-**新增 admin 端点**（新增）：
-- `GET /admin/market-knowledge` — admin 列出所有市场知识库（所有都是 APPROVED）
-- `DELETE /admin/market-knowledge/{marketId}` — admin 下架（级联清理）
+**admin 端点**：
+- `GET /admin/market-knowledge` — admin 列出所有市场知识库（全状态：PENDING / APPROVED / REJECTED）
+- `POST /admin/market-knowledge` — admin 新增：直发 `APPROVED` + `created_by_kind='ADMIN'`。请求体 `MarketCreateRequest`（`name` / `description` / `content` / `category`）
+- `PUT /admin/market-knowledge/{id}` — 编辑字段（`MarketUpdateRequest`）—— **不能改状态**（无 status 字段）；状态变更只能走 approve/reject
+- `DELETE /admin/market-knowledge/{marketId}` — admin 下架（级联清理 `loom_user_knowledge` + `loom_role_knowledge` 引用行）
+- 其余 per-id admin 腿与技能市场镜像：`/official`、`/featured-rank`、`/category`、`/announcement`（PUT + DELETE）、`/reviews/{username}`（DELETE）、`/stats-reset`、`/tags`（PUT + GET）
 
 ---
 
-#### 5.8.6 管理员拒绝市场提交
+#### 5.8.6 管理员审批通过 / 拒绝市场提交
 
 ```
-POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
+POST /spring/ai/loom/admin/market-knowledge/{id}/approve
+POST /spring/ai/loom/admin/market-knowledge/{id}/reject
 ```
 
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------------|--------|----------------|
-| `marketId` | string | 市场知识库 ID |
-
-**响应**: `MarketKnowledgeRecord` — 更新后的记录，`status=REJECTED`。
-
-**权限**: 仅管理员。非管理员返回 403。
+仅 admin（非 admin → `403`）。`approve` 置 `status=APPROVED` 并记录 `reviewed_at` / `reviewed_by`。`reject` 置 `status=REJECTED`，请求体必须携带非空 `comment`（`{"comment": "理由"}`）—— 缺失/空白 → `400`。作者在**我的发布**看到拒绝原因后可重新提交：REJECTED 旧行归档到 `loom_market_knowledge_archive`（保留原 id，含评论/审核人/时间），主表新建 PENDING 行。
 
 ---
 
@@ -629,13 +663,13 @@ GET /spring/ai/loom/api/knowledge-market/my-pulled
 GET /spring/ai/loom/api/knowledge-market/my-submitted
 ```
 
-**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（ 后全是 APPROVED）。
+**响应**: `MarketKnowledgeRecord[]` — 当前用户提交到市场的知识库列表（PENDING / APPROVED / REJECTED 全状态）。
 
 ---
 
 ## 6. 技能管理
 
-> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 改为 6 个 system seed 进默认 admin 用户（wb04307201）的 `user_skill`，加一套 admin 管理的市场流程。
+> 所有 Skill 全部入数据库（表 `market_skill` / `user_skill` / `role_skill`），yml 的 `skills[]` 段不再读取 —— 演示应用由 `V1.1` 迁移把 6 个系统技能 seed 进**默认 admin 用户**的 `user_skill`，加一套 admin 管理的市场流程。
 >
 > `user_skill.source` 字段反映 Skill 三个来源：
 > - `USER_CREATED` — 用户通过 API 或聊天 UI 自己创建；**完全可编辑**（name/desc/content/default_loaded）。若该 skill 已共享到市场，作者保存时会**自动反向同步**到对应的 `market_skill` 行，并**推送给所有 MARKET_PULLED 拉取者**
@@ -660,7 +694,7 @@ GET /spring/ai/loom/skill
 | `description` | string | 技能描述 |
 | `load` | boolean | 是否预加载到 LLM 系统提示 |
 | `content` | string | 技能内容（如果存的是 `classpath:xxx`，会在读时自动 resolve 成真实文本） |
-| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（ 起移除 `MARKET_VIEW`；admin 也只看到自己 user_skill） |
+| `source` | string | `USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（`MARKET_VIEW` 已移除；admin 也只看到自己 user_skill） |
 
 admin 也只看到自己的 `user_skill`（与普通用户一致）；浏览市场 APPROVED 用 `GET /market-skills`。
 
@@ -759,7 +793,7 @@ POST /spring/ai/loom/skill/sync
 GET /spring/ai/loom/market-skills
 ```
 
-返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name` 排序（ 去掉 version 字段后无 version DESC 排序）。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
+返回所有 `status='APPROVED'` 的 `market_skill`，按 `author, name` 排序（`version` 字段已移除，无 version DESC 排序）。每条带完整 `MarketSkill` 模型（`id` / `name` / `description` / `content` / `author` / `status` / `submittedAt` / `reviewedAt` / `reviewedBy` / `reviewComment`）。
 
 ---
 
@@ -779,10 +813,11 @@ GET /spring/ai/loom/market-skills/{id}
 POST /spring/ai/loom/market-skills/{id}/pull
 ```
 
-从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。抛 `400` 条件：
-- 市场 Skill 状态不是 `APPROVED`
-- 同名已有 `ROLE_GRANTED` 锁定
-- 同名已存在（静默刷新 content）
+从指定 `market_skill` 创建/更新一条 `MARKET_PULLED` 的 `user_skill`。市场 Skill 状态不是 `APPROVED` 时抛 `403`（审批流 —— 仅已审批条目可拉取）。拒绝条件：
+- 同名已有 `ROLE_GRANTED` 锁定（`400`）
+- 同名已有 `USER_CREATED` 自建技能（`403` —— 拒绝覆盖自建内容，需先删除自建版本）
+
+同名已是 `MARKET_PULLED` 时原地刷新 content 至最新市场快照（无报错）。
 
 ---
 
@@ -793,7 +828,7 @@ POST /spring/ai/loom/user/market-skills
 Content-Type: application/json
 ```
 
-新建一条 `market_skill`，`status='APPROVED'`（ 起无需审批，提交即上架），`author=currentUser`。
+新建一条 `market_skill`，`status='PENDING'`（审批流 —— 等待 admin 审批通过/拒绝；`created_by_kind='USER'`），`author=currentUser`。
 
 **请求体** (`MarketSkillSubmitRequest`):
 
@@ -803,7 +838,7 @@ Content-Type: application/json
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
 
-：去掉 `version` 字段 — 唯一约束改为 `(author, name)`。同一作者同名直接 UPSERT（覆盖内容 + 重置 APPROVED），无需新版本号。
+注：`version` 字段已移除 — 唯一约束为 `(author, name)`。同一作者同名重复提交视原行状态而定：**REJECTED** → 旧行整行归档到 `market_skill_archive`（保留原 id，含拒绝评论/审核人/时间），新建一条 PENDING 行（新 id），作者 `user_skill.market_skill_id` 反向链接改绑新行；**PENDING / APPROVED** → 仅原地更新内容，**状态不动**（APPROVED 永不降级）。
 
 ---
 
@@ -813,22 +848,38 @@ Content-Type: application/json
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/spring/ai/loom/admin/market-skills` | 列出**所有**（ 起所有都是 APPROVED，无审批流） |
-| POST | `/spring/ai/loom/admin/market-skills` | 直接以 `status=APPROVED` 创建 |
-| PUT | `/spring/ai/loom/admin/market-skills/{id}` | 改任意字段 |
-| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | 级联删除 user_skill / role_skill 引用（：这就是"下架"，拉取者失去该 skill） |
-| _已移除_ | `/admin/market-skills/pending` | ：去掉（无审批流，没有 PENDING 状态） |
-| _已移除_ | `/admin/market-skills/{id}/approve` | ：去掉（提交即上架） |
-| _已移除_ | `/admin/market-skills/{id}/reject` | ：去掉（需要下架请用 DELETE） |
+| GET | `/spring/ai/loom/admin/market-skills` | 列出**所有**状态（PENDING / APPROVED / REJECTED）；可选 `?status=PENDING` 过滤（没有单独的 `/pending` 端点），另支持 `page` / `size` / `category` / `query` / `sortBy` |
+| POST | `/spring/ai/loom/admin/market-skills` | admin 新增 —— 直发 `status=APPROVED` + `created_by_kind='ADMIN'`（绕过 PENDING）。请求体 `MarketCreateRequest`（`name` / `description` / `content` / `category`） |
+| PUT | `/spring/ai/loom/admin/market-skills/{id}` | 改任意字段。请求体 `MarketUpdateRequest` —— **不能改状态**（无 status 字段）；状态变更只能走 approve/reject |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | 级联删除 user_skill / role_skill 引用（这就是"下架"，拉取者失去该 skill） |
+| POST | `/admin/market-skills/{id}/approve` | admin 审批通过：`status=APPROVED`，落 `reviewed_at` / `reviewed_by` |
+| POST | `/admin/market-skills/{id}/reject` | admin 拒绝：`status=REJECTED`；请求体 `{"comment": "..."}` **必填**（空/缺失 → `400`）。作者重投 REJECTED 行时旧行归档到 `market_skill_archive`，新建 PENDING 行 |
+| _从未存在_ | `/admin/market-skills/pending` | 没有单独端点 —— 用 `GET /admin/market-skills?status=PENDING` 过滤 |
+| PUT | `/admin/market-skills/{id}/official` \| `/featured-rank` \| `/category` \| `/announcement` \| `/stats-reset` \| `/tags` | per-row admin 腿（官方标记 / 精选排序 / 分类 / 公告 / 统计重置 / tag 管理）；另有 `GET .../tags`、`DELETE .../announcement`、`DELETE .../reviews/{username}` |
 
-`MarketSkillUpsertRequest`（POST/PUT 通用）:
+请求体：
+
+`MarketCreateRequest`（POST — admin 新增）:
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `name` | string | 是 | 技能名称 |
 | `description` | string | 否 | 技能描述 |
 | `content` | string | 是 | prompt 模板 |
-| `status` | string | 否 | 默认 `APPROVED`（：admin 不再新建技能 — 此端点为向后兼容保留） |
+| `category` | string | 否 | 分类 |
+
+`MarketUpdateRequest`（PUT — admin 编辑；无 `status` 字段 —— 状态变更只能走 approve/reject）:
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | 否 | 重命名；null = 不改 |
+| `description` | string | 否 | 技能描述 |
+| `content` | string | 否 | prompt 模板 |
+| `category` | string | 否 | 分类 |
+| `isOfficial` | boolean | 否 | 官方标记 |
+| `featuredRank` | int | 否 | 精选排序 |
+
+> `MarketSkillUpsertRequest`（+ `ISkillMarketService.adminCreate/adminUpdate/adminDelete`）已 `@Deprecated`（ADR-T03 shim，保留 1 个 minor 版本）—— 上面 v2 的 `createApproved` / `update` / `delete` 路径是受支持的入口。
 
 ---
 
@@ -889,7 +940,7 @@ GET /spring/ai/chat/loom/mcp
  {
  "name": "weather-mcp",
  "title": "天气查询",
- "version": "1.1.40",
+ "version": "1.1.41",
  "description": "提供实时天气查询服务",
  "defaultSelected": true,
  "tools": [
@@ -980,7 +1031,7 @@ GET /spring/ai/chat/loom/mcp
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `command` | `String` | ✅ | 要执行的命令 |
-| `workingDir` | `String` | | 工作目录（默认 `.local/file/{username}/`） |
+| `workingDir` | `String` | | 工作目录（默认 `~/.loom/users/{username}/file/`） |
 | `repl` | `Boolean` | | 是否 REPL 模式（`true`= 长期交互；`false`/省略 = 一次性命令） |
 | `timeout` | `Long` | | 等待超时（毫秒，默认 30000） |
 
@@ -1113,7 +1164,7 @@ GET /spring/ai/chat/loom/mcp
 
 ## 11. Maven 构建工具
 
-所有 Maven 工具的操作范围限定在用户文件目录（`{fileBasePath}/{username}/`）内。超出该范围的绝对路径将被拒绝。
+所有 Maven 工具的操作范围限定在用户文件目录（`{usersBasePath}/{username}/file/`）内。超出该范围的绝对路径将被拒绝。
 
 ### 11.1 通用执行
 
@@ -1217,7 +1268,7 @@ GET /spring/ai/chat/loom/mcp
 
 ## 11.7 文件工具（@Tool 注解）
 
-所有文件工具均限定在用户文件目录（`{fileBasePath}/{username}/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
+所有文件工具均限定在用户文件目录（`{usersBasePath}/{username}/file/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
 
 **资源约束**（详见 [11.7.1](#1171-文件工具配置ifiletool)）：`readTextFile` / `writeFile` / `editFile` 走 `file.maxFileSize`（默认 5 MB）；`readMediaFile` 走 `file.maxMediaSize`（默认 1 MB）；`directoryTree` / `searchFiles` 走 `file.maxWalkDepth` / `file.maxWalkEntries` / `file.excludedDirs`；`searchFiles` 还受 `file.maxSearchResults` 限制。
 
@@ -1448,9 +1499,12 @@ GET /spring/ai/chat/loom/mcp
 ```json
 {
  "content": "string",
- "reasoningContent": "string"
+ "reasoningContent": "string",
+ "askUser": null
 }
 ```
+
+`askUser` 普通帧为 `null`；非空时携带 `AskUserEvent` 提问卡片（见 § 3.1/3.2）。
 
 ### ConversationRecord
 
@@ -1536,7 +1590,7 @@ GET /spring/ai/chat/loom/mcp
 }
 ```
 
-> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（ 起移除 `MARKET_VIEW`）。
+> 响应形态与 PUT 请求体一致（`name` / `description` / `load` / `content`），由服务端在响应里补一个 `source` 字段标识数据来源。`source` 取值：`USER_CREATED` / `MARKET_PULLED` / `ROLE_GRANTED`（`MARKET_VIEW` 已移除）。
 
 ---
 
@@ -1575,14 +1629,15 @@ GET /spring/ai/chat/loom/mcp
 
 `spring.ai.loom.agent.skills[]` yml 段**不再读取**。参见 [§6 技能管理](#6-技能管理) 了解新的数据库流程。首次启动时会 seed 6 个 system skill。
 
-### 11.5 JVector 配置
+### 11.5 向量存储配置(H2 持久化 JVector)
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.jvector.indexPath` | string | `.local/jvector-index` | 向量索引存储路径 |
 | `spring.ai.loom.agent.jvector.m` | int | `16` | HNSW 图参数 M |
 | `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | 构建时的 ef 参数 |
 | `spring.ai.loom.agent.jvector.efSearch` | int | `10` | 搜索时的 ef 参数 |
+
+> 持久化:向量存 H2 表 `loom_vector_store`(embedding BLOB,little-endian float32),`ApplicationReadyEvent` 时 hydrate 进内存 JVector HNSW 图 —— 启动不再 re-embed。旧 `~/.loom/jvector-index/` json 文件已退役。更换 embedding 模型会使存量向量失效(dim 守卫跳过旧行并 WARN);需清表并重传知识库文档。
 
 ### 11.6 鉴权配置
 
@@ -1597,8 +1652,7 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.fileBasePath` | string | `.local/file` | 上传文件的根目录 |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge` | 知识库文件的根目录 |
+| `spring.ai.loom.agent.usersBasePath` | string | `~/.loom/users` | 用户树根目录；每用户沙箱 = `{usersBasePath}/{username}/file/` |
 
 > 同目录下同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
@@ -1608,7 +1662,7 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | 是否启用文件工具 |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **M3 起已废弃** — 无实际效果;`IFileTool` 是 universal 工具（总是可见） |
 | `spring.ai.loom.agent.file.maxFileSize` | long | `5242880`（5 MB） | 单次读取 / 写入文件大小上限（字节）。超过直接拒绝，**避免 OOM 和 LLM context 溢出**。 |
 | `spring.ai.loom.agent.file.maxMediaSize` | long | `1048576`（1 MB） | 媒体文件（图片 / 音频）大小上限。base64 编码后体积 ≈ 4/3，比文本更严。 |
 | `spring.ai.loom.agent.file.maxWalkDepth` | int | `5` | 目录树 / 递归列出 / 搜索的深度上限。 |
@@ -1630,46 +1684,37 @@ GET /spring/ai/chat/loom/mcp
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | 是否启用 Maven 工具（**opt-in**）—— 部署场景的编译/打包由 `ICompileAndDeployTool` 处理 |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **M3 起已废弃** — 无实际效果;bean 在 classpath 有 `maven-invoker`（库默认依赖）时创建,可见性由 `role_tool.tool_maven` RBAC 控制。部署场景的编译/打包由 `ICompileAndDeployTool` 处理 |
 | `spring.ai.loom.agent.maven.mavenHome` | string | — | Maven 安装目录。**为空时工具会自动探测**：依次尝试 `MAVEN_HOME` / `M2_HOME` 环境变量，再扫描 Windows 常见路径（如 `C:\developer\apache-maven-*`、`C:\Program Files\Apache Maven`）。自动探测**不依赖系统 PATH**，避免被损坏的 mvn 包装脚本（如 npm 全局 mvn）遮蔽而让 `maven-invoker` 抛 `Error configuring command line`。 |
 | `spring.ai.loom.agent.maven.localRepository` | string | — | 本地仓库路径（为空时使用默认路径） |
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | 输出最大行数（超出截断） |
 | `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | 默认执行超时（毫秒），5 分钟 |
 
-> 所有 Maven 工具的操作范围限定在 `{fileBasePath}/{username}/` 内，超出该范围的路径将被拒绝。
+> 所有 Maven 工具的操作范围限定在 `{usersBasePath}/{username}/file/` 内，超出该范围的路径将被拒绝。
 >
 > **排错提示 — `MavenInvocationException: Error configuring command line`**：表示 `maven-invoker` 找不到可用的 `mvn` / `mvn.cmd`。工具启动日志会打印实际解析到的 `mavenHome` 和一份诊断提示（包含所有搜索过的路径、环境变量、修好方法）。最常见原因是 `PATH` 上有损坏或遮蔽的 `mvn`（例如 npm 全局 mvn 包装脚本），此时在 `application.yml` 显式设置 `spring.ai.loom.agent.maven.mavenHome` 指向真实 Maven 安装目录即可绕过。
 >
 > **排错提示 — Windows 上删除项目目录报"文件被锁定"**：旧版本是因为 `maven-invoker 3.3.0` / `plexus-utils 3.3.0`（a）在异常/取消路径上注册的 JVM shutdown hook 永不释放持有的 `Process` 引用，（b）`Invoker.execute` 拿不到子进程句柄、无法把取消/超时向下传播给 mvn 子进程。结果是：一次被取消或超时的 Maven 调用会留下 mvn 子进程继续运行，持续对 `target/classes`、`~/.m2/repository/*.jar` 持有 mmap 句柄，在 Windows 上锁住这些文件。**新版本不再用 `Invoker.execute` 跑进程**——直接用 `ProcessBuilder` fork mvn、用 `Process.waitFor(timeout, unit)` 做干净超时、超时后 `Process.destroyForcibly` + 显式关闭流。**不再注册任何 JVM shutdown hook，mvn 子进程在超时/取消时一定被杀。** 升级后如果还看到锁，多半是上一次 JVM 留下的孤儿 mvn 进程，用 `tasklist /FI "IMAGENAME eq cmd.exe"` 找到并 `taskkill /F /PID <pid>` 即可。
 
-### 11.9 工具组开关
+### 11.9 工具组开关（已废弃）
 
-所有内置工具组**默认全部启用**（`matchIfMissing=true`）。在 yml 中将下列任一属性设为 `false` 即可关闭对应工具组。
+> **自 M3 起,下列 `*.enabled` 开关不再控制工具 bean 的创建。** 所有常开 `I*Tool` bean 无条件创建（外加 `IHtmlRenderTool` — 仅由 classpath 上的 playwright 门控）。可见性由两种机制决定:**universal 工具**（`@ToolGroup(defaultGranted=true)` — 对所有登录用户可见）与 **RBAC 工具**（`tool_git` / `tool_maven` / `tool_compile` / `tool_render` — 由管理员经 `/admin/roles/{code}/tools` 按角色授予,持久化在 `role_tool` 表）。完整模型见 [TOOLS.zh-CN.md §1](./TOOLS.zh-CN.md)。以下属性仅为向后兼容保留。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |-----------------------------------------------|----------|-------|-------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.time.enabled` | boolean | `true` | 时间工具（`ITimeTool` — 获取当前时间、时区转换） |
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | 文件工具（`IFileTool` — 16 个基于路径的读写/编辑/搜索/删除操作） |
-| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | 技能工具（`ISkillTool` — 列出技能、获取技能详情） |
-| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Git 工具（`IGitTool` — 28 个 git 操作）。**opt-in** —— 端到端部署走 `ICompileAndDeployTool`。 |
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Maven 工具（同时需要 classpath 上有 `maven-invoker`）。**opt-in** —— 部署场景的编译/打包走 `ICompileAndDeployTool`。 |
+| `spring.ai.loom.agent.time.enabled` | boolean | `true` | **已废弃** — 无实际效果（`ITimeTool` 是 universal 工具） |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **已废弃** — 无实际效果（`IFileTool` 是 universal 工具） |
+| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | **已废弃** — 无实际效果（`ISkillTool` 是 universal 工具） |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | **已废弃** — 无实际效果;`IGitTool` bean 总是创建,可见性由 `role_tool.tool_git` RBAC 控制 |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **已废弃** — 无实际效果;`IMavenTool` bean 在 classpath 有 `maven-invoker`（库默认依赖）时创建,可见性由 `role_tool.tool_maven` RBAC 控制 |
 | `spring.ai.loom.agent.git.username` | string | — | HTTP(S) Git 认证用户名（clone/pull/push） |
 | `spring.ai.loom.agent.git.token` | string | — | HTTP(S) Git 认证 token / 密码 |
 | `spring.ai.loom.agent.gitUsername` | string | — | **遗留**顶层别名，等价于 `git.username` |
 | `spring.ai.loom.agent.gitToken` | string | — | **遗留**顶层别名，等价于 `git.token` |
 
-**示例 — 启用 Git 工具**：
+**示例 — 给角色开放 Git 工具**：无需改 yml;在管理控制台（角色管理 → 编辑/授权 → 授权本地工具组）给角色勾选 `tool_git` 即可。
 
-```yaml
-spring:
- ai:
- loom:
- agent:
- git:
- enabled: true # 默认 false；设为 true 启用
-```
-
-> 即便工具组被关闭，你仍可以通过自定义 `@Bean IGitTool` / `@Bean IMavenTool` 重新启用 —— `@ConditionalOnMissingBean` 始终优先采用用户提供的 Bean。
+> 要替换工具实现,提供自定义 `@Bean IGitTool` / `@Bean IMavenTool` —— `@ConditionalOnMissingBean` 始终优先采用用户提供的 Bean。
 
 ### 11.10 端到端部署配置（`ICompileAndDeployTool`）
 
@@ -1677,7 +1722,7 @@ spring:
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---------------------------------------------------|----------|-------------|---------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | 是否启用端到端部署工具。默认开启，是部署场景的推荐入口。 |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | **M3 起已废弃** — 无实际效果;bean 总是创建,可见性由 `role_tool.tool_compile` RBAC 控制,是部署场景的推荐入口。 |
 | `spring.ai.loom.agent.compile.imageTemplates` | map<string, ImageTemplate> | `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` | 预置基础镜像别名（`ImageTemplate { image, command[] }`），可通过工具入参 `baseImage` 选择。 |
 
 **基础镜像模板**（可选）：预置 `java17` / `java21` / `nginx` / `python3` / `node20` / `node20-serve` 六个模板，可通过 yml 覆盖或新增。工具入参 `baseImage` 传别名即选中对应模板，传完整镜像名（如 `openjdk:17-slim`）则直接用，command 走 java17 兜底。
@@ -1736,12 +1781,12 @@ spring:
 | 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | 上传文件到知识库 |
 | 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | 获取知识库文件列表 |
 | 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | 删除知识库文件 |
-| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | 浏览已审批的市场知识库（分页） |
-| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | 订阅市场知识库 |
-| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | 提交知识库到市场 |
+| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | 浏览已审批的市场知识库（保留的 v1 腿；v2 `GET /market-knowledge` 为主列表） |
+| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | 订阅市场知识库（仅 APPROVED，否则 403） |
+| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | 提交知识库到市场（→ PENDING） |
 | 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}` | 撤回市场提交 |
-| 15e| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/approve` | 管理员审批市场提交 |
-| 15f| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/reject` | 管理员拒绝市场提交 |
+| 15e| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/approve` | 管理员审批通过市场提交（v2 admin 路由） |
+| 15f| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/reject` | 管理员拒绝市场提交（comment 必填） |
 | 15g| `GET` | `/spring/ai/loom/api/knowledge-market/my-pulled` | 查看我订阅的市场知识库 |
 | 15h| `GET` | `/spring/ai/loom/api/knowledge-market/my-submitted` | 查看我的市场提交 |
 | 16 | `GET` | `/spring/ai/chat/loom/mcp` | 获取 MCP 工具列表 |
@@ -1749,4 +1794,5 @@ spring:
 | 18 | `PUT` | `/spring/ai/loom/skill` | 创建/更新技能 |
 | 19 | `GET` | `/spring/ai/loom/skill/{name}` | 获取单个技能 |
 | 20 | `DELETE` | `/spring/ai/loom/skill/{name}` | 删除技能 |
+| 20a| `GET` | `/spring/ai/loom/admin/ask-logs?limit=&username=` | 提问卡片（askUser）日志 —— `loom_tool_call_log`（tool_name='askUser'）的只读视图；`limit` 默认 50、上限 200；`username` 可选过滤；`status`：ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN。供 admin 日志页（stats.html）"提问卡片"区块使用，adminPathPatterns 门禁 |
 | — | `GET` | `/spring/ai/loom` | 重定向到 UI 首页 |

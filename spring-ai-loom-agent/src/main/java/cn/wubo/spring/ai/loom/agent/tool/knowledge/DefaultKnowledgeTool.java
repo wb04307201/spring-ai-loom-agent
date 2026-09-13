@@ -1,8 +1,11 @@
 package cn.wubo.spring.ai.loom.agent.tool.knowledge;
 
 import cn.wubo.spring.ai.loom.agent.knowledge.IKnowledge;
+import cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService;
 import cn.wubo.spring.ai.loom.agent.model.KnowledgeRecord;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.tool.annotation.Tool;
@@ -14,14 +17,34 @@ import java.util.List;
 
 public class DefaultKnowledgeTool implements IKnowledgeTool {
 
+    private static final Logger log = LoggerFactory.getLogger(DefaultKnowledgeTool.class);
+
     private final IKnowledge knowledge;
     private final VectorStore vectorStore;
     private final LoomAgentProperties.RagProperty ragProperty;
+    private final IMarketContentStatsService kbStatsService;
 
-    public DefaultKnowledgeTool(IKnowledge knowledge, VectorStore vectorStore, LoomAgentProperties.RagProperty ragProperty) {
+    /**
+     * Primary constructor — wires the KB stats service so every successful
+     * search increments {@code loom_market_knowledge_stats.search_count}.
+     * The stats service is optional (passed via setter when null) so older
+     * call-sites (custom {@code IKnowledgeTool} replacements) keep compiling.
+     */
+    public DefaultKnowledgeTool(IKnowledge knowledge, VectorStore vectorStore, LoomAgentProperties.RagProperty ragProperty, IMarketContentStatsService kbStatsService) {
         this.knowledge = knowledge;
         this.vectorStore = vectorStore;
         this.ragProperty = ragProperty;
+        this.kbStatsService = kbStatsService;
+    }
+
+    /**
+     * Legacy constructor — kept for backward compatibility with any custom
+     * instantiation that doesn't have a stats service. Defers to the primary
+     * constructor with a null stats service; the tool then becomes a no-op
+     * for stat increments.
+     */
+    public DefaultKnowledgeTool(IKnowledge knowledge, VectorStore vectorStore, LoomAgentProperties.RagProperty ragProperty) {
+        this(knowledge, vectorStore, ragProperty, null);
     }
 
     /**
@@ -60,6 +83,25 @@ public class DefaultKnowledgeTool implements IKnowledgeTool {
                         .filterExpression(filterExpression)
                         .build()
         );
+
+        // T16: increment loom_market_knowledge_stats.search_count for this KB.
+        // Counts every successful search call (including zero-result ones)
+        // — mirrors how T10's loom_user_knowledge.access_count is wired
+        // regardless of whether content was returned.
+        //
+        // M3+ T1.5: kbStatsService is now IMarketContentStatsService<String>
+        // (K = String UUID). The String path is the canonical path — no
+        // Long.parseLong graceful-degradation. The stats service buffers
+        // directly via BatchedCounterService.increment(String, ...).
+        if (kbStatsService != null) {
+            try {
+                kbStatsService.incrementStat(knowledgeId, "SEARCH");
+            } catch (RuntimeException ex) {
+                // Stats are best-effort; never let stat bookkeeping fail the search.
+                log.warn("searchKnowledge: stats increment failed for knowledgeId={}: {}",
+                        knowledgeId, ex.getMessage());
+            }
+        }
 
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("检索结果（知识库ID: %s，查询: %s，共 %d 条）:%n%n", knowledgeId, query, results.size()));

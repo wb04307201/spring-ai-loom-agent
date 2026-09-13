@@ -2,6 +2,8 @@
 <html lang="zh-CN">
   <head>
     <title>技能市场 - 灵梭管理控制台</title>
+    <meta name="description" content="灵梭管理控制台 — 技能市场审批与官方技能管理" />
+    <link rel="icon" type="image/png" href="/static/logo.png" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/spring/ai/loom/style.css" />
@@ -23,7 +25,7 @@
           <a href="roles.html" class="admin-sidebar-link"
             ><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a
           >
-          <a href="skills-market.html" class="admin-sidebar-link active"
+          <a href="market-skills.html" class="admin-sidebar-link active"
             ><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a
           >
           <a href="knowledge-market.html" class="admin-sidebar-link"
@@ -47,7 +49,7 @@
         <header class="admin-header">
           <div class="admin-header-left">
             <h1>技能市场</h1>
-            <span class="admin-subtitle">编辑 / 下架市场技能（不再新建）</span>
+            <span class="admin-subtitle">admin 可新增 / 审批 / 编辑 / 下架市场技能</span>
           </div>
           <div class="admin-header-right">
             <span id="admin-username" class="admin-username"></span>
@@ -67,13 +69,16 @@
               margin-bottom: 12px;
             "
           >
-            <strong>admin 职责</strong> —— 仅负责<strong>编辑 / 下架</strong
-            >市场技能。 不在控制台新建技能（技能一律从聊天界面「共享」Tab
-            由作者本人发布到市场；admin 不应越权代为创作）。
-            起无审批流：作者提交即上架；下架会自动级联清理所有拉取者副本。
+            <strong>admin 职责</strong> —— 负责市场技能的<strong>新增 / 审批 / 编辑 /
+            下架</strong>。admin 新增的技能直接落 APPROVED;
+            作者从聊天界面「共享」Tab 提交后状态为 PENDING,待 admin
+            审批;审批通过后才会对其他用户可见。下架会自动级联清理所有拉取者副本。
           </div>
 
+          <div id="pending-chip-container" style="margin-bottom: 12px; display: none"></div>
+
           <div class="admin-toolbar">
+            <button id="create-skill-btn" class="primary-btn">+ 新增技能</button>
             <button id="refresh-btn" class="secondary-btn">刷新</button>
           </div>
 
@@ -84,7 +89,7 @@
       </div>
     </div>
 
-    <!-- 编辑技能模态框（仅编辑现有技能，不再用于新建） -->
+    <!-- 编辑技能模态框（编辑技能） -->
     <div id="edit-skill-modal" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 720px; max-height: 85vh">
         <div class="modal-header">
@@ -133,6 +138,31 @@
               placeholder="支持 {param} 占位符"
             ></textarea>
           </div>
+          <div class="form-group">
+            <label>分类</label>
+            <input
+              type="text"
+              id="edit-category"
+              class="form-input"
+              placeholder="例如：效率工具"
+            />
+          </div>
+          <div class="form-group">
+            <label>精选排序</label>
+            <input
+              type="number"
+              id="edit-featured-rank"
+              class="form-input"
+              min="0"
+              step="1"
+              placeholder="留空表示不设置"
+            />
+          </div>
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="edit-official" /> 标记为官方
+            </label>
+          </div>
           <div id="es-error" class="error-msg" style="display: none"></div>
         </div>
         <div class="modal-footer">
@@ -142,7 +172,95 @@
       </div>
     </div>
 
-    <!-- 去掉审批拒绝备注 modal -->
+    <!-- 审批拒绝备注走 prompt()，不需要独立 modal -->
+
+    <!-- M0 T19：公告管理模态框 -->
+    <div id="announcement-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 560px">
+        <div class="modal-header">
+          <h3 id="announcement-title-text">管理公告</h3>
+          <div class="close-button" id="announcement-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div class="form-group">
+            <label>公告标题 <span style="color: var(--error-color)">*</span></label>
+            <input
+              type="text"
+              id="ann-title"
+              class="form-input"
+              placeholder="例如：限时特惠"
+            />
+          </div>
+          <div class="form-group">
+            <label>公告正文 <span style="color: var(--error-color)">*</span></label>
+            <textarea
+              id="ann-body"
+              class="form-input"
+              rows="5"
+              placeholder="公告内容（纯文本，不支持 Markdown）"
+            ></textarea>
+          </div>
+          <div id="ann-error" class="error-msg" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="ann-cancel">取消</button>
+          <button class="delete-btn btn-sm" id="ann-delete" style="display: none">撤销公告</button>
+          <button class="primary-btn" id="ann-save">发布</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- M0 T19：评论管理模态框 -->
+    <div id="review-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 640px; max-height: 80vh">
+        <div class="modal-header">
+          <h3 id="review-title-text">用户评价</h3>
+          <div class="close-button" id="review-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px; overflow-y: auto">
+          <div id="review-modal-aggregate"></div>
+          <div id="review-modal-list">加载中...</div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="review-cancel">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- M4 T5：标签批量编辑模态框（镜像 knowledge-market.html） -->
+    <div id="tag-edit-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 560px">
+        <div class="modal-header">
+          <h3 id="tag-edit-title-text">编辑标签</h3>
+          <div class="close-button" id="tag-edit-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div class="form-group">
+            <label>当前标签</label>
+            <div id="tag-edit-current" class="tag-edit-list"></div>
+          </div>
+          <div class="form-group">
+            <label
+              >标签（逗号分隔,例如 <code>RAG, FAQ, 教程</code>）</label
+            >
+            <input
+              type="text"
+              id="tag-edit-input"
+              class="tag-edit-input"
+              placeholder="RAG, FAQ, 教程"
+            />
+            <div class="tag-edit-hint">
+              输入逗号、空格或全角逗号分隔的标签;重复和空标签会被忽略;留空则清空所有标签。
+            </div>
+          </div>
+          <div id="tag-edit-error" class="error-msg" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="tag-edit-cancel">取消</button>
+          <button class="primary-btn" id="tag-edit-save">保存</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 通用确认 -->
     <div id="confirm-modal" class="modal-overlay" style="display: none">
@@ -175,6 +293,7 @@
 
     <div id="toast-notification" class="toast"></div>
 
-    <script src="skills-market.js"></script>
+    <script src="market-admin.js"></script>
+    <script src="market-skills.js"></script>
   </body>
 </html>

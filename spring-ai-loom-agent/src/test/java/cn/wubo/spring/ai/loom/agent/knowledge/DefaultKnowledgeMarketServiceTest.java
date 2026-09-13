@@ -77,51 +77,63 @@ class DefaultKnowledgeMarketServiceTest {
  }
  }
 
- /* ===== submit（直接 APPROVED + UPSERT） ===== */
+ /* ===== submit（落 PENDING + 同名非 REJECTED 就地 UPDATE） ===== */
 
  @Test
- @DisplayName("submit 直接 APPROVED 状态（不再 PENDING）")
- void testSubmit_directlyApproved() {
+ @DisplayName("submit 全新插入落 PENDING（等 admin approve，不再直接 APPROVED）")
+ void testSubmit_landsPending() {
  String kbId = "kb-001";
  KnowledgeRecord kb = new KnowledgeRecord(kbId, "testuser", "测试知识库", "描述", "USER_CREATED");
  when(knowledge.list("testuser")).thenReturn(List.of(kb));
 
  MarketKnowledgeRecord result = new MarketKnowledgeRecord(
  "market-001", "testuser", "测试知识库", "描述",
- "APPROVED", null, null, "testuser", null);
+ "PENDING", null, null, "testuser", null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(result);
 
  MarketKnowledgeRecord returned = marketService.submit(kbId);
 
- assertEquals(MarketKnowledgeRecord.STATUS_APPROVED, returned.status());
- // 应走 INSERT 路径（不是 UPDATE）
+ assertEquals(MarketKnowledgeRecord.STATUS_PENDING, returned.status());
+ // 应走 INSERT 路径（不是 UPDATE），且 INSERT 落 'PENDING','USER' 字面量
+ verify(jdbcTemplate.mock).update(
+ argThat((String s) -> s.contains("INSERT INTO loom_market_knowledge")
+ && s.contains("'PENDING', 'USER'")),
+ any(Object[].class));
  verify(jdbcTemplate.mock, never()).update(
  argThat((String s) -> s.contains("UPDATE loom_market_knowledge")));
  }
 
  @Test
- @DisplayName("submit 同一 username+name 已存在 → UPSERT（更新内容）")
+ @DisplayName("submit 同一 username+name 已存在（非 REJECTED）→ 仅 UPDATE description，不 INSERT")
  void testSubmit_upsertsExisting() {
  String kbId = "kb-001";
  KnowledgeRecord kb = new KnowledgeRecord(kbId, "testuser", "测试知识库", "新描述", "USER_CREATED");
  when(knowledge.list("testuser")).thenReturn(List.of(kb));
- // SELECT id 走 String.class 路径返回 existingId
+ // 新实现的同名旧行查询 SQL：WHERE username=? AND name=? LIMIT 1（String.class 路径）
  when(jdbcTemplate.mock.queryForObject(
- argThat((String s) -> s.contains("WHERE username = ? AND name = ?")),
+ argThat((String s) -> s != null && s.contains("SELECT id FROM loom_market_knowledge WHERE username=? AND name=?")),
  eq(String.class), any(Object[].class)))
  .thenReturn("existing-market-id");
+ // 旧行状态 APPROVED（非 REJECTED）→ 就地 UPDATE 分支（REJECTED 才会归档+重 INSERT）
+ when(jdbcTemplate.mock.queryForObject(
+ argThat((String s) -> s != null && s.contains("SELECT status FROM loom_market_knowledge WHERE id=?")),
+ eq(String.class), any(Object[].class)))
+ .thenReturn("APPROVED");
  // getById → 返回 stub
  MarketKnowledgeRecord stub = new MarketKnowledgeRecord(
  "existing-market-id", "testuser", "测试知识库", "新描述",
- "APPROVED", null, null, "testuser", null);
+ "APPROVED", null, null, "testuser", null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(stub);
 
  MarketKnowledgeRecord returned = marketService.submit(kbId);
 
  assertEquals("existing-market-id", returned.id());
- // 应走 UPDATE 而不是 INSERT
+ // 新契约：UPDATE 只写 description，SQL 不得触碰 status（APPROVED 永不降级）
  verify(jdbcTemplate.mock).update(
- argThat((String s) -> s.contains("UPDATE loom_market_knowledge SET description")),
+ argThat((String s) -> s.contains("UPDATE loom_market_knowledge SET description=? WHERE id=?")
+ && !s.contains("status")),
  any(Object[].class));
  verify(jdbcTemplate.mock, never()).update(
  argThat((String s) -> s.contains("INSERT INTO loom_market_knowledge")),
@@ -144,7 +156,8 @@ class DefaultKnowledgeMarketServiceTest {
  void testWithdraw_userOwnSubmission() {
  MarketKnowledgeRecord existing = new MarketKnowledgeRecord(
  "market-001", "testuser", "测试知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(existing);
  when(user.isAdmin("testuser")).thenReturn(false);
 
@@ -163,7 +176,8 @@ class DefaultKnowledgeMarketServiceTest {
  void testWithdraw_adminCanDeleteAny() {
  MarketKnowledgeRecord existing = new MarketKnowledgeRecord(
  "market-001", "otheruser", "其他人的知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(existing);
  when(user.isAdmin("testuser")).thenReturn(true);
 
@@ -175,7 +189,8 @@ class DefaultKnowledgeMarketServiceTest {
  void testWithdraw_cannotWithdrawOthers() {
  MarketKnowledgeRecord existing = new MarketKnowledgeRecord(
  "market-001", "otheruser", "其他人的知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(existing);
  when(user.isAdmin("testuser")).thenReturn(false);
 
@@ -190,8 +205,8 @@ class DefaultKnowledgeMarketServiceTest {
  @DisplayName("listApproved 列出已审批的市场知识库")
  void testListApproved_returnsApprovedOnly() {
  List<MarketKnowledgeRecord> approved = List.of(
- new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null),
- new MarketKnowledgeRecord("m2", "user2", "KB2", "desc2", "APPROVED", null, null, null, null));
+ new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null, null, null, null, null, null, null, null, null),
+ new MarketKnowledgeRecord("m2", "user2", "KB2", "desc2", "APPROVED", null, null, null, null, null, null, null, null, null, null, null, null));
  when(jdbcTemplate.mock.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
 
  List<MarketKnowledgeRecord> result = marketService.listApproved(1, 20);
@@ -204,7 +219,7 @@ class DefaultKnowledgeMarketServiceTest {
  @DisplayName("listMyPulled 列出用户订阅列表")
  void testListMyPulled_returnsSubscribed() {
  List<MarketKnowledgeRecord> pulled = List.of(
- new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null));
+ new MarketKnowledgeRecord("m1", "user1", "KB1", "desc1", "APPROVED", null, null, null, null, null, null, null, null, null, null, null, null));
  when(jdbcTemplate.mock.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(pulled);
 
  List<MarketKnowledgeRecord> result = marketService.listMyPulled("testuser");
@@ -213,14 +228,15 @@ class DefaultKnowledgeMarketServiceTest {
  assertEquals("KB1", result.get(0).name());
  }
 
- /* ===== pull（不再校验 status='APPROVED'，提交即上架） ===== */
+ /* ===== pull（新契约：非 APPROVED → 403） ===== */
 
  @Test
- @DisplayName("pull 订阅市场知识库（不再校验 status）")
+ @DisplayName("pull 订阅已 APPROVED 的市场知识库")
  void testPull_subscribes() {
  MarketKnowledgeRecord approved = new MarketKnowledgeRecord(
  "market-001", "author1", "公共知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
  // No existing subscription
  when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
@@ -234,11 +250,29 @@ class DefaultKnowledgeMarketServiceTest {
  }
 
  @Test
+ @DisplayName("pull 非 APPROVED → 403 拒绝（审批流新契约）")
+ void testPull_rejectsNonApproved() {
+ MarketKnowledgeRecord pending = new MarketKnowledgeRecord(
+ "market-001", "author1", "公共知识库", "描述",
+ "PENDING", null, null, null, null, null, null, null,
+ null, null, null, null, null);
+ when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(pending);
+
+ LoomAgentRuntimeException ex = assertThrows(LoomAgentRuntimeException.class,
+ () -> marketService.pull("testuser", "market-001"));
+ assertEquals(403, ex.getStatusCode());
+ assertTrue(ex.getMessage().contains("未通过审批"));
+ // 403 应发生在任何 loom_user_knowledge 写入之前
+ verify(jdbcTemplate.mock, never()).update(anyString(), any(Object[].class));
+ }
+
+ @Test
  @DisplayName("pull 重复订阅抛异常")
  void testPull_duplicateSubscription() {
  MarketKnowledgeRecord approved = new MarketKnowledgeRecord(
  "market-001", "author1", "公共知识库", "描述",
- "APPROVED", null, null, null, null);
+ "APPROVED", null, null, null, null, null, null, null,
+ null, null, null, null, null);
  when(jdbcTemplate.mock.queryForObject(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(approved);
  when(jdbcTemplate.mock.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(1);
 

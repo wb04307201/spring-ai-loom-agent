@@ -3,7 +3,7 @@ loom:
   file:
     mcp:
       # 文件操作的基础目录路径
-      basePath: .local/file
+      basePath: ${user.home}/.loom/mcp
       # 文本文件最大大小（字节），默认 10MB
       maxFileSize: 10485760
       # 媒体文件最大大小（字节），默认 50MB

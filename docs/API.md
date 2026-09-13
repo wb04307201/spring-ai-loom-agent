@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.40
+> **Version**: 1.1.41
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -201,6 +201,20 @@ Each event returns a `ChatResponseRecord`:
 |--------------------|--------|--------------------------------|
 | `content` | string | AI response text fragment |
 | `reasoningContent` | string | Reasoning/thinking trace (optional) |
+| `askUser` | object \| null | 3rd component. `null` = normal content frame; non-null = an askUser question-card event (`AskUserEvent`, fields below). The frontend renders an inline choice card and the `askUser` tool blocks until answered |
+
+**`askUser` (`AskUserEvent`) fields**:
+
+| Field | Type | Description |
+|---|---|---|
+| `questionId` | string | UUID; index for the answer endpoint |
+| `question` | string | Question body |
+| `header` | string | Short title/chip (nullable) |
+| `background` | string | Background context (nullable) |
+| `options` | object[] | 2-4 options, each `{label, description}` |
+| `multiSelect` | boolean | Whether multiple options can be selected |
+| `allowCustomInput` | boolean | Whether a custom "other" input is allowed |
+| `timeoutSeconds` | number | Frontend countdown; same value as the tool's blocking timeout |
 
 **SSE Event Example**:
 
@@ -213,6 +227,20 @@ data: {"content":"How can","reasoningContent":""}
 
 data: {"content":"I help you?","reasoningContent":""}
 ```
+
+### 3.2 AskUser answer endpoint
+
+```
+POST /spring/ai/loom/ask/{questionId}/answer
+Content-Type: application/json
+```
+
+Submits the answer to a question card (the `askUser` tool is blocking and waiting).
+
+- Request body: `{"answer": "option label"}` (single-select / custom input) or `{"answer": ["label1","label2"]}` (multi-select)
+- `200 {"ok":true}` — answer delivered, the blocked tool thread is woken up
+- `400 {"error":"invalid answer"}` — malformed body / `answer` missing or blank
+- `404 {"error":"not found"}` — unknown questionId, cross-user submission, or the question already timed out / was cancelled (all three share one response to prevent existence leaks)
 
 ---
 
@@ -342,13 +370,21 @@ GET /spring/ai/loom/file/{id}/download
 
 ## 5. Knowledge Base Management
 
+### 5.0 Feature Flags
+
+```
+GET /spring/ai/loom/api/features
+```
+
+**Response**: `{ "knowledge": boolean }` — `knowledge` is `true` iff the container has a `VectorStore` bean (RAG chain active). When `spring.ai.loom.agent.rag.enabled=false` (or no `EmbeddingModel` bean exists), it is `false` and the frontend hides the knowledge-space (📚) button.
+
 ### 5.1 Check Knowledge Upload Status
 
 ```
 GET /spring/ai/loom/knowledge/checkKnowledgeUpload
 ```
 
-**Response**: `boolean` — Whether knowledge upload functionality is available.
+**Response**: `boolean` — Whether knowledge upload functionality is available (`false` when RAG is globally disabled).
 
 ---
 
@@ -488,9 +524,11 @@ DELETE /spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}
 
 ### 5.8 Knowledge Market
 
-> Knowledge market enables sharing knowledge bases across users. no approval flow — submit goes directly to APPROVED.
+> Knowledge market enables sharing knowledge bases across users. Approval flow: submit → **PENDING** → admin approve/reject (`POST /admin/market-knowledge/{id}/approve|reject`); only APPROVED entries are publicly listed and pullable. Re-submitting a REJECTED entry archives the old row (id-preserving, incl. reject comment/reviewer/time) into `loom_market_knowledge_archive` and creates a NEW PENDING row.
 
 #### 5.8.1 Browse Approved Market Knowledge Bases
+
+> Kept v1 leg (roles.js dependency): `GET /api/knowledge-market` still returns the APPROVED-only list; the richer v2 list (`GET /market-knowledge`, paged with tag/category filters) is the primary browse endpoint for the frontend.
 
 ```
 GET /spring/ai/loom/api/knowledge-market?page=1&size=20
@@ -529,7 +567,7 @@ POST /spring/ai/loom/api/knowledge-market/{marketId}/pull
 |-----------|--------|-------------------------|
 | `marketId`| string | Market knowledge ID |
 
-**Response**: `{"success": true}` on success. Creates a subscription in `loom_user_knowledge` with `source=MARKET_PULLED`.
+**Response**: `{"success": true}` on success. Creates a subscription in `loom_user_knowledge` with `source=MARKET_PULLED`. Requires the entry to be `APPROVED` — non-APPROVED returns `403`.
 
 ---
 
@@ -545,9 +583,9 @@ POST /spring/ai/loom/api/knowledge/{knowledgeId}/submit
 |---------------|--------|-------------------|
 | `knowledgeId` | string | Knowledge base ID |
 
-**Response**: `MarketKnowledgeRecord` — The created market entry with `status='APPROVED'` (no approval flow).
+**Response**: `MarketKnowledgeRecord` — The created market entry with `status='PENDING'` (awaits admin review).
 
-**Behavior**: If `(username, name)` already exists → UPSERT (updates description; no new row). Otherwise → INSERT a new row directly APPROVED.
+**Behavior**: If a same-`(username, name)` entry exists → depends on its status: **REJECTED** → old row archived to `loom_market_knowledge_archive` (id-preserving, includes reject comment/reviewer/time), a NEW PENDING row is inserted (new id). **PENDING / APPROVED** → in-place content update, **status untouched** (APPROVED never demotes). Otherwise → INSERT a new PENDING row (`created_by_kind='USER'`).
 
 ---
 
@@ -565,35 +603,43 @@ DELETE /spring/ai/loom/api/knowledge-market/{marketId}
 
 **Response**: `{"success": true}` on success.
 
-****: Unified DELETE endpoint for both author withdraw and admin takedown. Internal permission check decides path:
+**Behavior**: Unified DELETE endpoint for both author withdraw and admin takedown. Internal permission check decides path:
 - **Author**: `DELETE FROM loom_market_knowledge WHERE id=? AND username=?` (only deletes own)
-- **Admin**: `DELETE FROM loom_market_knowledge WHERE id=?` (cascades to all references)
+- **Admin**: `DELETE FROM loom_market_knowledge WHERE id=?` (any row)
 
-**Cascading cleanup**: Auto-deletes `loom_user_knowledge` (subscriber rows) + `loom_role_knowledge` (role grants).
+**Cascading cleanup** (both paths): Auto-deletes `loom_user_knowledge` (subscriber rows) + `loom_role_knowledge` (role grants) referencing the market entry.
 
-** removed endpoints**:
-- `_removed_ /api/knowledge-market/{marketId}/approve` — no approval flow
-- `_removed_ /api/knowledge-market/{marketId}/reject` — no approval flow
+**Approval endpoints** (v2 admin router — the v1 `/api/knowledge-market/{marketId}/approve|reject` paths remain retired; approve/reject now live under `/admin`):
+- `POST /admin/market-knowledge/{id}/approve` — admin approve: `status=APPROVED`, `reviewed_at`/`reviewed_by` set
+- `POST /admin/market-knowledge/{id}/reject` — admin reject: `status=REJECTED`; body `{"comment": "..."}` is **required** (empty/missing → `400` both client-side and server-side)
 
-**New admin endpoints ()**:
-- `GET /admin/market-knowledge` — list all market knowledge bases (all APPROVED)
-- `DELETE /admin/market-knowledge/{marketId}` — admin takedown (cascade cleanup)
-
----
-
-#### 5.8.5 Admin Approve Market Submission (removed)
-
-> removed — no approval flow needed.
+**Admin endpoints**:
+- `GET /admin/market-knowledge` — list all market knowledge bases (all statuses: PENDING / APPROVED / REJECTED)
+- `POST /admin/market-knowledge` — admin create: direct `APPROVED` + `created_by_kind='ADMIN'`. Body: `MarketCreateRequest` (`name` / `description` / `content` / `category`)
+- `PUT /admin/market-knowledge/{id}` — edit fields (`MarketUpdateRequest`) — **cannot change status** (no status field); state changes only via approve/reject
+- `DELETE /admin/market-knowledge/{marketId}` — admin takedown (cascade cleanup of `loom_user_knowledge` + `loom_role_knowledge` reference rows)
+- Plus per-id admin legs mirroring the skill market: `/official`, `/featured-rank`, `/category`, `/announcement` (PUT + DELETE), `/reviews/{username}` (DELETE), `/stats-reset`, `/tags` (PUT + GET)
 
 ---
 
-#### 5.8.6 Admin Reject Market Submission
+#### 5.8.5 Admin Approve / Reject Market Submission
+
+```
+POST /spring/ai/loom/admin/market-knowledge/{id}/approve
+POST /spring/ai/loom/admin/market-knowledge/{id}/reject
+```
+
+Admin-only (non-admin → `403`). `approve` sets `status=APPROVED` and records `reviewed_at` / `reviewed_by`. `reject` sets `status=REJECTED` and requires a non-blank `comment` in the body (`{"comment": "reason"}`) — missing/blank → `400`. The author sees the reject reason in **我的发布** and can re-submit: the REJECTED row is archived to `loom_market_knowledge_archive` (id-preserving, includes comment/reviewer/time) and a fresh PENDING row is created.
+
+---
+
+#### 5.8.6 Admin Reject Market Submission (legacy v1 path)
 
 ```
 POST /spring/ai/loom/api/knowledge-market/{marketId}/reject
 ```
 
-> removed — use unified `DELETE /api/knowledge-market/{marketId}` instead.
+> removed — the v1 KB approve/reject legs are retired; use the v2 admin endpoints `POST /admin/market-knowledge/{id}/approve|reject` (see § 5.8.5) instead.
 
 ---
 
@@ -613,7 +659,7 @@ GET /spring/ai/loom/api/knowledge-market/my-pulled
 GET /spring/ai/loom/api/knowledge-market/my-submitted
 ```
 
-**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (all are APPROVED).
+**Response**: `MarketKnowledgeRecord[]` — Knowledge bases the current user has submitted to the market (PENDING / APPROVED / REJECTED).
 
 ---
 
@@ -688,7 +734,7 @@ PATCH /spring/ai/loom/skill/{name}
 Content-Type: application/json
 ```
 
-For `MARKET_PULLED` and `USER_CREATED` skills — change `description` and/or `default_loaded` without overwriting content. Returns `400` if the skill is `ROLE_GRANTED` (locked).
+For `USER_CREATED` skills — change `description` and/or `default_loaded` without overwriting content. For `MARKET_PULLED` skills — only `default_loaded` may change; a `description` change is rejected with `403` (locked to the market snapshot). Returns `400` if the skill is `ROLE_GRANTED` (locked).
 
 **Request Body** (`UserSkillPatchRequest`):
 
@@ -711,7 +757,7 @@ GET /spring/ai/loom/skill/{name}
 |-----------|--------|-------------|
 | `name` | string | Skill name |
 
-**Response**: `SkillRecord`. For admins, falls back to the market view if no local copy exists.
+**Response**: `SkillRecord`. Admins see only their own `user_skill` (no market-view fallback — consistent with §6.2).
 
 ---
 
@@ -741,7 +787,7 @@ Re-runs the `role_skill` → `user_skill` sync for the current user. Mostly for 
 GET /spring/ai/loom/market-skills
 ```
 
-Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name` ( removed the `version` field — no `version DESC` ordering any more). Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
+Returns all `market_skill` rows with `status='APPROVED'`, ordered by `author, name` (the `version` field has been removed — no `version DESC` ordering any more). Each item has the full `MarketSkill` model (`id`, `name`, `description`, `content`, `author`, `status`, `submittedAt`, `reviewedAt`, `reviewedBy`, `reviewComment`).
 
 ---
 
@@ -761,10 +807,11 @@ GET /spring/ai/loom/market-skills/{id}
 POST /spring/ai/loom/market-skills/{id}/pull
 ```
 
-Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `400` if:
-- The market skill isn't `APPROVED`
+Creates / updates a `MARKET_PULLED` `user_skill` row from the given `market_skill`. Throws `403` if the market skill isn't `APPROVED` (approval flow — only approved entries are pullable). Throws `400`/`403` if:
 - A `ROLE_GRANTED` lock with the same name already exists
-- The same name is already in your `user_skill` (refreshes content silently)
+- A same-name `USER_CREATED` skill exists in your `user_skill` (`403` — pull refuses to overwrite self-built content; delete it first or use `duplicate`)
+
+A same-name `MARKET_PULLED` row is refreshed in place (content updated to the latest market snapshot, no error).
 
 ---
 
@@ -775,7 +822,7 @@ POST /spring/ai/loom/user/market-skills
 Content-Type: application/json
 ```
 
-Submits a new `market_skill` row with `status=APPROVED` and `author=currentUser` (no approval flow — submit is instant).
+Submits a new `market_skill` row with `status=PENDING` and `author=currentUser` (approval flow — awaits admin approve/reject; `created_by_kind='USER'`).
 
 **Request Body** (`MarketSkillSubmitRequest`):
 
@@ -785,9 +832,13 @@ Submits a new `market_skill` row with `status=APPROVED` and `author=currentUser`
 | `description`| string | No | Description |
 | `content` | string | Yes | Prompt template |
 
-removed the `version` field — the `(author, name)` pair is the unique constraint.
+The `version` field has been removed — the `(author, name)` pair is the unique constraint.
 
-Behavior: If `(author, name)` already exists in `market_skill`, the existing row is **UPSERTed** (content/desc replaced; status reset to APPROVED). Otherwise INSERT a new row with `status=APPROVED` (no approval flow). The author's `user_skill.market_skill_id` is rebound to the new market_skill row so that subsequent `save` propagates to all pullers.
+Behavior: If `(author, name)` already exists in `market_skill`, the outcome depends on its status:
+- **REJECTED** → the old row is archived to `market_skill_archive` (id-preserving, includes reject comment/reviewer/time), and a **NEW** PENDING row is inserted (new id). The author's `user_skill.market_skill_id` backlink is rebound to the new row.
+- **PENDING / APPROVED** → in-place content/desc update, **status untouched** (APPROVED never demotes back to PENDING).
+
+Otherwise INSERT a new row with `status=PENDING`. The author's `user_skill.market_skill_id` is bound to the market_skill row so that subsequent `save` propagates to all pullers.
 
 ---
 
@@ -797,22 +848,38 @@ Behavior: If `(author, name)` already exists in `market_skill`, the existing row
 
 | Method | Path | Description |
 |--------|---------------------------------------------------|---------------------------------------------------|
-| GET | `/spring/ai/loom/admin/market-skills` | List **all** ( 起所有都是 APPROVED，无审批流) |
-| POST | `/spring/ai/loom/admin/market-skills` | Create directly with `status=APPROVED`. Body: `MarketSkillUpsertRequest` |
-| PUT | `/spring/ai/loom/admin/market-skills/{id}` | Edit any field of any market skill |
-| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | Cascade-deletes from `user_skill` and `role_skill`（：这就是"下架"，拉取者失去该 skill） |
-| _removed_ | `/admin/market-skills/pending` | ：去掉（无审批流，没有 PENDING 状态） |
-| _removed_ | `/admin/market-skills/{id}/approve` | ：去掉（提交即上架） |
-| _removed_ | `/admin/market-skills/{id}/reject` | ：去掉（需要下架请用 DELETE） |
+| GET | `/spring/ai/loom/admin/market-skills` | List **all** statuses (PENDING / APPROVED / REJECTED); optional `?status=PENDING` filter (there is no separate `/pending` endpoint), plus `page` / `size` / `category` / `query` / `sortBy` |
+| POST | `/spring/ai/loom/admin/market-skills` | Admin create — direct `status=APPROVED` + `created_by_kind='ADMIN'` (bypasses PENDING). Body: `MarketCreateRequest` (`name` / `description` / `content` / `category`) |
+| PUT | `/spring/ai/loom/admin/market-skills/{id}` | Edit any field of any market skill. Body: `MarketUpdateRequest` — **cannot change status** (no status field); state changes only via approve/reject |
+| DELETE | `/spring/ai/loom/admin/market-skills/{id}` | Cascade-deletes from `user_skill` and `role_skill`（这就是"下架"，拉取者失去该 skill） |
+| POST | `/admin/market-skills/{id}/approve` | Admin approve: `status=APPROVED`, `reviewed_at` / `reviewed_by` set |
+| POST | `/admin/market-skills/{id}/reject` | Admin reject: `status=REJECTED`; body `{"comment": "..."}` **required** (empty/missing → `400`). Author re-submit of a REJECTED row archives it to `market_skill_archive` and creates a NEW PENDING row |
+| _never existed_ | `/admin/market-skills/pending` | No separate endpoint — use `GET /admin/market-skills?status=PENDING` |
+| PUT | `/admin/market-skills/{id}/official` \| `/featured-rank` \| `/category` \| `/announcement` \| `/stats-reset` \| `/tags` | Per-row admin legs (official flag / featured rank / category / announcement / stats reset / tag management); plus `GET .../tags`, `DELETE .../announcement`, `DELETE .../reviews/{username}` |
 
-`MarketSkillUpsertRequest`:
+Request bodies:
+
+`MarketCreateRequest` (POST — admin create):
 
 | Field | Type | Required | Description |
 |------------|--------|----------|------------------------------------------------------|
 | `name` | string | Yes | Skill name |
 | `description`| string| No | Description |
 | `content` | string | Yes | Prompt template |
-| `status` | string | No | Defaults to `APPROVED` if omitted (admin no longer creates new skills — this endpoint is preserved for backward compatibility only) |
+| `category` | string | No | Category |
+
+`MarketUpdateRequest` (PUT — admin edit; no `status` field — status changes only via approve/reject):
+
+| Field | Type | Required | Description |
+|------------|--------|----------|------------------------------------------------------|
+| `name` | string | No | Rename; null = no change |
+| `description`| string| No | Description |
+| `content` | string | No | Prompt template |
+| `category` | string | No | Category |
+| `isOfficial` | boolean | No | Official flag |
+| `featuredRank` | int | No | Featured ranking |
+
+> `MarketSkillUpsertRequest` (+ `ISkillMarketService.adminCreate/adminUpdate/adminDelete`) are `@Deprecated` (ADR-T03 shim, kept 1 minor version) — the v2 `createApproved` / `update` / `delete` paths above are the supported entry points.
 
 ---
 
@@ -873,7 +940,7 @@ GET /spring/ai/chat/loom/mcp
  {
  "name": "weather-mcp",
  "title": "Weather",
- "version": "1.1.40",
+ "version": "1.1.41",
  "description": "Provides real-time weather query service",
  "defaultSelected": true,
  "tools": [
@@ -960,7 +1027,7 @@ Start a terminal process or REPL session. Supports two modes: **Shell mode** (on
 | Parameter | Type | Required | Description |
 |--------------|---------|----------|-------------------------------------------------------------------------------------------------|
 | `command` | string | Yes | Command to execute. Shell mode: any shell command. REPL mode: interpreter (e.g. `python`, `node`) |
-| `workingDir` | string | No | Working directory (default: `.local/file/{username}/`) |
+| `workingDir` | string | No | Working directory (default: `~/.loom/users/{username}/file/`) |
 | `repl` | boolean | No | Whether REPL mode. `true` = long interactive session; `false`/omitted = one-shot command |
 | `timeout` | long | No | Wait timeout in milliseconds (default 30000ms) |
 
@@ -1192,20 +1259,20 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | GET | `/admin/conversations/{conversationId}/messages` | List raw `ChatMessage`s |
 | POST | `/admin/conversations/clean-batch` | Hard-delete soft-deleted conversations in batch |
 
-### 10.3 Token Usage Statistics
+### 10.3 Token Usage Statistics & Logs
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
+| GET | `/admin/ask-logs?limit=&username=` | AskUser question-card logs (read-only view over `loom_tool_call_log` where `tool_name='askUser'`; `limit` default 50, max 200; `status`: ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN). Powers the "提问卡片" block on `admin/stats.html` |
 
 ### 10.4 Role / MCP / Skill / Knowledge Management
 
 All under `/admin/...` and already documented in:
 
-- [§ 5 Knowledge Base Management](#5-knowledge-base-management) — `admin/knowledge*`, `/api/knowledge-market*`
+- [§ 5 Knowledge Base Management](#5-knowledge-base-management) — `admin/knowledge*`, `/api/knowledge-market*`, and the Knowledge Market approval flow (§5.8)
 - [§ 6 Skill Management](#6-skill-management) — `admin/market-skills*`, `/admin/roles/{code}/skills`
 - [§ 7 MCP Tools](#7-mcp-tools) — `admin/mcps*`, `admin/mcp-tools*`
-- See `docs/knowledge-market.md` for the Knowledge Market flow.
 
 ### 10.5 Admin UI Pages (`admin/*.html`)
 
@@ -1213,13 +1280,13 @@ All under `/admin/...` and already documented in:
 | --- | --- |
 | `admin/console.html` (→ user.html) | User list + role assignment + batch content cleanup |
 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
-| `admin/skills-market.html` | Approve / reject / directly CRUD Skill |
+| `admin/market-skills.html` | Approve / reject / directly CRUD Skill |
 | `admin/knowledge-market.html` | Approve / reject / directly CRUD Knowledge |
 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
 | `admin/conversation.html` | Drill into any user's conversation turns (admin only) |
 | `admin/stats.html` | Monthly Token usage (year + month filter) |
 
-All admin pages share a fixed left sidebar (see README "Admin Console" section). `D2` () fixed the previously dead `admin/knowledge-market.html` page (the JS file was missing).
+All admin pages share a fixed left sidebar (see README "Admin Console" section).
 
 ---
 
@@ -1242,9 +1309,12 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 ```json
 {
  "content": "string",
- "reasoningContent": "string"
+ "reasoningContent": "string",
+ "askUser": null
 }
 ```
+
+`askUser` is `null` for normal frames; when non-null it carries an `AskUserEvent` question card (see § 3.1/3.2).
 
 ### ConversationRecord
 
@@ -1369,14 +1439,15 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
 The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Skill Management](#6-skill-management) for the database-driven flow. 6 system skills are seeded on first launch.
 
-### 10.5 JVector Configuration
+### 10.5 Vector Store Configuration (H2-backed JVector)
 
 | Property | Type | Default | Description |
 |-------------------------------------------------|--------|------------------------|------------------------------|
-| `spring.ai.loom.agent.jvector.indexPath` | string | `.local/jvector-index` | Vector index storage path |
 | `spring.ai.loom.agent.jvector.m` | int | `16` | HNSW graph parameter M |
 | `spring.ai.loom.agent.jvector.efConstruction` | int | `100` | ef parameter at build time |
 | `spring.ai.loom.agent.jvector.efSearch` | int | `10` | ef parameter at search time |
+
+> Persistence: vectors live in the H2 table `loom_vector_store` (embedding BLOB, little-endian float32) and are hydrated into the in-memory JVector HNSW graph on `ApplicationReadyEvent` — no boot-time re-embedding. The legacy `~/.loom/jvector-index/` json files are retired. Changing the embedding model invalidates stored vectors (dim-guarded rows are skipped with a WARN); wipe the table and re-upload knowledge documents.
 
 ### 10.6 Authentication Configuration
 
@@ -1392,8 +1463,7 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.fileBasePath` | string | `.local/file` | Root directory for uploaded files |
-| `spring.ai.loom.agent.knowledgeBasePath` | string | `.local/knowledge` | Root directory for knowledge base files |
+| `spring.ai.loom.agent.usersBasePath` | string | `~/.loom/users` | User-tree root; per-user sandbox = `{usersBasePath}/{username}/file/` |
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
 
@@ -1403,7 +1473,7 @@ The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | Whether to enable the file tool |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **Deprecated since M3** — no effect; `IFileTool` is a universal tool (always visible) |
 | `spring.ai.loom.agent.file.maxFileSize` | long | `5242880` (5 MB) | Per-call upper bound on file read/write size (bytes). Exceeding this is rejected outright, **to avoid OOM and LLM context overflow**. |
 | `spring.ai.loom.agent.file.maxMediaSize` | long | `1048576` (1 MB) | Upper bound on media files (images / audio). Base64-encoded size ≈ 4/3 of the original, so the limit is stricter than for text. |
 | `spring.ai.loom.agent.file.maxWalkDepth` | int | `5` | Upper bound on depth for `directoryTree` / recursive listing / search. |
@@ -1427,7 +1497,7 @@ The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | Whether to register the end-to-end deploy tool (default enabled) |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | **Deprecated since M3** — no effect; bean always created, visibility RBAC-gated via `role_tool.tool_compile` |
 | `spring.ai.loom.agent.compile.mavenHome` | string | auto-discover | Optional Maven install dir; falls back to `maven.mavenHome` and PATH |
 | `spring.ai.loom.agent.compile.dockerCmd` | string | `docker` | Optional override for the docker CLI binary |
 | `spring.ai.loom.agent.compile.imageTemplates` | map | (6 pre-set templates) | Pre-set base-image templates keyed by alias; see below |
@@ -1490,11 +1560,11 @@ Example tool invocation:
 
 ### 10.9 Git Configuration (`IGitTool`)
 
-`IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. **Disabled by default** — opt in with `git.enabled=true`.
+`IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. The bean is **always created**; visibility is RBAC-gated — an admin must grant `tool_git` to a role (`/admin/roles/{code}/tools`, persisted in `role_tool`). The `git.enabled` yml flag is **deprecated (no effect)**.
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
-| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Whether to register the Git tool (default false; set to true to enable) |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; visibility is RBAC-gated via `role_tool.tool_git` |
 | `spring.ai.loom.agent.git.username` | string | — | Git username for remote authentication |
 | `spring.ai.loom.agent.git.token` | string | — | Git token / password for remote authentication |
 
@@ -1506,55 +1576,46 @@ spring:
  loom:
  agent:
  git:
- enabled: true # default false; set to true to enable
  username: your-username
  token: your-token
+# Note: no 'enabled' flag — grant tool_git to a role in the admin console instead
 ```
 
 ### 10.10 Maven Build Configuration
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Whether to register the Maven tool (**opt-in**) — compile/package for deployment scenarios is handled by `ICompileAndDeployTool` |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; the bean is created when `maven-invoker` is on the classpath (a default lib dependency) and visibility is RBAC-gated via `role_tool.tool_maven`. Compile/package for deployment scenarios is handled by `ICompileAndDeployTool` |
 | `spring.ai.loom.agent.maven.mavenHome` | string | — | Maven install directory. **When empty, the tool auto-discovers**: it tries the `MAVEN_HOME` / `M2_HOME` environment variables first, then scans common Windows paths (e.g. `C:\developer\apache-maven-*`, `C:\Program Files\Apache Maven`). Auto-discovery does **not** rely on the system `PATH`, so a broken or shadowing `mvn` wrapper (e.g. a global npm `mvn`) won't cause `maven-invoker` to throw `Error configuring command line`. |
 | `spring.ai.loom.agent.maven.localRepository` | string | — | Local repository path (uses the default path when empty) |
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | Maximum output lines (truncated when exceeded) |
 | `spring.ai.loom.agent.maven.defaultTimeoutMs` | long | `300000` | Default execution timeout in milliseconds (5 minutes) |
 
-> All Maven tool operations are scoped to `{fileBasePath}/{username}/`; paths outside that range are rejected.
+> All Maven tool operations are scoped to `{usersBasePath}/{username}/file/`; paths outside that range are rejected.
 >
 > **Troubleshooting tip — `MavenInvocationException: Error configuring command line`**: this means `maven-invoker` could not find a usable `mvn` / `mvn.cmd`. The tool startup log prints the resolved `mavenHome` together with a diagnostic hint listing every path it searched, the environment variables it looked at, and how to fix it. The most common cause is a broken or shadowing `mvn` on `PATH` (e.g. a global npm `mvn` wrapper); in that case, explicitly set `spring.ai.loom.agent.maven.mavenHome` in `application.yml` to point at the real Maven install directory to bypass it.
 >
 > **Troubleshooting tip — "file is locked" errors when deleting the project directory on Windows**: in older versions this was caused by `maven-invoker 3.3.0` / `plexus-utils 3.3.0` because (a) the JVM shutdown hook they register on the exception/cancel path never releases the held `Process` reference, and (b) `Invoker.execute` does not expose the child-process handle, so it cannot propagate cancel/timeout down to the mvn child process. The result: a cancelled or timed-out Maven call would leave the mvn child running and continuing to hold mmap handles on `target/classes` and `~/.m2/repository/*.jar`, locking those files on Windows. **The new version no longer uses `Invoker.execute` to run the process** — it forks mvn directly with `ProcessBuilder`, does a clean timeout via `Process.waitFor(timeout, unit)`, then calls `Process.destroyForcibly` and explicitly closes the streams on timeout. **No JVM shutdown hook is registered any more, so the mvn child is always killed on timeout/cancel.** If you still see locks after upgrading, it is most likely an orphan mvn process left behind by a previous JVM — find it with `tasklist /FI "IMAGENAME eq cmd.exe"` and `taskkill /F /PID <pid>` it.
 
-### 10.11 Tool Group Switches
+### 10.11 Tool Group Switches (deprecated)
 
-All built-in tool groups are **enabled by default** (`matchIfMissing=true`). Set any of the following properties to `false` in yml to turn off the corresponding tool group.
+> **Since M3, the `*.enabled` switches below no longer gate tool beans.** All always-on `I*Tool` beans are created unconditionally (plus `IHtmlRenderTool`, gated only by `playwright` on the classpath). Visibility is governed by **universal tools** (`@ToolGroup(defaultGranted=true)` — visible to every logged-in user) vs **RBAC tools** (`tool_git` / `tool_maven` / `tool_compile` / `tool_render`, granted per role via `/admin/roles/{code}/tools`, persisted in `role_tool`). See [TOOLS.md §1](./TOOLS.md) for the full model. The properties remain for backward compatibility only.
 
 | Property | Type | Default | Description |
 |-----------------------------------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.time.enabled` | boolean | `true` | Time tool (`ITimeTool` — get current time, convert between timezones) |
-| `spring.ai.loom.agent.file.enabled` | boolean | `true` | File tool (`IFileTool` — 16 path-based read/write/edit/search/delete operations) |
-| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | Skill tool (`ISkillTool` — list skills, get skill details) |
-| `spring.ai.loom.agent.git.enabled` | boolean | `false` | Git tool (`IGitTool` — 28 git operations). **Opt-in** — end-to-end deployment goes through `ICompileAndDeployTool`. |
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Maven tool (also requires `maven-invoker` on the classpath). **Opt-in** — compile/package for deployment scenarios goes through `ICompileAndDeployTool`. |
+| `spring.ai.loom.agent.time.enabled` | boolean | `true` | **Deprecated** — no effect (`ITimeTool` is universal) |
+| `spring.ai.loom.agent.file.enabled` | boolean | `true` | **Deprecated** — no effect (`IFileTool` is universal) |
+| `spring.ai.loom.agent.skill.enabled` | boolean | `true` | **Deprecated** — no effect (`ISkillTool` is universal) |
+| `spring.ai.loom.agent.git.enabled` | boolean | `false` | **Deprecated** — no effect; `IGitTool` bean always created, visibility RBAC-gated via `role_tool.tool_git` |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **Deprecated** — no effect; `IMavenTool` bean created when `maven-invoker` on classpath, visibility RBAC-gated via `role_tool.tool_maven` |
 | `spring.ai.loom.agent.git.username` | string | — | HTTP(S) Git auth username (clone/pull/push) |
 | `spring.ai.loom.agent.git.token` | string | — | HTTP(S) Git auth token / password |
 | `spring.ai.loom.agent.gitUsername` | string | — | **Legacy** top-level alias, equivalent to `git.username` |
 | `spring.ai.loom.agent.gitToken` | string | — | **Legacy** top-level alias, equivalent to `git.token` |
 
-**Example — enable the Git tool**:
+**Example — expose the Git tool to a role**: no yml change needed; in the admin console (角色管理 → base → 编辑/授权 → 授权本地工具组) grant `tool_git` to the role.
 
-```yaml
-spring:
- ai:
- loom:
- agent:
- git:
- enabled: true # default false; set to true to enable
-```
-
-> Even when a tool group is turned off, you can still re-enable it by providing your own `@Bean IGitTool` / `@Bean IMavenTool` — `@ConditionalOnMissingBean` always takes precedence over the auto-configured bean.
+> To replace a tool implementation, provide your own `@Bean IGitTool` / `@Bean IMavenTool` — `@ConditionalOnMissingBean` always gives user-provided beans precedence.
 
 ---
 
@@ -1581,12 +1642,12 @@ spring:
 | 13 | `POST` | `/spring/ai/loom/knowledge/{id}/upload` | Upload file to knowledge base |
 | 14 | `GET` | `/spring/ai/loom/knowledge/{id}/file` | List files in knowledge base |
 | 15 | `DELETE` | `/spring/ai/loom/knowledge/{id}/file/{fileId}` | Delete file from knowledge base |
-| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | Browse approved market knowledge (paginated) |
-| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | Subscribe to market knowledge |
-| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | Submit knowledge to market |
+| 15a| `GET` | `/spring/ai/loom/api/knowledge-market` | Browse approved market knowledge (kept v1 leg; v2 `GET /market-knowledge` is the primary list) |
+| 15b| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/pull` | Subscribe to market knowledge (APPROVED-only, else 403) |
+| 15c| `POST` | `/spring/ai/loom/api/knowledge/{knowledgeId}/submit` | Submit knowledge to market (→ PENDING) |
 | 15d| `DELETE` | `/spring/ai/loom/api/knowledge-market/{marketId}` | Withdraw market submission |
-| 15e| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/approve`| Admin approve market submission |
-| 15f| `POST` | `/spring/ai/loom/api/knowledge-market/{marketId}/reject`| Admin reject market submission |
+| 15e| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/approve` | Admin approve market submission (v2 admin router) |
+| 15f| `POST` | `/spring/ai/loom/admin/market-knowledge/{id}/reject` | Admin reject market submission (comment required) |
 | 15g| `GET` | `/spring/ai/loom/api/knowledge-market/my-pulled` | List my subscribed market knowledge |
 | 15h| `GET` | `/spring/ai/loom/api/knowledge-market/my-submitted` | List my market submissions |
 | 16 | `GET` | `/spring/ai/chat/loom/mcp` | Get MCP servers and tools |

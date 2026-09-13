@@ -11,7 +11,12 @@ import java.util.Map;
 @Data
 @ConfigurationProperties(prefix = "loom.compile.mcp")
 public class LoomCompileMcpProperties {
-    private String basePath = ".local/file";
+    /**
+     * MCP server 沙箱根（扁平配置模式，独立单租户进程 — 不使用主库用户树）。
+     * 默认与其余 3 个 MCP server 共享 {@code ~/.loom/mcp}，git clone 的仓库可被
+     * file/maven MCP 直接互操作；compile workspace（compile-deploy-* 运行目录）建在其下。
+     */
+    private String basePath = System.getProperty("user.home") + "/.loom/mcp";
     private String mavenHome;
     private long mavenTimeoutMs = 600000;
     private long dockerBuildTimeoutMs = 600000;

@@ -7,8 +7,8 @@
  *   .modal-xl   800px  — 详情编辑
  *
  * 按钮约定：
- *   .primary-btn    — 蓝色填充（主操作：保存 / 创建 / 通过）
- *   .secondary-btn  — 灰底白边（次操作：刷新 / 取消 / 编辑）
+ *   .primary-btn    — 蓝色填充（主操作：保存 / 创建 / 通过）【已迁入 style.css 共享层】
+ *   .secondary-btn  — 灰底白边（次操作：刷新 / 取消 / 编辑）【M4 T2 已迁入 style.css 共享层】
  *   .delete-btn / .danger-btn — 红边框白底（删除 / 拒绝）
  *   .danger-solid   — 红底白字（确认对话框的「确定」红底按钮）
  *   .btn-sm         — 表格行内按钮（4-12px padding / 12px font-size）
@@ -91,7 +91,7 @@ body {
 
 .admin-sidebar-subtitle {
   font-size: 11px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
 }
 
 .admin-sidebar-nav {
@@ -116,12 +116,12 @@ body {
 
 .admin-sidebar-link:hover {
   background: var(--bg-secondary, #f1f5f9);
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
 }
 
 .admin-sidebar-link.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--primary-color, #6366f1);
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--primary-color, #4f46e5);
   font-weight: 500;
 }
 
@@ -176,7 +176,7 @@ body {
 
 .admin-subtitle {
   font-size: 12px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   margin-left: 12px;
 }
 
@@ -188,12 +188,12 @@ body {
 
 .admin-username {
   font-size: 13px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
 }
 
 .header-link {
   font-size: 13px;
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
   text-decoration: none;
 }
 
@@ -215,41 +215,8 @@ body {
   margin-bottom: 16px;
 }
 
-.primary-btn {
-  padding: 8px 16px;
-  background: var(--primary-color, #6366f1);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.primary-btn:hover {
-  background: var(--primary-hover, #4f46e5);
-}
-.primary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.secondary-btn {
-  padding: 8px 16px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #1e293b);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.secondary-btn:hover {
-  border-color: var(--primary-color, #6366f1);
-  color: var(--primary-color, #6366f1);
-}
+/* M4 T2: .secondary-btn + :hover 已迁入共享层 style.css（index.html 的市场
+   load-more 按钮也要用）——与之前 .primary-btn 迁移同款做法，此处不再重复定义。 */
 
 .table-container {
   background: var(--bg-primary, #fff);
@@ -288,7 +255,7 @@ table.user-table {
 
 .user-table th {
   background: #f8fafc;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 12px;
   font-weight: 500;
   text-transform: uppercase;
@@ -300,24 +267,6 @@ table.user-table {
 }
 .user-table tbody tr:hover {
   background: #f8fafc;
-}
-
-.type-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.type-badge.ADMIN {
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--primary-color, #6366f1);
-}
-
-.type-badge.USER {
-  background: rgba(148, 163, 184, 0.1);
-  color: var(--text-muted, #94a3b8);
 }
 
 /* 已分配角色列:多 badge 横向排列,空状态用 muted 文字 */
@@ -340,7 +289,7 @@ table.user-table {
 }
 
 .role-empty {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 12px;
   font-style: italic;
 }
@@ -378,7 +327,7 @@ table.user-table {
 }
 
 .user-link {
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
   text-decoration: none;
 }
 .user-link:hover {
@@ -388,7 +337,7 @@ table.user-table {
 .usage-cell {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
 }
 
 .batch-list {
@@ -418,7 +367,7 @@ table.user-table {
 }
 
 .batch-conv {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-family: ui-monospace, monospace;
   font-size: 11px;
 }
@@ -431,7 +380,7 @@ table.user-table {
 }
 
 .batch-date {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 11px;
 }
 
@@ -475,7 +424,7 @@ table.user-table {
 }
 
 .bar-label {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-variant-numeric: tabular-nums;
 }
 
@@ -487,7 +436,7 @@ table.user-table {
 }
 
 .bar-fill {
-  background: linear-gradient(90deg, var(--primary-color, #6366f1), #a855f7);
+  background: linear-gradient(90deg, var(--primary-color, #4f46e5), #a855f7);
   height: 100%;
   border-radius: 4px;
   transition: width 0.3s;
@@ -496,22 +445,22 @@ table.user-table {
 .bar-value {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
   font-weight: 500;
 }
 
 .clean-btn {
   padding: 4px 12px;
   background: transparent;
-  color: var(--primary-color, #6366f1);
-  border: 1px solid var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
+  border: 1px solid var(--primary-color, #4f46e5);
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .clean-btn:hover {
-  background: var(--primary-color, #6366f1);
+  background: var(--primary-color, #4f46e5);
   color: white;
 }
 
@@ -530,12 +479,12 @@ table.user-table {
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   padding-top: 2px;
 }
 
 .msg-role.role-user {
-  color: var(--primary-color, #6366f1);
+  color: var(--primary-color, #4f46e5);
 }
 .msg-role.role-assistant {
   color: #059669;
@@ -555,36 +504,7 @@ table.user-table {
 .empty-state {
   padding: 40px;
   text-align: center;
-  color: var(--text-muted, #94a3b8);
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 6px;
-  color: var(--text-primary, #1e293b);
-}
-
-.form-input {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-  background: var(--bg-secondary, #f8fafc);
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: var(--primary-color, #6366f1);
-  background: white;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  color: var(--text-muted, #64748b);
 }
 
 .error-msg {
@@ -661,19 +581,11 @@ table.user-table {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 20px;
 }
 .close-button:hover {
   background: #f1f5f9;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 24px;
-  border-top: 1px solid var(--border-color, #e2e8f0);
 }
 
 .toast {
@@ -726,7 +638,7 @@ table.user-table {
 }
 .conv-meta-table th {
   width: 120px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-weight: 500;
 }
 
@@ -772,7 +684,7 @@ table.user-table {
 .flow-round-divider {
   text-align: center;
   font-size: 11px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #475569);
   padding: 12px 0 6px 0;
   margin: 6px 0 2px 0;
   border-top: 1px dashed var(--border-color, #e2e8f0);
@@ -812,7 +724,7 @@ table.user-table {
   text-align: center;
 }
 .flow-time {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 12px;
   font-family: ui-monospace, monospace;
   padding-top: 2px;
@@ -822,7 +734,7 @@ table.user-table {
   padding: 2px 6px;
   border-radius: 3px;
   background: var(--bg-secondary, #f1f5f9);
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #475569);
   text-align: center;
   align-self: start;
   font-family: ui-monospace, monospace;
@@ -843,7 +755,7 @@ table.user-table {
   margin-bottom: 2px;
 }
 .flow-meta {
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-size: 11px;
   font-family: ui-monospace, monospace;
   margin-top: 2px;
@@ -866,7 +778,7 @@ table.user-table {
 .flow-prompt summary,
 .flow-error summary {
   cursor: pointer;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
   font-weight: 500;
 }
 .flow-thinking pre,
@@ -889,7 +801,7 @@ table.user-table {
 
 /* 类型着色：背景色块 + 左边框 */
 .flow-event-USER {
-  border-left: 3px solid #94a3b8;
+  border-left: 3px solid #64748b;
   padding-left: 5px;
 }
 .flow-event-ASSISTANT {
@@ -968,7 +880,7 @@ table.user-table {
 .flow-markdown blockquote {
   border-left: 3px solid #cbd5e1;
   padding-left: 12px;
-  color: #64748b;
+  color: #475569;
   margin: 0.5em 0;
 }
 .flow-markdown table {
@@ -1006,7 +918,7 @@ table.user-table {
 }
 /* V5.4 P3：SYSTEM 事件 — 系统提示词，紫色调区分 */
 .flow-event-SYSTEM {
-  border-left: 3px solid #6366f1;
+  border-left: 3px solid #4f46e5;
   padding-left: 5px;
   background: #f5f3ff;
   border-radius: 4px;
@@ -1020,7 +932,102 @@ table.user-table {
 }
 .flow-event-SYSTEM .flow-system summary {
   cursor: pointer;
-  color: var(--primary, #6366f1);
+  color: var(--primary, #4f46e5);
   font-weight: 500;
   padding: 4px 0;
+}
+
+/* M0 T12: 待审核角标（admin market-skills 顶部红色 chip） */
+.pending-chip {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.pending-chip-red {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* M0 T11/T12: 审批状态徽章（admin market 表「状态」列渲染） */
+.approval-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.approval-status-PENDING {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.approval-status-APPROVED {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+.approval-status-REJECTED {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+.approval-status-WITHDRAWN {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.approval-status-UNKNOWN {
+  background: #f3f4f6;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+}
+.approval-meta {
+  font-size: 12px;
+  color: var(--text-muted, #475569);
+}
+.approval-comment {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #475569);
+  background: #f8fafc;
+  border-left: 3px solid #cbd5e1;
+  padding: 4px 8px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+}
+
+.tag-edit-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  background: var(--bg-secondary, #f8fafc);
+  min-height: 40px;
+  margin-bottom: 6px;
+}
+.tag-edit-list-empty {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+  padding: 6px;
+}
+.tag-edit-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.tag-edit-hint {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  margin-top: 4px;
+  line-height: 1.5;
 }

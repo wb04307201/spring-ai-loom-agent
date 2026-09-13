@@ -4,7 +4,6 @@ import cn.wubo.loom.file.core.FileOperations;
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.model.FileRecord;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
-import cn.wubo.spring.ai.loom.agent.util.TikaUtils;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -13,12 +12,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 文件工具默认实现。
@@ -26,7 +21,7 @@ import java.util.UUID;
  * 核心文件操作委托给 {@link FileOperations}，本类负责：
  * <ul>
  * <li>从 ToolContext 获取 username</li>
- * <li>拼接 basePath = fileBasePath + username</li>
+ * <li>经 {@link cn.wubo.loom.file.core.LoomPaths} 派生沙箱根 = {usersBasePath}/{username}/file</li>
  * <li>预览/下载链接生成（依赖 IFile 数据库操作）</li>
  * <li>删除后清理 file_info 表中的临时记录</li>
  * </ul>
@@ -34,13 +29,15 @@ import java.util.UUID;
 public class DefaultFileTool implements IFileTool {
 
     private final IFile file;
-    private final String fileBasePath;
+    /** 用户树根（沙箱 = {usersBasePath}/{username}/file），null/blank 回退 LoomPaths 默认。 */
+    private final String usersBasePath;
     private final LoomAgentProperties.FileToolProperty cfg;
     private final FileOperations fileOps;
+    private final cn.wubo.spring.ai.loom.agent.tool.common.FileIdBridge fileIdBridge;
 
-    public DefaultFileTool(IFile file, String fileBasePath, LoomAgentProperties.FileToolProperty cfg) {
+    public DefaultFileTool(IFile file, String usersBasePath, LoomAgentProperties.FileToolProperty cfg) {
         this.file = file;
-        this.fileBasePath = fileBasePath;
+        this.usersBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultUsersBase(usersBasePath);
         this.cfg = cfg;
         this.fileOps = new FileOperations(new FileOperations.Config(
                 cfg.getMaxFileSize(),
@@ -51,6 +48,7 @@ public class DefaultFileTool implements IFileTool {
                 new java.util.HashSet<>(cfg.getExcludedDirs()),
                 cfg.getDeleteConfirmToken()
         ));
+        this.fileIdBridge = new cn.wubo.spring.ai.loom.agent.tool.common.FileIdBridge(file);
     }
 
     // ==================== Read operations ====================
@@ -265,7 +263,7 @@ public class DefaultFileTool implements IFileTool {
         if (!Files.isRegularFile(filePath)) {
             return "路径不是文件：" + path;
         }
-        String fileId = getOrCreateFileId(filePath, username);
+        String fileId = fileIdBridge.getOrCreateFileId(filePath, username);
         if (fileId == null) {
             return "文件注册失败，无法生成下载链接";
         }
@@ -302,7 +300,7 @@ public class DefaultFileTool implements IFileTool {
         if (!Files.isRegularFile(filePath)) {
             return "路径不是文件：" + path;
         }
-        String fileId = getOrCreateFileId(filePath, username);
+        String fileId = fileIdBridge.getOrCreateFileId(filePath, username);
         if (fileId == null) {
             return "文件注册失败，无法生成预览链接";
         }
@@ -394,7 +392,7 @@ public class DefaultFileTool implements IFileTool {
     }
 
     private Path getUserFileDir(String username) {
-        return Paths.get(fileBasePath, username);
+        return cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
     }
 
     private Path resolvePathForRead(String path, String username) throws IOException {
@@ -408,41 +406,5 @@ public class DefaultFileTool implements IFileTool {
         }
         cn.wubo.loom.file.core.PathSecurityUtils.assertInsideBaseDir(resolved, baseDir, true);
         return resolved;
-    }
-
-    private String getOrCreateFileId(Path filePath, String username) {
-        try {
-            String pathStr = filePath.toString();
-            FileRecord existing = file.getByExactPath(pathStr, username);
-            if (existing != null) {
-                try {
-                    BasicFileAttributes attrs = Files.readAttributes(filePath, BasicFileAttributes.class);
-                    if (attrs.size() != existing.size()) {
-                        file.update(existing.id(), pathStr, filePath.getFileName().toString(), attrs.size(), username);
-                    }
-                } catch (Exception ignored) {
-                    // 读取 / 更新失败时仍然返回已有 id
-                }
-                return existing.id();
-            }
-
-            String mimeType = TikaUtils.TIKA.detect(filePath.toFile());
-            if (mimeType == null) mimeType = "application/octet-stream";
-            String fileId = UUID.randomUUID().toString();
-            BasicFileAttributes attrs = Files.readAttributes(filePath, BasicFileAttributes.class);
-            file.insert(new FileRecord(
-                    fileId,
-                    null,
-                    filePath.getFileName().toString(),
-                    attrs.size(),
-                    LocalDateTime.ofInstant(attrs.lastModifiedTime().toInstant(), ZoneId.systemDefault()),
-                    pathStr,
-                    "temp",
-                    mimeType
-            ), username);
-            return fileId;
-        } catch (Exception e) {
-            return null;
-        }
     }
 }

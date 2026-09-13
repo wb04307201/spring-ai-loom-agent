@@ -2,6 +2,8 @@
 <html lang="zh-CN">
   <head>
     <title>灵梭</title>
+    <meta name="description" content="灵梭 Spring AI LoomAgent — 内置 RAG 知识库、MCP 工具调用与技能库的智能对话应用" />
+    <link rel="icon" type="image/png" href="/static/logo.png" />
     <meta charset="UTF-8" />
     <meta name="renderer" content="webkit" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
@@ -156,6 +158,9 @@
             }
             .conv-state-num {
               font-weight: 600;
+            }
+            .conv-state-label {
+              white-space: nowrap;
             }
           </style>
 
@@ -698,6 +703,8 @@
       </div>
     </div>
 
+    <script src="i18n/i18n.js"></script>
     <script type="module" src="app.js"></script>
+    <script src="admin/market-admin.js"></script>
   </body>
 </html>

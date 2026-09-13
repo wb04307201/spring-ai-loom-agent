@@ -2,6 +2,8 @@
 <html lang="zh-CN">
   <head>
     <title>日志 - 灵梭管理控制台</title>
+    <meta name="description" content="灵梭管理控制台 — Token 用量与提问卡片日志" />
+    <link rel="icon" type="image/png" href="/static/logo.png" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/spring/ai/loom/style.css" />
@@ -23,7 +25,7 @@
           <a href="roles.html" class="admin-sidebar-link"
             ><span class="admin-sidebar-icon">🛡</span><span>角色管理</span></a
           >
-          <a href="skills-market.html" class="admin-sidebar-link"
+          <a href="market-skills.html" class="admin-sidebar-link"
             ><span class="admin-sidebar-icon">🏪</span><span>技能市场</span></a
           >
           <a href="knowledge-market.html" class="admin-sidebar-link"
@@ -117,6 +119,44 @@
 
           <div id="stats-table" class="table-container">
             <div class="loading-indicator">加载中...</div>
+          </div>
+
+          <!-- §2 提问卡片(askUser)日志:数据源 loom_tool_call_log,只读 -->
+          <div class="stats-card" style="margin-top: 16px">
+            <h3
+              style="
+                margin: 0 0 12px 0;
+                font-size: 14px;
+                color: var(--text-muted);
+                font-weight: 500;
+              "
+            >
+              提问卡片(askUser)日志
+              <span style="font-size: 12px; margin-left: 8px">
+                用户：
+                <input
+                  type="text"
+                  id="ask-logs-user"
+                  placeholder="全部用户"
+                  style="
+                    width: 140px;
+                    padding: 4px 8px;
+                    border: 1px solid var(--border-color);
+                    border-radius: 4px;
+                  "
+                />
+                <button
+                  id="ask-logs-refresh"
+                  class="secondary-btn"
+                  style="padding: 4px 10px; margin-left: 6px"
+                >
+                  刷新
+                </button>
+              </span>
+            </h3>
+            <div id="ask-logs-table" class="table-container">
+              <div class="loading-indicator">加载中...</div>
+            </div>
           </div>
         </main>
       </div>

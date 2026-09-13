@@ -14,9 +14,9 @@ import java.util.Set;
 public class LoomFileMcpProperties {
 
     /**
-     * 文件操作的基础目录路径。
+     * MCP server 沙箱根（扁平配置模式，不使用主库用户树；4 个 MCP server 默认共享）。
      */
-    private String basePath = ".local/file";
+    private String basePath = System.getProperty("user.home") + "/.loom/mcp";
 
     /**
      * 文本文件最大大小（字节）。

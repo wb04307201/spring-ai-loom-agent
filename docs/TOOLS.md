@@ -1,6 +1,6 @@
 # Spring AI LoomAgent — Built-in Tools
 
-> Reference for every tool that LoomAgent exposes to the LLM by default. Each tool group can be enabled/disabled independently, and each sub-tool interface can be replaced with a custom `@Bean`.
+> Reference for every tool that LoomAgent exposes to the LLM by default. Tool visibility is governed by universal / RBAC (`role_tool`) mechanisms, and each sub-tool interface can be replaced with a custom `@Bean`.
 
 ---
 
@@ -15,37 +15,37 @@
 - [7. `IMavenTool` — Maven Build Tools (maven-invoker)](#7-imaventool--maven-build-tools-maven-invoker)
 - [8. `IKnowledgeTool` — Knowledge RAG Retrieval](#8-iknowledgetool--knowledge-rag-retrieval)
 - [9. `ICompileAndDeployTool` — End-to-End Deployment](#9-icompileanddeploytool--end-to-end-deployment)
+ - [9.1 Tool-call Parameters](#91-tool-call-parameters)
+ - [9.2 Configuration](#92-configuration)
+ - [9.3 Base-image Templates (built-in)](#93-base-image-templates-built-in)
+ - [9.4 Example Invocation](#94-example-invocation)
+ - [9.5 End-to-End Conversation Examples](#95-end-to-end-conversation-examples)
 - [10. `ISubTaskTool` — Sub-task Delegation](#10-isubtasktool--sub-task-delegation)
 - [11. `IScheduleTool` — Scheduled Tasks](#11-ischeduletool--scheduled-tasks)
-- [12. Replacing a Sub-Tool](#12-replacing-a-sub-tool)
- - [8.1 Tool-call Parameters](#81-tool-call-parameters)
- - [8.2 Configuration](#82-configuration)
- - [8.3 Base-image Templates (built-in)](#83-base-image-templates-built-in)
- - [8.4 Example Invocation](#84-example-invocation)
- - [8.5 End-to-End Conversation Examples](#85-end-to-end-conversation-examples)
-- [9. `ISubTaskTool` — Sub-task Delegation](#9-isubtasktool--sub-task-delegation)
-- [10. `IScheduleTool` — Scheduled Tasks](#10-ischeduletool--scheduled-tasks)
-- [11. Replacing a Sub-Tool](#11-replacing-a-sub-tool)
+- [12. `IAskUserTool` — AskUser Interactive Question](#12-iaskusertool--askuser-interactive-question)
+- [13. `IHtmlRenderTool` — HTML Render Screenshot](#13-ihtmlrendertool--html-render-screenshot)
+- [14. Replacing a Sub-Tool](#14-replacing-a-sub-tool)
 
 ---
 
 ## 1. Tool Visibility & RBAC
 
-Since M3, all 9 `I*Tool` beans are **always created** regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
+Since M3, all 10 always-on `I*Tool` beans are **always created** (plus `IHtmlRenderTool`, which is created only when `com.microsoft.playwright:playwright` is on the classpath) regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
 
-1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 6 universal tools are listed below.
-2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 3 RBAC tools are listed below.
+1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 7 universal tools are listed below.
+2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 4 RBAC tools are listed below.
 
 ### Universal tools (always visible)
 
 | Tool | Group | Reason for defaultGrant |
 |------|-------|-------------------------|
 | `ITimeTool` | `tool_time` | Read-only; returns current time / timezone conversion — no side effects |
-| `IFileTool` | `tool_file` | Per-user file isolation (`{fileBasePath}/{username}/`); LLM prompt guides safe usage; includes `deleteFileOrDirectory` — admins should review any auto-deletion flows |
+| `IFileTool` | `tool_file` | Per-user file isolation (`{usersBasePath}/{username}/file/`); LLM prompt guides safe usage; includes `deleteFileOrDirectory` — admins should review any auto-deletion flows |
 | `ISkillTool` | `tool_skill` | Skill content is per-user; allows self-created skill editing |
 | `IKnowledgeTool` | `tool_knowledge` | KB access is independently gated by `role_knowledge` table — the tool itself needs no extra RBAC |
 | `ISubTaskTool` | `tool_subtask` | Sub-task runs inherit user identity — no privilege escalation surface |
 | `IScheduleTool` | `tool_schedule` | Per-user namespace `loom-sched-{user}-{conv}-{name}`; fires as sub-task — no privilege escalation |
+| `IAskUserTool` | `tool_askUser` | Asks only the current user within the current stream; the answer returns to the same stream — no privilege escalation; excluded at schema level from sub-tasks/scheduled tasks |
 
 ### RBAC tools (require `role_tool` authorization)
 
@@ -54,6 +54,7 @@ Since M3, all 9 `I*Tool` beans are **always created** regardless of any `*.enabl
 | `IGitTool` | `tool_git` | `git push` writes to remote repositories; end-to-end deployment via `ICompileAndDeployTool` covers the common case |
 | `IMavenTool` | `tool_maven` | Arbitrary `mvn` builds; compile/package goes through `ICompileAndDeployTool` |
 | `ICompileAndDeployTool` | `tool_compile` | Spawns Docker containers; runs build pipelines; consumes network & disk resources |
+| `IHtmlRenderTool` | `tool_render` | Spawns a headless Chromium process (~150-300MB RAM per instance); requires the optional `com.microsoft.playwright:playwright` dependency on the classpath — without it the bean is not created at all |
 
 ### Why the yml `*.enabled` switches no longer gate tools
 
@@ -76,19 +77,21 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. 9 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. 11 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
 | Sub-Interface | Default Impl | Methods | Visibility | Notes |
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | Read-only current time / timezone conversion |
-| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); seeded from `market_skill` by the init migration — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
-| `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{fileBasePath}/{username}/` |
+| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); the demo app seeds 6 system skills into the default admin user's `user_skill` (`V1.1` migration) — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
+| `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{usersBasePath}/{username}/file/` |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
+| `IAskUserTool` | `DefaultAskUserTool` | 1 | **universal** | `askUser` — blocking same-stream question card; excluded from sub-task/scheduled-task tool schema |
 | `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **RBAC** | Requires `role_tool.tool_git` authorization; opt-in via `@Bean IGitTool` replacement |
 | `IMavenTool` | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **RBAC** | Requires `role_tool.tool_maven`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | **RBAC** | Requires `role_tool.tool_compile`; end-to-end `git clone → build → docker run → health check` |
+| `IHtmlRenderTool` | `DefaultHtmlRenderTool` (Playwright 1.50.0) | 1 | **RBAC** | Requires `role_tool.tool_render`; bean created only when the optional `playwright` dependency is on the classpath; headless-Chromium HTML→PNG screenshots (UI prototypes / data-analysis one-pagers) |
 
 > Each tool's individual section below still lists any remaining yml flags as **legacy** — they are kept for backward compatibility only and have no functional effect since M3.
 
@@ -127,7 +130,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Default** | `DefaultFileTool` |
 | **Override** | Custom `@Bean IFileTool` |
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Visible to every logged-in user regardless of role. Includes `deleteFileOrDirectory` — admins should review any auto-deletion flows. |
-| **Root path** | All path-based operations use `{fileBasePath}/{username}/` (default `.local/file/{username}/`) |
+| **Root path** | All path-based operations use `{usersBasePath}/{username}/file/` (default `~/.loom/users/{username}/file/`) |
 
 **Methods (16)**:
 
@@ -159,8 +162,8 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.git.IGitTool` |
 | **Default** | `DefaultGitTool` (based on Eclipse JGit 7.6.0) |
 | **Override** | Custom `@Bean IGitTool` |
-| **State** | **RBAC + opt-in bean**. Bean is conditional on `spring.ai.loom.agent.git.enabled=true` (default `false`, `matchIfMissing=false`) plus `@ConditionalOnMissingBean`. Once created, only visible to users whose roles grant `tool_git` via the `role_tool` table. |
-| **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{fileBasePath}/{username}/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
+| **State** | **RBAC**. Bean is always created (`@ConditionalOnMissingBean` only; the `git.enabled` yml flag is deprecated and has no effect). Visible only to users whose roles grant `tool_git` via the `role_tool` table. |
+| **Working dir** | Set via `gitSetWorkingDir` (absolute path or relative to `{usersBasePath}/{username}/file/`); `gitInit` / `gitClone` accept an absolute path or a relative path under the user file dir |
 
 **Methods (28)**:
 
@@ -185,14 +188,14 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Interface** | `cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool` |
 | **Default** | `DefaultMavenTool` (based on maven-invoker 3.3.0, no shell dependency) |
 | **Override** | Custom `@Bean IMavenTool` |
-| **State** | **RBAC + opt-in bean**. Bean is conditional on `maven-invoker` classpath + `spring.ai.loom.agent.maven.enabled=true` (default `false`) plus `@ConditionalOnMissingBean`. Once created, only visible to users whose roles grant `tool_maven` via the `role_tool` table. |
+| **State** | **RBAC**. Bean is created when `maven-invoker` is on the classpath (`@ConditionalOnClass`; it ships as a default lib dependency) plus `@ConditionalOnMissingBean`; the `maven.enabled` yml flag is deprecated and has no effect. Visible only to users whose roles grant `tool_maven` via the `role_tool` table. |
 | **Methods (6)** | `mavenExecute` (generic Maven goal execution); `mavenBuild` (compile); `mavenPackage` (package JAR/WAR); `mavenTest` (run tests, supports test pattern); `mavenDependencyTree` (dependency tree with scope filter); `mavenValidate` (validate project structure) |
 
 **Configuration**:
 
 | Property | Type | Default | Description |
 |-----------------------------------------------|---------|-------------|----------------------------------------------------|
-| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | Whether to enable Maven tool (opt-in) |
+| `spring.ai.loom.agent.maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; visibility is RBAC-gated via `role_tool.tool_maven` |
 | `spring.ai.loom.agent.maven.mavenHome` | String | — | Maven install directory (optional, uses PATH if empty) |
 | `spring.ai.loom.agent.maven.localRepository` | String | — | Local repository path (optional) |
 | `spring.ai.loom.agent.maven.maxOutputLines` | int | `200` | Max output lines before truncation |
@@ -232,7 +235,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | **Override** | Custom `@Bean ICompileAndDeployTool` |
 | **State** | **RBAC** — `@ToolGroup(defaultGranted=false)`. Only visible to users whose roles grant `tool_compile` via the `role_tool` table (admin → `/admin/roles/{code}/tools`). |
 | **Method** | `compileAndDeploy(Map<String,Object> params, ToolContext toolContext)` → `CompileAndDeployResult` |
-| **Workspace** | Each call creates an isolated work dir under `{fileBasePath}/{username}/compile-deploy-<uuid>/` |
+| **Workspace** | Each call creates an isolated work dir under `{usersBasePath}/{username}/compile-workspaces/compile-deploy-<user>-<ts>-<uuid8>/` |
 
 ### 9.1 Tool-call Parameters
 
@@ -260,7 +263,7 @@ All settings live under `spring.ai.loom.agent.compile.*`.
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|----------------------------------|--------------------------------------------------------------------------------------------------------------|
-| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | Whether to register the end-to-end deploy tool (default enabled) |
+| `spring.ai.loom.agent.compile.enabled` | boolean | `true` | **Deprecated since M3** — no functional effect; the bean is always created and visibility is RBAC-gated via `role_tool.tool_compile` |
 | `spring.ai.loom.agent.compile.mavenHome` | string | auto-discover | Optional Maven install dir; falls back to `maven.mavenHome` and PATH |
 | `spring.ai.loom.agent.compile.dockerCmd` | string | `docker` | Optional override for the docker CLI binary |
 | `spring.ai.loom.agent.compile.mavenTimeoutMs` | long | `600000` | Maven build timeout (10 minutes) |
@@ -453,13 +456,13 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Sub-task runs inherit user identity — no privilege escalation surface. |
 | **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
 
-The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool`) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
+The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool` / `IAskUserTool` — a sub-task cannot ask the user questions; anything needing user decision must be written into the sub-task's returned result and the main conversation decides whether to ask) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
 
 **Configuration**:
 
 | Property | Default | Description |
 |--------------------------------|---------|------------------------------------------|
-| `subtask.enabled` | `true` | Enable the `start_sub_task` tool |
+| `subtask.enabled` | `true` | **Deprecated since M3** — no functional effect; `ISubTaskTool` is a universal tool (always visible) |
 | `subtask.max-concurrent` | `4` | Max concurrent sub-tasks |
 | `subtask.max-history` | `200` | Retained sub-task history entries |
 
@@ -489,13 +492,13 @@ The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Scheduled tasks are namespaced `loom-sched-{user}-{conv}-{name}` and fire as sub-tasks. |
 | **Methods (4)** | `createSchedule` (cron / fixed_delay / fixed_rate / one_shot), `cancelSchedule`, `listSchedules`, `getScheduleHistory` |
 
-Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` and **fire as sub-tasks** when triggered. LoomAgent owns the H2 persistence (`loom_scheduled_task`, added in ``); `ScheduleRestoreListener` rehydrates rows on `ApplicationReadyEvent` preserving the original `createdAt` so the `max-lifetime` ceiling accumulates across restarts (rows older than the ceiling are cleaned up). Cancelling verifies row ownership (cross-user cancel is refused) and deletes the persisted row so the restore listener cannot resurrect a "ghost" task.
+Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` and **fire as sub-tasks** when triggered. LoomAgent owns the H2 persistence (`loom_scheduled_task`, part of the single `V1.0__init.sql` schema); `ScheduleRestoreListener` rehydrates rows on `ApplicationReadyEvent` preserving the original `createdAt` so the `max-lifetime` ceiling accumulates across restarts (rows older than the ceiling are cleaned up). Cancelling verifies row ownership (cross-user cancel is refused) and deletes the persisted row so the restore listener cannot resurrect a "ghost" task.
 
 **Trigger constraints** come from `flex.schedule.limits`:
 
 | Property | Example | Description |
 |--------------------------------|---------|------------------------------------------|
-| `schedule.enabled` | `true` | Enable the schedule tools |
+| `schedule.enabled` | `true` | **Deprecated since M3** — no functional effect; `IScheduleTool` is a universal tool (always visible) |
 | `flex.schedule.limits.min-interval` | `10m` | Minimum trigger interval |
 | `flex.schedule.limits.max-lifetime` | `72h` | Max task lifetime (accumulates across restarts) |
 | `flex.schedule.limits.mode` | `strict`| `strict` = exceeding a limit throws |
@@ -519,7 +522,102 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 
 ---
 
-## 12. Replacing a Sub-Tool
+## 12. `IAskUserTool` — AskUser Interactive Question
+
+| Item | Details |
+|-----------------|---------------------------------------------------------------------------------------|
+| **Interface** | `cn.wubo.spring.ai.loom.agent.askuser.IAskUserTool` |
+| **Default** | `DefaultAskUserTool` |
+| **Override** | Custom `@Bean IAskUserTool` |
+| **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Asks only the current user within the current stream; the answer returns to the same stream — no privilege escalation surface. |
+| **Methods (1)** | `askUser(question, header, background, optionsJson, multiSelect, allowCustomInput)` — renders an inline choice card in the chat stream and blocks until the user answers |
+
+**Tool-call parameters**:
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `question` | string | Yes | Question text — one sentence, clear and specific |
+| `header` | string | No | Short title/chip (2-6 words, e.g. "Deployment method"); may be null |
+| `background` | string | No | Why the question is asked (1-2 sentences); may be null |
+| `optionsJson` | string | Yes | JSON array of 2-4 options: `[{"label":"Option A","description":"extra note"},{"label":"Option B"}]` (a string, not a typed list — better tool-args JSON tolerance for qwen-family models; parsed server-side with Spring AI's lenient `JsonParser`) |
+| `multiSelect` | boolean | No | Allow selecting multiple options (null = false) |
+| `allowCustomInput` | boolean | No | Allow a free-text "other" answer (null = false) |
+
+**Card behavior**: the question is pushed into the current chat stream as an SSE frame (`ChatResponseRecord.askUser` = `AskUserEvent`, see [API.md](./API.md) § 3.1). The frontend renders an inline card — single-select submits on click, multi-select uses an explicit submit button, optional custom input, countdown timer, and frozen "answered / timed out / cancelled" states. The answer is POSTed to `/spring/ai/loom/ask/{questionId}/answer` (see [API.md](./API.md) § 3.2), which wakes the blocked tool thread; the answer returns to the same stream as the tool result.
+
+**Return-text contract** (every failure path returns text — never throws — so the SSE Flux completes normally and ChatMemory persists the turn):
+
+| Return prefix | Trigger |
+|---|---|
+| `[用户已回答] {answer}` | User answered within the timeout |
+| `[用户未作答] ...` | Timeout (`askuser.timeoutSeconds`, default 300), or the user pressed stop (the stop path cancels all pending questions for the conversation) |
+| `[提问失败] ...` | Validation error (blank question / unparseable `optionsJson` / option count outside 2-4 / blank option label), missing conversation context, stream unavailable, or a wait exception — each message tells the LLM how to correct and retry |
+
+(There is also a rare `[提问被中断]` prefix if the waiting thread is interrupted.)
+
+**Timeout & stop behavior**: on timeout the tool returns a "user did not answer" text instructing the LLM to proceed with its own reasonable decision; pressing stop cancels every pending question for `(username, conversationId)` so no blocked thread leaks.
+
+**Sub-task / scheduled-task exclusion contract** (#1 spec D6, see `ISubTaskTool` javadoc): a sub-task only executes what the main task planned and returns its result. It cannot ask the user questions — anything needing user decision must be written into the sub-task's returned result, and the main conversation decides whether to ask the user. `DefaultSubTaskExecutor` filters `IAskUserTool` out of the sub-task tool schema, and scheduled tasks fire through the same sub-task path, inheriting this exclusion.
+
+**Configuration**:
+
+| Property | Default | Description |
+|--------------------------------|---------|------------------------------------------|
+| `askuser.timeoutSeconds` | `300` | Max seconds the tool blocks waiting for the user's answer; on timeout it returns a "user did not answer" text and the Flux completes normally |
+
+---
+
+## 13. `IHtmlRenderTool` — HTML Render Screenshot
+
+Renders a local self-contained single-page HTML file into a PNG screenshot with headless
+Chromium (Playwright) — designed for LLM-written UI prototypes embedded in requirement docs,
+data-analysis one-pagers, and report visuals.
+
+| Method | Parameters | Description |
+|--------|-----------|-------------|
+| `renderHtmlFile` | `htmlFilePath` (required), `imageName?`, `device?` (desktop/tablet/mobile), `fullPage?` (default true) | Renders `{usersBasePath}/{username}/file/{htmlFilePath}` into `{usersBasePath}/{username}/file/prototypes/{name}-{timestamp}.png`, bridges a `usage='temp'` file record, and returns a preview URL + markdown embed snippet |
+
+**Enable it (2 requirements):**
+
+1. Add the optional dependency (the library does not pull it transitively):
+
+```xml
+<dependency>
+    <groupId>com.microsoft.playwright</groupId>
+    <artifactId>playwright</artifactId>
+    <version>1.50.0</version>
+</dependency>
+```
+
+2. Admin console → Roles → authorize the `tool_render` group for the role (RBAC tool, not universal).
+
+**Bare-metal Linux deployment (jar without Docker):** run `docs/provision-chromium.sh /path/to/app.jar`
+once as root (installs system shared libraries + `fonts-noto-cjk` so Chinese text does not render as
+tofu boxes, then downloads the Playwright-managed Chromium), then start the jar as a **non-root** user.
+Dev machines (Windows/macOS) need no provisioning — Playwright downloads the browser on first use
+(requires network). If Chromium is unavailable at render time the tool returns an `[渲染不可用]`
+text with the provisioning hint — it never throws.
+
+**Security:** all external network requests are blocked twice (context route abort + injected CSP
+`default-src 'none'`); the HTML must be self-contained (inline CSS/JS). Input paths are sandboxed to
+the user's file directory; output only ever lands in its `prototypes/` subdirectory. Renders are
+serialized (one at a time); `timeout-seconds` bounds the queue wait (the render itself is bounded by
+Playwright per-operation timeouts and the 60s browser-launch timeout); HTML size cap 2MB.
+
+**Configuration (`spring.ai.loom.agent.render.*`):**
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `chromium-path` | _(empty)_ | Explicit Chromium binary (e.g. `/usr/bin/chromium-browser`); empty = Playwright probe (managed cache → system channel) |
+| `device-scale-factor` | `2` | Screenshot scale (2 = Retina) |
+| `timeout-seconds` | `30` | Queue-acquisition timeout in seconds; the render itself is bounded by Playwright per-op timeouts + 60s launch timeout |
+| `render-wait-ms` | `1500` | Fixed wait after `setContent` for inline JS to finish |
+| `network-blocked` | `true` | Route-abort all external requests (CSP stays injected even when false) |
+| `max-html-bytes` | `2097152` | HTML file size cap |
+
+---
+
+## 14. Replacing a Sub-Tool
 
 Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a custom implementation wins automatically:
 

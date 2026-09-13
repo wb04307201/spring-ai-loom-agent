@@ -14,12 +14,14 @@ from pathlib import Path
 # 关键术语
 MUST_HAVE_EN = [
     "Spring AI LoomAgent",
-    "Chat UI", "Knowledge Base", "MCP Tools", "Skill Library",
-    "RBAC", "Admin Console", "Flyway",
+    "Chat", "Knowledge", "Files", "MCP", "Skill", "RBAC",
+    "PILLARS", "TOOLS", "PLATFORM", "BUILD",
+    "Flyway", "JVector", "ChatMemory",
 ]
 MUST_HAVE_ZH = [
     "Spring AI LoomAgent",
-    "核心", "知识库", "MCP", "Skill", "RBAC", "管理控制台",
+    "核心", "知识库", "文件", "MCP", "技能", "权限",
+    "工具", "平台", "构建", "RBAC",
 ]
 FORBIDDEN_PATTERNS = [
     (r"v\d+\.\d+", "版本号 v1.0 / v2.0 这种"),
@@ -32,7 +34,13 @@ FORBIDDEN_PATTERNS = [
 # 视觉检查 prompt
 EN_VISUAL_CHECK_PROMPT = """Analyze this project overview infographic and answer:
 1. Is the title "Spring AI LoomAgent" clearly visible? (Y/N)
-2. Are these sections present and labeled in English: CORE 4 FEATURES / RBAC + USER TYPE / ADMIN CONSOLE / 8 TOOL GROUPS / FILE MANAGEMENT / DATA LAYER / STACK / SUPPORT? (Y/N + missing list)
+2. Are these zones present in order:
+   - HERO: big title + cyan tagline + a thin outline pill reading "06 PILLARS - 11 TOOLS - 07 UNIVERSAL - 04 RBAC"? (Y/N)
+   - 01 PILLARS: exactly 6 equal cyan cards — Chat, Knowledge, Files, MCP, Skill, RBAC? (Y/N + count)
+   - 02 TOOLS: caption "7 universal  4 RBAC" next to the zone label + exactly 11 equal cards — Files, Knowledge, Git, Maven, Deploy, Time, Skill, Sub-task, Schedule, Ask-user, Html render? (Y/N + count + missing)
+   - 03 PLATFORM: row A = 6 chips (Users, Roles, Sessions, Skill Market, KB Market, Admin Console) with ONLY Skill Market + KB Market orange; row B = exactly 8 thin cyan stack pills (Spring Boot, Spring AI, JDK 17, JVector, JGit, H2, Flyway, ChatMemory)? (Y/N + counts)
+   - 04 BUILD: 4 boxes connected by arrows — core, config, starter, test? (Y/N)
+   - FOOTER: thin cyan hairline with centered white text "Interface · Default · Replaceable"? (Y/N)
 3. Are there any visible:
    - Version numbers like "v1.0", "v2.0", "1.0.0", "3.5.16"? (Y/N)
    - Dates like "2024", "2025", "2026", "2024-01-01"? (Y/N)
@@ -44,7 +52,9 @@ EN_VISUAL_CHECK_PROMPT = """Analyze this project overview infographic and answer
 
 Reply in format:
   title: Y/N
-  sections_complete: Y/N (missing: ...)
+  zones_complete: Y/N (missing: ...)
+  tool_card_count: N
+  stack_pill_count: N
   has_version: Y/N (examples: ...)
   has_date: Y/N
   has_hex: Y/N
@@ -57,7 +67,13 @@ Reply in format:
 
 ZH_VISUAL_CHECK_PROMPT = """分析这张中文项目概览信息图，回答：
 1. 标题 "Spring AI LoomAgent" 是否清晰可见？(Y/N)
-2. 这些板块是否有且都用中文标注：核心 4 大功能 / RBAC + 用户类型 / 管理控制台 / 8 个工具组 / 文件管理 / 数据层 / 底层栈 / 支撑？(Y/N + 缺失列表)
+2. 这些区块是否按顺序存在：
+   - HERO：大标题 + 青色副标题 + 细轮廓胶囊「06 PILLARS - 11 TOOLS - 07 UNIVERSAL - 04 RBAC」？(Y/N)
+   - 01 核心：EXACTLY 6 张等大青色卡片 — 对话、知识库、文件、MCP、技能、权限？(Y/N + 数量)
+   - 02 工具：区块标签旁说明文字「7 通用  4 RBAC」+ EXACTLY 11 张等大卡片 — 文件、知识库、Git、Maven、部署、时间、技能、子任务、定时、问答、HTML渲染？(Y/N + 数量 + 缺失)
+   - 03 平台：第 A 行 6 个芯片（用户、角色、会话、技能市场、知识市场、管理控制台），其中**只有**技能市场 + 知识市场是橙色；第 B 行 EXACTLY 8 个细青色技术栈胶囊（Spring Boot、Spring AI、JDK 17、JVector、JGit、H2、Flyway、ChatMemory）？(Y/N + 数量)
+   - 04 构建：4 个方框箭头流 — 核心、配置、启动、测试？(Y/N)
+   - 页脚：细青色水平线 + 线上居中白字「接口 · 默认 · 可替换」？(Y/N)
 3. 是否出现：
    - 任何版本号（v1.0、v2.0、1.0.0、3.5.16 这种）？(Y/N)
    - 任何日期 / 年份（2024、2025、2026、2024-01-01 这种）？(Y/N)
@@ -69,7 +85,9 @@ ZH_VISUAL_CHECK_PROMPT = """分析这张中文项目概览信息图，回答：
 
 按格式回复：
   title: Y/N
-  sections_complete: Y/N (missing: ...)
+  zones_complete: Y/N (missing: ...)
+  tool_card_count: N
+  stack_pill_count: N
   has_version: Y/N (examples: ...)
   has_date: Y/N
   has_hex: Y/N

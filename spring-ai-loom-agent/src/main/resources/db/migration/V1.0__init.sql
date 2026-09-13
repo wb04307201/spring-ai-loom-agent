@@ -11,6 +11,27 @@
 -- 2. market_skill 唯一约束改为 (author, name)（原是三元组）
 -- 3. skill / chat_token_usage 等早期表保留（原文 + 兼容）
 -- =============================================================
+--
+-- M3+ T5.1 — 源码组织拆分（policy A）
+-- ---------------------------------
+-- CLAUDE.md 政策：项目只跑全新库；不接受已有实例上增量升级 schema。
+-- 因此本文件保持 V1.0__init.sql 单文件，fresh init 一次跑全。
+-- 拆分靠 SQL 注释段标记，不靠多文件：
+--
+--   § 1  知识库 / 文件 / 用户 / 用户会话 / Token 用量
+--   § 2  Skill 系统（旧 per-user 表，被 Skill 市场取代）
+--   § 3  RBAC + Role / Skill / Knowledge / MCP 关联
+--   § 4  Skill + Knowledge 市场（M0/M1/M2 升级后）
+--   § 5  公告 / Stats / Review / Tag 等市场辅助表
+--   § 6  Schedule / SubTask / File content / Tool call log / Chat reasoning / Chat usage
+--   § 7  M3+ technical debt cleanup（spec §4.1 + §4.2：A12 加 updated_at + B1 market_id BIGINT→VARCHAR(36)）
+--   § 8  清理已废弃的 flex_scheduled_task（原 V12）
+--   § 9  Flyway baseline 标记（仅新装生效）
+--
+-- 各段用 `-- ===== § N: ... =====` 分隔，可读性 + grep 友好。
+-- 若未来政策调整为多文件 Flyway 增量演进，本文件可直接 split；
+-- 当前 §N 标号与未来 V_<n>__<name>.sql 文件名一一对应。
+-- =============================================================
 
 
 -- ============== 知识库 ==============
@@ -571,6 +592,20 @@ ALTER TABLE role_tool
     ADD CONSTRAINT fk_role_tool_role
     FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
 
+-- 4. role_skill.role_code → role.code
+--    DEFECT-Q3-1 修复(2026-09-09 第四轮全面测试):B.2.1 的 FK 块漏了后加的
+--    role_skill(M4 技能授权)与 loom_role_knowledge(知识库市场授权)两张子表,
+--    角色删除后 dangling 行在同 code 重建时让陈旧授权复活。DB 层补 CASCADE 兜底
+--    (应用层 DefaultRoleService.delete() 同步补显式 DELETE,双保险对齐前三表)。
+ALTER TABLE role_skill
+    ADD CONSTRAINT fk_role_skill_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
+-- 5. loom_role_knowledge.role_code → role.code(同 DEFECT-Q3-1)
+ALTER TABLE loom_role_knowledge
+    ADD CONSTRAINT fk_role_knowledge_role
+    FOREIGN KEY (role_code) REFERENCES role(code) ON DELETE CASCADE;
+
 
 -- =============================================================
 -- V2.3: user_role.username 加 FK + CASCADE 修 P0.3.3 bug
@@ -616,3 +651,315 @@ WHERE group_name IN (
     'tool_skill',
     'tool_file'
 );
+
+-- ==== M0 market upgrade (spec § 4) ====
+
+-- 公共列(skill + knowledge 两表都加)
+ALTER TABLE market_skill          ADD COLUMN is_official     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE loom_market_knowledge ADD COLUMN is_official     BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE market_skill          ADD COLUMN featured_rank   INT NOT NULL DEFAULT 0;
+ALTER TABLE loom_market_knowledge ADD COLUMN featured_rank   INT NOT NULL DEFAULT 0;
+
+ALTER TABLE market_skill          ADD COLUMN category        VARCHAR(64);
+ALTER TABLE loom_market_knowledge ADD COLUMN category        VARCHAR(64);
+
+ALTER TABLE market_skill          ADD COLUMN created_by_kind VARCHAR(16) NOT NULL DEFAULT 'USER';
+ALTER TABLE loom_market_knowledge ADD COLUMN created_by_kind VARCHAR(16) NOT NULL DEFAULT 'USER';
+
+-- 附表
+CREATE TABLE market_skill_stats (
+  market_skill_id BIGINT PRIMARY KEY,
+  pull_count BIGINT NOT NULL DEFAULT 0,
+  last_pulled_at TIMESTAMP,
+  FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
+);
+
+CREATE TABLE market_skill_review (
+  market_skill_id BIGINT NOT NULL,
+  username VARCHAR(64) NOT NULL,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  edit_count SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (market_skill_id, username),
+  FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_skill_review ON market_skill_review(username);
+
+CREATE TABLE loom_market_knowledge_stats (
+  market_id BIGINT PRIMARY KEY,
+  search_count BIGINT NOT NULL DEFAULT 0,
+  last_searched_at TIMESTAMP,
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+);
+
+CREATE TABLE loom_market_knowledge_review (
+  market_id BIGINT NOT NULL,
+  username VARCHAR(64) NOT NULL,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  edit_count SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (market_id, username),
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_kb_review ON loom_market_knowledge_review(username);
+
+CREATE TABLE market_content_announcement (
+  market_kind VARCHAR(16) NOT NULL,
+  market_id BIGINT NOT NULL,
+  title VARCHAR(128) NOT NULL,
+  body TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (market_kind, market_id)
+);
+
+-- 索引建议(性能)
+CREATE INDEX idx_market_skill_official_rank   ON market_skill(is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_kb_official_rank      ON loom_market_knowledge(is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_skill_status_approved ON market_skill(status, is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_kb_status_approved    ON loom_market_knowledge(status, is_official DESC, featured_rank DESC);
+CREATE INDEX idx_market_skill_category        ON market_skill(category);
+CREATE INDEX idx_market_kb_category           ON loom_market_knowledge(category);
+
+ALTER TABLE loom_user_knowledge ADD COLUMN access_count BIGINT NOT NULL DEFAULT 0;
+
+CREATE INDEX idx_user_knowledge_access_check ON loom_user_knowledge(username, market_knowledge_id, access_count);
+
+-- M2 T20: KB 多对多 tag — spec § 4.2 / § M2。
+-- market_id 与 loom_market_knowledge.id 对齐(VARCHAR(36) UUID,NOT BIGINT)。
+-- 删除 KB 时通过 FK ON DELETE CASCADE 自动清理 tag 行。
+CREATE TABLE loom_market_knowledge_tag (
+  market_id VARCHAR(36) NOT NULL,
+  tag       VARCHAR(64) NOT NULL,
+  PRIMARY KEY (market_id, tag),
+  FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_kb_tag ON loom_market_knowledge_tag(tag);
+
+-- =============================================================
+-- ==== M3+ technical debt cleanup (spec § 4.1 + § 4.2) ====
+-- B1 真修:market_content_announcement / loom_market_knowledge_stats /
+--          loom_market_knowledge_review 三张表的 market_id 历史定义成 BIGINT,
+--          与 loom_market_knowledge.id (VARCHAR(36) UUID) 类型不一致。
+--          统一为 VARCHAR(36)。
+-- A12 列错位:market_skill / loom_user_knowledge 缺 updated_at 时间戳。
+-- =============================================================
+
+-- A12: 添加 updated_at 列
+ALTER TABLE market_skill        ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE loom_user_knowledge ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- B1: market_id 类型对齐 VARCHAR(36)
+-- H2 2.3.232 直接 ALTER COLUMN 类型即可,FK 在原位保留,无需 DROP/ADD。
+ALTER TABLE market_content_announcement   ALTER COLUMN market_id VARCHAR(36);
+ALTER TABLE loom_market_knowledge_stats  ALTER COLUMN market_id VARCHAR(36);
+ALTER TABLE loom_market_knowledge_review ALTER COLUMN market_id VARCHAR(36);
+
+-- =============================================================
+-- ==== M4 market enhancements (T4: skill tag system) ====
+-- M4: 技能多对多 tag —— 镜像 loom_market_knowledge_tag(列名随 skill 附表约定 market_skill_id)。
+-- market_skill_id 与 market_skill.id 对齐(BIGINT,NOT VARCHAR)。
+-- 删除 skill 时通过 FK ON DELETE CASCADE 自动清理 tag 行。
+-- =============================================================
+CREATE TABLE market_skill_tag (
+  market_skill_id BIGINT NOT NULL,
+  tag             VARCHAR(64) NOT NULL,
+  PRIMARY KEY (market_skill_id, tag),
+  FOREIGN KEY (market_skill_id) REFERENCES market_skill(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_market_skill_tag ON market_skill_tag(tag);
+
+-- =============================================================
+-- #4 市场审批流:REJECTED 行重投时旧行归档表(只增不删,供追溯)
+-- 主表 UNIQUE(author/username, name) 不动;重投 = 旧行挪进 archive + 主表新建 PENDING 行(新 id)
+-- 归档行保留原主键值(非自增),便于与原行对应。
+-- =============================================================
+CREATE TABLE market_skill_archive (
+  id BIGINT PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  author VARCHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  submitted_at TIMESTAMP NOT NULL,
+  reviewed_at TIMESTAMP NULL,
+  reviewed_by VARCHAR(64) NULL,
+  review_comment TEXT NULL,
+  archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE loom_market_knowledge_archive (
+  id VARCHAR(36) PRIMARY KEY,
+  username VARCHAR(64) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  description TEXT,
+  status VARCHAR(20) NOT NULL,
+  submitted_at TIMESTAMP,
+  reviewed_at TIMESTAMP,
+  reviewed_by VARCHAR(64),
+  review_comment TEXT,
+  archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================================
+-- #3 H2 向量存储:H2JVectorStore 持久层(向量 + 文档 + metadata)
+-- 替代旧 ~/.loom/jvector-index/{docs,ids}.json;启动 ApplicationReadyEvent
+-- 时全量 hydrate 进内存 JVector HNSW 图,消灭启动 re-embed。
+-- 不加 username/knowledge_id 列(隔离档 A:knowledgeId 在 metadata_json 内,
+-- SpEL 后过滤照旧)。dim 列是换 embedding 模型守卫(不匹配行加载时跳过)。
+-- =============================================================
+CREATE TABLE IF NOT EXISTS loom_vector_store (
+  document_id   VARCHAR(64) PRIMARY KEY,
+  content       CLOB NOT NULL,
+  metadata_json CLOB NOT NULL,
+  embedding     BLOB NOT NULL,
+  dim           INT NOT NULL,
+  score         DOUBLE,
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_loom_vector_store_created ON loom_vector_store(created_at);
+
+-- =============================================================
+-- ==== 官方种子技能：一问一答表达训练(#4 follow-up,spec 2026-09-08)====
+-- 两条 market_skill:author=system / APPROVED / is_official / created_by_kind=ADMIN
+-- / category=表达沟通。fresh-DB 政策:本段随全新库执行一次;
+-- WHERE NOT EXISTS 幂等(镜像默认 admin 种子先例),UNIQUE(author,name) 双保险。
+-- 内容三铁律:①不硬编码工具名(只描述"提问能力");②防 qwen 自白死循环;③纯文本。
+-- =============================================================
+
+INSERT INTO market_skill (name, description, content, author, status,
+                          reviewed_at, reviewed_by,
+                          is_official, created_by_kind, category)
+SELECT 'STAR-IJ 讲清一件事',
+       '用户想「讲清楚一件事」(项目复盘 / 绩效述职 / 面试准备 / 经验沉淀)时触发：按 情境-任务-行动-结果-项目价值-个人成长 六步一问一答收集信息，汇总成结构化叙述与 30 秒电梯稿',
+       '用户想「讲清楚一件事」（项目复盘 / 绩效述职 / 面试准备 / 经验沉淀）时触发本技能。
+你的任务：按 STAR-IJ 六步（S情境 - T任务 - A行动 - R结果 - I项目价值 - J个人成长）逐步向用户提问，每步一次提问，收集完成后汇总成结构化叙述。
+
+⛔ 执行纪律（必读，否则任务失败）：
+1. 不要描述你打算做什么 ——「我将为您梳理 / 接下来我会问」这类自白没有意义，直接发起提问。
+2. 每次提问后必须等待用户真实回答，不得代替用户作答、不得自问自答、不得把引导选项当成用户的选择。
+3. 一次只问一步。用户答完当前步骤再问下一步，不要一次抛出多个问题。
+4. 信息足够时立即进入汇总，不要为凑步数反复追问。
+
+提问方式：使用你的提问能力（向用户发起带选项的提问卡片），每步提供 3-4 个引导选项并允许自由输入。用户选择或输入后，仅在「行动 / 结果」两步可追问一轮细节，然后进入下一步。
+
+六步提问流程：
+第 1 步 S 情境：这件事发生的背景是什么？（时间、场合、当时的局面）
+  引导选项示例：项目启动期 / 攻坚期 / 收尾复盘 / 自由描述
+第 2 步 T 任务：你在其中承担什么角色、要达成什么目标？
+  引导选项示例：整体负责人 / 核心执行 / 协作支持 / 自由描述
+第 3 步 A 行动：你具体做了哪些关键动作？（引导用户拆成 2-4 个动作，可多选，可追问一轮细节）
+  引导选项示例：方案设计 / 资源协调 / 技术攻坚 / 沟通推进
+第 4 步 R 结果：取得了什么可量化的成果？
+  追问策略：用户答得笼统时，追问一次「有没有具体数字？对比之前改善多少？」，只追问一次。
+第 5 步 I 项目价值：这件事对团队 / 业务 / 用户产生了什么意义？
+  引导选项示例：提效 / 降本 / 增收 / 风险控制 / 体验改善
+第 6 步 J 个人成长：你从中学到了什么、哪些能力得到提升？
+  引导选项示例：方法论沉淀 / 技术突破 / 协作能力 / 认知升级
+
+汇总产出（六步答完后立即输出，不要再提问）：
+1. 结构化叙述：按 S/T/A/R/I/J 六段展开，每段 2-4 句，保留用户原话中的关键数字与细节。
+2. 一句话版本：30 秒电梯稿，突出结果与价值。
+3. 如用户说明了用途（面试 / 述职 / 复盘），按该场景调整语气与详略。
+
+边界处理：
+- 用户某步拒答或答「不知道」：记录该步为「略过」，继续下一步，汇总时如实标注。
+- 用户跑题：温和拉回当前步骤的问题。
+- 用户中途要求直接汇总：用已收集的信息立即汇总，缺失步骤标注「未提供」。',
+       'system', 'APPROVED', CURRENT_TIMESTAMP, 'system',
+       TRUE, 'ADMIN', '表达沟通'
+WHERE NOT EXISTS (SELECT 1 FROM market_skill WHERE author = 'system' AND name = 'STAR-IJ 讲清一件事');
+
+INSERT INTO market_skill (name, description, content, author, status,
+                          reviewed_at, reviewed_by,
+                          is_official, created_by_kind, category)
+SELECT '靶心人公式 讲好一个故事',
+       '用户想「讲好一个故事」(品牌故事 / 演讲 / 个人经历分享 / 短视频脚本)时触发：按 目标-阻碍-努力-结果-意外-转弯-结局 七步一问一答引导，汇总成有张力的故事与故事骨架',
+       '用户想「讲好一个故事」（品牌故事 / 演讲 / 个人经历分享 / 短视频脚本）时触发本技能。
+你的任务：按「靶心人公式」七步逐步向用户提问，收集完成后汇总成一个有张力的故事。
+
+靶心人公式七步：目标 → 阻碍 → 努力 → 结果 → 意外 → 转弯 → 结局。
+（注意：第六步的原词是「转弯」，指意外给主角或局面带来的转变，不是简单的「转折」。）
+
+⛔ 执行纪律（必读，否则任务失败）：
+1. 不要描述你打算做什么 ——「我将帮您打磨故事」这类自白没有意义，直接发起提问。
+2. 每次提问后必须等待用户真实回答，不得代替用户作答、不得自问自答、不得虚构用户没说的细节。
+3. 一次只问一步，用户答完再问下一步。
+4. 信息足够时立即进入汇总产出，不要为凑满七步硬追问。
+
+提问方式：使用你的提问能力（向用户发起带选项的提问卡片），每步提供引导选项并允许自由输入。第 1 步提问的背景说明里顺带确认故事主角与场合（如「这是你自己的经历，还是品牌 / 产品的故事？」），不要为此单独多问一轮。
+
+七步提问流程：
+第 1 步 目标：主角想要什么？（一句话目标，越具体越好）
+第 2 步 阻碍：什么在阻挡主角？（人 / 事 / 环境 / 自身局限）
+第 3 步 努力：主角为克服阻碍做了什么？（可追问 1-2 轮细节，好故事需要具体动作）
+第 4 步 结果：努力的直接结果如何？（常见是没成功或只部分成功 —— 这正是故事的张力所在，如实收集，不要美化）
+第 5 步 意外：出现了什么意料之外的事？
+第 6 步 转弯：这个意外让主角或局面发生了什么转变？（认知、策略、关系的转变）
+第 7 步 结局：最终如何收场？你希望听众记住什么？
+
+快速变体（按素材复杂度自选，并在提问前一句话告知用户所用版本）：
+- 努力人公式（4 步）：目标 → 阻碍 → 努力 → 结局。适合简单场景、时间有限的用户。
+- 意外人公式（4 步）：目标 → 意外 → 转弯 → 结局。适合反转突出的故事。
+判断依据：第 4、5 步若用户表示「没有意外 / 一切顺利」，主动建议改用努力人公式，不硬编七步。
+
+汇总产出（收集完成后立即输出，不要再提问）：
+1. 连贯故事文本：300-600 字，按七步（或所选变体）推进，保留用户原话的关键细节，在「意外 → 转弯」处放慢节奏制造张力。
+2. 故事骨架：每步一行，供用户二次创作或做 PPT 大纲。
+
+边界处理：
+- 用户某步拒答或答「不知道」：记录该步为「略过」，继续下一步，汇总时如实标注或自然过渡。
+- 用户跑题：温和拉回当前步骤的问题。
+- 用户中途要求直接成稿：用已收集的信息立即汇总，缺失步骤以合理过渡带过并标注「未提供细节」。',
+       'system', 'APPROVED', CURRENT_TIMESTAMP, 'system',
+       TRUE, 'ADMIN', '表达沟通'
+WHERE NOT EXISTS (SELECT 1 FROM market_skill WHERE author = 'system' AND name = '靶心人公式 讲好一个故事');
+
+-- =============================================================
+-- ==== 默认基础角色 base(4 常用 MCP + 2 官方表达技能)+ 授予默认 admin ====
+-- 放在 market_skill 种子之后:role_skill 按名查 market_skill.id(不硬编码自增值)。
+-- role_mcp.mcp_name = 运行时 SDK client 名(spring-ai-mcp-client - X),无 FK 到
+-- mcp_server;getVisibleMcpsForUser 运行时与活跃 client 名匹配,mcp_server 元数据
+-- (title/description)在 V1.1 seed。is_system=FALSE(可在控制台删除,CASCADE 清子表)。
+-- default_enabled / default_loaded = TRUE(聊天面板默认勾选启动 / 技能默认加载)。
+-- 全部 INSERT...SELECT...WHERE NOT EXISTS 幂等(镜像上方 admin / market_skill 种子风格)。
+-- =============================================================
+
+INSERT INTO role (code, name, is_system, description)
+SELECT 'base', '基础角色', FALSE, '默认基础角色:4 个常用 MCP + 2 个官方表达技能,默认启用/加载'
+WHERE NOT EXISTS (SELECT 1 FROM role WHERE code = 'base');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - sequential-thinking', 0, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - sequential-thinking');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - bing-search', 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - bing-search');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - memory', 2, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - memory');
+
+INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
+SELECT 'base', 'spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch', 3, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch');
+
+INSERT INTO role_skill (role_code, market_skill_id, sort_order, default_loaded)
+SELECT 'base', ms.id, 0, TRUE FROM market_skill ms
+WHERE ms.author = 'system' AND ms.name = '靶心人公式 讲好一个故事'
+  AND NOT EXISTS (SELECT 1 FROM role_skill rs WHERE rs.role_code = 'base' AND rs.market_skill_id = ms.id);
+
+INSERT INTO role_skill (role_code, market_skill_id, sort_order, default_loaded)
+SELECT 'base', ms.id, 1, TRUE FROM market_skill ms
+WHERE ms.author = 'system' AND ms.name = 'STAR-IJ 讲清一件事'
+  AND NOT EXISTS (SELECT 1 FROM role_skill rs WHERE rs.role_code = 'base' AND rs.market_skill_id = ms.id);
+
+INSERT INTO user_role (username, role_code)
+SELECT 'wb04307201', 'base'
+WHERE NOT EXISTS (SELECT 1 FROM user_role WHERE username = 'wb04307201' AND role_code = 'base');

@@ -29,14 +29,14 @@ public class LoomAgentProperties {
  * "spring-boot:run from test module vs parent module" inconsistency
  * disappears across the board.
  *
- * <p>Sub-paths ({@link #fileBasePath}, {@link #knowledgeBasePath},
- * {@link #jvector}, etc.) are derived from this root via field defaults,
- * but Spring's {@code @ConfigurationProperties} does NOT auto-resolve
- * field-init {@code ${...}} placeholders, so the actual integration
- * point is in the consumer side: each property either reads the literal
- * value above OR — when {@code loomHome} is overridden in yml — the
- * consumer rebuilds the path. Override the sub-paths directly in yml if
- * you only need to relocate a specific state category.</p>
+ * <p>Sub-paths ({@link #usersBasePath}, {@link #datasourceDir}, {@link #jvector},
+ * etc.) are derived from this root via field defaults, but Spring's
+ * {@code @ConfigurationProperties} does NOT auto-resolve field-init
+ * {@code ${...}} placeholders, so the actual integration point is in the
+ * consumer side: the {@code loomAgentProperties} binder bean re-derives
+ * sub-paths still at their built-in defaults when {@code loomHome} is
+ * overridden in yml. Override the sub-paths directly in yml if you only
+ * need to relocate a specific state category.</p>
  *
  * <p>Override via {@code spring.ai.loom.agent.loom-home} in
  * application.yml.</p>
@@ -44,22 +44,23 @@ public class LoomAgentProperties {
  private String loomHome = System.getProperty("user.home") + "/.loom";
 
  /**
- * User files root directory. Defaulted to an ABSOLUTE path under the
- * user's home directory (NOT a cwd-relative path) so the directory the
- * file manager UI shows is always the same as the directory IUpload
- * writes to — regardless of whether spring-boot:run is launched from the
- * parent project root or the test module root.
+ * 用户树根目录（per-user aggregation root）。每个登录用户的**全部**文件系统
+ * 足迹都在 {@code {usersBasePath}/{username}/} 之下：
+ * <pre>
+ * {usersBasePath}/{username}/file/                ← 上传 + file/git/maven/render 工具沙箱
+ * {usersBasePath}/{username}/compile-workspaces/  ← 编译部署 workspace（成功即删）
+ * </pre>
+ * 派生规则单一来源 = {@code cn.wubo.loom.file.core.LoomPaths}，各工具不得
+ * 自行拼接。默认 ABSOLUTE 路径（NOT cwd-relative），保证 spring-boot:run
+ * 从任何模块启动目录都不漂移；{@code rm -rf {usersBasePath}/{username}}
+ * 即清除该用户全部本地文件。
  *
- * <p>Overrideable via {@code spring.ai.loom.agent.file-base-path} in
- * application.yml.</p>
+ * <p>Overrideable via {@code spring.ai.loom.agent.users-base-path} in
+ * application.yml. 取代已删除的 {@code fileBasePath} / {@code knowledgeBasePath}
+ * （老键会被 binder 静默忽略）。</p>
  */
- private String fileBasePath = System.getProperty("user.home") + "/.loom/file";
- /**
- * Knowledge-base file root. Defaulted to absolute for the same reason as
- * {@link #fileBasePath}. Override via
- * {@code spring.ai.loom.agent.knowledge-base-path}.
- */
- private String knowledgeBasePath = System.getProperty("user.home") + "/.loom/knowledge";
+ private String usersBasePath = cn.wubo.loom.file.core.LoomPaths.DEFAULT_USERS_BASE;
+
  /**
  * Absolute root for the H2 file database. Set via yml
  * {@code spring.datasource.url} as
@@ -93,8 +94,21 @@ public class LoomAgentProperties {
  */
  private ScheduleProperty schedule = new ScheduleProperty();
 
+ private AskUserProperty askuser = new AskUserProperty();
+
+ private RenderProperty render = new RenderProperty();
+
  @Data
  public static class RagProperty {
+ /**
+  * RAG / 知识空间全局开关(yml: {@code spring.ai.loom.agent.rag.enabled},默认 true)。
+  * false → RagConfiguration 整段不激活:不创建 VectorStore(H2 JVector 不初始化、
+  * 零 embedding API 调用)、IUpload / IDocumentRead / H2VectorStoreReloader 与下游
+  * @ConditionalOnBean(VectorStore) 链(IKnowledgeTool、knowledge/upload 路由)全部消失。
+  * 前端据 features.knowledge=false 隐藏知识空间按钮。IKnowledge 元数据与知识库市场
+  * 不依赖 VectorStore,不受影响;loom_vector_store 表仍由 V1.0 schema 建立(不写不读)。
+  */
+ private boolean enabled = true;
  private double similarityThreshold = 0.0F;
  private int topK = 4;
  }
@@ -106,12 +120,9 @@ public class LoomAgentProperties {
  @Data
  public static class JVectorProperties {
  /**
- * HNSW index directory. Defaulted to an absolute path under
- * {@code ~/.loom/jvector-index/} so the vector-store is owned by
- * the user regardless of cwd. Override via
- * {@code spring.ai.loom-agent.jvector.index-path} in yml.
+ * JVector HNSW 引擎参数。持久化已迁到 H2 表 loom_vector_store(#3),
+ * 不再有磁盘索引目录;旧 indexPath 属性已删除,yml 里的残留键被 binder 静默忽略。
  */
- private String indexPath = System.getProperty("user.home") + "/.loom/jvector-index";
  private int m = 16;
  private int efConstruction = 100;
  private int efSearch = 10;
@@ -366,5 +377,45 @@ public class LoomAgentProperties {
  @Data
  public static class ScheduleProperty {
  private boolean enabled = true;
+ }
+
+ /**
+ * AskUser 交互工具配置(#1)。yml 通过 {@code spring.ai.loom.agent.askuser.*} 配置。
+ * <ul>
+ * <li>{@code timeoutSeconds} — 工具阻塞等待用户作答的最长秒数(默认 300 = 5 分钟,spec D2)。
+ * 超时后工具返回"用户未作答"文本给 LLM,Flux 正常 complete(ChatMemory 本轮保住)。</li>
+ * </ul>
+ * 无 enabled 开关:M3 起工具 bean 总是创建;askUser 是 universal 工具(defaultGranted),
+ * 不受 role_tool RBAC 控制。
+ */
+ @Data
+ public static class AskUserProperty {
+ private long timeoutSeconds = 300;
+ }
+
+ /**
+ * HTML 渲染截图工具配置(IHtmlRenderTool,spec 2026-09-09 D5/D6/D9)。
+ * yml 前缀 {@code spring.ai.loom.agent.render.*}。
+ * <ul>
+ * <li>{@code chromiumPath} — 可选:显式 Chromium 二进制路径(如系统包
+ * {@code /usr/bin/chromium-browser});空 = Playwright 默认探测(三级探测的第 2/3 级)</li>
+ * <li>{@code deviceScaleFactor} — 截图清晰度倍数(2 = Retina,默认 2)</li>
+ * <li>{@code timeoutSeconds} — 渲染排队获取超时秒(Semaphore 入口,默认 30);渲染本体另由 Playwright 每操作默认超时与 60s 启动超时限界</li>
+ * <li>{@code renderWaitMs} — setContent 后固定等待毫秒,让内联 JS 渲染完成(默认 1500)</li>
+ * <li>{@code networkBlocked} — 是否 route abort 屏蔽全部外部网络(默认 true;
+ * 关掉只去掉 route abort,CSP 仍然注入 —— 这是逃生门不是常规配置)</li>
+ * <li>{@code maxHtmlBytes} — HTML 文件大小上限字节(默认 2MB)</li>
+ * </ul>
+ * 无 enabled 开关:M3 起工具 bean 总是创建,启停由 role_tool RBAC 表控制;
+ * bean 是否创建取决于 classpath 有没有 playwright(optional 依赖)。
+ */
+ @Data
+ public static class RenderProperty {
+ private String chromiumPath;
+ private int deviceScaleFactor = 2;
+ private int timeoutSeconds = 30;
+ private int renderWaitMs = 1500;
+ private boolean networkBlocked = true;
+ private long maxHtmlBytes = 2 * 1024 * 1024;
  }
 }

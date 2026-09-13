@@ -84,16 +84,18 @@ public class MavenOperations {
     }
 
     /**
-     * Get user file directory: {basePath}/{username}/
+     * Get user file directory (sandbox root): {usersBasePath}/{username}/file/
+     * — derived via {@link cn.wubo.loom.file.core.LoomPaths}; the basePath
+     * parameter carries usersBasePath semantics.
      */
     private static Path getUserFileDir(String basePath, String username) {
-        return Paths.get(basePath != null ? basePath : ".local/file", username);
+        return cn.wubo.loom.file.core.LoomPaths.userFileDir(basePath, username);
     }
 
     // ==================== Path Resolution ====================
 
     /**
-     * Validate that a path is within the user's file directory ({basePath}/{username}/).
+     * Validate that a path is within the user's file directory ({usersBasePath}/{username}/file/).
      * Prevents directory traversal and symlink escape.
      *
      * @return validated File, or null if out of bounds
@@ -269,7 +271,7 @@ public class MavenOperations {
     }
 
     /**
-     * Resolve working directory, scoped within basePath/{username}/.
+     * Resolve working directory, scoped within {usersBasePath}/{username}/file/.
      *
      * @param workingDir explicit working dir (may be null for default)
      * @param username   username
@@ -285,7 +287,7 @@ public class MavenOperations {
     }
 
     /**
-     * Resolve pom.xml file, scoped within basePath/{username}/.
+     * Resolve pom.xml file, scoped within {usersBasePath}/{username}/file/.
      *
      * @param pomPath  explicit pom path (may be null to auto-detect)
      * @param username username

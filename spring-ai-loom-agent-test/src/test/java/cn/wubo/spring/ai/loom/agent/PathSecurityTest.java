@@ -14,12 +14,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Security tests for path sandbox in DefaultGitTool.
- * Verifies that all path parameters are properly restricted to {fileBasePath}/{username}/.
+ * Verifies that all path parameters are properly restricted to
+ * {usersBasePath}/{username}/file/.
  */
 class PathSecurityTest {
 
     private DefaultGitTool tool;
     private Map<String, Object> context;
+    /** usersBasePath 用绝对路径，避免断言依赖测试进程 cwd。 */
+    private static final String USERS_BASE =
+            Paths.get(System.getProperty("java.io.tmpdir"), "loom-pathsec-users").toString();
 
     private static org.springframework.ai.chat.model.ToolContext tc(Map<String, Object> ctx) {
         return new org.springframework.ai.chat.model.ToolContext(ctx);
@@ -45,7 +49,7 @@ class PathSecurityTest {
     @BeforeEach
     void setUp() {
         LoomAgentProperties props = new LoomAgentProperties();
-        props.setFileBasePath(".local/file");
+        props.setUsersBasePath(USERS_BASE);
         props.setGitUsername("testuser");
         tool = new DefaultGitTool(props);
         context = new HashMap<>();
@@ -109,7 +113,8 @@ class PathSecurityTest {
      */
     @Test
     void getWorkingDirAcceptsValidPath() throws Exception {
-        context.put("gitWorkingDir", ".local/file/testuser/my-repo");
+        String repoPath = Paths.get(USERS_BASE, "testuser", "file", "my-repo").toString();
+        context.put("gitWorkingDir", repoPath);
 
         Method getWd = DefaultGitTool.class.getDeclaredMethod("getWorkingDir", org.springframework.ai.chat.model.ToolContext.class);
         getWd.setAccessible(true);
@@ -117,7 +122,7 @@ class PathSecurityTest {
         Object result = getWd.invoke(tool, tc(context));
         assertNotNull(result);
         // getWorkingDir now returns absolute path
-        assertEquals(Paths.get(".local/file/testuser/my-repo").toAbsolutePath().normalize(), result);
+        assertEquals(Paths.get(repoPath).toAbsolutePath().normalize(), result);
     }
 
     /**

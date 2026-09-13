@@ -11,6 +11,12 @@ import org.springframework.ai.tool.annotation.ToolParam;
  * The sub-task shares the main conversation's ChatMemory (write-only namespace
  * "{conversationId}--sub--{subTaskId}"), runs synchronously, and returns the
  * final answer as a string for the main conversation to consume.
+ * <p>
+ * Delegation contract (#1 spec D6): a sub-task only executes what the main task
+ * planned and returns its result. It cannot ask the user questions — anything
+ * needing user decision must be written into the sub-task's returned result, and
+ * the main conversation decides whether to ask the user. Scheduled tasks run
+ * through the same sub-task path and inherit this exclusion.
  * </p>
  */
 @ToolGroup(value = "subtask", defaultGranted = true, description = "start_sub_task / list_sub_tasks / cancel_sub_task / get_sub_task_history — 委派子任务给子模型")

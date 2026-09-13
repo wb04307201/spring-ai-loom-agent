@@ -43,7 +43,8 @@ class KnowledgeMarketIntegrationTest {
     private static final String KB_NAME = "测试市场知识库";
     private JdbcTemplate jdbcTemplate;
     private IKnowledge knowledge;
-    private IKnowledgeMarketService marketService;
+    // Task 4: 具体类型以便调用 approve/reject(v1 shim 接口不暴露审批方法)
+    private DefaultKnowledgeMarketService marketService;
     private IKnowledgeRoleAdmin roleAdmin;
     private IUser user;
     private Cache sessionCache;
@@ -140,11 +141,28 @@ class KnowledgeMarketIntegrationTest {
                 name VARCHAR(200) NOT NULL,
                 description TEXT,
                 status VARCHAR(20) NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+                created_by_kind VARCHAR(16) NOT NULL DEFAULT 'USER',
                 submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 reviewed_at TIMESTAMP,
                 reviewed_by VARCHAR(64),
                 review_comment TEXT,
                 UNIQUE(username, name)
+                )
+                """);
+
+        // Task 4: submit 走审批流后,REJECTED 重投会 INSERT...SELECT 进归档表 — 镜像 V1.0 schema
+        jdbcTemplate.execute("""
+                CREATE TABLE loom_market_knowledge_archive (
+                id VARCHAR(36) PRIMARY KEY,
+                username VARCHAR(64) NOT NULL,
+                name VARCHAR(200) NOT NULL,
+                description TEXT,
+                status VARCHAR(20) NOT NULL,
+                submitted_at TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                reviewed_by VARCHAR(64),
+                review_comment TEXT,
+                archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
 
@@ -167,6 +185,18 @@ class KnowledgeMarketIntegrationTest {
                 PRIMARY KEY (role_code, market_knowledge_id)
                 )
                 """);
+
+        // M3+ R4: DefaultKnowledgeMarketService.listApproved / listPaged now embed
+        // tags via one batch SELECT on loom_market_knowledge_tag — mirror the real
+        // V1.0 schema table so this hand-built test schema stays complete.
+        jdbcTemplate.execute("""
+                CREATE TABLE loom_market_knowledge_tag (
+                market_id VARCHAR(36) NOT NULL,
+                tag VARCHAR(64) NOT NULL,
+                PRIMARY KEY (market_id, tag),
+                FOREIGN KEY (market_id) REFERENCES loom_market_knowledge(id) ON DELETE CASCADE
+                )
+                """);
     }
 
     // ===== Main Flow Test =====
@@ -182,13 +212,18 @@ class KnowledgeMarketIntegrationTest {
         String kbId = kb.id();
         UserContextHolder.clear();
 
-        // Step 2: User A submits to market (直接 APPROVED，无审批流)
+        // Step 2: User A submits to market (进 PENDING，admin approve 后 APPROVED)
         UserContextHolder.setCurrentUser(USER_A);
         MarketKnowledgeRecord submitted = marketService.submit(kbId);
-        assertThat(submitted.status()).isEqualTo(MarketKnowledgeRecord.STATUS_APPROVED);
+        assertThat(submitted.status()).isEqualTo(MarketKnowledgeRecord.STATUS_PENDING);
         assertThat(submitted.username()).isEqualTo(USER_A);
-        assertThat(submitted.reviewedBy()).isEqualTo(USER_A);
+        assertThat(submitted.reviewedBy()).isNull();
         UserContextHolder.clear();
+
+        // Step 3: Admin approves the submission
+        MarketKnowledgeRecord approved = marketService.approve(submitted.id(), ADMIN_USER);
+        assertThat(approved.status()).isEqualTo(MarketKnowledgeRecord.STATUS_APPROVED);
+        assertThat(approved.reviewedBy()).isEqualTo(ADMIN_USER);
 
         // Step 4: Admin assigns knowledge base to role
         UserContextHolder.setCurrentUser(ADMIN_USER);
@@ -223,10 +258,15 @@ class KnowledgeMarketIntegrationTest {
     void testListApprovedMarketKnowledge() {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于浏览测试");
-        marketService.submit(kb.id());
+        MarketKnowledgeRecord submitted = marketService.submit(kb.id());
         UserContextHolder.clear();
 
-        // 用户提交直接 APPROVED，无需审批流
+        // 用户提交进 PENDING,未审批前不应出现在 approved 列表
+        List<MarketKnowledgeRecord> pendingList = marketService.listApproved(1, 20);
+        assertThat(pendingList).noneMatch(mk -> mk.id().equals(submitted.id()));
+
+        // admin approve 后 APPROVED,可被列出
+        marketService.approve(submitted.id(), ADMIN_USER);
         List<MarketKnowledgeRecord> approvedList = marketService.listApproved(1, 20);
         assertThat(approvedList).anySatisfy(mk ->
                 assertThat(mk.name()).isEqualTo(KB_NAME));
@@ -237,11 +277,17 @@ class KnowledgeMarketIntegrationTest {
     void testPullMarketKnowledge() {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于拉取测试");
-        // 提交直接 APPROVED，无需审批流
+        // 用户提交进 PENDING，admin approve 后 APPROVED
         MarketKnowledgeRecord submitted = marketService.submit(kb.id());
         UserContextHolder.clear();
 
         String marketId = submitted.id();
+        // PENDING 状态不可拉取(403 守卫)
+        assertThatThrownBy(() -> marketService.pull(USER_B, marketId))
+                .isInstanceOf(LoomAgentRuntimeException.class)
+                .hasMessageContaining("未通过审批");
+
+        marketService.approve(marketId, ADMIN_USER);
         marketService.pull(USER_B, marketId);
 
         List<KnowledgeRecord> accessibleKbs = knowledge.listAccessible(USER_B);
@@ -258,11 +304,15 @@ class KnowledgeMarketIntegrationTest {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于撤回测试");
         MarketKnowledgeRecord submitted = marketService.submit(kb.id());
+        // 审批通过上架后再撤回 — 证明 withdraw 真的把已上架行删掉(而非本来就不在列表)
+        marketService.approve(submitted.id(), ADMIN_USER);
+        assertThat(marketService.listApproved(1, 100))
+                .anySatisfy(mk -> assertThat(mk.id()).isEqualTo(submitted.id()));
 
         marketService.withdraw(submitted.id());
         UserContextHolder.clear();
 
-        // 无 PENDING 状态，验证列表里确实没了
+        // 撤回后,approved 列表里确实没了
         List<MarketKnowledgeRecord> allAfter = marketService.listApproved(1, 100);
         assertThat(allAfter).noneMatch(mk -> mk.id().equals(submitted.id()));
     }
@@ -273,11 +323,13 @@ class KnowledgeMarketIntegrationTest {
         UserContextHolder.setCurrentUser(USER_A);
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于重复提交测试");
         MarketKnowledgeRecord first = marketService.submit(kb.id());
+        assertThat(first.status()).isEqualTo(MarketKnowledgeRecord.STATUS_PENDING);
 
-        // 第二次 submit 同 name 应 UPSERT（id 保持不变），不再抛异常
+        // 第二次 submit 同 name(非 REJECTED 行)应 UPSERT（id 保持不变、状态不升不降），不再抛异常
         MarketKnowledgeRecord second = marketService.submit(kb.id());
 
         assertThat(second.id()).isEqualTo(first.id());
+        assertThat(second.status()).isEqualTo(MarketKnowledgeRecord.STATUS_PENDING);
         UserContextHolder.clear();
     }
 
@@ -288,6 +340,9 @@ class KnowledgeMarketIntegrationTest {
         KnowledgeRecord kb = knowledge.insert(KB_NAME, "用于删除测试");
         MarketKnowledgeRecord submitted = marketService.submit(kb.id());
         UserContextHolder.clear();
+
+        // 审批上架后由 admin 删除 — 证明删除作用于一条真实在架(APPROVED)的行
+        marketService.approve(submitted.id(), ADMIN_USER);
 
         UserContextHolder.setCurrentUser(ADMIN_USER);
         // admin DELETE 也通过 withdraw 端点（统一 DELETE）

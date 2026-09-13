@@ -2,6 +2,8 @@
 <html lang="zh-CN">
   <head>
     <title>用户管理 - 灵梭管理控制台</title>
+    <meta name="description" content="灵梭管理控制台 — 用户管理与角色分配" />
+    <link rel="icon" type="image/png" href="/static/logo.png" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/spring/ai/loom/style.css" />
@@ -23,7 +25,7 @@
           <a href="roles.html" class="admin-sidebar-link">
             <span class="admin-sidebar-icon">🛡</span><span>角色管理</span>
           </a>
-          <a href="skills-market.html" class="admin-sidebar-link">
+          <a href="market-skills.html" class="admin-sidebar-link">
             <span class="admin-sidebar-icon">🏪</span><span>技能市场</span>
           </a>
           <a href="knowledge-market.html" class="admin-sidebar-link">
@@ -63,6 +65,11 @@
             >
             里维护的业务角色（可任意命名），用于给普通用户授权 MCP 服务。
           </div>
+
+          <!-- M0 T14: 跨市场 PENDING 待审核汇总 — 进入控制台时拉取 /admin/market-skills + /admin/market-knowledge
+               两端点,客户端按 status==='PENDING' 过滤计数。N>0 才显示,与 market-skills/knowledge-market.html 内同款 chip 共用 .pending-chip / .pending-chip-red。 -->
+          <div id="pending-chip-container" style="margin-bottom: 12px; display: none"></div>
+
           <div class="admin-toolbar">
             <button id="create-user-btn" class="primary-btn">+ 新建用户</button>
             <button id="refresh-btn" class="secondary-btn">刷新</button>

@@ -16,20 +16,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LoomAgentPropertiesDefaultsTest {
 
     @Test
-    void fileBasePath_defaultsUnderUserHome_dot_loom() {
+    void usersBasePath_defaultsUnderUserHome_dot_loom() {
         LoomAgentProperties p = new LoomAgentProperties();
-        assertThat(p.getFileBasePath()).startsWith(System.getProperty("user.home"));
-        assertThat(p.getFileBasePath()).contains(".loom").contains("file");
-        assertThat(p.getFileBasePath()).doesNotContain(".local");
-    }
-
-    @Test
-    void knowledgeBasePath_defaultsUnderUserHome_dot_loom() {
-        LoomAgentProperties p = new LoomAgentProperties();
-        assertThat(p.getKnowledgeBasePath())
-                .startsWith(System.getProperty("user.home"))
-                .contains(".loom").contains("knowledge")
-                .doesNotContain(".local");
+        assertThat(p.getUsersBasePath()).startsWith(System.getProperty("user.home"));
+        assertThat(p.getUsersBasePath()).contains(".loom").contains("users");
+        assertThat(p.getUsersBasePath()).doesNotContain(".local");
     }
 
     @Test
@@ -38,15 +29,6 @@ class LoomAgentPropertiesDefaultsTest {
         assertThat(p.getDatasourceDir())
                 .startsWith(System.getProperty("user.home"))
                 .contains(".loom").contains("datasource")
-                .doesNotContain(".local");
-    }
-
-    @Test
-    void jvectorIndexPath_defaultsUnderUserHome_dot_loom() {
-        LoomAgentProperties p = new LoomAgentProperties();
-        assertThat(p.getJvector().getIndexPath())
-                .startsWith(System.getProperty("user.home"))
-                .contains(".loom").contains("jvector-index")
                 .doesNotContain(".local");
     }
 
@@ -69,14 +51,28 @@ class LoomAgentPropertiesDefaultsTest {
         // user setup, and the contract we want to pin is purely about the
         // configured default, not the filesystem state.
         for (String path : new String[]{
-                p.getFileBasePath(),
-                p.getKnowledgeBasePath(),
-                p.getDatasourceDir(),
-                p.getJvector().getIndexPath()
+                p.getUsersBasePath(),
+                p.getDatasourceDir()
         }) {
             assertThat(path)
                     .as("path %s must live under loomHome %s", path, loomHome)
                     .startsWith(loomHome + "/");
         }
+    }
+
+    @Test
+    void askuserTimeoutSeconds_defaultsTo300() {
+        LoomAgentProperties props = new LoomAgentProperties();
+        assertThat(props.getAskuser().getTimeoutSeconds()).isEqualTo(300L);
+    }
+
+    @Test
+    void renderProperty_defaultsMatchSpec() {
+        LoomAgentProperties props = new LoomAgentProperties();
+        assertThat(props.getRender().getDeviceScaleFactor()).isEqualTo(2);
+        assertThat(props.getRender().getTimeoutSeconds()).isEqualTo(30);
+        assertThat(props.getRender().getRenderWaitMs()).isEqualTo(1500);
+        assertThat(props.getRender().isNetworkBlocked()).isTrue();
+        assertThat(props.getRender().getMaxHtmlBytes()).isEqualTo(2L * 1024 * 1024);
     }
 }

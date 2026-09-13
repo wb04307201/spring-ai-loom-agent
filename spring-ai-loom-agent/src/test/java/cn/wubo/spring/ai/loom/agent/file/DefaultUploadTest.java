@@ -74,9 +74,9 @@ class DefaultUploadTest {
  List<String> names = captor.getAllValues().stream().map(FileRecord::fileName).toList();
  assertEquals(List.of("file.txt", "file(1).txt", "file(2).txt"), names);
 
- assertTrue(Files.exists(tempDir.resolve("alice").resolve("file.txt")));
- assertTrue(Files.exists(tempDir.resolve("alice").resolve("file(1).txt")));
- assertTrue(Files.exists(tempDir.resolve("alice").resolve("file(2).txt")));
+ assertTrue(Files.exists(tempDir.resolve("alice").resolve("file").resolve("file.txt")));
+ assertTrue(Files.exists(tempDir.resolve("alice").resolve("file").resolve("file(1).txt")));
+ assertTrue(Files.exists(tempDir.resolve("alice").resolve("file").resolve("file(2).txt")));
  }
 
  @Test

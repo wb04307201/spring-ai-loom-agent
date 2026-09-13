@@ -41,15 +41,22 @@ class DefaultGitToolTest {
 
     private DefaultGitTool tool;
     private Path tmpRoot;
+    private Path cleanupRoot;
+    private Path usersBase;
     private String username;
 
     @BeforeEach
     void setUp() throws IOException {
         LoomAgentProperties props = new LoomAgentProperties();
-        // fileBasePath 用 tmpRoot 父级，username 用 tmpRoot 名
-        tmpRoot = Files.createTempDirectory("loom-gittest-");
-        username = tmpRoot.getFileName().toString();
-        props.setFileBasePath(tmpRoot.getParent().toString());
+        // 沙箱 = {usersBase}/{username}/file：usersBase 用临时目录的父级，
+        // username 用临时目录名，tmpRoot 指向沙箱本身。
+        Path userTmp = Files.createTempDirectory("loom-gittest-");
+        cleanupRoot = userTmp;
+        usersBase = userTmp.getParent();
+        username = userTmp.getFileName().toString();
+        tmpRoot = userTmp.resolve("file");
+        Files.createDirectories(tmpRoot);
+        props.setUsersBasePath(usersBase.toString());
         props.setGitUsername("git-user");
         props.setGitToken("git-token");
         tool = new DefaultGitTool(props);
@@ -60,11 +67,11 @@ class DefaultGitToolTest {
         // JGit 在 Windows 上可能持有 .git/objects 句柄，主动 GC + 短暂等待
         System.gc();
         Thread.sleep(200);
-        if (tmpRoot != null && Files.exists(tmpRoot)) {
+        if (cleanupRoot != null && Files.exists(cleanupRoot)) {
             // 多次尝试删除（处理临时文件锁）
             for (int attempt = 0; attempt < 3; attempt++) {
                 try {
-                    Files.walkFileTree(tmpRoot, new SimpleFileVisitor<Path>() {
+                    Files.walkFileTree(cleanupRoot, new SimpleFileVisitor<Path>() {
                         @Override
                         public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                             try {
@@ -142,7 +149,7 @@ class DefaultGitToolTest {
         try {
             // 用一个 2s 超时的工具（生产默认 60s，测试里太慢）
             LoomAgentProperties fastProps = new LoomAgentProperties();
-            fastProps.setFileBasePath(tmpRoot.getParent().toString());
+            fastProps.setUsersBasePath(usersBase.toString());
             fastProps.getGit().setRemoteTimeoutSeconds(2);
             DefaultGitTool fastTool = new DefaultGitTool(fastProps);
 
@@ -435,10 +442,10 @@ class DefaultGitToolTest {
     // ==================== 路径解析辅助验证 ====================
 
     @Test
-    @DisplayName("Path 解析会把 username 目录作为根")
+    @DisplayName("Path 解析会把 {usersBase}/{username}/file 作为根")
     void pathResolution() {
-        // tmpRoot.getParent() 是 fileBasePath，username 是 tmpRoot 的名字
-        Path userDir = Paths.get(tmpRoot.getParent().toString(), username);
-        assertEquals(tmpRoot, userDir, "Paths.get(fileBasePath, username) 应等于 tmpRoot");
+        // usersBase 是临时目录父级，username 是临时目录名，沙箱 = usersBase/username/file
+        Path userDir = cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBase.toString(), username);
+        assertEquals(tmpRoot, userDir, "LoomPaths.userFileDir(usersBase, username) 应等于 tmpRoot");
     }
 }

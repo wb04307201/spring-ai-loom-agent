@@ -8,7 +8,7 @@ Spring AI LoomAgent 支持两种由 LLM 主动发起的异步/委派能力：**�
 
 主对话中，LLM 可调用工具 `start_sub_task(prompt, systemContext)` 把一段任务委派给一个"子模型"执行：
 
-- 子任务拥有与主对话相同的工具访问（文件 / MCP / Skill / 时间等），**但不能**再次启动子任务或创建定时器（从工具集合层面过滤，杜绝自递归）。
+- 子任务的工具访问**与主对话一样受角色授权约束**：获得通用工具（文件 / Skill / 知识库 / 时间等）+ 该用户角色已授权的 RBAC 工具（render / git / maven / compile），未授权的 RBAC 工具绝不进入子任务工具集。同时**不能**再次启动子任务或创建定时器（从工具集合层面过滤，杜绝自递归）。
 - 主对话在子任务运行期间**同步等待**，子任务完成（或被取消）后把最终文本返回主对话继续。
 - 子任务在专用线程池 `loomSubTaskExecutor` 上运行，可被中断。
 - 子任务的 ChatMemory 写入命名空间 `{conversationId}--sub--{subTaskId}`。
@@ -17,7 +17,7 @@ Spring AI LoomAgent 支持两种由 LLM 主动发起的异步/委派能力：**�
 
 | key | 默认 | 说明 |
 |---|---|---|
-| `enabled` | `true` | 是否注册子任务相关 bean |
+| `enabled` | `true` | **M3 起已废弃** — 无实际效果;`ISubTaskTool` 是 universal 工具（对所有登录用户可见） |
 | `max-concurrent` | `4` | 同时在飞子任务上限，超过则启动请求被拒 |
 | `max-history` | `200` | 每用户历史保留条数，FIFO 丢弃最旧 |
 
@@ -43,7 +43,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 
 > **⚠ Username 约束**：namespace 的 `{username}-{conversationId}` 段以第一个 `-` 作为分隔符，因此 **`username` 不得包含 `-`**。`DefaultUser.createUser` 已在 2026-07 测试 commit `dc20b8f` 后强制校验：含 `-` 的 username 会抛 `LoomAgentRuntimeException(400, ...)`。前端 `schedulePanel._shortName` 解析同样依赖此不变式（截掉 prefix + 第一个 `-` + 36 字符 UUID），未来如需放开 username-dash，必须同步把 `_shortName` 改为基于"找最后一个 36 字符 UUID 形串"的解析方式，不能再用 `split('-').slice(4)` 这种按位置切的脆弱做法。
 
-配置（`spring.ai.loom.agent.schedule.*`）：`enabled`（默认 `true`）。
+配置（`spring.ai.loom.agent.schedule.*`）：`enabled`（默认 `true`，**M3 起已废弃 — 无实际效果**;`IScheduleTool` 是 universal 工具）。触发约束见 `flex.schedule.limits.*`。
 
 ## 前端面板
 
@@ -59,7 +59,7 @@ LLM 可创建定时任务，触发时以**子任务**方式运行给定提示词
 1. 杀掉该 conversationId 名下所有在飞子任务；
 2. 取消该 `loom-sched-{user}-{conv}-` 前缀下的所有定时任务。
 
-两个能力均可通过 `enabled=false` 单独关闭，关闭时对应清理自动跳过。
+两个清理步骤在删除会话时无条件执行（旧的 `enabled=false` 开关自 M3 起已废弃，不再跳过清理）。
 
 ## 持久化 (Path B — loom-owned)
 

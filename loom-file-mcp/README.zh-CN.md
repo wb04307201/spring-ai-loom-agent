@@ -40,7 +40,7 @@ java -jar target/loom-file-mcp-1.0-SNAPSHOT.jar
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `basePath` | `.local/file` | 文件操作的根目录 |
+| `basePath` | `~/.loom/mcp` | 文件操作的根目录（MCP 共享沙箱；扁平配置，非主库用户树） |
 | `maxFileSize` | `10485760`（10 MB） | 文本文件最大大小（字节） |
 | `maxMediaSize` | `52428800`（50 MB） | 媒体文件最大大小（字节） |
 | `maxWalkDepth` | `5` | 目录遍历最大深度 |

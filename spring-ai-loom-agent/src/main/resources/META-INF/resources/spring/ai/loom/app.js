@@ -56,8 +56,12 @@ const API = {
     `/spring/ai/loom/knowledge/${knowledgeId}/file/${fileId}`,
   uploadFile: "/spring/ai/loom/file/upload",
   checkKnowledgeUpload: "/spring/ai/loom/knowledge/checkKnowledgeUpload",
+  // 功能开关探测（知识空间全局关闭：RAG 关闭时 features.knowledge=false → 隐藏 ks 按钮）
+  features: "/spring/ai/loom/api/features",
   // Knowledge market
-  listMarketKnowledge: "/spring/ai/loom/api/knowledge-market",
+  // M4 T2: KB 市场 tab 默认分支改走 v2 分页路由（0-based，返回 Page{items,total,page,size}）。
+  // 旧 v1 /api/knowledge-market（1-based）不再被本 SPA 调用；pull/my-submitted 等仍走各自 v1 路由。
+  listMarketKnowledge: "/spring/ai/loom/market-knowledge",
   pullMarketKnowledge: (id) =>
     `/spring/ai/loom/api/knowledge-market/${id}/pull`,
   submitToMarket: (id) => `/spring/ai/loom/api/knowledge/${id}/submit`,
@@ -81,6 +85,7 @@ const state = {
   capabilities: [],     // M5:统一 capability 列表(本地 tool group + MCP server),从 /api/capabilities 拉
   selectedToolGroups: [], // M5:用户在前端勾选的本地 tool group 名列表(纯 group_name,如 "tool_file")
   enabledKnowledgeIds: [],
+  features: { knowledge: true }, // 功能开关(features 端点);默认 true,init 探测后覆写
   selectedSkill: null, // {name, description} | null，用户通过 / 命令精准选中的 Skill
   isStreaming: false,
   controller: null, // AbortController for SSE
@@ -544,8 +549,15 @@ const api = {
     });
     return r.ok ? r.json() : null;
   },
-  async listMarketSkills() {
-    const r = await apiFetch(API.listMarketSkills);
+  // M4 T2: v2 分页路由 — page 0-based，返回 Page{items,total,page,size}；
+  // query 非空时附加 &query=（服务端搜索）。
+  // M4 T7: sortBy 非空时附加 &sortBy=（official_rank / submitted_at / rating；
+  // 仅分页分支有效，?tag= 分支服务端忽略排序 — 调用方在 tag 激活时不应传）。
+  async listMarketSkills(page = 0, size = 20, query = "", sortBy = "") {
+    let url = `${API.listMarketSkills}?page=${page}&size=${size}`;
+    if (query) url += `&query=${encodeURIComponent(query)}`;
+    if (sortBy) url += `&sortBy=${encodeURIComponent(sortBy)}`;
+    const r = await apiFetch(url);
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   },
@@ -626,10 +638,14 @@ const api = {
   },
 
   // Knowledge market
-  async listMarketKnowledge(page = 1, size = 20) {
-    const r = await apiFetch(
-      `${API.listMarketKnowledge}?page=${page}&size=${size}`,
-    );
+  // M4 T2: v2 分页路由 — page 0-based（默认 0），返回 Page{items,total,page,size}。
+  // M4 T7: +query（服务端关键词搜索）+sortBy（official_rank / submitted_at / rating；
+  // 仅分页分支有效，?tag= 分支服务端忽略两者 — 调用方在 tag 激活时不应传）。
+  async listMarketKnowledge(page = 0, size = 20, query = "", sortBy = "") {
+    let url = `${API.listMarketKnowledge}?page=${page}&size=${size}`;
+    if (query) url += `&query=${encodeURIComponent(query)}`;
+    if (sortBy) url += `&sortBy=${encodeURIComponent(sortBy)}`;
+    const r = await apiFetch(url);
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   },
@@ -679,6 +695,20 @@ const api = {
   async checkKnowledgeUpload() {
     const r = await apiFetch(API.checkKnowledgeUpload);
     return r.ok;
+  },
+  /**
+   * 功能开关探测。失败/网络异常 → fail-open 返回 {knowledge:true}(探测失败不该
+   * 误藏入口;RAG 真关闭时后端必返回 200 {knowledge:false},信号是确定的)。
+   */
+  async loadFeatures() {
+    try {
+      const r = await apiFetch(API.features);
+      if (!r.ok) return { knowledge: true };
+      return await r.json();
+    } catch (e) {
+      console.warn("[api.loadFeatures] failed, fail-open:", e);
+      return { knowledge: true };
+    }
   },
   async listFileTree() {
     const r = await apiFetch("/spring/ai/loom/file/tree");
@@ -1593,6 +1623,211 @@ const conversation = {
   },
 };
 
+/**
+ * #1 AskUser:LLM 提问卡片(聊天流内嵌,spec D1)。
+ * 卡片仅活于当前流:提交/超时/取消后就地定格;刷新页面不重建(历史里只有文本)。
+ */
+const askUserCards = (() => {
+  const active = new Map(); // questionId -> { el, timer, submitBtn, countdownEl, summaryEl }
+
+  function fmtRemaining(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  // §1 终态折叠:freeze 后卡片隐藏,显示一行摘要(点击 toggle 展开回看)。
+  // answerText 仅"已答"路径传(提交成功时的答案);其余终态传 null。
+  // restorePending(可重试失败)不调用本函数 —— 卡片保持可交互(spec D8)。
+  function freeze(qid, stateText, ok, answerText) {
+    const card = active.get(qid);
+    if (!card) return;
+    clearInterval(card.timer);
+    active.delete(qid);
+    card.el.classList.add("askuser-frozen");
+    card.el.querySelectorAll("input,button").forEach((n) => (n.disabled = true));
+    // 终态隐藏提交按钮:否则按钮会永远停在"提交中..."(submit 在 fetch 前设的
+    // 在飞标签,freeze 只 disable 不复位)—— 看起来像卡死。终态语义由徽章表达
+    // (已答 ✓ / 已超时 / 已取消 / 已失效),四种终态共用本函数,无单一合适按钮文案。
+    if (card.submitBtn) card.submitBtn.style.display = "none";
+    const badge = card.el.querySelector(".askuser-state");
+    if (badge) {
+      badge.textContent = stateText;
+      badge.classList.toggle("askuser-state-ok", !!ok);
+    }
+    // 折叠成摘要行(问题文本来自卡片 DOM 的 textContent —— 天然已转义;
+    // 摘要行用 textContent 赋值,LLM 问题/用户答案均不可信,不得 innerHTML)
+    const summary = card.summaryEl;
+    if (summary) {
+      const qEl = card.el.querySelector(".askuser-question");
+      const question = qEl ? qEl.textContent : "";
+      const icon = ok ? "✓" : stateText === "已超时" ? "⏳" : "✗";
+      const tail = ok
+        ? answerText || ""
+        : stateText === "已超时"
+          ? "已超时，未作答"
+          : stateText === "已失效(超时或已取消)"
+            ? "已失效"
+            : stateText;
+      const textEl = summary.querySelector(".askuser-summary-text");
+      if (textEl) textEl.textContent = `${icon} ${question} → ${tail}`;
+      summary.classList.toggle("askuser-summary-ok", !!ok);
+      card.el.style.display = "none";
+      summary.style.display = "flex";
+    }
+  }
+
+  async function submit(qid, ev) {
+    const card = active.get(qid);
+    if (!card) return;
+    const inputs = card.el.querySelectorAll(".askuser-opt-input:checked");
+    const labels = Array.from(inputs).map((n) => n.value);
+    const customInput = card.el.querySelector(".askuser-custom-input");
+    const customText = customInput ? customInput.value.trim() : "";
+    if (customText) labels.push(customText);
+    // 单选 + 自定义输入时,"其他" radio 的 value="" 会混进来 —— 过滤空白后再组装 payload
+    const vals = labels.map((s) => s.trim()).filter(Boolean);
+    if (vals.length === 0) {
+      showToast("请先选择一个选项或输入自定义答案", "error");
+      return;
+    }
+    card.submitBtn.disabled = true;
+    card.submitBtn.textContent = "提交中...";
+    // 非 404 失败(400/500/网络异常)可重试:恢复卡片待提交态,倒计时继续跑
+    const restorePending = (msg) => {
+      card.submitBtn.disabled = false;
+      card.submitBtn.textContent = "提交答案";
+      const badge = card.el.querySelector(".askuser-state");
+      if (badge) {
+        badge.textContent = "";
+        badge.classList.remove("askuser-state-ok");
+      }
+      showToast(msg, "error");
+    };
+    try {
+      const r = await fetch(
+        `/spring/ai/loom/ask/${encodeURIComponent(qid)}/answer`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({ answer: ev.multiSelect ? vals : vals[0] }),
+        },
+      );
+      if (r.ok) {
+        freeze(qid, "已答 ✓", true, vals.join("、"));
+      } else if (r.status === 404) {
+        // 404 = 已超时/已取消/已失效(spec §5 竞态行)—— 唯一不可重试的情况
+        freeze(qid, "已失效(超时或已取消)", false);
+      } else {
+        restorePending(`提交失败(HTTP ${r.status}),请重试`);
+      }
+    } catch (e) {
+      restorePending("提交失败:" + (e.message || "网络错误") + ",请重试");
+    }
+  }
+
+  function render(ev) {
+    if (!ev || !ev.questionId) return;
+    const qid = ev.questionId;
+    const inputType = ev.multiSelect ? "checkbox" : "radio";
+    const optionsHtml = (ev.options || [])
+      .map(
+        (opt, i) => `
+      <label class="askuser-opt">
+        <input class="askuser-opt-input" type="${inputType}" name="askuser-${qid}" value="${escapeHtml(opt.label)}"/>
+        <span class="askuser-opt-label">${escapeHtml(opt.label)}</span>
+        ${opt.description ? `<span class="askuser-opt-desc">${escapeHtml(opt.description)}</span>` : ""}
+      </label>`,
+      )
+      .join("");
+    const customHtml = ev.allowCustomInput
+      ? `<div class="askuser-custom">
+          <label class="askuser-opt">
+            <input class="askuser-opt-input" type="${ev.multiSelect ? "checkbox" : "radio"}" name="askuser-${qid}" value="" data-custom-trigger="1"/>
+            <span class="askuser-opt-label">其他:</span>
+          </label>
+          <input class="askuser-custom-input" type="text" placeholder="输入自定义答案..." maxlength="500"/>
+        </div>`
+      : "";
+
+    const item = document.createElement("div");
+    item.className = "chat-item chat-item-left";
+    item.innerHTML = `
+      <div class="avatar"><img src="${aiImage}" alt="AI"/></div>
+      <div class="bubble">
+        <div class="askuser-wrap">
+        <div class="askuser-summary" style="display: none;">
+          <span class="askuser-summary-text"></span><span class="askuser-summary-arrow">▸</span>
+        </div>
+        <div class="askuser-card" id="askuser-${qid}">
+          <div class="askuser-head">
+            ${ev.header ? `<span class="askuser-header-chip">${escapeHtml(ev.header)}</span>` : ""}
+            <span class="askuser-countdown">⏳ <span class="askuser-countdown-num"></span></span>
+            <span class="askuser-state"></span>
+          </div>
+          <div class="askuser-question">${escapeHtml(ev.question)}</div>
+          ${ev.background ? `<div class="askuser-background">${escapeHtml(ev.background)}</div>` : ""}
+          <div class="askuser-options">${optionsHtml}${customHtml}</div>
+          <button class="askuser-submit">提交答案</button>
+        </div>
+        </div>
+      </div>`;
+    ui.mainContent.appendChild(item);
+    ui.scrollToBottom();
+
+    const el = item.querySelector(".askuser-card");
+    const summaryEl = item.querySelector(".askuser-summary");
+    // 摘要行点击 toggle 展开/收起完整卡片(终态只读回看;卡片保持冻结态)
+    summaryEl.addEventListener("click", () => {
+      const cardHidden = el.style.display === "none";
+      el.style.display = cardHidden ? "" : "none";
+      summaryEl.querySelector(".askuser-summary-arrow").textContent = cardHidden ? "▾" : "▸";
+    });
+    const submitBtn = el.querySelector(".askuser-submit");
+    const countdownEl = el.querySelector(".askuser-countdown-num");
+    submitBtn.addEventListener("click", () => submit(qid, ev));
+    // 单选时点选项文字也可提交(减少一次点击);多选保留显式提交
+    if (!ev.multiSelect) {
+      el.querySelectorAll(".askuser-opt-input").forEach((n) =>
+        n.addEventListener("change", () => {
+          const custom = el.querySelector(".askuser-custom-input");
+          if (n.dataset.customTrigger && custom) {
+            custom.focus(); // "其他"选项:聚焦输入框,等用户填完点提交
+            return;
+          }
+          if (custom) custom.value = "";
+          submit(qid, ev);
+        }),
+      );
+    }
+
+    // 本地倒计时(spec D2:与后端 timeoutSeconds 同值;归零仅置灰前端,
+    // 后端超时以工具返回文本为准 —— 竞态窗口内提交会收到 404 → "已失效")
+    let remaining = Number(ev.timeoutSeconds) || 300;
+    countdownEl.textContent = fmtRemaining(remaining);
+    const timer = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        freeze(qid, "已超时", false);
+        return;
+      }
+      countdownEl.textContent = fmtRemaining(remaining);
+    }, 1000);
+
+    active.set(qid, { el, timer, submitBtn, countdownEl, summaryEl });
+  }
+
+  /** 流结束(complete/error/stop)时把仍在等待的卡片定格。 */
+  function cancelAllActive(reasonText) {
+    for (const qid of Array.from(active.keys())) {
+      freeze(qid, reasonText, false);
+    }
+  }
+
+  return { render, cancelAllActive };
+})();
+
 // ===================== §7 Chat Engine =====================
 const chat = {
   async send() {
@@ -1656,6 +1891,10 @@ const chat = {
       await api.streamChat(
         record,
         (data) => {
+          // #1 AskUser:提问卡片事件帧(按字段分派,普通内容帧不受影响)
+          if (data.askUser) {
+            askUserCards.render(data.askUser);
+          }
           // reasoning content
           if (data.reasoningContent) {
             const thinkingContainer = document.getElementById("thinking-" + id);
@@ -1675,6 +1914,7 @@ const chat = {
           ui.scrollToBottom();
         },
         () => {
+          askUserCards.cancelAllActive("已结束");
           // complete
           const actionsEl = document.getElementById("actions-" + id);
           if (actionsEl) actionsEl.style.display = "";
@@ -1688,6 +1928,7 @@ const chat = {
           conversation.maybeAutoRename(state.conversationId, text);
         },
         (error) => {
+          askUserCards.cancelAllActive("已取消");
           // error
           const actionsEl = document.getElementById("actions-" + id);
           if (actionsEl) actionsEl.style.display = "";
@@ -1749,6 +1990,7 @@ const chat = {
           state.controller.abort();
         } catch (_) {}
       }
+      askUserCards.cancelAllActive("已取消");
       ui.setStopButtonVisible(false);
     }
   },
@@ -1825,7 +2067,7 @@ const knowledge = {
         market:
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">从左侧选一个市场知识库查看详情</div>',
         share:
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">无审批流，提交即上架，<br>其他用户可在「市场」Tab 立即订阅。</p></div>',
+          '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后进入审核，管理员审批通过后，<br>其他用户可在「市场」Tab 订阅。</p></div>',
         mypublish:
           '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>',
         mine: null, // 「我的」Tab 用 select() 主动填；列表为空时 sidebar 已自带 empty
@@ -2150,64 +2392,490 @@ const knowledge = {
     if (!kb) return;
     const ok = await dialog.confirm({
       title: "共享到知识库市场",
-      message: `确认将「${kb.name}」共享到市场？共享后其他用户可浏览并添加到自己的知识库。`,
+      // M3+ T4.3 — i18n key extraction; resolution happens at render time
+      // via window.I18N.t (loaded by i18n/i18n.js). Falls back to the key
+      // string itself if dict not yet loaded or key missing.
+      message: `确认将「${kb.name}」提交到市场？审批通过后其他用户可浏览并添加到自己的知识库。`,
       okText: "共享",
     });
     if (!ok) return;
     try {
       await api.submitToMarket(id);
-      showToast(`已将「${kb.name}」共享到市场`, "success");
+      showToast(`已提交「${kb.name}」，等待管理员审批`, "success");
       this.loadList();
     } catch (e) {
       showToast("共享失败：" + e.message, "error");
     }
   },
 
-  _kmStatusLabel(status) {
-    // +20: 只有 APPROVED 一个状态（去审批）
-    switch (status) {
-      case "APPROVED":
-        return { text: "已上架", bg: "#d1fae5", color: "#065f46" };
-      default:
-        return { text: status || "未知", bg: "#f1f5f9", color: "#475569" };
+  _kbTagFilter: null,
+  // M4 T2: KB 市场「加载更多」分页状态（默认分支 v2 Page total 驱动；tag 分支裸数组 cursor 驱动）
+  _kbMarketItems: [],
+  _kbMarketTotal: 0,
+  _kbMarketPage: 0,
+  _kbMarketHasMore: false,
+  _kbMarketLoading: false,
+  _kbMarketSeq: 0,
+  // M4 T7: KB 市场服务端关键词搜索（镜像技能 tab T2 模式）+ 排序状态。
+  // query/sortBy 仅分页分支下发；tag 分支服务端忽略两者（D11），tag 激活时
+  // 搜索 input 事件被忽略、排序 select 被 disable。
+  _kbMarketQuery: "",
+  _kbMarketDebounce: null,
+  _kbSort: "official_rank",
+  // 搜索触发的重渲染后把焦点还给 #kb-market-search（bar 全量重建会丢焦点）
+  _kbSearchFocus: false,
+  _renderTagChipsHtml(tags, opts) {
+    // Render a list of tag strings as `.tag-chip` spans. opts.onChipClick
+    // (when present) wires each chip as a filter button; otherwise they're
+    // static display chips. `emptyText` is shown when tags is empty.
+    const list = Array.isArray(tags) ? tags.filter(Boolean) : [];
+    if (list.length === 0) {
+      if (opts && opts.emptyText) {
+        return '<span class="kb-tag-filter-empty">' + escapeHtml(opts.emptyText) + "</span>";
+      }
+      return "";
     }
+    const klass = opts && opts.onChipClick ? "tag-chip tag-chip-filter" : "tag-chip";
+    const extraAttr = opts && opts.activeTag
+      ? ' data-tag="' + escapeHtml(opts.activeTag) + '"'
+      : "";
+    return list
+      .map(
+        (t) =>
+          '<span class="' +
+          klass +
+          '"' +
+          extraAttr +
+          ' data-tag="' +
+          escapeHtml(String(t)) +
+          '">' +
+          escapeHtml(String(t)) +
+          "</span>",
+      )
+      .join("");
   },
-  async _renderMarketTab(container, detail) {
+  async _renderMarketTab(container, detail, tagFilter) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
+    // M2 T21: tagFilter (string|null) — 当非空时走公开 /market-knowledge?tag=...
+    // 端点(返回裸 list 形态);为空时走 v2 /market-knowledge Page 分页接口。
+    // M4 T2: 默认分支已切 v2（0-based，Page{items,total}，size=20，total 驱动 load-more）；
+    // tag 分支保持裸数组契约（size=50，cursor 式：本页返回条数 < size 即停）。
+    this._kbTagFilter = tagFilter || null;
+    this._kbMarketItems = [];
+    this._kbMarketTotal = 0;
+    this._kbMarketPage = 0;
+    this._kbMarketHasMore = false;
+    // M4 T7: 重进 tab（含 tag 切换）时清 query + 取消悬挂 debounce（镜像技能 tab
+    // Fix round 1 —— 否则旧 input 的 300ms 定时器晚触发会 bump seq 把本次合法
+    // 初始 fetch 判 stale，tab 卡「加载中...」）。排序 select 值跨重渲染保留。
+    this._kbMarketQuery = "";
+    if (this._kbMarketDebounce) {
+      clearTimeout(this._kbMarketDebounce);
+      this._kbMarketDebounce = null;
+    }
+    this._kbSearchFocus = false; // 全量重进 tab — 不把焦点强制交给搜索框
+    // Fix round 1: 每次重置 bump seq —— 让旧 tag/旧渲染的 in-flight load-more
+    // 响应（可能晚到）在 _fetchKbMarketPage 里被识别为 stale 并丢弃，防止
+    // 旧响应 concat 进新列表造成混行。
+    this._kbMarketSeq++;
     container.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">加载中...</div>';
     detail.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个市场知识库查看详情</div>';
     try {
-      const data = await api.listMarketKnowledge(1, 50);
-      const items = (data && data.content) || data || [];
-      if (!items || items.length === 0) {
-        container.innerHTML =
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
-        return;
-      }
-      container.innerHTML = "";
-      for (const kb of items) {
-        const div = document.createElement("div");
-        div.className = "ks-item";
-        div.innerHTML = `
- <div class="ks-item-main">
- <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
- </div>
- <span class="ks-item-desc">by ${escapeHtml(kb.username || kb.author || "")} · ${escapeHtml(kb.description || "")}</span>
- </div>
- `;
-        div.addEventListener("click", () =>
-          this._showMarketKbDetail(kb, div, detail),
-        );
-        container.appendChild(div);
-      }
+      const res = await this._fetchKbMarketPage(0, false);
+      if (res && res.stale) return; // 已被更新的渲染取代 — 不碰 container
+      this._renderKbMarketList(container, detail);
     } catch (e) {
       container.innerHTML =
         '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
         escapeHtml(e.message) +
         "</div>";
+    }
+  },
+
+  // M4 T2: 拉取 KB 市场一页并累积到 _kbMarketItems。默认分支 v2 Page（total 驱动）；
+  // tag 分支裸数组（返回条数 < size 即没有更多）。
+  // Fix round 1: sequence token 防 stale response（与技能 tab 同款）—— fetch 开始时
+  // 捕获 token，await 之后 token 过期则丢弃响应/错误，返回 {stale:true}。
+  async _fetchKbMarketPage(page, append) {
+    const seq = ++this._kbMarketSeq;
+    const tagFilter = this._kbTagFilter;
+    let items;
+    let total = null;
+    try {
+      if (tagFilter) {
+        const size = 50;
+        const url =
+          "/spring/ai/loom/market-knowledge?tag=" +
+          encodeURIComponent(tagFilter) +
+          "&page=" +
+          page +
+          "&size=" +
+          size;
+        const r = await apiFetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        items = (await r.json()) || [];
+        if (seq !== this._kbMarketSeq) return { stale: true };
+        this._kbMarketHasMore = items.length >= size;
+      } else {
+        const size = 20;
+        // M4 T7: 分页分支下发 query + sortBy（tag 分支服务端忽略两者，故不传）。
+        const data = await api.listMarketKnowledge(
+          page,
+          size,
+          this._kbMarketQuery,
+          this._kbSort,
+        );
+        items = (data && (data.items || data.content)) || data || [];
+        total = data && typeof data.total === "number" ? data.total : null;
+        if (seq !== this._kbMarketSeq) return { stale: true };
+        this._kbMarketHasMore =
+          items.length >= size &&
+          (total == null || (append ? this._kbMarketItems.length : 0) + items.length < total);
+      }
+    } catch (e) {
+      if (seq !== this._kbMarketSeq) return { stale: true }; // stale error — discard
+      throw e;
+    }
+    if (seq !== this._kbMarketSeq) return { stale: true };
+    this._kbMarketItems = append ? this._kbMarketItems.concat(items) : items;
+    if (total != null) this._kbMarketTotal = total;
+    this._kbMarketPage = page;
+    return { stale: false };
+  },
+
+  // M4 T2: 渲染 KB 市场列表（tag 过滤栏 + 全部已加载行 + load-more 按钮）。
+  // load-more 后全量重渲染 —— 客户端 sort 作用于累积列表，增量 append 会与
+  // sort 顺序冲突（新行可能排到已渲染行之前），故不做 cursor 式局部追加。
+  _renderKbMarketList(container, detail) {
+    const tagFilter = this._kbTagFilter;
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    // M0 T14: 官方优先 → featured_rank 降序 → 提交时间降序（同 Skills 市场 Tab 的语义）。
+    // M4 T7: 默认（分页）分支服务端已按 sortBy 排序（official_rank 默认语义 == 本
+    // 比较器；submitted_at / rating 只有服务端能排）—— 客户端再排会覆盖服务端顺序，
+    // 故仅 tag 分支（裸数组，服务端固定 rank 序、忽略 sortBy）保留客户端兜底排序。
+    const rawItems = this._kbMarketItems || [];
+    const items = tagFilter
+      ? [...rawItems].sort((a, b) => {
+          const ao = a && a.isOfficial ? 1 : 0;
+          const bo = b && b.isOfficial ? 1 : 0;
+          if (ao !== bo) return bo - ao;
+          const ar = a && a.featuredRank != null ? Number(a.featuredRank) : 0;
+          const br = b && b.featuredRank != null ? Number(b.featuredRank) : 0;
+          if (ar !== br) return br - ar;
+          const ad = a && a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+          const bd = b && b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+          return bd - ad;
+        })
+      : rawItems;
+    // M3+ T2.2: listWithTags helper removed — tags (when backend embeds via
+    // T2.1 follow-up batch SELECT) are read directly from row.tags.
+    if (!items || items.length === 0) {
+      // M4 T7: 空态三分支（镜像技能 tab）：tag → 「没有匹配 tag「x」的知识库」；
+      // query → 「没有匹配「kw」的知识库」；无 → 市场暂无知识库。空态文本不高亮。
+      const empty = tagFilter
+        ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
+          escapeHtml(tagFilter) +
+          "」的知识库</div>"
+        : this._kbMarketQuery
+          ? '<div style="padding: 40px; text-align: center; color: var(--text-muted);">没有匹配「' +
+            escapeHtml(this._kbMarketQuery) +
+            "」的知识库</div>"
+          : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+      container.innerHTML = this._renderKbTagFilterBar([], tagFilter) + empty;
+      this._bindKbTagFilterBar(container, detail);
+      return;
+    }
+    // M3+ T2.2: listWithAnnouncements helper removed — announcement data
+    // comes pre-embedded on each row (row.announcementTitle / row.announcementBody
+    // via T2.1 LEFT JOIN market_content_announcement).
+    // M2 T21: 客户端聚合当前已加载行所有 unique tag,渲染成可点击的过滤 chip
+    const aggregatedTags = [];
+    const seen = new Set();
+    for (const kb of items) {
+      const tags = kb && Array.isArray(kb.tags) ? kb.tags : [];
+      for (const tg of tags) {
+        const s = String(tg);
+        if (s && !seen.has(s)) {
+          seen.add(s);
+          aggregatedTags.push(s);
+        }
+      }
+    }
+    aggregatedTags.sort();
+    container.innerHTML = "";
+    container.insertAdjacentHTML(
+      "beforeend",
+      this._renderKbTagFilterBar(aggregatedTags, tagFilter),
+    );
+    this._bindKbTagFilterBar(container, detail);
+    const rowsWrap = document.createElement("div");
+    rowsWrap.className = "kb-market-rows";
+    container.appendChild(rowsWrap);
+    // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
+    // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
+    for (const kb of items) {
+      if (kb && kb.announcementTitle) {
+        const annView = {
+          title: kb.announcementTitle,
+          body: kb.announcementBody || "",
+        };
+        const banner = document.createElement("div");
+        banner.className = "market-announcement market-announcement-list";
+        banner.innerHTML =
+          window.MarketAdmin && window.MarketAdmin.announcementHtml
+            ? window.MarketAdmin.announcementHtml(annView)
+            : `<div class="market-announcement-title">📢 ${escapeHtml(
+                annView.title,
+              )}</div><div class="market-announcement-body">${escapeHtml(
+                annView.body,
+              )}</div>`;
+        banner.style.cursor = "pointer";
+        banner.addEventListener("click", () => {
+          const rowEl = banner.nextElementSibling;
+          if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
+        });
+        rowsWrap.appendChild(banner);
+      }
+      const div = document.createElement("div");
+      div.className = "ks-item";
+      const officialBadge = kb && kb.isOfficial
+        ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
+        : "";
+      const tagChips = (kb && Array.isArray(kb.tags) && kb.tags.length > 0)
+        ? '<div class="kb-tag-row">' +
+          this._renderTagChipsHtml(kb.tags) +
+          "</div>"
+        : "";
+      // M4 T7: name/description/username 走 highlightHtml（当前 query 命中包 <mark>；
+      // tag 分支 query 恒为 ""，highlightHtml 退化为 escapeHtml）。详情/公告/chips 不高亮。
+      div.innerHTML = `
+ <div class="ks-item-main">
+ <div class="ks-item-row1">
+ <span class="ks-item-name">${highlightHtml(kb.name, this._kbMarketQuery)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ </div>
+ <span class="ks-item-desc">by ${highlightHtml(kb.username || kb.author || "", this._kbMarketQuery)} · ${highlightHtml(kb.description || "", this._kbMarketQuery)}</span>
+ ${tagChips}
+ </div>
+ `;
+      div.addEventListener("click", () =>
+        this._showMarketKbDetail(kb, div, detail),
+      );
+      rowsWrap.appendChild(div);
+    }
+    // M4 T2: load-more 按钮 — 没有更多时直接移除（ruling: removal，不留 end-state）
+    const oldBtn = container.querySelector(".load-more-btn");
+    if (oldBtn) oldBtn.remove();
+    if (this._kbMarketHasMore) {
+      const btn = document.createElement("button");
+      btn.className = "secondary-btn load-more-btn";
+      btn.textContent = t("market.load.more", "加载更多");
+      btn.addEventListener("click", async () => {
+        if (this._kbMarketLoading) return;
+        this._kbMarketLoading = true;
+        btn.disabled = true;
+        try {
+          const res = await this._fetchKbMarketPage(this._kbMarketPage + 1, true);
+          // Fix round 1: stale 响应（用户已切 tag / 重进 tab）→ 不重渲染旧 container
+          if (res && res.stale) return;
+          this._renderKbMarketList(container, detail);
+        } catch (e) {
+          showToast("加载失败：" + e.message, "error");
+          btn.disabled = false;
+        } finally {
+          this._kbMarketLoading = false;
+        }
+      });
+      container.appendChild(btn);
+    }
+  },
+
+  _renderKbTagFilterBar(tags, activeTag) {
+    // M2 T21: 渲染 KB 市场 Tag 过滤栏 — 始终展示 "全部" chip + 当前页聚合的 tag chips
+    // (可点击过滤) + 自由文本输入 + "应用筛选" 按钮。"全部" 是 active 当 activeTag 为空。
+    const tagList = Array.isArray(tags) ? tags : [];
+    const active = activeTag || null;
+    const allActive = active == null || active === "";
+    const chipsHtml = tagList
+      .map((t) => {
+        const isActive = active === t;
+        const cls =
+          "tag-chip tag-chip-filter" + (isActive ? " active" : "");
+        return (
+          '<span class="' +
+          cls +
+          '" data-tag="' +
+          escapeHtml(t) +
+          '">' +
+          escapeHtml(t) +
+          "</span>"
+        );
+      })
+      .join("");
+    const allChipCls =
+      "tag-chip tag-chip-filter" + (allActive ? " active" : "");
+    // M4 T7: 关键词搜索框（镜像技能 tab #skill-market-search）+ 排序 select（复用
+    // skills._renderSortSelectHtml）。搜索框 value 从 _kbMarketQuery 恢复（每次
+    // load-more/搜索都会全量重渲染 bar，靠 value 保留已输入文本）。tag 过滤激活时
+    // 排序 select disable（tag 分支忽略 sortBy，D11）。
+    return (
+      '<div class="kb-tag-filter-bar">' +
+      '<span class="kb-tag-filter-bar-label">搜索：</span>' +
+      '<div class="kb-tag-filter-input-row">' +
+      '<input type="text" id="kb-market-search" class="kb-tag-filter-input" ' +
+      'placeholder="搜索知识库（名称 / 描述 / 作者）" value="' +
+      escapeHtml(this._kbMarketQuery || "") +
+      '"/>' +
+      "</div>" +
+      '<span class="kb-tag-filter-bar-label">排序：</span>' +
+      skills._renderSortSelectHtml(
+        "kb-market-sort",
+        this._kbSort,
+        !!active,
+      ) +
+      '<span class="kb-tag-filter-bar-label">标签筛选：</span>' +
+      '<span class="' +
+      allChipCls +
+      '" data-tag="">全部</span>' +
+      '<div class="tag-chip-group">' +
+      chipsHtml +
+      "</div>" +
+      '<div class="kb-tag-filter-input-row">' +
+      '<input type="text" id="kb-tag-filter-input" class="kb-tag-filter-input" placeholder="输入标签（如 RAG / FAQ）然后点应用筛选" value="' +
+      escapeHtml(active || "") +
+      '"/>' +
+      '<button class="primary-btn" id="kb-tag-filter-apply" style="padding:5px 14px;font-size:12px;">应用筛选</button>' +
+      "</div>" +
+      "</div>"
+    );
+  },
+
+  _bindKbTagFilterBar(container, detail) {
+    // 绑定 chip 点击和「应用筛选」按钮 → 重新拉取过滤后列表
+    const self = this;
+    container.querySelectorAll(".kb-tag-filter-bar .tag-chip-filter").forEach(
+      (chip) => {
+        chip.addEventListener("click", () => {
+          const tag = chip.getAttribute("data-tag") || "";
+          // 已经 active 时再点一下 = 清除过滤
+          if (
+            chip.classList.contains("active") &&
+            tag !== ""
+          ) {
+            self._renderMarketTab(container, detail, null);
+            return;
+          }
+          self._renderMarketTab(container, detail, tag || null);
+        });
+      },
+    );
+    const applyBtn = container.querySelector("#kb-tag-filter-apply");
+    const inputEl = container.querySelector("#kb-tag-filter-input");
+    if (applyBtn && inputEl) {
+      const trigger = () => {
+        const v = inputEl.value.trim();
+        self._renderMarketTab(container, detail, v || null);
+      };
+      applyBtn.addEventListener("click", trigger);
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          trigger();
+        }
+      });
+    }
+    // M4 T7: 关键词搜索（镜像技能 tab：300ms debounce + Enter 立即 + seq guard）。
+    // tag 过滤激活时忽略 keyword（tag 分支不带 query，D11）—— 与技能 tab runSearch 同语义。
+    const searchInput = container.querySelector("#kb-market-search");
+    const runKbSearch = async () => {
+      if (self._kbTagFilter) return;
+      if (self._kbMarketDebounce) {
+        clearTimeout(self._kbMarketDebounce);
+        self._kbMarketDebounce = null;
+      }
+      self._kbMarketQuery = searchInput.value.trim();
+      self._kbSearchFocus = true; // 搜索触发的重渲染 → 渲染后把焦点还给搜索框
+      self._kbMarketPage = 0;
+      self._kbMarketItems = [];
+      self._kbMarketTotal = 0;
+      self._kbMarketHasMore = false;
+      // 新搜索开始 → 旧 load-more 按钮立即失效（seq guard 兜底 stale response）
+      const staleBtn = container.querySelector(".load-more-btn");
+      if (staleBtn) staleBtn.remove();
+      try {
+        const res = await self._fetchKbMarketPage(0, false); // 内部 ++seq 作 in-flight guard
+        if (res && res.stale) return;
+        self._renderKbMarketList(container, detail);
+      } catch (e) {
+        // page-0 失败 → 错误态（镜像 _renderMarketTab catch；stale 错误已被 fetch 吞掉）
+        self._kbSearchFocus = false;
+        container.innerHTML =
+          '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+          escapeHtml(e.message) +
+          "</div>";
+      }
+    };
+    if (searchInput) {
+      searchInput.addEventListener("input", () => {
+        self._kbSearchFocus = true;
+        if (self._kbMarketDebounce) clearTimeout(self._kbMarketDebounce);
+        self._kbMarketDebounce = setTimeout(runKbSearch, 300);
+      });
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          runKbSearch();
+        }
+      });
+      searchInput.addEventListener("blur", () => {
+        self._kbSearchFocus = false;
+      });
+    }
+    // M4 T7: 排序 change → 重置 page/items + bump seq（经 _fetchKbMarketPage）重新拉取。
+    // tag 过滤激活时 select 已 disabled（change 不触发）。
+    const sortSel = container.querySelector("#kb-market-sort");
+    if (sortSel) {
+      sortSel.addEventListener("change", async () => {
+        self._kbSearchFocus = false; // 排序触发不应抢焦点到搜索框
+        self._kbSort = sortSel.value || "official_rank";
+        if (self._kbMarketDebounce) {
+          clearTimeout(self._kbMarketDebounce);
+          self._kbMarketDebounce = null;
+        }
+        self._kbMarketPage = 0;
+        self._kbMarketItems = [];
+        self._kbMarketTotal = 0;
+        self._kbMarketHasMore = false;
+        const staleBtn = container.querySelector(".load-more-btn");
+        if (staleBtn) staleBtn.remove();
+        try {
+          const res = await self._fetchKbMarketPage(0, false);
+          if (res && res.stale) return;
+          self._renderKbMarketList(container, detail);
+        } catch (e) {
+          // page-0 失败 → 错误态（镜像 _renderMarketTab catch）
+          container.innerHTML =
+            '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+            escapeHtml(e.message) +
+            "</div>";
+        }
+      });
+    }
+    // M4 T7: 全量重渲染会销毁并重建搜索框 —— 若本次渲染由搜索触发（_kbSearchFocus），
+    // 把焦点 + 光标（置于文末）还给新搜索框，避免 debounce 中途丢焦点。load-more /
+    // tag 点击 / 排序不置该 flag，故不会抢焦点。
+    if (self._kbSearchFocus && searchInput) {
+      searchInput.focus();
+      const len = searchInput.value.length;
+      try {
+        searchInput.setSelectionRange(len, len);
+      } catch (_) {
+        /* ignore — non-text input */
+      }
     }
   },
 
@@ -2217,18 +2885,27 @@ const knowledge = {
       .querySelectorAll("#ks-sidebar .ks-item")
       .forEach((i) => i.classList.remove("selected"));
     element.classList.add("selected");
+    // M2 T21: 优先用 listWithTags 阶段已装饰的 row.tags,否则实时拉一次
+    const preloadedTags =
+      marketKb && Array.isArray(marketKb.tags) ? marketKb.tags : null;
     detail.innerHTML = `
+ <div id="market-announcement-slot"></div>
  <div class="detail-section">
  <div class="detail-section-title">市场元数据</div>
  <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
  <div>作者：${escapeHtml(marketKb.username || marketKb.author || "-")}</div>
  <div>状态：<span class="type-badge ADMIN">${escapeHtml(marketKb.status || "APPROVED")}</span></div>
  <div>上架时间：${marketKb.reviewedAt ? new Date(marketKb.reviewedAt).toLocaleString() : marketKb.submittedAt ? new Date(marketKb.submittedAt).toLocaleString() : "-"}</div>
+ <div id="kb-detail-tags-row" style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:var(--text-muted);">标签：</span><span id="kb-detail-tags-slot"></span></div>
  </div>
  </div>
  <div class="detail-section">
  <div class="detail-section-title">描述</div>
  <div class="detail-section-content">${escapeHtml(marketKb.description || "无")}</div>
+ </div>
+ <div class="detail-section">
+ <div class="detail-section-title">评分与评论</div>
+ <div id="market-reviews-slot" class="market-reviews-slot"></div>
  </div>
  <div style="margin-top: 24px; display: flex; gap: 12px;">
  <button class="send-skill-btn" id="pull-kb-confirm-btn" style="flex: 1;">添加到我的知识库</button>
@@ -2237,6 +2914,60 @@ const knowledge = {
     detail
       .querySelector("#pull-kb-confirm-btn")
       .addEventListener("click", () => this._pullMarketKnowledge(marketKb.id));
+
+    // T19: load announcement + review list + submission form.
+    const annSlot = detail.querySelector("#market-announcement-slot");
+    const reviewSlot = detail.querySelector("#market-reviews-slot");
+    // M2 T21: tag slot — 优先用 listWithTags 已装饰的 row.tags,
+    // 否则实时 fetch。失败时显示「—」静默。
+    const tagSlot = detail.querySelector("#kb-detail-tags-slot");
+    const renderTags = (tags) => {
+      if (!tagSlot) return;
+      if (Array.isArray(tags) && tags.length > 0) {
+        tagSlot.outerHTML =
+          '<span id="kb-detail-tags-slot" class="tag-chip-group">' +
+          this._renderTagChipsHtml(tags) +
+          "</span>";
+      } else {
+        tagSlot.outerHTML =
+          '<span id="kb-detail-tags-slot" style="color:var(--text-muted);font-size:12px;">无</span>';
+      }
+    };
+    if (preloadedTags) {
+      renderTags(preloadedTags);
+    } else if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getMarketTags === "function"
+    ) {
+      window.MarketAdmin
+        .getMarketTags("KNOWLEDGE", marketKb.id)
+        .then(renderTags)
+        .catch(() => {
+          if (tagSlot) tagSlot.textContent = "无";
+        });
+    } else if (tagSlot) {
+      tagSlot.textContent = "—";
+    }
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getAnnouncement === "function"
+    ) {
+      window.MarketAdmin
+        .getAnnouncement("KNOWLEDGE", marketKb.id)
+        .then((ann) => {
+          if (ann && annSlot) annSlot.innerHTML = window.MarketAdmin.announcementHtml(ann);
+        })
+        .catch(() => {});
+    }
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.reviewList === "function"
+    ) {
+      _renderReviewSection("KNOWLEDGE", marketKb.id, reviewSlot);
+    } else {
+      reviewSlot.innerHTML =
+        '<div style="color: var(--text-muted); font-size: 12px;">评分功能暂不可用</div>';
+    }
   },
 
   async _pullMarketKnowledge(id) {
@@ -2253,7 +2984,7 @@ const knowledge = {
   async _renderShareTab(container, detail) {
     // 两段式（点列表项 → 详情面板打开共享表单）
     detail.innerHTML =
-      '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">无审批流，提交即上架，<br>其他用户可在「市场」Tab 立即订阅。</p></div>';
+      '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><p style="font-size: 14px; margin-bottom: 8px;">从左侧选一个自建知识库共享到市场</p><p style="font-size: 12px; color: var(--text-muted);">提交后进入审核，管理员审批通过后，<br>其他用户可在「市场」Tab 订阅。</p></div>';
     const ownKbs = (this._kbList || []).filter(
       (kb) => kb.username === state.username,
     );
@@ -2283,11 +3014,11 @@ const knowledge = {
     detail.innerHTML = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
- 共享「<strong>${escapeHtml(kb.name)}</strong>」到市场。其他用户可在「市场」Tab 立即订阅。<br>
+ 共享「<strong>${escapeHtml(kb.name)}</strong>」到市场。审批通过后其他用户可在「市场」Tab 订阅。<br>
  你的本地实例保持不变，共享不影响你的使用。
  </div>
  <div style="font-size: 12px; color: var(--text-muted);">
- 无审批流，提交即上架。同名+同作者会覆盖（status 直接 APPROVED）。
+ 提交后状态为 PENDING，等待管理员审批。同名+同作者会更新原投稿。
  </div>
  <div style="display: flex; gap: 12px;">
  <button class="send-skill-btn" id="share-kb-confirm-btn" style="flex: 1;">共享到市场</button>
@@ -2302,14 +3033,15 @@ const knowledge = {
   async _handleShareSubmit(kb) {
     try {
       await api.submitToMarket(kb.id);
-      showToast(`已共享「${kb.name}」，其他用户可立即订阅`, "success");
+      showToast(`已提交「${kb.name}」，等待管理员审批`, "success");
       this.loadList();
     } catch (e) {
       showToast("共享失败：" + e.message, "error");
     }
   },
   async _renderMyPublishTab(container, detail) {
-    // -2: 所有提交都是 APPROVED；列表只显示名称 + 描述，详情面板显示完整信息 + 撤回按钮
+    // -2: 列表显示名称 + 描述 + 审批状态徽章，详情面板显示完整信息 + 撤回按钮
+    // （审批流已上线：PENDING/APPROVED/REJECTED，与 Skill 侧「我的发布」一致）
     detail.innerHTML =
       '<div style="padding: 40px; text-align: center; color: var(--text-muted);">选择一个发布查看详情</div>';
     try {
@@ -2323,10 +3055,11 @@ const knowledge = {
       for (const kb of items) {
         const div = document.createElement("div");
         div.className = "ks-item";
+        const st = skills._statusLabel(kb.status);
         div.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:#d1fae5;color:#065f46;">已上架</span></span>
+ <span class="ks-item-name">${escapeHtml(kb.name)} <span class="ks-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></span>
  </div>
  <span class="ks-item-desc">${escapeHtml(kb.description || "")}</span>
  </div>
@@ -2345,19 +3078,50 @@ const knowledge = {
   },
 
   _showMyPublishDetail(kb, detail) {
-    // -2: 详情面板显示完整信息 + 「撤回共享（下架）」按钮
+    // -2: 详情面板显示完整信息 + 审批状态徽章 + 「撤回共享（下架）」按钮
+    // M0 T14 / Task 8: 审批流已上线。镜像 Skill 侧「我的发布」详情：
+    // 顶部显示状态徽章；REJECTED 时把审核意见做成醒目的红框块（拒绝原因），
+    // 其他状态若有评论则降级显示为一行「审核意见」。
+    // 注：_statusLabel 挂在 skills 对象上（knowledge 对象独立），显式跨对象引用。
+    const st = skills._statusLabel(kb.status);
+    // Spec §2 parity: withdraw 文案按状态区分（与 Skill 侧「我的发布」一致）。
+    const withdrawLabel =
+      kb.status === "APPROVED"
+        ? "下架并删除"
+        : kb.status === "REJECTED"
+          ? "删除被拒记录"
+          : "撤回投稿";
+    let reviewCommentBlock = "";
+    if (kb && kb.reviewComment) {
+      if (kb.status === "REJECTED") {
+        reviewCommentBlock =
+          '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;color:#991b1b;font-size:12px;line-height:1.6;">' +
+          "拒绝原因：" +
+          escapeHtml(kb.reviewComment) +
+          "</div>";
+      } else {
+        reviewCommentBlock =
+          '<div style="background: var(--bg-secondary); border-radius:6px; padding:10px 12px; color: var(--text-muted); font-size:12px; line-height:1.6;">审核意见：' +
+          escapeHtml(kb.reviewComment) +
+          "</div>";
+      }
+    }
     detail.innerHTML = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
  <div>名称：<strong>${escapeHtml(kb.name)}</strong></div>
  <div>描述：${escapeHtml(kb.description || "无")}</div>
+ <div>状态：<span class="ks-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
  <div>上架时间：${kb.submittedAt ? new Date(kb.submittedAt).toLocaleString() : "-"}</div>
+ ${kb && kb.reviewedAt ? "<div>审核时间：" + new Date(kb.reviewedAt).toLocaleString() + "</div>" : ""}
+ ${kb && kb.reviewedBy ? "<div>审核人：" + escapeHtml(kb.reviewedBy) + "</div>" : ""}
  </div>
+ ${reviewCommentBlock}
  <div style="font-size: 12px; color: var(--text-muted);">
- 上架即可被其他用户订阅。你的本地实例保持不变，可正常编辑或删除。
+ 审批通过后即可被其他用户订阅。你的本地实例保持不变，可正常编辑或删除。
  </div>
  <div style="display: flex; gap: 12px;">
- <button class="send-skill-btn" id="my-publish-withdraw-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享（下架）</button>
+ <button class="send-skill-btn" id="my-publish-withdraw-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">${escapeHtml(withdrawLabel)}</button>
  </div>
  </div>
  `;
@@ -2382,6 +3146,147 @@ const knowledge = {
     }
   },
 };
+
+/**
+ * _renderReviewSection(kind, marketId, slot) — free helper used by both the
+ * Skill and KB market detail panels. Loads the review list via
+ * window.MarketAdmin.reviewList and renders an aggregate + submission form
+ * + the rendered review list. The submission widget handles the
+ * 403 (KB-without-access) case by showing a guidance message.
+ *
+ * Falls back to a simple "暂不可用" placeholder when window.MarketAdmin is
+ * not loaded.
+ */
+async function _renderReviewSection(kind, marketId, slot) {
+  if (!slot) return;
+  if (
+    !window.MarketAdmin ||
+    typeof window.MarketAdmin.reviewList !== "function"
+  ) {
+    slot.innerHTML =
+      '<div style="color: var(--text-muted); font-size: 12px;">评分功能暂不可用</div>';
+    return;
+  }
+
+  const aggregateBlock = (agg) => {
+    if (!agg || !agg.count)
+      return '<div class="review-aggregate review-aggregate-empty">尚无评分</div>';
+    const avg = Number(agg.avg || 0).toFixed(1);
+    return (
+      '<div class="review-aggregate">' +
+      `<span class="review-aggregate-avg">${avg}</span>` +
+      window.MarketAdmin.renderStarWidget(Math.round(agg.avg || 0), true) +
+      `<span class="review-aggregate-count">${agg.count} 条评价</span>` +
+      "</div>"
+    );
+  };
+
+  const formBlock = () =>
+    '<div class="review-form">' +
+    '<div class="review-form-row">' +
+    '<span style="font-size: 13px; color: var(--text-primary);">你的评分：</span>' +
+    '<span class="star-rating star-rating-editable" data-rating="0">' +
+    ["★", "★", "★", "★", "★"]
+      .map(
+        (_, i) =>
+          `<button type="button" class="star-btn" data-value="${i + 1}">★</button>`,
+      )
+      .join("") +
+    "</span>" +
+    "</div>" +
+    '<textarea class="review-comment-input form-input" rows="3" placeholder="说说你的使用感受（可选）" maxlength="500"></textarea>' +
+    '<div class="review-form-actions">' +
+    '<span class="review-form-msg" style="font-size: 12px;"></span>' +
+    '<button type="button" class="primary-btn review-submit-btn" disabled>提交</button>' +
+    "</div>" +
+    "</div>";
+
+  slot.innerHTML =
+    '<div class="review-loading">加载评价...</div>';
+
+  try {
+    const result = await window.MarketAdmin.reviewList(kind, marketId);
+    slot.innerHTML =
+      aggregateBlock(result.aggregate) +
+      formBlock() +
+      '<div class="review-list-wrap">' +
+      result.html +
+      "</div>";
+
+    const starBox = slot.querySelector(".star-rating-editable");
+    const submitBtn = slot.querySelector(".review-submit-btn");
+    const commentInput = slot.querySelector(".review-comment-input");
+    const msgEl = slot.querySelector(".review-form-msg");
+
+    let chosen = 0;
+    const refreshStars = () => {
+      slot.querySelectorAll(".star-btn").forEach((b) => {
+        const v = Number(b.getAttribute("data-value"));
+        const active = v <= chosen;
+        b.classList.toggle("star-filled", active);
+        b.classList.toggle("star-empty", !active);
+      });
+      submitBtn.disabled = chosen === 0;
+    };
+    starBox.addEventListener("click", (ev) => {
+      const t = ev.target.closest(".star-btn");
+      if (!t) return;
+      chosen = Number(t.getAttribute("data-value")) || 0;
+      refreshStars();
+    });
+    refreshStars();
+
+    submitBtn.addEventListener("click", async () => {
+      if (chosen === 0) return;
+      msgEl.style.color = "var(--text-muted)";
+      msgEl.textContent = "提交中...";
+      submitBtn.disabled = true;
+      try {
+        await window.MarketAdmin.submitReview(
+          kind,
+          marketId,
+          chosen,
+          commentInput.value.trim(),
+        );
+        msgEl.style.color = "#16a34a";
+        msgEl.textContent = "已提交，感谢你的评价！";
+        commentInput.value = "";
+        chosen = 0;
+        refreshStars();
+        // refresh list
+        const fresh = await window.MarketAdmin.reviewList(kind, marketId);
+        const listWrap = slot.querySelector(".review-list-wrap");
+        if (listWrap) listWrap.innerHTML = fresh.html;
+        const aggWrap = slot.querySelector(".review-aggregate");
+        if (aggWrap && aggWrap.parentNode === slot) {
+          aggWrap.outerHTML = aggregateBlock(fresh.aggregate);
+        } else if (aggWrap) {
+          aggWrap.outerHTML = aggregateBlock(fresh.aggregate);
+        } else {
+          slot.insertAdjacentHTML(
+            "afterbegin",
+            aggregateBlock(fresh.aggregate),
+          );
+        }
+      } catch (e) {
+        submitBtn.disabled = false;
+        if (e && e.status === 403) {
+          msgEl.style.color = "var(--error-color)";
+          msgEl.textContent = "请先访问过该知识库再评";
+        } else {
+          msgEl.style.color = "var(--error-color)";
+          msgEl.textContent =
+            "提交失败：" + (e && e.message ? e.message : "未知错误");
+        }
+      }
+    });
+  } catch (e) {
+    slot.innerHTML =
+      '<div style="color: var(--error-color); font-size: 12px;">加载评价失败：' +
+      escapeHtml((e && e.message) || "未知错误") +
+      "</div>";
+  }
+}
 
 // ===================== §8.5 File Manager =====================
 const fileMgr = {
@@ -3437,7 +4342,23 @@ function getFileIcon(name) {
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
-  return div.innerHTML;
+  // M4 T7 (T6 review hardening): div.innerHTML 只转义 & < >，不转义引号 —
+  // data-tag="..." 等属性上下文遇到含 " 的值可被注入。补 " / ' 转义。
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// M4 T7: 搜索关键词高亮 — 必须先 escape 后 mark（kw 与 text 都走 escapeHtml，
+// 再做正则转义），保证 <img onerror=...> 之类输入只会以转义文本呈现，
+// 命中的子串被包进 <mark class="search-hit">。kw trim 后为空 → 等价 escapeHtml。
+function highlightHtml(text, kw) {
+  const esc = escapeHtml(text == null ? "" : String(text));
+  const k = (kw || "").trim();
+  if (!k) return esc;
+  const ekw = escapeHtml(k).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return esc.replace(
+    new RegExp(ekw, "gi"),
+    (m) => '<mark class="search-hit">' + m + "</mark>",
+  );
 }
 
 // ===================== §9 MCP Service =====================
@@ -3750,38 +4671,386 @@ const skills = {
       });
   },
 
-  async _renderMarketTab(container) {
+  // M4 T2: 技能市场服务端搜索 + load-more 分页状态
+  //（v2 GET /market-skills?page=&size=&query=，Page{items,total,page,size}，0-based）
+  _skillMarketQuery: "",
+  _skillMarketPage: 0,
+  _skillMarketItems: [],
+  _skillMarketTotal: 0,
+  _skillMarketHasMore: false,
+  _skillMarketSeq: 0,
+  _skillMarketLoading: false,
+  _skillMarketDebounce: null,
+  // M4 T6: tag 过滤状态（null/空 = 无 tag 过滤，走 T2 服务端 query+分页路径）
+  _skillTagFilter: null,
+  // M4 T7: 排序状态（official_rank 默认 / submitted_at / rating）。仅分页分支带 sortBy；
+  // tag 过滤激活时 select 被 disable，sortBy 不下发（服务端 ?tag= 分支忽略排序 — D11）。
+  _skillSort: "official_rank",
+
+  // M4 T7: 排序 select 的 HTML（两 tab 复用同一构造器）。label 走 I18N.t（带 zh fallback）；
+  // disabled=true 用于 tag 过滤激活时锁死 select（clearest UX，见 D11 裁决）。
+  _renderSortSelectHtml(id, currentSort, disabled) {
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    const opt = (val, label) =>
+      '<option value="' +
+      val +
+      '"' +
+      (currentSort === val ? " selected" : "") +
+      ">" +
+      escapeHtml(label) +
+      "</option>";
+    return (
+      '<select id="' +
+      id +
+      '" class="market-sort-select"' +
+      (disabled ? " disabled" : "") +
+      ">" +
+      opt("official_rank", t("market.sort.official", "官方优先")) +
+      opt("submitted_at", t("market.sort.newest", "最新提交")) +
+      opt("rating", t("market.sort.rating", "评分最高")) +
+      "</select>"
+    );
+  },
+
+  async _renderMarketTab(container, tagFilter) {
     // 两段式（点列表项 → 详情面板 + send-skill-btn 风格按钮），跟技能库市场 Tab 风格一致
-    container.innerHTML =
+    // M4 T2: 客户端过滤（_skillMarketAll）已被服务端搜索取代 —— 搜索框 input 事件
+    // debounce 300ms → page=0 重新 fetch；Enter 立即 fetch。in-flight guard 用递增
+    // sequence token，过期响应直接丢弃。highlight 留给 T7。
+    // M4 T6: tagFilter (string|null) — 非空时走公开 GET /market-skills?tag=...
+    // 分支（enriched 裸数组，keyword query 忽略 —— 与 KB tab D11/D12 相同语义）；
+    // 为空时保持 T2 服务端 query + load-more 分页路径原样。
+    this._skillTagFilter = tagFilter || null;
+    this._skillMarketQuery = "";
+    this._skillMarketPage = 0;
+    this._skillMarketItems = [];
+    this._skillMarketTotal = 0;
+    this._skillMarketHasMore = false;
+    // Fix round 1: 重进 tab 时取消悬挂的 debounce —— 否则 300ms 内切走再切回，
+    // 旧 rowsWrap 的 runSearch 会晚触发并 bump seq，把本次合法的初始 fetch
+    // 判为 stale 丢弃，tab 卡在「加载中...」。
+    if (this._skillMarketDebounce) {
+      clearTimeout(this._skillMarketDebounce);
+      this._skillMarketDebounce = null;
+    }
+    // M4 T6: tag/no-tag 切换时立即 bump seq —— 让上一分支的 in-flight fetch
+    //（旧 tag 的裸数组响应 / 旧 query 的分页响应）在 _fetchSkillMarketPage
+    // 里被判 stale 丢弃，防止晚到响应污染新分支的 rowsWrap。
+    this._skillMarketSeq++;
+    // 搜索栏复用 kb-tag-filter-bar/input（已在 style.css 共享层）—— DOM/位置保持不变。
+    // M4 T6: 同一个 .kb-tag-filter-bar 里合并「搜索 input 行 + tag chips 行」（镜像 KB 布局）。
+    container.innerHTML = "";
+    const bar = document.createElement("div");
+    bar.className = "kb-tag-filter-bar";
+    // M4 T7: 排序 select —— tag 过滤激活时 disable（?tag= 分支忽略 sortBy，D11）。
+    // select 的 disabled 状态随每次 _renderMarketTab 重建（tag chip 点击会重进此函数）。
+    bar.innerHTML =
+      '<span class="kb-tag-filter-bar-label">搜索：</span>' +
+      '<div class="kb-tag-filter-input-row">' +
+      '<input type="text" id="skill-market-search" class="kb-tag-filter-input" ' +
+      'placeholder="搜索技能（名称 / 描述 / 作者）"/>' +
+      "</div>" +
+      '<span class="kb-tag-filter-bar-label">排序：</span>' +
+      this._renderSortSelectHtml(
+        "skill-market-sort",
+        this._skillSort,
+        !!this._skillTagFilter,
+      ) +
+      '<span class="kb-tag-filter-bar-label">标签筛选：</span>' +
+      '<span id="skill-market-tag-chips" class="tag-chip-group"></span>';
+    container.appendChild(bar);
+    // 初始 chips（items 已重置为空 → 只有「全部」chip）；每次 rows 渲染后按已加载行聚合刷新
+    this._refreshSkillTagChips(container);
+    const rowsWrap = document.createElement("div");
+    rowsWrap.innerHTML =
       '<div style="padding: 20px; text-align: center; color: var(--text-muted);">加载中...</div>';
+    container.appendChild(rowsWrap);
+    const searchInput = bar.querySelector("#skill-market-search");
+    const runSearch = () => {
+      // M4 T6: tag 过滤激活时忽略 keyword 搜索（KB tab 同语义：tag 分支不带 query，
+      // 排序固定 rank 序）—— input/Enter 不发 fetch，不发明新 UX。
+      if (this._skillTagFilter) return;
+      if (this._skillMarketDebounce) {
+        clearTimeout(this._skillMarketDebounce);
+        this._skillMarketDebounce = null;
+      }
+      this._skillMarketQuery = searchInput.value.trim();
+      // 新搜索开始 → 旧 load-more 按钮立即失效（seq guard 兜底 stale response）
+      const staleBtn = container.querySelector(".load-more-btn");
+      if (staleBtn) staleBtn.disabled = true;
+      this._fetchSkillMarketPage(0, false, rowsWrap, container);
+    };
+    searchInput.addEventListener("input", () => {
+      if (this._skillMarketDebounce) clearTimeout(this._skillMarketDebounce);
+      this._skillMarketDebounce = setTimeout(runSearch, 300);
+    });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        runSearch();
+      }
+    });
+    // M4 T7: 排序 change → 重置 page/items/seq（bump seq 让 in-flight fetch 失效），
+    // 再走 page 0 分页 fetch（tag 过滤激活时 select 已 disabled，不会触发）。
+    const sortSelect = bar.querySelector("#skill-market-sort");
+    if (sortSelect) {
+      sortSelect.addEventListener("change", () => {
+        this._skillSort = sortSelect.value || "official_rank";
+        this._skillMarketPage = 0;
+        this._skillMarketItems = [];
+        this._skillMarketTotal = 0;
+        this._skillMarketHasMore = false;
+        this._skillMarketSeq++;
+        const staleBtn = container.querySelector(".load-more-btn");
+        if (staleBtn) staleBtn.remove();
+        this._fetchSkillMarketPage(0, false, rowsWrap, container);
+      });
+    }
+    await this._fetchSkillMarketPage(0, false, rowsWrap, container);
+  },
+
+  // M4 T6: 技能市场 tag 过滤 chips（镜像 KB _renderKbTagFilterBar 的 chip 构造 —
+  // 「全部」chip + 每个聚合 tag 一个 chip；active chip 高亮）。
+  // 复用说明：chips 的渲染/绑定是 skill-local 镜像，因为 KB 的 _renderKbTagFilterBar /
+  // _bindKbTagFilterBar 硬编码 KB 的 input id（kb-tag-filter-input/apply）且回调
+  // KB 自己的 _renderMarketTab —— 直接复用会触发 KB tab 重渲染。纯展示型的
+  // _renderTagChipsHtml（row/详情 chips 用）则通过同作用域的 knowledge 对象复用。
+  _renderSkillTagChipsHtml(tags, activeTag) {
+    const tagList = Array.isArray(tags) ? tags : [];
+    const active = activeTag || null;
+    const allActive = active == null || active === "";
+    const allChipCls = "tag-chip tag-chip-filter" + (allActive ? " active" : "");
+    const chips = tagList
+      .map((t) => {
+        const cls =
+          "tag-chip tag-chip-filter" + (active === t ? " active" : "");
+        return (
+          '<span class="' +
+          cls +
+          '" data-tag="' +
+          escapeHtml(t) +
+          '">' +
+          escapeHtml(t) +
+          "</span>"
+        );
+      })
+      .join("");
+    return (
+      '<span class="' + allChipCls + '" data-tag="">全部</span>' + chips
+    );
+  },
+
+  // M4 T6: 从当前已加载行聚合 distinct tags（null-safe，KB 2337-2349 同款）→
+  // 刷新 #skill-market-tag-chips 并绑定 chip 点击（点 active chip / 「全部」= 清除过滤）。
+  _refreshSkillTagChips(container) {
+    const slot = container.querySelector("#skill-market-tag-chips");
+    if (!slot) return;
+    const aggregatedTags = [];
+    const seen = new Set();
+    for (const m of this._skillMarketItems || []) {
+      const tags = m && Array.isArray(m.tags) ? m.tags : [];
+      for (const tg of tags) {
+        const s = String(tg);
+        if (s && !seen.has(s)) {
+          seen.add(s);
+          aggregatedTags.push(s);
+        }
+      }
+    }
+    aggregatedTags.sort();
+    slot.innerHTML = this._renderSkillTagChipsHtml(
+      aggregatedTags,
+      this._skillTagFilter,
+    );
+    slot.querySelectorAll(".tag-chip-filter").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const tag = chip.getAttribute("data-tag") || "";
+        // 「全部」或再点已 active 的 chip = 清除过滤 → 回 T2 服务端分页路径（page 0，
+        // _renderMarketTab 统一重置 items/page/query/debounce 并 bump seq）
+        if (tag === "" || chip.classList.contains("active")) {
+          this._renderMarketTab(container, null);
+          return;
+        }
+        this._renderMarketTab(container, tag);
+      });
+    });
+  },
+
+  // M4 T2: 拉取技能市场一页（page 0-based，size=20）。append=true 时 concat 追加。
+  // sequence token 防 stale response（搜索 debounce 期间旧请求晚到会覆盖新结果）。
+  // 错误全部内部消化（带 seq guard）：page-0 失败渲染错误态；load-more 失败保留
+  // 已加载行 + toast + 重新启用按钮。
+  // M4 T6: _skillTagFilter 非空时走 ?tag= 分支 —— 公开 GET /market-skills?tag=...
+  // 返回 enriched 裸数组（rows 带 tags + announcement；无 Page wrapper / total，
+  // 单次 fetch size=100，无 load-more）；keyword query 在该分支被忽略（KB 同语义）。
+  async _fetchSkillMarketPage(page, append, rowsWrap, container) {
+    const seq = ++this._skillMarketSeq;
     try {
-      const list = await api.listMarketSkills(1, 50);
-      const items = (list && list.content) || list || [];
-      if (!items || items.length === 0) {
-        container.innerHTML =
-          '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无知识库</div>';
+      if (this._skillTagFilter) {
+        // tag 分支基址复用 API.listMarketSkills（T2 已接线的 API map 条目），镜像 KB tag 分支拼 URL
+        const url =
+          `${API.listMarketSkills}?tag=` +
+          encodeURIComponent(this._skillTagFilter) +
+          "&page=0&size=100";
+        const r = await apiFetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const items = (await r.json()) || [];
+        if (seq !== this._skillMarketSeq) return; // stale response — discard
+        this._skillMarketItems = Array.isArray(items) ? items : [];
+        this._skillMarketTotal = this._skillMarketItems.length;
+        this._skillMarketPage = 0;
+        this._skillMarketHasMore = false; // 裸数组单次 fetch — tag 路径无 load-more
+        this._renderSkillMarketRows(rowsWrap, container);
         return;
       }
-      container.innerHTML = "";
-      for (const m of items) {
-        const item = document.createElement("div");
-        item.className = "ks-item";
-        item.innerHTML = `
+      const data = await api.listMarketSkills(
+        page,
+        20,
+        this._skillMarketQuery,
+        this._skillSort,
+      );
+      if (seq !== this._skillMarketSeq) return; // stale response — discard
+      const items = (data && (data.items || data.content)) || data || [];
+      this._skillMarketItems = append
+        ? this._skillMarketItems.concat(items)
+        : items;
+      this._skillMarketTotal =
+        data && typeof data.total === "number"
+          ? data.total
+          : this._skillMarketItems.length;
+      this._skillMarketPage = page;
+      this._skillMarketHasMore =
+        items.length >= 20 &&
+        this._skillMarketItems.length < this._skillMarketTotal;
+      this._renderSkillMarketRows(rowsWrap, container);
+    } catch (e) {
+      if (seq !== this._skillMarketSeq) return; // stale error — discard
+      if (append) {
+        showToast("加载失败：" + e.message, "error");
+        const btn = container.querySelector(".load-more-btn");
+        if (btn) btn.disabled = false;
+        this._skillMarketLoading = false;
+      } else {
+        rowsWrap.innerHTML =
+          '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
+          escapeHtml(e.message) +
+          "</div>";
+        // Fix round 1: page-0 搜索失败也要清掉旧 load-more 按钮（runSearch 只是
+        // disabled 它）—— 与空态 early-return 的清理对称，避免残留 disabled 按钮。
+        const staleLoadMore = container.querySelector(".load-more-btn");
+        if (staleLoadMore) staleLoadMore.remove();
+      }
+    }
+  },
+
+  _renderSkillMarketRows(rowsWrap, container) {
+    // M4 T2: 渲染 this._skillMarketItems 原样（服务端已按 query 过滤；不再客户端过滤）
+    // M4 T6: tag 过滤激活时同样原样渲染（?tag= 分支返回 enriched 裸数组）——
+    // rows 渲染后按已加载行聚合刷新 tag chips（bar 在 container 上，rows 在 rowsWrap）。
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    const items = this._skillMarketItems || [];
+    rowsWrap.innerHTML = "";
+    // M4 T2: load-more 按钮 — 没有更多时移除（ruling: removal）；空态 early-return
+    // 前也要移除，否则旧按钮残留在 container 上
+    const oldBtn = container.querySelector(".load-more-btn");
+    if (oldBtn) oldBtn.remove();
+    if (items.length === 0) {
+      // 空态：tag 过滤 → 「没有匹配 tag「x」的技能」（镜像 KB）；有 query →
+      // 「没有匹配「kw」的技能」（沿用旧文案）；无 → 市场暂无技能
+      rowsWrap.innerHTML = this._skillTagFilter
+        ? '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配 tag「' +
+          escapeHtml(this._skillTagFilter) +
+          '」的技能</div>'
+        : this._skillMarketQuery
+          ? '<div style="padding: 24px; text-align: center; color: var(--text-muted);">没有匹配「' +
+            escapeHtml(this._skillMarketQuery) +
+            '」的技能</div>'
+          : '<div style="padding: 40px; text-align: center; color: var(--text-muted);">市场暂无技能</div>';
+      // M4 T6: 空态也要刷新 chips —— tag 激活时聚合为空（仅「全部」+ active chip
+      // 依赖 _skillTagFilter 渲染），点击「全部」可退出空态
+      this._refreshSkillTagChips(container);
+      return;
+    }
+    // T19 fix-up 2: per-row announcement banner — 当 row.announcementTitle 存在时,
+    // 渲染 banner 紧贴在 row 上方。点击 banner 选中该 row。
+    for (const m of items) {
+      if (m && m.announcementTitle) {
+        const annView = {
+          title: m.announcementTitle,
+          body: m.announcementBody || "",
+        };
+        const banner = document.createElement("div");
+        banner.className = "market-announcement market-announcement-list";
+        banner.innerHTML =
+          window.MarketAdmin && window.MarketAdmin.announcementHtml
+            ? window.MarketAdmin.announcementHtml(annView)
+            : `<div class="market-announcement-title">📢 ${escapeHtml(
+                annView.title,
+              )}</div><div class="market-announcement-body">${escapeHtml(
+                annView.body,
+              )}</div>`;
+        banner.style.cursor = "pointer";
+        // 点击 banner 时 banner 自身不是 list item — 暂时用 placeholder,
+        // 真正选中由下面 row 的 click 处理。
+        banner.addEventListener("click", () => {
+          const rowEl = banner.nextElementSibling;
+          if (rowEl && rowEl.classList.contains("ks-item")) rowEl.click();
+        });
+        rowsWrap.appendChild(banner);
+      }
+      const item = document.createElement("div");
+      item.className = "ks-item";
+      const officialBadge = m && m.isOfficial
+        ? ' <span class="ks-source-tag" title="官方推荐" style="background:#fef3c7;color:#92400e;">🏛️</span>'
+        : "";
+      // M4 T6: per-row tag chips（镜像 KB ~2389-2393）—— listPaged / ?tag= 分支的 rows 都带 tags
+      const tagChips =
+        m && Array.isArray(m.tags) && m.tags.length > 0
+          ? '<div class="kb-tag-row">' +
+            knowledge._renderTagChipsHtml(m.tags) +
+            "</div>"
+          : "";
+      // M4 T7: name/description/author 走 highlightHtml（当前 query 命中包 <mark>；
+      // tag 分支 query 恒为 ""，highlightHtml 退化为 escapeHtml）。详情/公告/chips 不高亮。
+      item.innerHTML = `
  <div class="ks-item-main">
  <div class="ks-item-row1">
- <span class="ks-item-name">${escapeHtml(m.name)} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
+ <span class="ks-item-name">${highlightHtml(m.name, this._skillMarketQuery)}${officialBadge} <span class="ks-source-tag" style="background:#ede9fe;color:#6b21a8;">市</span></span>
  </div>
- <span class="ks-item-desc">by ${escapeHtml(m.author || "")} · ${escapeHtml(m.description || "")}</span>
+ <span class="ks-item-desc">by ${highlightHtml(m.author || "", this._skillMarketQuery)} · ${highlightHtml(m.description || "", this._skillMarketQuery)}</span>
+ ${tagChips}
  </div>
  `;
-        item.addEventListener("click", () => this._selectMarketSkill(m, item));
-        container.appendChild(item);
-      }
-    } catch (e) {
-      container.innerHTML =
-        '<div style="padding: 40px; text-align: center; color: var(--error-color);">加载失败：' +
-        escapeHtml(e.message) +
-        "</div>";
+      item.addEventListener("click", () => this._selectMarketSkill(m, item));
+      rowsWrap.appendChild(item);
+    }
+    // M4 T6: rows 渲染完成后按已加载行聚合刷新 tag filter chips（null-safe）
+    this._refreshSkillTagChips(container);
+    // M4 T2: 有更多时追加 load-more 按钮（旧按钮已在函数开头移除）
+    if (this._skillMarketHasMore) {
+      const btn = document.createElement("button");
+      btn.className = "secondary-btn load-more-btn";
+      btn.textContent = t("market.load.more", "加载更多");
+      btn.addEventListener("click", async () => {
+        if (this._skillMarketLoading) return;
+        this._skillMarketLoading = true;
+        btn.disabled = true;
+        // 错误已在 _fetchSkillMarketPage 内部消化（toast + 重新启用按钮）
+        await this._fetchSkillMarketPage(
+          this._skillMarketPage + 1,
+          true,
+          rowsWrap,
+          container,
+        );
+        this._skillMarketLoading = false;
+      });
+      container.appendChild(btn);
     }
   },
 
@@ -3793,12 +5062,17 @@ const skills = {
     document.getElementById("skill-detail-title").textContent =
       marketSkill.name;
     const detail = document.getElementById("skills-detail");
+    // M4 T6: 优先用列表已内嵌的 row.tags（listPaged / ?tag= 分支都带 tags），否则详情内实时拉一次
+    const preloadedTags =
+      marketSkill && Array.isArray(marketSkill.tags) ? marketSkill.tags : null;
     detail.innerHTML = `
+ <div id="market-announcement-slot"></div>
  <div class="detail-section">
  <div class="detail-section-title">市场元数据</div>
  <div class="detail-section-content" style="line-height: 1.8; color: var(--text-primary); font-size: 13px;">
  <div>作者：${escapeHtml(marketSkill.author)}</div>
  <div>状态：<span class="type-badge ADMIN">${escapeHtml(marketSkill.status)}</span></div>
+ <div id="skill-detail-tags-row" style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:var(--text-muted);">标签：</span><span id="skill-detail-tags-slot"></span></div>
  </div>
  </div>
  <div class="detail-section">
@@ -3808,6 +5082,10 @@ const skills = {
  <div class="detail-section">
  <div class="detail-section-title">内容</div>
  <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(marketSkill.content || "")}</div>
+ </div>
+ <div class="detail-section">
+ <div class="detail-section-title">评分与评论</div>
+ <div id="market-reviews-slot" class="market-reviews-slot"></div>
  </div>
  <div style="margin-top: 24px;">
  <button class="send-skill-btn" id="pull-skill-btn" style="flex: 1;">${already ? "已拉取（点击更新）" : "拉取到我的 Skill"}</button>
@@ -3820,6 +5098,60 @@ const skills = {
     const dlBtn = detail.querySelector("#skill-detail-download-btn");
     if (dlBtn)
       dlBtn.addEventListener("click", () => this.handleDownload(marketSkill));
+
+    // T19: load announcement + review list + submission form.
+    const annSlot = detail.querySelector("#market-announcement-slot");
+    const reviewSlot = detail.querySelector("#market-reviews-slot");
+    // M4 T6: tag slot（镜像 KB ~2553-2582）— 优先 row.tags，否则 MarketAdmin.getMarketTags
+    // 实时拉一次；失败静默显示「无」。
+    const tagSlot = detail.querySelector("#skill-detail-tags-slot");
+    const renderTags = (tags) => {
+      if (!tagSlot) return;
+      if (Array.isArray(tags) && tags.length > 0) {
+        tagSlot.outerHTML =
+          '<span id="skill-detail-tags-slot" class="tag-chip-group">' +
+          knowledge._renderTagChipsHtml(tags) +
+          "</span>";
+      } else {
+        tagSlot.outerHTML =
+          '<span id="skill-detail-tags-slot" style="color:var(--text-muted);font-size:12px;">无</span>';
+      }
+    };
+    if (preloadedTags) {
+      renderTags(preloadedTags);
+    } else if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getMarketTags === "function"
+    ) {
+      window.MarketAdmin
+        .getMarketTags("SKILL", marketSkill.id)
+        .then(renderTags)
+        .catch(() => {
+          if (tagSlot) tagSlot.textContent = "无";
+        });
+    } else if (tagSlot) {
+      tagSlot.textContent = "—";
+    }
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.getAnnouncement === "function"
+    ) {
+      window.MarketAdmin
+        .getAnnouncement("SKILL", marketSkill.id)
+        .then((ann) => {
+          if (ann && annSlot) annSlot.innerHTML = window.MarketAdmin.announcementHtml(ann);
+        })
+        .catch(() => {});
+    }
+    if (
+      window.MarketAdmin &&
+      typeof window.MarketAdmin.reviewList === "function"
+    ) {
+      _renderReviewSection("SKILL", marketSkill.id, reviewSlot);
+    } else {
+      reviewSlot.innerHTML =
+        '<div style="color: var(--text-muted); font-size: 12px;">评分功能暂不可用</div>';
+    }
   },
 
   async handlePull(marketSkill) {
@@ -3878,13 +5210,16 @@ const skills = {
   },
 
   _statusLabel(status) {
+    // M3+ T4.3 — text pulled from window.I18N.t when available, falls back
+    // to the Chinese label if the i18n dict hasn't loaded or the key is missing.
+    const t = (key, fallback) => (window.I18N && window.I18N.t ? window.I18N.t(key) : fallback) || fallback;
     switch (status) {
       case "PENDING":
-        return { text: "审核中", bg: "#fef3c7", color: "#92400e" };
+        return { text: t("market.admin.status.pending", "审核中"), bg: "#fef3c7", color: "#92400e" };
       case "APPROVED":
-        return { text: "已通过", bg: "#d1fae5", color: "#065f46" };
+        return { text: t("market.admin.status.approved", "已通过"), bg: "#d1fae5", color: "#065f46" };
       case "REJECTED":
-        return { text: "已拒绝", bg: "#fee2e2", color: "#991b1b" };
+        return { text: t("market.admin.status.rejected", "已拒绝"), bg: "#fee2e2", color: "#991b1b" };
       default:
         return { text: status, bg: "#f1f5f9", color: "#475569" };
     }
@@ -3924,27 +5259,55 @@ const skills = {
       .forEach((i) => i.classList.remove("selected"));
     element.classList.add("selected");
     const st = this._statusLabel(skill.status);
+    // M0 T14: REJECTED 时把审核意见做成醒目的红框块，避免被淹没在元信息文字流中。
+    // 其他状态若有评论也降级显示在一行（保留历史兼容）。
+    let reviewCommentBlock = "";
+    if (skill.reviewComment) {
+      if (skill.status === "REJECTED") {
+        reviewCommentBlock =
+          '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;color:#991b1b;font-size:12px;line-height:1.6;">' +
+          "拒绝原因：" +
+          escapeHtml(skill.reviewComment) +
+          "</div>";
+      } else {
+        reviewCommentBlock =
+          "<div>审核意见：" + escapeHtml(skill.reviewComment) + "</div>";
+      }
+    }
+    // Spec §2: withdraw 在任意状态可用 — 按钮文案按状态区分（PENDING/APPROVED/REJECTED）。
+    const t = (key, fallback) =>
+      (window.I18N && window.I18N.t
+        ? window.I18N.t(key, fallback)
+        : fallback) || fallback;
+    const withdrawLabel =
+      skill.status === "APPROVED"
+        ? t("market.withdraw.approved", "下架并删除")
+        : skill.status === "REJECTED"
+          ? t("market.withdraw.rejected", "删除被拒记录")
+          : t("market.withdraw.pending", "撤回投稿");
     let html = `
  <div style="display: flex; flex-direction: column; gap: 16px;">
  <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-size: 12px; color: var(--text-muted);">
  <div>名称：${escapeHtml(skill.name)}</div>
- <div>版本：v${escapeHtml(skill.version)}</div>
  <div>状态：<span class="skill-source-tag" style="background:${st.bg};color:${st.color};">${st.text}</span></div>
  <div>共享时间：${skill.submittedAt ? new Date(skill.submittedAt).toLocaleString() : "-"}</div>
  ${skill.reviewedAt ? "<div>审核时间：" + new Date(skill.reviewedAt).toLocaleString() + "</div>" : ""}
  ${skill.reviewedBy ? "<div>审核人：" + escapeHtml(skill.reviewedBy) + "</div>" : ""}
- ${skill.reviewComment ? "<div>审核意见：" + escapeHtml(skill.reviewComment) + "</div>" : ""}
+ ${reviewCommentBlock}
  </div>
  <div style="font-size: 13px; color: var(--text-muted);">${escapeHtml(skill.description || "无说明")}</div>
  <div class="detail-section-content" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 12px; border-radius: 6px; font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;">${escapeHtml(skill.content || "")}</div>
  `;
-    if (skill.status === "PENDING") {
-      html += `
+    html += `
  <div style="display: flex; gap: 12px; margin-top: 8px;">
- <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">撤回共享</button>
+ <button class="send-skill-btn" id="withdraw-skill-btn" style="flex: 1; background: var(--warning-color, #f59e0b);">${escapeHtml(withdrawLabel)}</button>
+ ${
+   skill.status === "REJECTED"
+     ? `<button class="send-skill-btn" id="resubmit-skill-btn" style="flex: 1; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">${escapeHtml(t("market.resubmit", "重新投稿"))}</button>`
+     : ""
+ }
  </div>
  `;
-    }
     html += "</div>";
     detail.innerHTML = html;
 
@@ -3952,16 +5315,40 @@ const skills = {
     if (withdrawBtn) {
       withdrawBtn.addEventListener("click", () => this.handleWithdraw(skill));
     }
+    const resubmitBtn = document.getElementById("resubmit-skill-btn");
+    if (resubmitBtn) {
+      resubmitBtn.addEventListener("click", () => this.handleResubmit(skill));
+    }
   },
 
   async handleWithdraw(skill) {
-    if (!confirm(`确认撤回「${skill.name}」的共享？`)) return;
+    // Spec §2: APPROVED 下架是破坏性操作（市场条目被删除，他人已拉取副本不再同步更新），用更强确认文案。
+    const msg =
+      skill.status === "APPROVED"
+        ? `该技能已通过审批并被其他用户拉取，下架删除将移除市场条目（他人已拉取的副本保留但不再同步更新）。确认下架「${skill.name}」？`
+        : `确认撤回「${skill.name}」的共享？`;
+    if (!confirm(msg)) return;
     try {
       await api.withdrawMarketSkill(skill.id);
       showToast(`已撤回「${skill.name}」`, "success");
       this.renderModal();
     } catch (e) {
       showToast("撤回失败：" + e.message, "error");
+    }
+  },
+
+  async handleResubmit(skill) {
+    // REJECTED 行重新投稿：后端自动归档旧 REJECTED 行 + 新建 PENDING 行
+    try {
+      await api.submitMarketSkill({
+        name: skill.name,
+        description: skill.description,
+        content: skill.content,
+      });
+      showToast("已重新投稿，等待管理员审批", "success");
+      this.renderModal();
+    } catch (e) {
+      showToast("重新投稿失败：" + e.message, "error");
     }
   },
 
@@ -3980,7 +5367,7 @@ const skills = {
  <input type="text" id="submit-skill-version" class="param-input" placeholder="例如 1.0.0（语义化版本）" value="1.0.0">
  </div>
  <div style="font-size: 12px; color: var(--text-muted);">
- 共享后状态为 PENDING。同名+同版本号不能重复共享。
+ 共享后状态为 PENDING，等待管理员审批。同名投稿会更新原记录。
  </div>
  <div style="display: flex; gap: 12px;">
  <button class="send-skill-btn" id="submit-confirm-btn" style="flex: 1;">共享到市场</button>
@@ -4827,6 +6214,18 @@ const init = async () => {
     await mcp.loadList();
   } catch (e) {
     console.warn("[init] mcp.loadList failed, continuing:", e);
+  }
+
+  // 知识空间全局关闭开关(RAG 关闭: spring.ai.loom.agent.rag.enabled=false 或无 EmbeddingModel)
+  // features.knowledge=false → 隐藏 #ks-button(知识空间入口);fail-open(探测失败保持显示)
+  try {
+    state.features = await api.loadFeatures();
+    if (state.features && state.features.knowledge === false) {
+      const ks = document.getElementById("ks-button");
+      if (ks) ks.style.display = "none";
+    }
+  } catch (e) {
+    console.warn("[init] loadFeatures failed, continuing:", e);
   }
 
   try {

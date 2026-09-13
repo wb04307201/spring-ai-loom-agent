@@ -30,6 +30,31 @@
             <artifactId>spring-boot-autoconfigure-processor</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- M3+ T4.1: Micrometer counter / timer backing for MarketMetrics.
+             spring-boot-starter-actuator transitively brings micrometer-core
+             and a default SimpleMeterRegistry. Per cleanup spec §9 ADR-T07:
+             Micrometer + Spring Boot Actuator; explicitly NOT Prometheus / OTel. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- M3+ T4.2: token-bucket rate limiting on /pull /access /reviews.
+             Per cleanup spec §9 ADR-T08: in-memory bucket, NOT Redis
+             distributed; no horizontal scaling support. -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>8.10.1</version>
+            <optional>true</optional>
+        </dependency>
+        <!-- IHtmlRenderTool/HtmlRenderEngine bean 定义编译期需要(lib 侧是 optional 不传递);
+             optional=true:starter/消费者不引入,运行时门控靠 @ConditionalOnClass(name=...) 字符串形式 -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 
 </project>

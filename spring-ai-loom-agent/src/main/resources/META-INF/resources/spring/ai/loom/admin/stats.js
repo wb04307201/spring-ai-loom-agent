@@ -6,6 +6,8 @@
   const barChart = document.getElementById("bar-chart");
   const statsTable = document.getElementById("stats-table");
   const monthLabel = document.getElementById("month-label");
+  const askLogsTable = document.getElementById("ask-logs-table");
+  const askLogsUser = document.getElementById("ask-logs-user");
 
   const now = new Date();
   yearInput.value = now.getFullYear();
@@ -113,8 +115,95 @@
  </table>`;
   }
 
+  // ===== §2 提问卡片(askUser)日志 =====
+
+  function fmtWait(ms) {
+    // durationMs 主体是用户思考+作答的阻塞时间 —— 标注"等待"而非"耗时"(spec D3)
+    if (ms == null || isNaN(ms)) return "-";
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return `等待 ${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `等待 ${m}m ${s}s`;
+  }
+
+  function askStatusBadge(status) {
+    // 语义/配色与聊天卡片摘要行一致(spec §2.2:已答绿/超时灰/取消灰/失败红)
+    const map = {
+      ANSWERED: ["已答", "var(--success-color, #22c55e)"],
+      TIMEOUT: ["已超时", "var(--text-muted, #64748b)"],
+      CANCELLED: ["已取消", "var(--text-muted, #64748b)"],
+      FAILED: ["失败", "#ef4444"],
+      UNKNOWN: ["未知", "var(--text-muted, #64748b)"],
+    };
+    const [label, color] = map[status] || map.UNKNOWN;
+    return `<span style="color: ${color}; font-weight: 600; font-size: 12px;">${label}</span>`;
+  }
+
+  async function loadAskLogs() {
+    askLogsTable.innerHTML = '<div class="loading-indicator">加载中...</div>';
+    const user = askLogsUser.value.trim();
+    const qs = `limit=50${user ? `&username=${encodeURIComponent(user)}` : ""}`;
+    try {
+      const r = await fetch(`/spring/ai/loom/admin/ask-logs?${qs}`, {
+        credentials: "include",
+      });
+      if (r.status === 401) {
+        window.location.replace("/spring/ai/loom/login.html");
+        return;
+      }
+      if (!r.ok) {
+        askLogsTable.innerHTML = `<div class="empty-state">加载失败：HTTP ${r.status}</div>`;
+        return;
+      }
+      renderAskLogs(await r.json());
+    } catch (e) {
+      askLogsTable.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderAskLogs(list) {
+    if (!list || list.length === 0) {
+      askLogsTable.innerHTML = '<div class="empty-state">暂无提问记录</div>';
+      return;
+    }
+    const rows = list
+      .map((rec) => {
+        const q = rec.question || "";
+        const qShort = q.length > 60 ? q.slice(0, 60) + "…" : q;
+        const answer =
+          rec.status === "ANSWERED" && rec.answerText
+            ? escapeHtml(rec.answerText)
+            : askStatusBadge(rec.status);
+        const when = rec.createdAt
+          ? new Date(rec.createdAt).toLocaleString("zh-CN", { hour12: false })
+          : "-";
+        const convShort = (rec.conversationId || "").slice(0, 8);
+        return `<tr>
+ <td style="white-space: nowrap;">${when}</td>
+ <td><a class="user-link" href="user.html?username=${encodeURIComponent(rec.username || "")}">${escapeHtml(rec.username)}</a></td>
+ <td title="${escapeHtml(q)}">${escapeHtml(qShort)}</td>
+ <td>${answer}</td>
+ <td style="white-space: nowrap;">${fmtWait(rec.durationMs)}</td>
+ <td title="${escapeHtml(rec.conversationId || "")}">${escapeHtml(convShort)}</td>
+ </tr>`;
+      })
+      .join("");
+    askLogsTable.innerHTML = `
+ <table class="user-table">
+ <thead>
+ <tr><th>时间</th><th>用户</th><th>问题</th><th>答案 / 状态</th><th>等待时长</th><th>会话</th></tr>
+ </thead>
+ <tbody>${rows}</tbody>
+ </table>`;
+  }
+
   document.getElementById("reload-btn").addEventListener("click", load);
   document.getElementById("refresh-btn").addEventListener("click", load);
+  document.getElementById("ask-logs-refresh").addEventListener("click", loadAskLogs);
+  askLogsUser.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadAskLogs();
+  });
 
   // 顶部右侧渲染当前用户名（统一 header 风格）
   fetch("/spring/ai/loom/user/currentUser", {
@@ -132,4 +221,5 @@
     .catch(() => {});
 
   load();
+  loadAskLogs();
 })();

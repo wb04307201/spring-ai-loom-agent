@@ -39,11 +39,7 @@ import static org.awaitility.Awaitility.await;
         // (or with parallel test runs). Tests run in a forked Maven JVM so
         // they own their own DB lock.
         "spring.datasource.url=jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE",
-        "spring.ai.loom.agent.file-base-path=./target/test-file-base",
-        "spring.ai.loom.agent.knowledge-base-path=./target/test-knowledge-base",
-        // 本地 ollama 经常没预 pull mxbai-embed-large → 关闭 auto-pull 跳过拉取
-        // (测试不真正用 vector store,只是验证 sub-task / schedule 流程)
-        "spring.ai.vectorstore.jvector.auto-pull=false"
+        "spring.ai.loom.agent.users-base-path=./target/test-users"
 })
 class SubTaskAndScheduleHistoryIntegrationTest {
 

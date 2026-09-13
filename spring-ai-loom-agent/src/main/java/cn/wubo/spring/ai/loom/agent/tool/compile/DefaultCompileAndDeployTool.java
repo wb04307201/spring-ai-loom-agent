@@ -4,6 +4,7 @@ import cn.wubo.loom.compile.core.CompileAndDeployOperations;
 import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.loom.compile.core.CompileConfig;
 import cn.wubo.loom.compile.core.ImageTemplate;
+import cn.wubo.loom.file.core.LoomPaths;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.tool.maven.MavenHomeResolver;
 import org.slf4j.Logger;
@@ -11,7 +12,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -21,7 +21,8 @@ import java.util.stream.Collectors;
  * <p>
  * 本类是薄包装层，负责：
  * <ul>
- * <li>从 {@link ToolContext} 提取 username，计算 workspaceBasePath</li>
+ * <li>从 {@link ToolContext} 提取 username，经 {@link LoomPaths} 派生该用户的
+ * workspace 目录（{@code {usersBasePath}/{username}/compile-workspaces}）</li>
  * <li>将 {@link LoomAgentProperties.CompileProperty} 转换为 {@link CompileConfig}</li>
  * </ul>
  * 所有管线逻辑（clone/build/docker/health/process management）均位于 {@code loom-compile-core}。
@@ -29,28 +30,27 @@ import java.util.stream.Collectors;
 public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultCompileAndDeployTool.class);
-    private static final String DEFAULT_FILE_BASE_PATH = ".local/file";
 
     private final CompileAndDeployOperations operations;
-    private final String fileBasePath;
+    private final String usersBasePath;
 
     public DefaultCompileAndDeployTool(LoomAgentProperties properties) {
         this(properties.getCompile(), properties.getMaven() != null ? properties.getMaven().getMavenHome() : null,
-                properties.getFileBasePath());
+                properties.getUsersBasePath());
     }
 
     /**
      * 供测试直接注入
      */
-    DefaultCompileAndDeployTool(LoomAgentProperties.CompileProperty compile, String mavenHome, String fileBasePath) {
-        this.fileBasePath = (fileBasePath != null && !fileBasePath.isBlank()) ? fileBasePath : DEFAULT_FILE_BASE_PATH;
+    DefaultCompileAndDeployTool(LoomAgentProperties.CompileProperty compile, String mavenHome, String usersBasePath) {
+        this.usersBasePath = LoomPaths.orDefaultUsersBase(usersBasePath);
         String configured = compile != null ? compile.getMavenHome() : mavenHome;
         String resolved = MavenHomeResolver.resolve(configured);
 
         CompileConfig config = toCompileConfig(compile);
         this.operations = new CompileAndDeployOperations(resolved, config);
-        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, resolvedMavenHome={}, fileBasePath={}",
-                compile != null && compile.isEnabled(), configured, resolved, this.fileBasePath);
+        log.info("CompileAndDeployTool initialized: enabled={}, mavenHome={}, resolvedMavenHome={}, usersBasePath={}",
+                compile != null && compile.isEnabled(), configured, resolved, this.usersBasePath);
     }
 
     // ==================== Tool Entry ====================
@@ -100,31 +100,31 @@ public class DefaultCompileAndDeployTool implements ICompileAndDeployTool {
     }
 
     /**
-     * Per-user UPLOAD directory (i.e. where IUpload writes user-provided files
-     * such as chat attachments and the file manager UI browses). This is what
-     * {@link #getCompileDeployWorkspaceDir(String)} deliberately avoids — the
-     * two spaces MUST be kept separate so compile-deploy workspaces don't
-     * pollute the user's file listing and {@code rm -rf} on one space never
-     * wipes the other.
+     * Per-user UPLOAD directory ({@code {usersBasePath}/{username}/file}) — where
+     * IUpload writes user-provided files and the file manager UI browses. This is
+     * what {@link #getCompileDeployWorkspaceDir(String)} deliberately avoids: the
+     * two spaces are SIBLINGS under the user root, so compile-deploy workspaces
+     * don't pollute the user's file listing, the file-tool sandbox can never
+     * reach them, and {@code rm -rf} on one space never wipes the other.
      */
     Path getUserFileDir(String username) {
-        return Paths.get(fileBasePath, username);
+        return LoomPaths.userFileDir(usersBasePath, username);
     }
 
     // ==================== Config Conversion ====================
 
     /**
-     * Per-user COMPILE-DEPLOY WORKSPACE directory. Distinct from the upload dir
-     * so users see only their files in the file manager. Lives under
-     * {@code $user.home/.loom/compile-deploy-workspaces/&lt;username&gt;/}, which
-     * gives the user an obvious {@code rm -rf} target per account:
+     * Per-user COMPILE-DEPLOY WORKSPACE directory:
+     * {@code {usersBasePath}/{username}/compile-workspaces/}. Each run creates a
+     * {@code compile-deploy-<user>-<ts>-<uuid8>} subdir inside (naming owned by
+     * {@code CompileAndDeployOperations}). Sibling of the upload dir, never under
+     * it. The whole user tree is one {@code rm -rf} away:
      *
      * <pre>
-     * rm -rf ~/.loom/compile-deploy-workspaces/&lt;username&gt; # clean up everything
+     * rm -rf ~/.loom/users/&lt;username&gt; # clean up everything for that user
      * </pre>
      */
     Path getCompileDeployWorkspaceDir(String username) {
-        return Paths.get(System.getProperty("user.home"),
-                ".loom", "compile-deploy-workspaces", username);
+        return LoomPaths.userCompileWorkspacesDir(usersBasePath, username);
     }
 }

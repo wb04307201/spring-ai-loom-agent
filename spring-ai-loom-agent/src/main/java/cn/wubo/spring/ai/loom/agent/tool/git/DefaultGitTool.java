@@ -17,10 +17,10 @@ import java.util.Map;
 public class DefaultGitTool implements IGitTool {
 
     static final String WORKING_DIR_KEY = "gitWorkingDir";
-    private static final String BASE_PATH = ".local/file";
     private static final String GIT_SUBDIR = "git";
     private final GitOperations gitOps;
-    private final String fileBasePath;
+    /** 用户树根（{usersBase}/{username}/file 为沙箱根），null/blank 回退 LoomPaths 默认。 */
+    private final String usersBasePath;
 
     /**
      * 测试场景回退存储：当 ToolContext.getContext() 返回 unmodifiable Map（Spring AI 默认）时，
@@ -30,7 +30,7 @@ public class DefaultGitTool implements IGitTool {
     private final Map<String, String> fallbackWorkingDir = new java.util.concurrent.ConcurrentHashMap<>();
 
     public DefaultGitTool(LoomAgentProperties properties) {
-        this.fileBasePath = properties.getFileBasePath() != null ? properties.getFileBasePath() : BASE_PATH;
+        this.usersBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultUsersBase(properties.getUsersBasePath());
         String gitUsername = properties.getGitUsername();
         String gitToken = properties.getGitToken();
         int t = properties.getGit() != null ? properties.getGit().getRemoteTimeoutSeconds() : 60;
@@ -491,7 +491,7 @@ public class DefaultGitTool implements IGitTool {
     }
 
     private Path getUserFileDir(String username) {
-        return Paths.get(fileBasePath, username);
+        return cn.wubo.loom.file.core.LoomPaths.userFileDir(usersBasePath, username);
     }
 
     /**

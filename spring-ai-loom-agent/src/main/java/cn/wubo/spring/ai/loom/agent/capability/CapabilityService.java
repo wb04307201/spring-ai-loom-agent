@@ -217,6 +217,37 @@ public class CapabilityService {
     }
 
     /**
+     * bean → capability id({@code "tool_" + @ToolGroup value});未标 @ToolGroup 的接口返回 {@code null}。
+     * <p>
+     * null 语义 = 老实现,调用方一律放行(与 DefaultChat 既有兼容行为一致,
+     * 见 spec 2026-09-10-subtask-rbac-filter §2.1)。
+     */
+    public static String toolGroupIdOf(Object bean) {
+        Class<?> iface = findToolInterface(bean);
+        if (iface == null) return null;
+        ToolGroup ann = iface.getAnnotation(ToolGroup.class);
+        return ann == null ? null : "tool_" + ann.value();
+    }
+
+    /**
+     * 按 capability id 集合过滤本地 embed 工具 —— DRY 单一实现,
+     * {@code DefaultChat}(主聊天)与 {@code DefaultSubTaskExecutor}(子任务/定时任务)共用;
+     * 两处 visible 集来源不同(主聊天 = allowedCapabilityIdsFor 含前端勾选交集,
+     * 子任务 = visibleToolGroupsFor 角色全集),过滤逻辑相同。
+     * <p>
+     * {@code toolGroupIdOf(t) == null}(未标 @ToolGroup 的老实现)放行 —— 向后兼容语义。
+     * 保序,返回新列表。
+     */
+    public List<IEmbedTool> filterEmbedToolsByCapabilityIds(List<IEmbedTool> tools, Set<String> allowedIds) {
+        List<IEmbedTool> kept = new ArrayList<>();
+        for (IEmbedTool t : tools) {
+            String id = toolGroupIdOf(t);
+            if (id == null || allowedIds.contains(id)) kept.add(t);
+        }
+        return kept;
+    }
+
+    /**
      * 扫描所有 embedTools 的 @ToolGroup 注解,返回 {@code defaultGranted=true} 的 group_name 集合
      * （{@code "tool_xxx"} 形式）。在 Spring 容器初始化后第一次调用时构建缓存。
      * <p>
@@ -302,7 +333,7 @@ public class CapabilityService {
      * 返回 null(不抛异常)是为了老实现可平滑降级：DefaultChat 端会把它当"未授权"放行
      * (向后兼容)。
      */
-    private Class<?> findToolInterface(Object bean) {
+    private static Class<?> findToolInterface(Object bean) {
         for (Class<?> iface : bean.getClass().getInterfaces()) {
             if (iface.isAnnotationPresent(ToolGroup.class)) return iface;
         }

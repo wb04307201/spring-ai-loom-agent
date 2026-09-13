@@ -12,7 +12,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * 端到端集成测试：在用户实际的 .local/file/username/sql-forge-demo/sql-forge-demo 项目上
+ * 端到端集成测试：在用户实际的 .local/file/username/file/sql-forge-demo/sql-forge-demo 项目上
  * 调用 mavenBuild，验证：
  * <ol>
  * <li>不配置 mavenHome 也能成功调用 Maven（依赖自动探测）</li>
@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @DisplayName("DefaultMavenTool 真实项目集成测试")
 class DefaultMavenToolRealProjectIT {
 
-    private static final String REAL_PROJECT = "C:\\developer\\IdeaProjects\\spring-ai-loom-agent\\.local\\file\\username\\sql-forge-demo\\sql-forge-demo";
+    private static final String REAL_PROJECT = "C:\\developer\\IdeaProjects\\spring-ai-loom-agent\\.local\\file\\username\\file\\sql-forge-demo\\sql-forge-demo";
 
     private static ToolContext ctx(String username) {
         Map<String, Object> m = new HashMap<>();

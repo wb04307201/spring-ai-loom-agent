@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.skill;
 
+import cn.wubo.spring.ai.loom.agent.market.IMarketContentAdminService;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest;
@@ -7,6 +8,16 @@ import cn.wubo.spring.ai.loom.agent.model.UserSkill;
 
 import java.util.List;
 
+/**
+ * M3+ T3.1 — v1 skill market service interface. <b>Deprecated</b>: the generic
+ * {@link IMarketContentAdminService}<code>&lt;Long, MarketSkill, ...&gt;</code>
+ * (implemented by {@code DefaultSkillMarketService}) is the v2 path. This
+ * interface remains as a shim for 1 minor version per ADR-T03; once the
+ * call-site grep {@code ISkillMarketService} drops to 0, delete this file.
+ *
+ * @deprecated use {@link IMarketContentAdminService} via {@code DefaultSkillMarketService}
+ */
+@Deprecated
 public interface ISkillMarketService {
 
     /* ===== 市场浏览 ===== */
@@ -22,31 +33,49 @@ public interface ISkillMarketService {
     MarketSkill get(Long id);
 
     /**
-     * admin：列出全部（含 PENDING/APPROVED/REJECTED 状态——起无审批流，所有提交直接 APPROVED）
+     * admin：列出全部（含 PENDING / APPROVED / REJECTED 三种状态，审批流 #4）
      */
     List<MarketSkill> listAllForAdmin();
 
     /* ===== 用户提交 ===== */
 
     /**
-     * 任意用户：提交到市场（起无需审批，直接 status='APPROVED'）。
-     * 同一作者+name 已存在 → UPSERT（重置 reviewed_at/reviewed_by）；不存在 → INSERT。
-     * 成功后反写 author 自己的 user_skill.market_skill_id 指向新行。
+     * 任意用户：提交到市场（审批流 #4：新建行落 status='PENDING'，created_by_kind='USER'，
+     * 等 admin approve/reject；reject 必须填评论）。
+     * 同一作者+name 已存在：REJECTED → 旧行归档到 market_skill_archive（保留 id + 拒绝评论/审核人/时间）
+     * 并新建 PENDING 行（新 id）；PENDING/APPROVED → 仅原地更新内容，状态不动（APPROVED 永不降级）。
+     * 成功后反写 author 自己的 user_skill.market_skill_id 指向当前 market_skill 行。
      */
     MarketSkill submit(String username, MarketSkillSubmitRequest req);
 
     /* ===== admin 直接 CRUD ===== */
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
+     * {@code IMarketContentAdminService#createApproved} 取代
+     */
+    @Deprecated
     MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req);
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
+     * {@code IMarketContentAdminService#update} 取代
+     */
+    @Deprecated
     MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req);
 
+    /**
+     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
+     * {@code IMarketContentAdminService#delete}（含 cascadeCleanup 级联）取代
+     */
+    @Deprecated
     void adminDelete(String adminUsername, Long id);
 
     /* ===== 用户拉取 ===== */
 
     /**
      * 任意用户：从市场把 skill 拉到自己的 user_skill（source=MARKET_PULLED）。
+     * 仅 APPROVED 可拉取，否则抛 403（审批流 #4）。
      * 若同 name 已被 ROLE_GRANTED 锁定，抛错。
      * 若同 name 已是 MARKET_PULLED，刷新 content。
      */
@@ -55,7 +84,7 @@ public interface ISkillMarketService {
     /* ===== 用户查看/撤回 ===== */
 
     /**
-     * 查看我提交到市场的技能（起所有提交都是 APPROVED）
+     * 查看我提交到市场的技能（全状态：PENDING / APPROVED / REJECTED）
      */
     List<MarketSkill> listMySubmitted(String username);
 

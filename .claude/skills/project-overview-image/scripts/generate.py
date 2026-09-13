@@ -9,7 +9,8 @@ wan2.7-image endpoint (sync):
   Body: {model, input.messages[role=user, content[{text}]], parameters.{n, size}}
 
 Set WORKSPACE_ID env var (or DASHSCOPE_WORKSPACE_ID) to your business space ID.
-Set DASHSCOPE_API_KEY env var.
+Set DASHSCOPE_PERSON_TOKEN_API_KEY env var (personal token, sk- prefix; works
+against the wan2.7-image workspace endpoint).
 
 Use RUN_ID env var to generate candidate files (project-overview-{en,zh}-r{N}.png).
 """
@@ -39,7 +40,10 @@ A dark navy infographic poster, square aspect ratio. Modern enterprise tech post
 Overall palette: deep navy background, neon cyan for nearly every graphical element, white for the main typographic content. There are EXACTLY TWO warm orange accents on the poster, reserved for the **Skill Market** and **KB Market** pills in ZONE 4 (PLATFORM). These two orange pills sit side by side, forming a visual "Market block". Every other element is cyan or white. Do not use orange anywhere else.
 
 Card icon rule (applies to every card in every zone below):
-  Each card has EXACTLY two regions. Region 1 is an icon area containing one simple geometric icon ONLY, with absolutely no text, letters, numbers, or ghost characters inside. Region 2 is a label at the bottom edge of the card, exactly one short label, appearing only ONCE.
+  Each card has EXACTLY two regions. Region 1 is an icon area containing one simple geometric icon ONLY, with absolutely no text, letters, numbers, or ghost characters inside. A digit inside a circle is still a digit — forbidden in the icon area; digits may appear ONLY in the small top-corner badge described for ZONE 3. Region 2 is a label at the bottom edge of the card, exactly one short label, appearing only ONCE.
+
+No-duplicate rule (applies to every row in every zone below):
+  Every label in a row appears EXACTLY ONCE in that row. The most common rendering error on this poster is duplicating one card (often Files in the pillars row, Deploy in the tools row, Sessions in the platform row). Never render the same label twice in one row; if the row feels tight, shrink card width and padding instead.
 
 Generous breathing space between zones. Within a zone the elements sit close to each other.
 
@@ -47,13 +51,13 @@ ZONE 1: HERO (top third of the poster, centered). In this order top to bottom:
   - One very large bold white single-line title: Spring AI LoomAgent
   - One smaller cyan tagline directly below: Spring Boot AI Agent Out-of-the-Box Solution
   - A clear empty gap
-  - At the center, a thin horizontal outline pill (a rounded rectangle with a hairline cyan border, no fill) containing on a single line, in small uppercase: 06 PILLARS  -  09 TOOLS  -  07 ON  -  02 OPT-IN
+  - At the center, a thin horizontal outline pill (a rounded rectangle with a hairline cyan border, no fill) containing on a single line, in small uppercase: 06 PILLARS  -  11 TOOLS  -  07 UNIVERSAL  -  04 RBAC
 
 ZONE 2: small uppercase section label on the left in cyan: 01 PILLARS. Below it one horizontal row of six plain rounded rectangle cards, all cyan, all the same size, in this exact order from left to right: Chat, Knowledge, Files, MCP, Skill, RBAC.
 
-ZONE 3: small uppercase section label on the left in cyan: 02 TOOLS. To the right of that label on the same horizontal line, a small caption reading: 7 on  2 opt-in. Below the label, ONE horizontal row containing EXACTLY 9 plain rounded rectangle cards — no more, no fewer, all nine visible in the order listed — in this exact order from left to right. Every card is equal to every other card (no card is highlighted, no card is a different color, no card has a star):
-  Files, Knowledge, Git, Maven, Deploy, Time, Skill, Sub-task, Schedule
-  For each of these nine cards, put a small badge with the tool count (just the digit) inside the icon area at the top: 16, 1, 28, 6, 1, 2, 2, 4, 4. The card label sits at the bottom edge. The single most common rendering error is dropping one card (often Time) to fit the row; render all nine even if each card becomes narrower, prefer smaller width over omission, never omit a card or merge two cards into one.
+ZONE 3: small uppercase section label on the left in cyan: 02 TOOLS. To the right of that label on the same horizontal line, a small caption reading: 7 universal  4 RBAC. Below the label, ONE horizontal row containing EXACTLY 11 plain rounded rectangle cards — no more, no fewer, all eleven visible in the order listed — in this exact order from left to right. Every card is equal to every other card (no card is highlighted, no card is a different color, no card has a star):
+  Files, Knowledge, Git, Maven, Deploy, Time, Skill, Sub-task, Schedule, Ask-user, Html render
+  For each of these eleven cards, put a small badge with the tool count (just the digit) inside the icon area at the top: 16, 1, 28, 6, 1, 2, 2, 4, 4, 1, 1. The badge digits pair with the card labels strictly in order — Files=16, Knowledge=1, Git=28, Maven=6, Deploy=1, Time=2, Skill=2, Sub-task=4, Schedule=4, Ask-user=1, Html render=1 — each badge sits on its own card, never shifted onto a neighbour. The card label sits at the bottom edge. The single most common rendering error is dropping one card (often Time) to fit the row; render all eleven even if each card becomes narrower, prefer smaller width over omission, never omit a card or merge two cards into one.
 
 ZONE 4: small uppercase section label on the left in cyan: 03 PLATFORM. Below it, two stacked rows:
   Row A: one horizontal row of six small chip rectangles on the left in this order: Users, Roles, Sessions, Skill Market, KB Market, Admin Console. The **Skill Market** and **KB Market** pills are the ONLY orange-filled elements on the whole poster, sitting side by side to form a visual "Market block". All other chips are cyan-filled.
@@ -70,7 +74,10 @@ ZH_LAYOUT = """\
 整体配色：深蓝色背景，霓虹青色作为几乎所有图形的颜色，白色作为主文字。海报上 EXACTLY 只有两个暖橙色高亮，保留给 04 区（PLATFORM）里的"技能市场"和"知识市场"芯片。这两个橙色芯片并排相邻，形成视觉上的"市场板块"。其他任何元素都不能用橙色。
 
 卡片图标规则（下面每个区的所有卡片都遵守）：
-  每张卡片严格只有两个区域：(1) 图标区 —— 一个干净简单的几何图标，绝对不允许任何文字、字母、数字、伪字符出现在图标里；(2) 标签区 —— 在卡片底边恰好一个简短标签。同一张卡片里标签只能出现一次。
+  每张卡片严格只有两个区域：(1) 图标区 —— 一个干净简单的几何图标，绝对不允许任何文字、字母、数字、伪字符出现在图标里；圆圈里的数字也是数字 —— 图标区禁止，数字只能出现在 03 区描述的顶角小徽章里；(2) 标签区 —— 在卡片底边恰好一个简短标签。同一张卡片里标签只能出现一次。
+
+禁止重复规则（下面每个区的每一行都遵守）：
+  一行里每个标签只能出现恰好一次。这张海报最常见的渲染错误是在同一行里重复某张卡（核心行经常重复"文件"、工具行经常重复"部署"、平台行经常重复"会话"）。同一行绝不重复同一标签；如果一行太挤，缩小卡片宽度和 padding，而不是重复或省略。
 
 每个大区之间留出明显的空白呼吸。区内部元素紧凑排列。
 
@@ -78,13 +85,13 @@ ZH_LAYOUT = """\
   - 一行超大白色粗体标题：Spring AI LoomAgent
   - 紧接下方一行较小的青色副标题：Spring Boot AI Agent 开箱即用方案
   - 一段空白
-  - 居中位置一个细轮廓横向胶囊（圆角矩形，只有青色描边，没有填充），里面单行小号大写英文：06 PILLARS  -  09 TOOLS  -  07 ON  -  02 OPT-IN
+  - 居中位置一个细轮廓横向胶囊（圆角矩形，只有青色描边，没有填充），里面单行小号大写英文：06 PILLARS  -  11 TOOLS  -  07 UNIVERSAL  -  04 RBAC
 
 02 区：左侧一行青色小号大写章节标签：01 核心。其下方一行六张圆角矩形卡片，全部青色等大，从左到右依次为：对话、知识库、文件、MCP、技能、权限。
 
-03 区：左侧一行青色小号大写章节标签：02 工具。在章节标签右侧同一行小号说明文字：7 启用  2 手动。下方 EXACTLY 9 张圆角矩形卡片组成一行 — 不能多也不能少，9 张全部可见 — 全部青色等大，从左到右依次为。每张卡片完全相同（没有高亮、没有其他颜色、没有五角星）：
-  文件、知识库、Git、Maven、部署、时间、技能、子任务、定时
-  每张卡片在图标区顶端放一个小数字徽章：16、1、28、6、1、2、2、4、4。卡片标签贴在底部。最常见的渲染错误是漏掉一张卡（经常是"时间"）；即使每张更窄也要全部画出来，绝对不能省略一张或两张并一张。
+03 区：左侧一行青色小号大写章节标签：02 工具。在章节标签右侧同一行小号说明文字：7 通用  4 RBAC。下方 EXACTLY 11 张圆角矩形卡片组成一行 — 不能多也不能少，11 张全部可见 — 全部青色等大，从左到右依次为。每张卡片完全相同（没有高亮、没有其他颜色、没有五角星）：
+  文件、知识库、Git、Maven、部署、时间、技能、子任务、定时、问答、HTML渲染
+  每张卡片在图标区顶端放一个小数字徽章：16、1、28、6、1、2、2、4、4、1、1。徽章数字与卡片标签严格按顺序配对 —— 文件=16、知识库=1、Git=28、Maven=6、部署=1、时间=2、技能=2、子任务=4、定时=4、问答=1、HTML渲染=1 —— 每个徽章放在自己那张卡上，绝不串到邻卡。卡片标签贴在底部。最常见的渲染错误是漏掉一张卡（经常是"时间"）；即使每张更窄也要全部画出来，绝对不能省略一张或两张并一张。
 
 04 区：左侧一行青色小号大写章节标签：03 平台。其下方两行堆叠：
   第 A 行：一行六个小芯片矩形，依次为：用户、角色、会话、技能市场、知识市场、管理控制台。**技能市场**和**知识市场**是全海报 EXACTLY 唯一的两个橙色填充芯片，并排相邻形成"市场板块"。其他芯片都是青色填充。
@@ -267,7 +274,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--project", default=".", help="project root path")
     p.add_argument("--out-dir", default=None, help="output dir (default: <project>/docs)")
-    p.add_argument("--api-key", default=os.environ.get("DASHSCOPE_API_KEY"))
+    p.add_argument("--api-key", default=os.environ.get("DASHSCOPE_PERSON_TOKEN_API_KEY"))
     p.add_argument("--workspace-id", default=os.environ.get("DASHSCOPE_WORKSPACE_ID")
                                      or os.environ.get("WORKSPACE_ID"))
     p.add_argument("--size", default="1280*1280", help="wan2.7-image size (default 1280*1280)")
@@ -275,7 +282,7 @@ def main():
     args = p.parse_args()
 
     if not args.api_key:
-        sys.exit("DASHSCOPE_API_KEY not set")
+        sys.exit("DASHSCOPE_PERSON_TOKEN_API_KEY not set")
     args.workspace_id = normalize_workspace_id(args.workspace_id)
     if not args.workspace_id:
         print("[WARN] DASHSCOPE_WORKSPACE_ID not set, will use qwen-image fallback",

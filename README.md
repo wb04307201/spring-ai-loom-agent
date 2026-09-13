@@ -27,31 +27,36 @@
 > **Advanced**: 🧩 Sub-tasks · ⏰ Scheduled tasks · 🖼 Multimodal — one dependency, batteries included.
 
 - **💬 Streaming Chat** — SSE multi-turn, collapsible reasoning, message copy/download; **multimodal** image + document mixed input
-- **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in JVector local store (swap in any Spring AI vector store)
+- **📚 RAG Knowledge Base** — Multi-KB management, Tika parsing + vectorization, built-in H2-backed vector store (JVector HNSW in-memory index; swap in any Spring AI vector store)
 - **🔧 MCP Tool Integration** — Sync/async dual mode; available tools gated by **role authorization**, enabled per chat
-- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted); no approval flow (submit goes direct APPROVED); pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` is set; admin only edits / pulls (no creation); no version field. Skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
+- **🧠 Skill Market** — DB-stored prompt templates, **3 sources** (self-built / market-pulled / role-granted); approval flow (submit → PENDING → admin approve/reject, rejected re-submits archive the old row); pull rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` is set; admin can create (lands APPROVED immediately) / edit / approve / reject; no version field. Skills call MCP via `@tool_name`. Frontend chat input supports `/` picker for precise skill selection.
 - **🧩 Sub-tasks & ⏰ Scheduled Tasks** — Delegate a slice of work to a synchronous "sub-model"; LLM-created schedules run as sub-tasks and survive restarts
+- **🙋 AskUser Interactive Tool** — the AI asks you questions inline in the chat stream via option cards (single-select / multi-select / custom input), then seamlessly continues after you answer; sub-tasks and scheduled tasks never interrupt you
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
-- **🧰 Built-in Tools** — Time / file / skill / sub-task / schedule / end-to-end deploy (on by default), git / maven (opt-in); see [TOOLS.md](docs/TOOLS.md)
+- **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render; see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
 
 All tools follow the **interface + default implementation** pattern. Every component is registered with `@ConditionalOnMissingBean`, allowing consumers to replace any piece with a custom implementation.
 
-| Tool | Interface | Methods | Default | Config Property |
+| Tool | Interface | Methods | Visibility | Config Property |
 |------|-----------|---------|---------|-----------------|
-| Time | `ITimeTool` | 2 | ✅ enabled | `time.enabled` |
-| File | `IFileTool` | 16 | ✅ enabled | `file.enabled` |
-| Skill | `ISkillTool` | 3 | ✅ enabled | `skill.enabled` |
-| Knowledge | `IKnowledgeTool` | 1 | ✅ enabled | `knowledge.enabled` |
-| Sub-task | `ISubTaskTool` | 4 | ✅ enabled | `subtask.enabled` |
-| Schedule | `IScheduleTool` | 4 | ✅ enabled | `schedule.enabled` |
-| Git | `IGitTool` | 28 | ❌ disabled | `git.enabled` |
-| Maven | `IMavenTool` | 6 | ❌ disabled | `maven.enabled` |
-| Compile & Deploy | `ICompileAndDeployTool` | 1 | ✅ enabled | `compile.enabled` |
+| Time | `ITimeTool` | 2 | ✅ universal | — (`time.enabled` deprecated) |
+| File | `IFileTool` | 16 | ✅ universal | `file.*` limits (`file.enabled` deprecated) |
+| Skill | `ISkillTool` | 2 | ✅ universal | — (`skill.enabled` deprecated) |
+| Knowledge | `IKnowledgeTool` | 1 | ✅ universal | gated by `rag.enabled` (VectorStore) |
+| Sub-task | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| Schedule | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
+| AskUser | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
+| Git | `IGitTool` | 28 | 🔐 RBAC (`tool_git`) | `git.username` / `git.token` |
+| Maven | `IMavenTool` | 6 | 🔐 RBAC (`tool_maven`) | `maven.mavenHome` etc. |
+| Compile & Deploy | `ICompileAndDeployTool` | 1 | 🔐 RBAC (`tool_compile`) | `compile.*` |
+| Html Render | `IHtmlRenderTool` | 1 | 🔐 RBAC (`tool_render`) + classpath-gated | add `playwright` dep + grant in admin console |
+
+> **universal** = visible to every logged-in user (`@ToolGroup(defaultGranted=true)`). **RBAC** = visible only after an admin grants the tool group to a role (`role_tool` table). The legacy `*.enabled` yml switches no longer gate any tool since M3 — see [TOOLS.md §1](docs/TOOLS.md).
 
 For full `@Tool` method signatures, parameter details, and configuration reference, see [TOOLS.md](docs/TOOLS.md).
 
@@ -80,7 +85,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.40</version>
+ <version>1.1.41</version>
 </dependency>
 ```
 
@@ -164,9 +169,12 @@ spring:
  loom:
  agent:
  rag:
+ enabled: true # Global knowledge-space switch, default true. Set false to skip VectorStore/H2 JVector init (zero embedding calls) and hide the 📚 knowledge-space button
  similarityThreshold: 0.50 # Similarity threshold, default 0.0
  top-k: 4 # Top-k results, default 4
 ```
+
+> Setting `rag.enabled=false` (or providing no `EmbeddingModel` bean, e.g. `spring.ai.model.embedding.text=none`) cleanly disables the whole RAG chain — the app still starts, knowledge-base metadata CRUD survives, and the frontend hides the knowledge-space entry. `GET /spring/ai/loom/api/features` reports `{ "knowledge": false }`.
 
 ## MCP Services
 
@@ -239,25 +247,25 @@ Skills are prompt templates that the LLM uses for recurring workflows. The data 
 
 | Table | Purpose |
 |----------------|-----------------------------------------------------------------------------------------------|
-| `market_skill` | Public **Skill Market** — every entry has only `(author, name)` unique constraint ( removed `version`); admin edits / pulls (cannot create) — |
+| `market_skill` | Public **Skill Market** — every entry has only a `(author, name)` unique constraint (the `version` field has been removed); admin creates (direct `APPROVED`) / edits / approves / rejects / pulls |
 | `user_skill` | A user's local copy of a skill (`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`); remove blocked when `market_skill_id` is set; pull rejects overwriting same-name USER_CREATED |
-| `role_skill` | Role → market_skill authorization (which skills a role unlocks for its users); `setRoleKnowledges` auto-syncs `user_knowledge` for all assigned users |
+| `role_skill` | Role → market_skill authorization (which skills a role unlocks for its users), written via `ISkillRoleAdmin.setRoleSkills`; granted skills sync into each user's `user_skill` (locked `ROLE_GRANTED` entries) lazily on their next skill list/get |
 
 ### 6 seeded system skills
 
-On first launch, the init migration seeds 6 system skills (stored directly in each user's `user_skill` with `source=USER_CREATED`, `default_loaded=true`) so every fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can edit / delete any of them at any time from the **Skill Market** admin page (no creation from admin).
+On first launch, the demo init migration seeds 6 system skills (stored directly in the default admin user's `user_skill` with `source=USER_CREATED`, `default_loaded=true`) so a fresh install already has useful ones — including **Monthly Event Report**, **HTTP Test**, **Deploy Project**, **Auto E2E**, etc. Admins can create / edit / approve / reject / delete market skills from the **Skill Market** admin page.
 
 ### Skill lifecycle for a normal user
 
 1. **Create** — In the chat UI's Skill Library → **我的** tab → **+ 新增**, or `PUT /spring/ai/loom/skill`. The skill is stored in `user_skill` with `source=USER_CREATED`. Fully editable (name / desc / content / default-loaded).
-2. **Submit to market** — Library → **共享** tab. Click your skill, the form shows market metadata （无版本号）。 Submitted with `status=APPROVED` directly (no approval flow). Same `(author, name)` re-submits UPSERT (overwrites content + status).
-3. **Pull from market** — Library → **市场** tab. Click item → right panel shows full details + **「添加到我的知识库」** button. Creates / refreshes a `user_skill` row with `source=MARKET_PULLED`. Re-pull of same name UPSERTs (no error).
- - ****: If you already have a same-name `USER_CREATED` skill, pull is rejected (403) — use **「复制为我的技能」** first to copy as a new `USER_CREATED`.
-4. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-injected into your `user_skill` on every login with `source=ROLE_GRANTED, locked=true`. `setRoleKnowledges` auto-syncs new role grants. **You cannot edit or delete it** (it's pinned by the role).
+2. **Submit to market** — Library → **共享** tab. Click your skill, the form shows market metadata （无版本号）。 Submitted with `status=PENDING` — awaits admin approve/reject (reject requires a comment). Re-submitting a same `(author, name)` entry: if it was **REJECTED**, the old row is archived (reject comment/reviewer/time preserved) and a NEW PENDING row is created; if **PENDING / APPROVED**, content updates in place and status is untouched (APPROVED never demotes).
+3. **Pull from market** — Library → **市场** tab. Click item → right panel shows full details + **「拉取到我的 Skill」** button. Creates / refreshes a `user_skill` row with `source=MARKET_PULLED`. Re-pull of same name UPSERTs (no error).
+ - **Note**: If you already have a same-name `USER_CREATED` skill, pull is rejected (403) — use **「复制为我的技能」** first to copy as a new `USER_CREATED`.
+4. **Receive via role authorization** — If admin granted a role → market_skill, the skill is auto-synced into your `user_skill` on every skill list/get with `source=ROLE_GRANTED, locked=true`. **You cannot edit or delete it** (it's pinned by the role).
 
 ### What admins can do that normal users cannot
 
-- **Edit / 下架 (delete)** any `market_skill` (admin no longer creates new skills — author is the one who publishes from chat UI)
+- **Create** (direct `APPROVED`, `created_by_kind='ADMIN'`), **edit / approve / reject / 下架 (delete)** any `market_skill` — authors publish from the chat UI into PENDING; admins review or create directly
 - Authorize any APPROVED market skill to any role via `role_skill` (auto-syncs to all assigned users)
 - 下架 cascades to all `user_skill` (pullers) and `role_skill` (role grants) — no orphans
 
@@ -266,20 +274,20 @@ On first launch, the init migration seeds 6 system skills (stored directly in ea
 | Operation | USER_CREATED | MARKET_PULLED | ROLE_GRANTED |
 |----------------------------------------|--------------|---------------|--------------|
 | Edit `name` | ✗ (PK) | ✗ | ✗ |
-| Edit `description` | ✅ | ✅ | ✗ |
+| Edit `description` | ✅ | ✗ (locked to market snapshot) | ✗ |
 | Edit `content` | ✅ | ✗ (re-pull) | ✗ |
 | Edit `default_loaded` | ✅ | ✅ | ✗ |
 | Delete | ✅ | ✅ | ✗ |
-| Submit to market | ✅ (new ver.)| ✗ | ✗ |
+| Submit to market | ✅ | ✗ | ✗ |
 
 ### Using skills in the chat UI
 
 Open the Skill Library button (🧠) — four tabs:
 
-- **我的** — your local `user_skill` (plus admin's union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
+- **我的** — your local `user_skill` (admin sees only their own `user_skill` — no union view). Click a skill to see details, then **应用** (overwrite the textarea and **auto-send** to the model) or **复制** (overwrite the textarea, no send).
 - **市场** — browse all `APPROVED` market skills and **拉取** them into your `user_skill` (rejects if you already have a same-name `USER_CREATED`).
-- **共享** — submit a `USER_CREATED` skill to the market. status is direct `APPROVED`, no approval. no version number. two-stage click list item → right panel form.
-- **我的发布** — track your market submissions (all `APPROVED` after de-approval). Click list item → right panel with **「撤回共享（下架）」** button. Withdraw cascades to all `user_skill` and `role_skill`.
+- **共享** — submit a `USER_CREATED` skill to the market. Submission goes to `PENDING` awaiting admin approval. no version number. two-stage click list item → right panel form.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Click list item → right panel with a withdraw button (label varies by status: 撤回投稿 / 下架并删除 / 删除被拒记录). Author withdraw removes the market entry and clears the author's own `user_skill.market_skill_id` backlink — other users' already-pulled copies (`MARKET_PULLED`) and `role_skill` grants remain but stop receiving updates. (It's the **admin** 下架/delete that cascades cleanup to `user_skill` + `role_skill`.) REJECTED entries can be re-submitted — the old row is archived and a fresh PENDING row is created.
 
 Inside `content` you can reference MCP tools by `@tool_name` — the available tools come from the role-based `mcps` authorization, not from yml.
 
@@ -291,7 +299,7 @@ Knowledge bases store documents for RAG retrieval. The knowledge space modal has
 - **我的** — your own knowledge bases. Create, upload documents, delete.
 - **市场** — browse approved market knowledge bases and **添加到我的知识库** (subscribe).
 - **共享** — your own knowledge bases not yet shared. Click **共享到市场** to submit for admin approval.
-- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED). Withdraw PENDING items.
+- **我的发布** — track your market submissions (PENDING / APPROVED / REJECTED, with the reject reason shown). Withdraw is available at any status (label varies: 撤回投稿 / 下架并删除 / 删除被拒记录) — withdrawing deletes the market entry and, on the knowledge side, cascades cleanup of `loom_user_knowledge` subscriber rows + `loom_role_knowledge` grants. REJECTED entries can be re-submitted — the old row is archived (`loom_market_knowledge_archive`) and a fresh PENDING row is created.
 
 Market workflow: submit → PENDING → admin approve → APPROVED → other users can subscribe. Role-based authorization can also auto-grant knowledge bases to users (similar to skills).
 
@@ -306,10 +314,11 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 | Section | Path | Purpose |
 |-----------------|-------------------------------|--------------------------------------|
 | 用户管理 | `admin/console.html` | User list + role assignment + batch content cleanup |
-| 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill |
-| Skill 市场 | `admin/skills-market.html` | Approve / reject / directly CRUD Skill |
+| 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
+| 技能市场 | `admin/market-skills.html` | Approve / reject / directly create / edit / delete Skill |
+| 知识库市场 | `admin/knowledge-market.html` | Approve / reject / directly create / edit / delete Knowledge |
 | MCP 描述维护 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
-| 用量统计 | `admin/stats.html` | Monthly Token usage (year + month filter) |
+| 日志 | `admin/stats.html` | Monthly Token usage (year + month filter) |
 | 返回主页 | `/` | Back to chat home page |
 
 - **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.

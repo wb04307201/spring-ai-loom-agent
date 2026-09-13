@@ -75,6 +75,13 @@
             <groupId>org.apache.maven.shared</groupId>
             <artifactId>maven-invoker</artifactId>
         </dependency>
+        <!-- HTML 渲染截图工具(IHtmlRenderTool)依赖。optional:消费者不引入 →
+             HtmlRenderEngine / IHtmlRenderTool bean 因 @ConditionalOnClass 不创建(镜像 maven-invoker 先例) -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>io.github.wb04307201</groupId>
             <artifactId>flex-schedule-spring-boot-starter</artifactId>

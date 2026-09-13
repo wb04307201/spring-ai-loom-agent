@@ -40,7 +40,7 @@ java -jar target/loom-git-mcp-1.0-SNAPSHOT.jar
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `basePath` | `.local/file` | Git 操作的根目录 |
+| `basePath` | `~/.loom/mcp` | Git 操作的根目录（MCP 共享沙箱；扁平配置，非主库用户树） |
 | `gitUsername` | `""` | Git 用户名（用于远程认证） |
 | `gitToken` | `""` | Git 令牌/密码（用于远程认证） |
 | `remoteTimeoutSeconds` | `60` | 远程操作超时时间（秒） |

@@ -678,9 +678,13 @@
 
   async function loadMarketApproved() {
     try {
-      const r = await fetch(API.marketApproved, { credentials: "include" });
+      // M4 (FU-4 follow-on): public list 现为 v2 Page，默认 size=20 → 必须显式取大页，
+      // 否则角色授权下拉只显示前 20 条已审批技能。
+      const r = await fetch(`${API.marketApproved}?page=0&size=100`, { credentials: "include" });
       if (!r.ok) return [];
-      return await r.json();
+      // FU-4: 双向兼容 v1 (ARRAY) 与 v2 (Page{items}) 两种返回结构
+      const data = await r.json();
+      return Array.isArray(data) ? data : (data && Array.isArray(data.items) ? data.items : []);
     } catch (e) {
       return [];
     }
@@ -706,7 +710,7 @@
     const container = document.getElementById("rd-skills");
     if (!currentMarketSkills || currentMarketSkills.length === 0) {
       container.innerHTML =
-        '<div style="color: var(--text-muted); padding: 8px;">市场暂无已审批的技能。请先到<a href="skills-market.html">技能市场</a>创建。</div>';
+        '<div style="color: var(--text-muted); padding: 8px;">市场暂无已审批的技能。请先到<a href="market-skills.html">技能市场</a>创建。</div>';
       return;
     }
     const granted = currentRoleSkills

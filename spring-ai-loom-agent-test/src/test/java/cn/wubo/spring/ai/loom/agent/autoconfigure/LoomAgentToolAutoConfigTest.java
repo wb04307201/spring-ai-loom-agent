@@ -11,6 +11,8 @@ import cn.wubo.spring.ai.loom.agent.tool.file.IFileTool;
 import cn.wubo.spring.ai.loom.agent.tool.git.IGitTool;
 import cn.wubo.spring.ai.loom.agent.tool.knowledge.IKnowledgeTool;
 import cn.wubo.spring.ai.loom.agent.tool.maven.IMavenTool;
+import cn.wubo.spring.ai.loom.agent.tool.render.HtmlRenderEngine;
+import cn.wubo.spring.ai.loom.agent.tool.render.IHtmlRenderTool;
 import cn.wubo.spring.ai.loom.agent.tool.skill.ISkillTool;
 import cn.wubo.spring.ai.loom.agent.tool.time.ITimeTool;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -24,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 /**
- * 验证所有 9 个 I*Tool 默认都加载 (M3 起 yml enabled 开关已废弃,
+ * 验证所有 10 个 I*Tool 默认都加载 (M3 起 yml enabled 开关已废弃,
  * RBAC 是唯一控制)。
  * <p>
  * 只测 ToolConfiguration(嵌套静态 @Configuration 类),不触发其他需要
@@ -37,7 +39,7 @@ class LoomAgentToolAutoConfigTest {
             .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.ToolConfiguration.class);
 
     @Test
-    @DisplayName("默认配置下 8 个 I*Tool bean 加载(IScheduleTool 需要 flex-schedule classpath,本测试无该依赖)")
+    @DisplayName("默认配置下 9 个 I*Tool bean 加载(IScheduleTool 需要 flex-schedule classpath,本测试无该依赖)")
     void allToolsLoadedByDefault() {
         runner.run(ctx -> {
             assertThat(ctx).hasSingleBean(ITimeTool.class);
@@ -47,6 +49,9 @@ class LoomAgentToolAutoConfigTest {
             assertThat(ctx).hasSingleBean(IMavenTool.class);
             assertThat(ctx).hasSingleBean(ICompileAndDeployTool.class);
             assertThat(ctx).hasSingleBean(IKnowledgeTool.class);
+            // playwright 在 test 模块 classpath(显式依赖)→ @ConditionalOnClass 命中
+            assertThat(ctx).hasSingleBean(HtmlRenderEngine.class);
+            assertThat(ctx).hasSingleBean(IHtmlRenderTool.class);
         });
     }
 
@@ -65,6 +70,18 @@ class LoomAgentToolAutoConfigTest {
                     assertThat(ctx).hasSingleBean(IFileTool.class);
                     assertThat(ctx).hasSingleBean(IGitTool.class);
                     assertThat(ctx).hasSingleBean(IMavenTool.class);
+                });
+    }
+
+    @Test
+    @DisplayName("消费者自定义 IHtmlRenderTool bean → 默认实现不创建(@ConditionalOnMissingBean 可替换)")
+    void customRenderToolReplacesDefault() {
+        runner.withBean("customHtmlRenderTool", IHtmlRenderTool.class,
+                        () -> (htmlFilePath, imageName, device, fullPage, toolContext) -> "custom")
+                .run(ctx -> {
+                    assertThat(ctx).hasSingleBean(IHtmlRenderTool.class);
+                    assertThat(ctx.getBean(IHtmlRenderTool.class))
+                            .isNotInstanceOf(cn.wubo.spring.ai.loom.agent.tool.render.DefaultHtmlRenderTool.class);
                 });
     }
 
@@ -95,6 +112,28 @@ class LoomAgentToolAutoConfigTest {
         @Bean
         IKnowledge iKnowledge() {
             return mock(IKnowledge.class);
+        }
+
+        // IKnowledgeTool.defaultKnowledgeTool 注入 KB stats service (T16) — 测试上下文不加载
+        // StorageConfiguration,所以这里提供一个 mock;defaultKnowledgeTool 用它的 incrementStat 接口,
+        // 测试本身不调用 searchKnowledge,所以 stub 不会触发。
+        @Bean("kbStatsService")
+        cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService kbStatsService() {
+            return mock(cn.wubo.spring.ai.loom.agent.market.IMarketContentStatsService.class);
+        }
+
+        // T3 askUser:defaultAskUserTool 注入 AskUserRegistry + SseEmitterRegistry。
+        // 两者都是无参构造的简单类,用真实实例(AskUserRegistry 本可由 ToolConfiguration
+        // 自建,这里显式提供以便 @ConditionalOnMissingBean 跳过,SseEmitterRegistry 在
+        // 生产上下文靠组件扫描注册,本切片测试必须手动提供)。
+        @Bean
+        cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry() {
+            return new cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry();
+        }
+
+        @Bean
+        cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry sseEmitterRegistry() {
+            return new cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry();
         }
     }
 }
