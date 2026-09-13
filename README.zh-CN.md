@@ -11,10 +11,16 @@
 [![fork](https://img.shields.io/github/forks/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent) 
 ![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-17+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-3+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-1+-green.svg)
 
-<p style="display: flex">
+<table>
+  <tr>
+    <td style="padding: 0 10px; border: none; text-align: center;">
  <img src="docs/project-overview-zh.png" alt="Spring AI LoomAgent 项目概览" style="width: 50%" />
+    </td>
+    <td style="padding: 0 10px; border: none; text-align: center;">
  <img src="docs/loom-agent-ui-test.png" alt="Spring AI LoomAgent UI" style="width: 50%" />
-</p>
+    </td>
+  </tr>
+</table>
 
 ---
 
