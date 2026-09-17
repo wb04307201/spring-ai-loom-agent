@@ -16,7 +16,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.util.MimeTypeUtils;
@@ -31,6 +33,11 @@ import java.util.Map;
 public class DefaultChat implements IChat {
 
  private static final Logger log = LoggerFactory.getLogger(DefaultChat.class);
+
+ /** loom SSE 思考面板读取的 metadata key（DashScope 等 OpenAI 兼容 provider 原生会写）。 */
+ static final String REASONING_CONTENT_KEY = "reasoningContent";
+ /** Spring AI Anthropic 映射器为 thinking Generation 写的唯一 metadata key，用作识别标记。 */
+ static final String THINKING_SIGNATURE_KEY = "signature";
 
  private final ChatClient chatClient;
  private final IMcp mcp;
@@ -215,7 +222,33 @@ public class DefaultChat implements IChat {
   }
 
   return requestSpec.stream().chatResponse()
+          .map(DefaultChat::bridgeAnthropicThinking)
           .onErrorResume(err -> reactor.core.publisher.Flux.just(toErrorResponse(err)));
+ }
+
+ /**
+  * 把 Spring AI Anthropic 的 thinking 块桥接进 reasoningContent 通道（SseController 思考面板的数据源）。
+  *
+  * Anthropic 映射器不写 metadata.reasoningContent（那是 DashScope 等 OpenAI 兼容 provider 的约定），
+  * 而是把 thinking 块做成独立 Generation：content=思考文本、metadata 仅含 signature。后果是
+  * "思考过程"面板永远不出现，且思考文本混进回答正文。这里以 signature key 识别这类 Generation，
+  * 改写为 content="" + metadata.reasoningContent=思考增量；已带 reasoningContent 的 provider
+  * （DashScope enable_thinking 等）其 Generation 不含 signature key，原样透传不受影响。
+  */
+ static ChatResponse bridgeAnthropicThinking(ChatResponse response) {
+  Generation thinking = response == null ? null : response.getResult();
+  if (thinking == null || thinking.getOutput() == null
+          || !thinking.getOutput().getMetadata().containsKey(THINKING_SIGNATURE_KEY)) {
+   return response;
+  }
+  String delta = thinking.getOutput().getText();
+  Generation bridged = new Generation(
+          AssistantMessage.builder()
+                  .content("")
+                  .properties(Map.of(REASONING_CONTENT_KEY, delta == null ? "" : delta))
+                  .build(),
+          thinking.getMetadata());
+  return new ChatResponse(List.of(bridged), response.getMetadata());
  }
 
  /**
