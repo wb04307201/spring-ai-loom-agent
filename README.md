@@ -66,9 +66,6 @@ All tools follow the **interface + default implementation** pattern. Every compo
 
 For full `@Tool` method signatures, parameter details, and configuration reference, see [TOOLS.md](docs/TOOLS.md).
 
-### Compile & Deploy Tool
-![img_7.png](docs/img_7.png)
-
 ### Admin Console
 
 ![Admin console — users / roles / skill-market / knowledge-market / MCP / logs](docs/img_admin-console.png)
@@ -107,14 +104,14 @@ The test application uses Alibaba's Qwen (DashScope) via Spring AI Alibaba. Swap
 
 ```yaml
 spring:
- ai:
- dashscope:
- api-key: ${DASHSCOPE_API_KEY}
- chat:
- options:
- model: qwen3.7-plus
- multi_model: true
- enable_thinking: true
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen3.7-plus
+          multi_model: true
+          enable_thinking: true
 ```
 
 > [For other models, see the Spring AI docs](https://docs.spring.io/spring-ai/reference/api/chatmodel.html).
@@ -131,7 +128,7 @@ Visit `http://localhost:8080/spring/ai/loom`
 ![Knowledge Market — V22 two-stage list → detail panel](docs/img_kb-market.png)
 
 ## Document Upload & Conversation
-Click the `+` button next to the input field to upload images or documents. After uploading, type your question and send it. Click the ✎ button right of `+` to open the **drawing canvas**: freehand drawing (pen / line / rectangle / ellipse / text / eraser, with color swatches, stroke width, undo/redo) plus 18 built-in web UI stencils in a categorized "Components ▾" panel — CRUD skeleton pieces (data table with comma-separated column headers, form field, action bar, pagination, tabs, dialog, status tag, switch, textarea, breadcrumb) and basic controls — all movable, resizable, double-click to edit labels, for quickly sketching admin CRUD prototypes; **Confirm** exports a white-background PNG that is attached to the message like any uploaded image (pairs with multimodal models or the HTML render tool for a prototype workflow).
+Click the `+` button next to the input field to upload images or documents. After uploading, type your question and send it. Click the **palette button** right of `+` to open the **drawing canvas**: freehand drawing (pen / line / rectangle / ellipse / text / eraser, with color swatches, stroke width, undo/redo) plus 18 built-in web UI stencils in a categorized "Components ▾" panel — CRUD skeleton pieces (data table with comma-separated column headers, form field, action bar, pagination, tabs, dialog, status tag, switch, textarea, breadcrumb) and basic controls — all movable, resizable, double-click to edit labels, for quickly sketching admin CRUD prototypes; **Confirm** exports a white-background PNG that is attached to the message like any uploaded image (pairs with multimodal models or the HTML render tool for a prototype workflow).
 
 ### Supported Document Formats
 PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
@@ -145,42 +142,6 @@ PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
 Uploaded and generated files can get download links via MCP tool `downloadFileUrl`, or preview links via MCP tool `viewFileUrl`. Files and directories can be removed via MCP tool `deleteFileOrDirectory` (requires explicit `I_CONFIRM_DELETE` confirmation — token configurable via `spring.ai.loom.agent.file.deleteConfirmToken`, supports recursive directory removal, and cleans up temporary `file_info` records).
 
 The "File" entry provides unified browsing, previewing, downloading, and deleting for all non-knowledge-base files (including tool uploads and git repositories).
-
-## Replace the Default RAG Implementation
-The following example uses Qdrant as the vector store. Add the dependency:
-```xml
-<dependency>
- <groupId>org.springframework.ai</groupId>
- <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
-</dependency>
-```
-
-Add configuration:
-
-```yaml
-spring:
- ai:
- vectorstore:
- qdrant:
- host: localhost
- port: 6334
- collection-name: qwen-collection-name
-```
-
-Optional RAG configuration:
-
-```yaml
-spring:
- ai:
- loom:
- agent:
- rag:
- enabled: true # Global knowledge-space switch, default true. Set false to skip VectorStore/H2 JVector init (zero embedding calls) and hide the 📚 knowledge-space button
- similarityThreshold: 0.50 # Similarity threshold, default 0.0
- top-k: 4 # Top-k results, default 4
-```
-
-> Setting `rag.enabled=false` (or providing no `EmbeddingModel` bean, e.g. `spring.ai.model.embedding.text=none`) cleanly disables the whole RAG chain — the app still starts, knowledge-base metadata CRUD survives, and the frontend hides the knowledge-space entry. `GET /spring/ai/loom/api/features` reports `{ "knowledge": false }`.
 
 ## MCP Services
 
@@ -197,55 +158,34 @@ Add configuration:
 
 ```yaml
 spring:
- ai:
- mcp:
- client:
- stdio:
- servers-configuration: classpath:mcp-servers.json
+  ai:
+    mcp:
+      client:
+        stdio:
+          servers-configuration: classpath:mcp-servers.json
 ```
 
 `mcp-servers.json`:
 
 ```json
 {
- "mcpServers": {
- "time": {
- "command": "uvx",
- "args": [
- "mcp-server-time",
- "--local-timezone=Asia/Shanghai"
- ]
- }
- }
+  "mcpServers": {
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time",
+        "--local-timezone=Asia/Shanghai"
+      ]
+    }
+  }
 }
 ```
 
-The MCP button opens a panel showing available services:
+`Tool` button opens a panel showing available tools:
 
 ![img_3.png](docs/img_3.png)
 
 ![Skill Market — V20 two-stage list → detail panel](docs/img_skill-market.png)
-
-Add Chinese labels and descriptions for tools via configuration:
-
-```yaml
-spring:
- ai:
- loom:
- agent:
- mcps:
- - name: spring-ai-mcp-client - time
- title: Time
- description:
- A Model Context Protocol service that provides time and timezone conversion functionality. This service enables
- large language models to obtain current time information and perform timezone conversions using IANA timezone names,
- with automatic system timezone detection.
- tools:
- - name: get_current_time
- description: Get the current time in a specified timezone
- - name: convert_time
- description: Convert time between different time zones
-```
 
 ## Skill Market
 
@@ -298,6 +238,7 @@ Open the Skill Library button (🧠) — four tabs:
 Inside `content` you can reference MCP tools by `@tool_name` — the available tools come from the role-based `mcps` authorization, not from yml.
 
 For the full REST API, see [docs/API.md → §6 Skill Management](docs/API.md#6-skill-management).
+
 ## Knowledge Base & Knowledge Market
 
 Knowledge bases store documents for RAG retrieval. The knowledge space modal has four tabs:
@@ -311,7 +252,41 @@ Market workflow: submit → PENDING → admin approve → APPROVED → other use
 
 For the knowledge market REST API, see [docs/API.md → §5.8 Knowledge Market](docs/API.md#58-knowledge-market).
 
----
+### Replace the Default RAG Implementation
+The following example uses Qdrant as the vector store. Add the dependency:
+```xml
+<dependency>
+ <groupId>org.springframework.ai</groupId>
+ <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
+</dependency>
+```
+
+Add configuration:
+
+```yaml
+spring:
+  ai:
+    vectorstore:
+      qdrant:
+        host: localhost
+        port: 6334
+        collection-name: qwen-collection-name
+```
+
+Optional RAG configuration:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        rag:
+          enabled: true # Global knowledge-space switch, default true. Set false to skip VectorStore/H2 JVector init (zero embedding calls) and hide the 📚 knowledge-space button
+          similarityThreshold: 0.50 # Similarity threshold, default 0.0
+          top-k: 4 # Top-k results, default 4
+```
+
+> Setting `rag.enabled=false` (or providing no `EmbeddingModel` bean, e.g. `spring.ai.model.embedding.text=none`) cleanly disables the whole RAG chain — the app still starts, knowledge-base metadata CRUD survives, and the frontend hides the knowledge-space entry. `GET /spring/ai/loom/api/features` reports `{ "knowledge": false }`.
 
 ## Admin Console
 

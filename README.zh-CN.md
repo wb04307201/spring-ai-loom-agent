@@ -4,9 +4,9 @@
  <a href="README.md">English</a> | 中文
 </div>
 
-> Spring Boot AI Agent 开箱即用解决方案——让你的应用 **能对话**、**有记忆**、**会思考**、**可动手**——!
+> Spring Boot AI Agent 开箱即用解决方案——让你的应用 **能对话**、**有记忆**、**会思考**、**可动手**。
 
-[Maven Central](https://img.shields.io/maven-central/v/io.github.wb04307201/spring-ai-loom-agent-spring-boot-starter?style=flat-square)
+![Maven Central](https://img.shields.io/maven-central/v/io.github.wb04307201/spring-ai-loom-agent-spring-boot-starter?style=flat-square)
 [![star](https://gitee.com/wb04307201/spring-ai-loom-agent/badge/star.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-loom-agent)
 [![fork](https://gitee.com/wb04307201/spring-ai-loom-agent/badge/fork.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-loom-agent)
 [![star](https://img.shields.io/github/stars/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent)
@@ -30,7 +30,9 @@
 
 > **6 大核心**：💬 对话 · 📚 知识库 · 文件 · 🔧 MCP · 🧠 技能 · 🛡 权限
 > **平台功能**：🧠 技能市场 · 知识市场 · 🎛 管理控制台
-> **高级特性**：🧩 子任务 · ⏰ 定时任务 · 🖼 多模态 —— 引一个依赖，开箱即用——- **💬 流式对话** — SSE 多轮聊天，推理过程折叠展示，消息复制/下载；支持图片 + 文档**多模态混合输入**
+> **高级特性**：🧩 子任务 · ⏰ 定时任务 · 🖼 多模态 —— 引一个依赖，开箱即用。
+
+- **💬 流式对话** — SSE 多轮聊天，推理过程折叠展示，消息复制/下载；支持图片 + 文档**多模态混合输入**
 - **📚 RAG 知识库** — 多知识库管理，Tika 解析 + 向量化，内置 H2 持久化向量库（JVector HNSW 内存索引；可替换为任意 Spring AI 向量存储）
 - **🔧 MCP 工具集成** — 同步/异步双模式；可用工具按**角色授权**下发，会话内按需勾选启用
 - **🧠 技能市场** — Prompt 模板存库，**3 种来源**（自建 / 市场拉取 / 角色授权）；审批流：提交 → PENDING → admin 审批通过/拒绝，REJECTED 重新提交时旧行归档；拉取拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 可新建（直发 APPROVED）/ 编辑 / 审批 / 下架；去掉 version 字段；技能用 `@工具名` 调用 MCP
@@ -44,7 +46,7 @@
 
 ## 内置工具
 
-所有工具遵循 **接口 + 默认实现** 模式——每个组件均通过 `@ConditionalOnMissingBean` 注册，用户可提供自定义实现替换任意组件——
+所有工具遵循 **接口 + 默认实现** 模式——每个组件均通过 `@ConditionalOnMissingBean` 注册，用户可提供自定义实现替换任意组件。
 
 | 工具 | 接口 | 方法数 | 可见性 | 配置属性 |
 |------|------|--------|----------|----------|
@@ -62,8 +64,7 @@
 
 > **universal** = 对所有登录用户可见（`@ToolGroup(defaultGranted=true)`）。**RBAC** = 仅当管理员给角色授权该工具组后可见（`role_tool` 表）。旧的 `*.enabled` yml 开关自 M3 起不再控制任何工具 —— 见 [TOOLS.zh-CN.md §1](docs/TOOLS.zh-CN.md)。
 
-完整的 `@Tool` 方法签名、参数说明和配置参考见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)——### 编译部署工具
-![img_7.png](docs/img_7.png)
+完整的 `@Tool` 方法签名、参数说明和配置参考见 [TOOLS.zh-CN.md](docs/TOOLS.zh-CN.md)。
 
 ### Admin Console
 
@@ -91,7 +92,7 @@
 ```
 
 ### 2. 添加Spring AI模型依赖
-测试应用使用 Spring AI 的 对接阿里百炼：
+测试应用通过 Spring AI Alibaba 对接阿里百炼（Qwen）：
 ```xml
 <dependency>
  <groupId>com.alibaba.cloud.ai</groupId>
@@ -100,18 +101,22 @@
 </dependency>
 ```
 ```yaml
- dashscope:
- api-key: ${DASHSCOPE_API_KEY}
- chat:
- options:
- model: qwen3.7-plus
- multi_model: true
- enable_thinking: true
+spring:
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen3.7-plus
+          multi_model: true
+          enable_thinking: true
 ```
 
 > [使用其他模型可参考](https://docs.spring.io/spring-ai/reference/api/chatmodel.html)
 
-> **注意**: 如需基于文档进行问答，请确保模型支持多模态输入（如 `multi_model: true`），文档内容会通过 System Prompt 注入——### 3. 启动项目
+> **注意**: 如需基于文档进行问答，请确保模型支持多模态输入（如 `multi_model: true`），文档内容会通过 System Prompt 注入。
+
+### 3. 启动项目
 访问`http://localhost:8080/spring/ai/loom`
 
 ![img.png](docs/img.png)
@@ -121,46 +126,18 @@
 ![知识库市场 — V22 两段式：列表 → 详情](docs/img_kb-market.png)
 
 ## 文档上传与对话
-点击输入框左侧 `+` 按钮，可上传图片或文档文件——上传后在输入框中输入问题发送即可——点击 `+` 右侧的 ✎ 按钮打开**画板**：自由绘制（画笔 / 直线 / 矩形 / 椭圆 / 文字 / 橡皮，含色板、粗细、撤销/重做），另内置 18 个 Web 组件印章（「组件 ▾」面板分 4 组：CRUD 骨架件表格 / 表单字段 / 操作栏 / 分页 / 页签 / 对话框 / 状态标签 / 开关 / 多行输入 / 面包屑 + 基础控件，支持移动、缩放、双击改文字），可快速拼出后台 CRUD 界面原型图——点「确定」导出白底 PNG 作为聊天附件随消息发送（配合多模态模型"照图生成页面"或 HTML 渲染截图工具形成原型工作流）——### 支持的文档格式
-PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等——### 工作原理
+点击输入框左侧 `+` 按钮，可上传图片或文档文件——上传后在输入框中输入问题发送即可。点击 `+` 右侧的**调色盘按钮**打开**画板**：自由绘制（画笔 / 直线 / 矩形 / 椭圆 / 文字 / 橡皮，含色板、粗细、撤销/重做），另内置 18 个 Web 组件印章（「组件 ▾」面板分 4 组：CRUD 骨架件表格 / 表单字段 / 操作栏 / 分页 / 页签 / 对话框 / 状态标签 / 开关 / 多行输入 / 面包屑 + 基础控件，支持移动、缩放、双击改文字），可快速拼出后台 CRUD 界面原型图——点「确定」导出白底 PNG 作为聊天附件随消息发送（配合多模态模型"照图生成页面"或 HTML 渲染截图工具形成原型工作流）。
+
+### 支持的文档格式
+PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
+
+### 工作原理
 1. **图片**: 作为 Media 类型直接传递给多模态大模型（需模型支持，如 DashScope qwen 系列）
 2. **文档**: 通过 Apache Tika 提取文本内容，作为 System Prompt 注入对话上下文
 3. **混合场景**: 可同时上传图片和文档，模型会综合图片视觉信息与文档文本内容进行回答
 
 ### 文件下载、预览和删除
-上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接——文件和目录可通过 MCP 工具 `deleteFileOrDirectory` 删除（需显式传入 `I_CONFIRM_DELETE` 确认 — token 可在 `spring.ai.loom.agent.file.deleteConfirmToken` 改，支持递归删除目录，并清理已删除文件对应的临时 `file_info` 记录）——"文件"入口可统一查看、预览、下载和删除所有非知识库文件（含工具上传的文件和 git 仓库）——## 更换其它RAG以替换默认实现
-下面以qdrant向量数据库为例，添加依赖和配置：
-```xml
-<dependency>
- <groupId>org.springframework.ai</groupId>
- <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
-</dependency>
-```
-
-添加配置：
-```yaml
-spring:
- ai:
- vectorstore:
- qdrant:
- host: localhost
- port: 6334
- collection-name: qwen-collection-name
-```
-
-其它rag可选配置如下：
-```yaml
-spring:
- ai:
- loom:
- agent:
- rag:
- enabled: true # 知识空间全局开关,默认 true。设 false 跳过 VectorStore/H2 JVector 初始化(零 embedding 调用)并隐藏 📚 知识空间按钮
- similarityThreshold: 0.50 # 相似度阈值,默认0.0
- top-k: 4 # top-k，默认4
-```
-
-> `rag.enabled=false`(或容器内无 `EmbeddingModel` bean,例如 `spring.ai.model.embedding.text=none`)会干净地关闭整条 RAG 链 —— 应用照常启动,知识库元数据 CRUD 保留,前端隐藏知识空间入口。`GET /spring/ai/loom/api/features` 返回 `{ "knowledge": false }`。
+上传和生成的文件可通过 MCP 工具 `downloadFileUrl` 获取下载链接，也可以通过 MCP 工具 `viewFileUrl` 获取预览链接——文件和目录可通过 MCP 工具 `deleteFileOrDirectory` 删除（需显式传入 `I_CONFIRM_DELETE` 确认 — token 可在 `spring.ai.loom.agent.file.deleteConfirmToken` 改，支持递归删除目录，并清理已删除文件对应的临时 `file_info` 记录）——"文件"入口可统一查看、预览、下载和删除所有非知识库文件（含工具上传的文件和 git 仓库）。
 
 ## MCP服务
 以时间MCP服务为例，添加依赖：
@@ -175,48 +152,32 @@ spring:
 ```yaml
 spring:
  ai:
- mcp:
- client:
- stdio:
- servers-configuration: classpath:mcp-servers.json
+  mcp:
+    client:
+      stdio:
+        servers-configuration: classpath:mcp-servers.json
 ```
 
-mcp-servers.json:
+`mcp-servers.json`:
+
 ```json
 {
- "mcpServers": {
- "time": {
- "command": "uvx",
- "args": [
- "mcp-server-time",
- "--local-timezone=Asia/Shanghai"
- ]
- }
- }
+  "mcpServers": {
+    "time": {
+      "command": "uvx", 
+      "args": [
+        "mcp-server-time", 
+        "--local-timezone=Asia/Shanghai"
+      ]
+    }
+  }
 }
 ```
 
-MCP服务按钮可弹出面板查看目前拥有的MCP服务信息：
+`工具`按钮可弹出面板查看目前拥有的工具信息：
 ![img_3.png](docs/img_3.png)
 
 ![技能市场 — V20 两段式：列表 → 详情](docs/img_skill-market.png)
-
-可以通过配置为工具添加中文名和描述：
-```yaml
-spring:
- ai:
- loom:
- agent:
- mcps:
- - name: spring-ai-mcp-client - time
- title: 时间
- description:
- 一个提供时间和时区转换功能的模型上下文协议服务——该服务使大型语言模型能够获取当前时间信息，并使用IANA时区名称进行时区转换，同时具备自动检测系统时区的功能——tools:
- - name: get_current_time
- description: 获取指定时区的当前时间
- - name: convert_time
- description: 在不同时区之间转换时间
-```
 
 ## 技能市场
 
@@ -277,6 +238,40 @@ spring:
 - **我的发布** — 查看自己提交到市场的知识库状态（PENDING / APPROVED / REJECTED，展示拒绝原因）。点列表项 → 右侧详情面板撤回按钮（文案随状态变化）；知识库撤回会级联清理 `loom_user_knowledge`（订阅者行）+ `loom_role_knowledge`（角色授权）。REJECTED 可重新提交 —— 旧行归档（`loom_market_knowledge_archive`）+ 新建 PENDING 行。
 
 市场流程：提交 → PENDING → admin 审批通过 → APPROVED → 其他用户可订阅。也可通过角色授权自动下发知识库给用户（类似技能）。知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)。
+
+### 更换其它RAG以替换默认实现
+下面以qdrant向量数据库为例，添加依赖和配置：
+```xml
+<dependency>
+ <groupId>org.springframework.ai</groupId>
+ <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
+</dependency>
+```
+
+添加配置：
+```yaml
+spring:
+  ai:
+    vectorstore:
+      qdrant:
+        host: localhost
+        port: 6334
+        collection-name: qwen-collection-name
+```
+
+其它rag可选配置如下：
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        rag:
+          enabled: true # 知识空间全局开关,默认 true。设 false 跳过 VectorStore/H2 JVector 初始化(零 embedding 调用)并隐藏 📚 知识空间按钮
+          similarityThreshold: 0.50 # 相似度阈值,默认0.0
+          top-k: 4 # top-k，默认4
+```
+
+> `rag.enabled=false`(或容器内无 `EmbeddingModel` bean,例如 `spring.ai.model.embedding.text=none`)会干净地关闭整条 RAG 链 —— 应用照常启动,知识库元数据 CRUD 保留,前端隐藏知识空间入口。`GET /spring/ai/loom/api/features` 返回 `{ "knowledge": false }`。
 
 ## 管理控制台
 
