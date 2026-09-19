@@ -42,6 +42,8 @@ class DefaultChatTest {
  private IToolCallLogRepository toolCallLogRepository;
  private ISkillStorage skillStorage;
  private HttpServletRequest request;
+ private LoomAgentProperties properties;
+ private IRoleService roleService;
 
  @BeforeEach
  @SuppressWarnings("unchecked")
@@ -72,10 +74,11 @@ class DefaultChatTest {
  });
  IKnowledge knowledge = mock(IKnowledge.class);
  when(knowledge.list(anyString())).thenReturn(List.of());
- LoomAgentProperties properties = mock(LoomAgentProperties.class);
+ properties = mock(LoomAgentProperties.class);
  when(properties.getDefaultSystem()).thenReturn("base-system");
+ when(properties.getRag()).thenReturn(new LoomAgentProperties.RagProperty());
 
- IRoleService roleService = mock(IRoleService.class);
+ roleService = mock(IRoleService.class);
  when(roleService.getVisibleMcpsForUser(anyString())).thenReturn(List.of());
  when(roleService.getVisibleToolsForUser(anyString())).thenReturn(List.of());
 
@@ -268,5 +271,55 @@ class DefaultChatTest {
   assertTrue(prompt.contains("当前用户未配置技能 / 知识库 / MCP 工具"),
     "空配置应走兜底分支");
   assertTrue(prompt.contains("直接基于通用知识回答"), "兜底说明句应在");
+ }
+
+ // ============= buildDynamicSystemPrompt 【平台能力】注入语义 =============
+
+ @Test
+ @DisplayName("buildDynamicSystemPrompt：【平台能力】段注入 UI 级能力 + 元问题引导句")
+ void buildDynamicSystemPrompt_platformCapabilitiesSection() {
+  String prompt = chat.buildDynamicSystemPrompt("alice", java.util.List.of());
+
+  assertTrue(prompt.startsWith("base-system"), "消费方 persona 仍在最前,平台能力段不 parasitic defaultSystem");
+  assertTrue(prompt.contains("【平台能力】"), "应有平台能力段");
+  assertTrue(prompt.contains("画板"), "UI 能力:画板");
+  assertTrue(prompt.contains("知识空间"), "UI 能力:知识空间(rag 默认开)");
+  assertTrue(prompt.contains("技能市场"), "UI 能力:技能市场");
+  assertTrue(prompt.contains("子任务"), "UI 能力:子任务");
+  assertTrue(prompt.contains("定时任务"), "UI 能力:定时任务");
+  assertTrue(prompt.contains("文件管理"), "UI 能力:文件管理");
+  assertTrue(prompt.contains("未列出的能力"), "应有'只按真实能力自述'的元问题引导句");
+ }
+
+ @Test
+ @DisplayName("buildDynamicSystemPrompt：RBAC 工具仅授权时提及 — 未授权用户不被承诺 Git/编译部署")
+ void buildDynamicSystemPrompt_rbacToolLinesFollowRoleGrants() {
+  // setUp 默认 getVisibleToolsForUser → List.of():未授权任何 RBAC 工具
+  String denied = chat.buildDynamicSystemPrompt("alice", java.util.List.of());
+  assertFalse(denied.contains("Git 仓库"), "未授权 tool_git 不应提及 Git 能力");
+  assertFalse(denied.contains("编译部署"), "未授权 tool_compile 不应提及部署能力");
+  assertFalse(denied.contains("Maven 构建"), "未授权 tool_maven 不应提及 Maven 能力");
+  assertFalse(denied.contains("渲染截图"), "未授权 tool_render 不应提及渲染能力");
+
+  when(roleService.getVisibleToolsForUser("bob"))
+    .thenReturn(java.util.List.of("tool_git", "tool_compile"));
+  String granted = chat.buildDynamicSystemPrompt("bob", java.util.List.of());
+  assertTrue(granted.contains("Git 仓库"), "授权 tool_git 应提及");
+  assertTrue(granted.contains("编译部署"), "授权 tool_compile 应提及");
+  assertFalse(granted.contains("Maven 构建"), "未授权的 tool_maven 仍不应出现");
+  assertFalse(granted.contains("渲染截图"), "未授权的 tool_render 仍不应出现");
+ }
+
+ @Test
+ @DisplayName("buildDynamicSystemPrompt：rag.enabled=false → 平台能力段不提知识空间")
+ void buildDynamicSystemPrompt_ragDisabledHidesKnowledgeLine() {
+  LoomAgentProperties.RagProperty ragOff = new LoomAgentProperties.RagProperty();
+  ragOff.setEnabled(false);
+  when(properties.getRag()).thenReturn(ragOff);
+
+  String prompt = chat.buildDynamicSystemPrompt("alice", java.util.List.of());
+
+  assertTrue(prompt.contains("【平台能力】"));
+  assertFalse(prompt.contains("知识空间"), "RAG 关闭的部署不应承诺知识空间");
  }
 }

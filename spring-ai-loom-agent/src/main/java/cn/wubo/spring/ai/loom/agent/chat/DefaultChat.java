@@ -299,6 +299,35 @@ public class DefaultChat implements IChat {
   // Base system prompt from properties (极简: 角色定义)
   sb.append(properties.getDefaultSystem());
 
+  // 【平台能力】— 产品级能力摘要,让模型在用户问"你有什么功能"时能准确自述。
+  // - UI 段:对所有登录用户一致;知识空间行跟随 rag.enabled(关闭的部署不承诺)
+  // - RBAC 工具段:按 visibleToolGroupsFor(username) 动态生成,与本次会话真实
+  //   下发的 tool callback filter 严格一致 —— 未授权的能力绝不向用户承诺
+  // - 独立于 defaultSystem(消费方 persona 定制点):覆盖 defaultSystem 不丢平台自述
+  sb.append("\n\n【平台能力】\n");
+  sb.append("• 多轮流式对话，支持上传图片/文档附件（含画板手绘导出的 PNG）\n");
+  sb.append("• 画板：手绘界面草图 / 示意图，作为聊天附件发送\n");
+  if (properties.getRag() == null || properties.getRag().isEnabled()) {
+   sb.append("• 知识空间：上传管理知识库，会话中启用检索增强\n");
+  }
+  sb.append("• 技能市场：浏览 / 提交 / 拉取 Prompt 技能\n");
+  sb.append("• 子任务与定时任务：委派后台执行、按计划自动运行\n");
+  sb.append("• 文件管理：预览 / 下载 / 删除上传与工具产生的文件\n");
+  java.util.Set<String> visibleToolGroups = capabilityService.visibleToolGroupsFor(username);
+  if (visibleToolGroups.contains("tool_git")) {
+   sb.append("• Git 仓库管理：clone / commit / push / 分支等仓库操作\n");
+  }
+  if (visibleToolGroups.contains("tool_maven")) {
+   sb.append("• Maven 构建：编译 / 打包 / 测试 / 依赖树\n");
+  }
+  if (visibleToolGroups.contains("tool_compile")) {
+   sb.append("• 端到端编译部署：构建 → Docker 镜像 → 容器启动 → 健康检查\n");
+  }
+  if (visibleToolGroups.contains("tool_render")) {
+   sb.append("• HTML 渲染截图：把单页 HTML 渲染成界面原型图\n");
+  }
+  sb.append("\n当用户询问你有哪些功能时，基于本提示中列出的真实能力（含下方【技能】【知识库】清单）回答；未列出的能力不要提及。");
+
   // 动态拼装可用能力 + 对应使用说明
   // - skills: 列技能 + 调 getSkill 的说明
   // - knowledge bases: 列用户启用的 KB + 调 searchKnowledge 的说明
