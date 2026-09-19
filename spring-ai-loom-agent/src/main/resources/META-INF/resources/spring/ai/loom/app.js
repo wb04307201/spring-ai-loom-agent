@@ -6237,19 +6237,6 @@ const init = async () => {
   }
 
   try {
-    const uploadOk = await api.checkKnowledgeUpload();
-    if (uploadOk) {
-      const ib = document.getElementById("image-add-btn");
-      if (ib) ib.style.display = "flex";
-      // 画板按钮与 + 上传按钮同门联动:上传链路不可用时一起保持隐藏
-      const cb = document.getElementById("canvas-add-btn");
-      if (cb) cb.style.display = "flex";
-    }
-  } catch (e) {
-    console.warn("[init] checkKnowledgeUpload failed, continuing:", e);
-  }
-
-  try {
     await conversation.loadList();
   } catch (e) {
     console.warn("[init] conversation.loadList failed, continuing:", e);

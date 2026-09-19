@@ -25,24 +25,54 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 上传管线默认实现 —— 两条腿、两种依赖边界(2026-09-19 解耦改造):
+ * <ul>
+ *   <li><b>聊天附件腿</b>({@link #upload}):落盘 {@code {usersBasePath}/{username}/file/}
+ *       + file_info 元数据。<b>不依赖任何 RAG 组件</b> —— 无 embedding 的纯聊天部署
+ *       同样完整可用(IUpload bean 恒在,见 autoconfigure StorageConfiguration)。</li>
+ *   <li><b>知识上传腿</b>({@link #uploadWithKnowledge} / {@link #delete} 的知识分支):
+ *       需要 {@link IDocumentRead}(解析切块)与 {@link VectorStore}(向量化)。
+ *       二者经 {@link org.springframework.beans.factory.ObjectProvider} 注入:
+ *       降级部署(无 embedding/VectorStore)provider 为空 → 上传抛 503 业务错误、
+ *       删除跳过向量清理(元数据/存储照常清),不再把整条上传管线拖下水。</li>
+ * </ul>
+ */
 public class DefaultUpload implements IUpload {
 
     private final IFile file;
     private final IFileDocument fileDocument;
-    private final IDocumentRead documentRead;
-    private final VectorStore vectorStore;
+    private final org.springframework.beans.factory.ObjectProvider<IDocumentRead> documentReadProvider;
+    private final org.springframework.beans.factory.ObjectProvider<VectorStore> vectorStoreProvider;
     private final IKnowledge knowledge;
     private final IFileStorage fileStorage;
     private final String usersBasePath;
 
-    public DefaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, IFileStorage fileStorage, String usersBasePath) {
+    public DefaultUpload(IFile file, IFileDocument fileDocument,
+                         org.springframework.beans.factory.ObjectProvider<IDocumentRead> documentReadProvider,
+                         org.springframework.beans.factory.ObjectProvider<VectorStore> vectorStoreProvider,
+                         IKnowledge knowledge, IFileStorage fileStorage, String usersBasePath) {
         this.file = file;
         this.fileDocument = fileDocument;
-        this.documentRead = documentRead;
-        this.vectorStore = vectorStore;
+        this.documentReadProvider = documentReadProvider;
+        this.vectorStoreProvider = vectorStoreProvider;
         this.knowledge = knowledge;
         this.fileStorage = fileStorage;
         this.usersBasePath = usersBasePath;
+    }
+
+    /** 知识腿依赖门:降级部署(无 embedding/VectorStore)抛 503 业务错误。 */
+    private record KnowledgeLeg(IDocumentRead documentRead, VectorStore vectorStore) {
+    }
+
+    private KnowledgeLeg knowledgeLegOrThrow() {
+        IDocumentRead documentRead = documentReadProvider.getIfAvailable();
+        VectorStore vectorStore = vectorStoreProvider.getIfAvailable();
+        if (documentRead == null || vectorStore == null) {
+            throw new LoomAgentRuntimeException(503,
+                    "当前部署未启用知识空间(未配置 embedding / 无 VectorStore),知识库上传不可用");
+        }
+        return new KnowledgeLeg(documentRead, vectorStore);
     }
 
     /**
@@ -129,6 +159,8 @@ public class DefaultUpload implements IUpload {
 
     @Override
     public String uploadWithKnowledge(InputStream is, String fileName, String mimeType, String knowledgeId) {
+        // 先过依赖门再落存储,避免降级部署留下孤儿内容
+        KnowledgeLeg leg = knowledgeLegOrThrow();
         String username = UserContextHolder.getCurrentUser();
         try {
             // 通过 IFileStorage 保存文件内容（数据库或磁盘）
@@ -138,8 +170,8 @@ public class DefaultUpload implements IUpload {
             byte[] content = fileStorage.read(location);
             String resolvedMimeType = resolveMimeType(fileName, mimeType);
             Resource resource = new InputStreamResource(new ByteArrayInputStream(content), fileName);
-            List<Document> documents = documentRead.read(resource, knowledgeId);
-            vectorStore.add(documents);
+            List<Document> documents = leg.documentRead().read(resource, knowledgeId);
+            leg.vectorStore().add(documents);
 
             // 生成唯一 fileId 用于元数据关联
             String fileId = UUID.randomUUID().toString();
@@ -173,7 +205,11 @@ public class DefaultUpload implements IUpload {
         FileRecord fileRecord = file.getById(fileId, username);
         if (StringUtils.hasText(fileRecord.knowledgeId())) {
             List<FileDocumentRecord> fileDocumentRecords = fileDocument.getListByFileId(fileId);
-            vectorStore.delete(fileDocumentRecords.stream().map(FileDocumentRecord::documentId).toList());
+            // 降级部署(后来关掉 embedding)无 store 可清:跳过向量删除,元数据/存储照常清
+            VectorStore vectorStore = vectorStoreProvider.getIfAvailable();
+            if (vectorStore != null) {
+                vectorStore.delete(fileDocumentRecords.stream().map(FileDocumentRecord::documentId).toList());
+            }
             fileDocument.deleteByFileId(fileId);
             // 通过 IFileStorage 删除实际文件内容
             fileStorage.delete(fileId);

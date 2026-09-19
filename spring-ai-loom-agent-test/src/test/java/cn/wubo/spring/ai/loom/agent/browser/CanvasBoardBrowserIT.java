@@ -14,9 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ol>
  *   <li><b>入口按钮</b>:{@code #canvas-add-btn} 位于输入区 {@code .input-row},
  *       紧邻 {@code #image-add-btn}(+ 上传按钮)右侧,同款 {@code .image-add-btn}
- *       样式类。显隐与 + 按钮<b>同门联动</b>:app.js init 段
- *       {@code api.checkKnowledgeUpload()} 通过后才置 {@code display:flex}
- *       (上传链路不可用时两个按钮一起保持隐藏)→ 断言前须先等 + 按钮可见。</li>
+ *       样式类。<b>恒可见</b>(2026-09-19 解耦:聊天附件/画板不依赖 RAG,
+ *       无 embedding 部署同样显示);{@link #waitForUploadGate} 保留作渲染就绪兜底。</li>
  *   <li><b>模态框</b>:{@code #canvas-modal-overlay}(沿用 {@code .modal-overlay}
  *       惯例,showModal/hideModal 设 inline {@code display:flex/none}),内含
  *       画布 {@code <canvas id="canvas-board">}、取消 {@code #canvas-cancel-btn}、
@@ -62,7 +61,7 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
         return page;
     }
 
-    /** 等待 + 按钮被 init 的 checkKnowledgeUpload 门放行(display:flex)。 */
+    /** 输入行渲染就绪兜底等待(按钮自 2026-09-19 解耦后恒可见,不再承担门控语义)。 */
     private void waitForUploadGate(Page page) {
         page.waitForFunction(
                 "() => { const b = document.getElementById('image-add-btn');"

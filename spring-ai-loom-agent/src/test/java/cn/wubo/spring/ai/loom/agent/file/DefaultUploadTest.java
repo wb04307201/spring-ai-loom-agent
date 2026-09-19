@@ -38,19 +38,62 @@ class DefaultUploadTest {
  private IFile file;
  private IFileDocument fileDocument;
  private IFileStorage fileStorage;
+ private IDocumentRead documentRead;
  private VectorStore vectorStore;
  private DefaultUpload upload;
+
+ /** 单例 provider(知识腿依赖在场)。 */
+ private static <T> org.springframework.beans.factory.ObjectProvider<T> providerOf(T bean) {
+  return new org.springframework.beans.factory.ObjectProvider<>() {
+   @Override
+   public T getObject() {
+    return bean;
+   }
+
+   @Override
+   public T getIfAvailable() {
+    return bean;
+   }
+
+   @Override
+   public T getIfUnique() {
+    return bean;
+   }
+  };
+ }
+
+ /** 空 provider(降级部署:无 embedding/VectorStore)。 */
+ private static <T> org.springframework.beans.factory.ObjectProvider<T> emptyProvider(Class<T> type) {
+  return new org.springframework.beans.factory.ObjectProvider<>() {
+   @Override
+   public T getObject() {
+    throw new org.springframework.beans.factory.NoSuchBeanDefinitionException(type);
+   }
+
+   @Override
+   public T getIfAvailable() {
+    return null;
+   }
+
+   @Override
+   public T getIfUnique() {
+    return null;
+   }
+  };
+ }
 
  @BeforeEach
  void setUp() {
  UserContextHolder.setCurrentUser("alice");
  file = mock(IFile.class);
  fileDocument = mock(IFileDocument.class);
- IDocumentRead documentRead = mock(IDocumentRead.class);
+ documentRead = mock(IDocumentRead.class);
  vectorStore = mock(VectorStore.class);
  IKnowledge knowledge = mock(IKnowledge.class);
  fileStorage = mock(IFileStorage.class);
- upload = new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, fileStorage, tempDir.toString());
+ upload = new DefaultUpload(file, fileDocument,
+  providerOf(documentRead), providerOf(vectorStore),
+  knowledge, fileStorage, tempDir.toString());
  }
 
  @AfterEach
@@ -96,8 +139,9 @@ class DefaultUploadTest {
  when(fileStorage.read("loc-1")).thenReturn("content".getBytes());
  IDocumentRead documentRead = mock(IDocumentRead.class);
  // 重新装配以注入可控 documentRead
- DefaultUpload u = new DefaultUpload(file, fileDocument, documentRead, vectorStore,
- mock(IKnowledge.class), fileStorage, tempDir.toString());
+ DefaultUpload u = new DefaultUpload(file, fileDocument,
+  providerOf(documentRead), providerOf(vectorStore),
+  mock(IKnowledge.class), fileStorage, tempDir.toString());
  when(documentRead.read(any(), anyString())).thenReturn(List.of(new Document("d1"), new Document("d2")));
 
  String fileId = u.uploadWithKnowledge(in("content"), "doc.txt", "text/plain", "kb-1");
@@ -129,5 +173,44 @@ class DefaultUploadTest {
 
  assertFalse(Files.exists(Path.of(record.path())), "磁盘文件应被删除");
  verify(file).delete(fileId, "alice");
+ }
+
+ @Test
+ @DisplayName("降级部署(无 VectorStore):聊天附件腿照常,知识腿抛 503 业务错误")
+ void degradedDeploymentChatLegWorksKnowledgeLegThrows503() {
+ DefaultUpload degraded = new DefaultUpload(file, fileDocument,
+  emptyProvider(IDocumentRead.class), emptyProvider(VectorStore.class),
+  mock(IKnowledge.class), fileStorage, tempDir.toString());
+
+ // 聊天附件腿不依赖 RAG:落盘 + file_info 照常
+ String fileId = degraded.upload(in("hello"), "chat.txt", "text/plain");
+ assertNotNull(fileId);
+ verify(file).insert(any(FileRecord.class), anyString());
+ assertTrue(Files.exists(tempDir.resolve("alice").resolve("file").resolve("chat.txt")));
+
+ // 知识腿:依赖门前置,抛 503 业务错误(不落孤儿存储)
+ cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException ex =
+  assertThrows(cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException.class,
+   () -> degraded.uploadWithKnowledge(in("c"), "doc.txt", "text/plain", "kb-1"));
+ assertTrue(ex.getMessage().contains("知识空间"), "错误文案应指明知识空间未启用: " + ex.getMessage());
+ verifyNoInteractions(fileStorage);
+ }
+
+ @Test
+ @DisplayName("降级部署删除知识库文件:跳过向量清理,元数据/存储照常清")
+ void degradedDeploymentDeleteSkipsVectorCleanup() {
+ DefaultUpload degraded = new DefaultUpload(file, fileDocument,
+  emptyProvider(IDocumentRead.class), emptyProvider(VectorStore.class),
+  mock(IKnowledge.class), fileStorage, tempDir.toString());
+ FileRecord record = new FileRecord("fid-1", "kb-1", "doc.txt", 3L,
+  java.time.LocalDateTime.now(), "loc-1", "knowledge", "text/plain");
+ when(file.getById("fid-1", "alice")).thenReturn(record);
+ when(fileDocument.getListByFileId("fid-1")).thenReturn(List.of(new FileDocumentRecord("fid-1", "d1")));
+
+ degraded.delete("fid-1");
+
+ verify(fileDocument).deleteByFileId("fid-1");
+ verify(fileStorage).delete("fid-1");
+ // 无 VectorStore 可清:不抛错、流程走完
  }
 }
