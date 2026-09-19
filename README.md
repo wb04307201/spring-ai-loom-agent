@@ -28,7 +28,7 @@
 
 ## Features
 
-> **6 Pillars**: 💬 Chat · Knowledge · 📁 Files · 🔧 MCP · 🧠 Skill · 🛡 RBAC
+> **7 Pillars**: 💬 Chat · 📚 Knowledge · 📁 Files · 🔧 MCP · 🧠 Skill · 🎨 Canvas · 🛡 RBAC
 > **Platform**: 🧠 Skill Market · Knowledge Market · 🎛 Admin Console
 > **Advanced**: 🧩 Sub-tasks · ⏰ Scheduled tasks · 🖼 Multimodal — one dependency, batteries included.
 
@@ -41,6 +41,7 @@
 - **🛡 RBAC** — Two levels: user type (admin / user) + business roles; admin sees all, normal users get the union of their roles' grants
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
+- **🎨 Canvas Board** — full-screen drawing modal: 6 drawing tools + 18 web-UI stencils (CRUD prototype skeleton pieces) with a select tool for move / resize / label editing; exports a white-background PNG as a chat attachment, forming a prototype workflow with multimodal models or the HTML render tool
 - **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render; see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
