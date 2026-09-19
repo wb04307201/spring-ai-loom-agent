@@ -9,7 +9,6 @@ import cn.wubo.spring.ai.loom.agent.market.MarketUpdateRequest;
 import cn.wubo.spring.ai.loom.agent.market.Page;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest;
-import cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest;
 import cn.wubo.spring.ai.loom.agent.model.UserSkill;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -122,7 +121,7 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
      * admin 直发 APPROVED — 可信主路径,绕过 PENDING 审批 (Task 2 / #4)。
      * 落 {@code status='APPROVED', created_by_kind='ADMIN', reviewed_at=NOW,
      * reviewed_by=adminUsername, category=req.category};先按 author+name 查重,
-     * 同名已存在抛 422 (镜像 adminCreate 的查重语义)。
+     * 同名已存在抛 422。
      */
     @Override
     @Transactional
@@ -373,71 +372,7 @@ public class DefaultSkillMarketService extends AbstractMarketAdminService<Long, 
         return get(marketId);
     }
 
-    /* ===== ISkillMarketService — admin 直接 CRUD ===== */
-
-    /**
-     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由 {@link #createApproved(String, MarketCreateRequest)} 取代
-     */
-    @Deprecated
-    @Override
-    @Transactional
-    public MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req) {
-        if (req.name() == null || req.name().isBlank()) {
-            throw new LoomAgentRuntimeException("name 不能为空");
-        }
-        if (req.content() == null || req.content().isBlank()) {
-            throw new LoomAgentRuntimeException("content 不能为空");
-        }
-        String status = req.status() == null ? MarketSkill.STATUS_APPROVED : req.status();
-        Integer dup = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM market_skill WHERE author = ? AND name = ?",
-                Integer.class, adminUsername, req.name());
-        if (dup != null && dup > 0) {
-            throw new LoomAgentRuntimeException("已存在同名 Skill:author=" + adminUsername + " name=" + req.name());
-        }
-        jdbc.update(
-                "INSERT INTO market_skill (name, description, content, author, status, " +
-                        "reviewed_at, reviewed_by) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
-                req.name(), req.description(), req.content(),
-                adminUsername, status, adminUsername);
-        Long id = jdbc.queryForObject(
-                "SELECT MAX(id) FROM market_skill WHERE author = ? AND name = ?",
-                Long.class, adminUsername, req.name());
-        return get(id);
-    }
-
-    /**
-     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由 {@link #update(Long, MarketUpdateRequest)} 取代
-     */
-    @Deprecated
-    @Override
-    @Transactional
-    public MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req) {
-        MarketSkill existing = get(id);
-        jdbc.update(
-                "UPDATE market_skill SET name = ?, description = ?, content = ?, " +
-                        "status = COALESCE(?, status) WHERE id = ?",
-                req.name() == null ? existing.name() : req.name(),
-                req.description() == null ? existing.description() : req.description(),
-                req.content() == null ? existing.content() : req.content(),
-                req.status(),
-                id);
-        return get(id);
-    }
-
-    /**
-     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由 {@link #delete(Long)}（含 cascadeCleanup 级联）取代
-     */
-    @Deprecated
-    @Override
-    @Transactional
-    public void adminDelete(String adminUsername, Long id) {
-        // 先把 user_skill / role_skill 里所有引用清掉
-        jdbc.update("DELETE FROM user_skill WHERE market_skill_id = ?", id);
-        jdbc.update("DELETE FROM role_skill WHERE market_skill_id = ?", id);
-        int n = jdbc.update("DELETE FROM market_skill WHERE id = ?", id);
-        if (n == 0) throw new LoomAgentRuntimeException("Skill 不存在: id=" + id);
-    }
+    /* ===== IMarketContentAdminService 级联清理 ===== */
 
     @Override
     protected void cascadeCleanup(Long id) {
