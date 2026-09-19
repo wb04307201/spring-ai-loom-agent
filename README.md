@@ -131,7 +131,7 @@ Visit `http://localhost:8080/spring/ai/loom`
 ![Knowledge Market — V22 two-stage list → detail panel](docs/img_kb-market.png)
 
 ## Document Upload & Conversation
-Click the `+` button next to the input field to upload images or documents. After uploading, type your question and send it. Click the ✎ button right of `+` to open the **drawing canvas**: freehand drawing (pen / line / rectangle / ellipse / text / eraser, with color swatches, stroke width, undo/redo); **Confirm** exports a white-background PNG that is attached to the message like any uploaded image.
+Click the `+` button next to the input field to upload images or documents. After uploading, type your question and send it. Click the ✎ button right of `+` to open the **drawing canvas**: freehand drawing (pen / line / rectangle / ellipse / text / eraser, with color swatches, stroke width, undo/redo) plus 8 built-in web UI stencils (button / input / card / navbar / image placeholder / checkbox / radio / select — movable, resizable, double-click to edit labels) for quickly sketching UI prototypes; **Confirm** exports a white-background PNG that is attached to the message like any uploaded image (pairs with multimodal models or the HTML render tool for a prototype workflow).
 
 ### Supported Document Formats
 PDF, DOCX, XLSX, PPTX, MD, TXT, HTML, CSV, RTF, and more.
