@@ -4157,3 +4157,37 @@ textarea::placeholder {
   background: rgba(79, 70, 229, 0.1);
   color: var(--primary-color);
 }
+
+/* 组件分类弹出面板(18 件印章收纳) */
+.canvas-stencil-host {
+  position: relative;
+}
+
+.canvas-stencil-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  padding: 14px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  width: max-content;
+  max-width: 420px;
+}
+
+.canvas-panel-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-panel-group .canvas-group-label {
+  width: 100%;
+  margin-bottom: 2px;
+}

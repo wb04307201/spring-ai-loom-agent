@@ -683,16 +683,40 @@
             <button class="canvas-tool-btn" data-tool="text" title="文字">T</button>
             <button class="canvas-tool-btn" data-tool="eraser" title="橡皮(点击笔画整体擦除)">⌫</button>
           </div>
-          <div class="canvas-tool-group" id="canvas-stencils">
-            <span class="canvas-group-label">组件</span>
-            <button class="canvas-stencil-btn" data-stencil="button" title="按钮">按钮</button>
-            <button class="canvas-stencil-btn" data-stencil="input" title="输入框">输入</button>
-            <button class="canvas-stencil-btn" data-stencil="card" title="卡片">卡片</button>
-            <button class="canvas-stencil-btn" data-stencil="navbar" title="导航栏">导航</button>
-            <button class="canvas-stencil-btn" data-stencil="imgph" title="图片占位">图片</button>
-            <button class="canvas-stencil-btn" data-stencil="checkbox" title="复选框">勾选</button>
-            <button class="canvas-stencil-btn" data-stencil="radio" title="单选框">单选</button>
-            <button class="canvas-stencil-btn" data-stencil="select" title="下拉选择">下拉</button>
+          <div class="canvas-tool-group canvas-stencil-host">
+            <button class="canvas-tool-btn" id="canvas-stencil-toggle" title="Web UI 组件(18 件,CRUD 原型骨架)">组件 ▾</button>
+            <div id="canvas-stencil-panel" class="canvas-stencil-panel" style="display: none">
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">基础</span>
+                <button class="canvas-stencil-btn" data-stencil="button" title="按钮">按钮</button>
+                <button class="canvas-stencil-btn" data-stencil="input" title="输入框">输入</button>
+                <button class="canvas-stencil-btn" data-stencil="textarea" title="多行输入">多行</button>
+                <button class="canvas-stencil-btn" data-stencil="tag" title="状态标签">标签</button>
+                <button class="canvas-stencil-btn" data-stencil="switch" title="开关">开关</button>
+                <button class="canvas-stencil-btn" data-stencil="imgph" title="图片占位">图片</button>
+              </div>
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">表单</span>
+                <button class="canvas-stencil-btn" data-stencil="formitem" title="表单字段(标签+输入框)">字段</button>
+                <button class="canvas-stencil-btn" data-stencil="checkbox" title="复选框">勾选</button>
+                <button class="canvas-stencil-btn" data-stencil="radio" title="单选框">单选</button>
+                <button class="canvas-stencil-btn" data-stencil="select" title="下拉选择">下拉</button>
+              </div>
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">数据展示</span>
+                <button class="canvas-stencil-btn" data-stencil="table" title="数据表格(表头列名逗号分隔)">表格</button>
+                <button class="canvas-stencil-btn" data-stencil="pagination" title="分页条">分页</button>
+                <button class="canvas-stencil-btn" data-stencil="toolbar" title="操作栏(搜索+主按钮)">操作栏</button>
+              </div>
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">导航/容器</span>
+                <button class="canvas-stencil-btn" data-stencil="navbar" title="导航栏">导航</button>
+                <button class="canvas-stencil-btn" data-stencil="tabs" title="页签(逗号分隔)">页签</button>
+                <button class="canvas-stencil-btn" data-stencil="breadcrumb" title="面包屑(逗号分隔)">面包屑</button>
+                <button class="canvas-stencil-btn" data-stencil="modal" title="对话框">对话框</button>
+                <button class="canvas-stencil-btn" data-stencil="card" title="卡片">卡片</button>
+              </div>
+            </div>
           </div>
           <div class="canvas-tool-group" id="canvas-colors">
             <button class="canvas-swatch active" data-color="#000000" style="background:#000000" title="黑色"></button>

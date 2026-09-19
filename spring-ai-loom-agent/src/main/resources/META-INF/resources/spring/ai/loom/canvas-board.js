@@ -23,16 +23,27 @@
   const HANDLE_HIT = 8; // 手柄命中半径
   const MIN_SIZE = 10; // 缩放最小边长
 
-  /** Web 组件元数据:默认尺寸 / 是否有文案 / 文案浮层占位符。 */
+  /** Web 组件元数据:默认尺寸 / 是否有文案 / 默认文案 / 文案浮层占位符。
+   * 多段文案(表格列名/页签名/面包屑)用中英文逗号分隔。 */
   const STENCILS = {
     button: { defW: 120, defH: 40, hasText: true, placeholder: "按钮文案" },
     input: { defW: 200, defH: 40, hasText: true, placeholder: "占位提示" },
-    card: { defW: 240, defH: 160, hasText: true, placeholder: "卡片标题" },
-    navbar: { defW: 480, defH: 56, hasText: true, placeholder: "页面标题" },
+    textarea: { defW: 240, defH: 96, hasText: true, defaultText: "请输入描述…", placeholder: "首行占位文案" },
+    tag: { defW: 72, defH: 24, hasText: true, defaultText: "已启用", placeholder: "标签文字" },
+    switch: { defW: 96, defH: 28, hasText: true, defaultText: "启用", placeholder: "开关标签" },
     imgph: { defW: 160, defH: 120, hasText: false },
+    formitem: { defW: 240, defH: 64, hasText: true, defaultText: "字段名", placeholder: "字段标签" },
     checkbox: { defW: 120, defH: 24, hasText: true, placeholder: "选项" },
     radio: { defW: 120, defH: 24, hasText: true, placeholder: "选项" },
     select: { defW: 160, defH: 40, hasText: true, placeholder: "请选择" },
+    table: { defW: 480, defH: 220, hasText: true, defaultText: "名称,状态,操作", placeholder: "表头列名(逗号分隔)" },
+    pagination: { defW: 240, defH: 32, hasText: false },
+    toolbar: { defW: 480, defH: 48, hasText: true, defaultText: "新建", placeholder: "主按钮文案" },
+    navbar: { defW: 480, defH: 56, hasText: true, placeholder: "页面标题" },
+    tabs: { defW: 320, defH: 40, hasText: true, defaultText: "列表,已归档,回收站", placeholder: "页签名(逗号分隔)" },
+    breadcrumb: { defW: 240, defH: 24, hasText: true, defaultText: "首页,列表,详情", placeholder: "层级(逗号分隔)" },
+    modal: { defW: 360, defH: 240, hasText: true, defaultText: "对话框", placeholder: "对话框标题" },
+    card: { defW: 240, defH: 160, hasText: true, placeholder: "卡片标题" },
   };
   const STENCIL_TYPES = new Set(Object.keys(STENCILS));
 
@@ -79,11 +90,26 @@
           this.commitTextInput(); // 切工具时结算未提交的文字
         }));
 
+      // 组件面板开合:「组件 ▾」切换;选中印章/ Esc / 面板外点击 均收起
+      const stencilToggle = $("canvas-stencil-toggle");
+      const stencilPanel = $("canvas-stencil-panel");
+      stencilToggle?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        stencilPanel.style.display =
+          stencilPanel.style.display === "none" ? "grid" : "none";
+      });
+      document.addEventListener("pointerdown", (e) => {
+        if (!stencilPanel || stencilPanel.style.display === "none") return;
+        if (stencilPanel.contains(e.target) || e.target === stencilToggle) return;
+        stencilPanel.style.display = "none";
+      });
+
       // 组件印章选择
       document.querySelectorAll("#canvas-toolbar .canvas-stencil-btn")
         .forEach((btn) => btn.addEventListener("click", () => {
           this.tool = "stencil";
           this.stencilType = btn.dataset.stencil;
+          if (stencilPanel) stencilPanel.style.display = "none";
           document.querySelectorAll("#canvas-toolbar .canvas-tool-btn[data-tool]")
             .forEach((b) => b.classList.remove("active"));
           document.querySelectorAll("#canvas-toolbar .canvas-stencil-btn")
@@ -119,7 +145,8 @@
       canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
       canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
       canvas.addEventListener("pointerleave", (e) => this.onPointerUp(e));
-      // 双击组件改文字(选择工具语义,但不要求当前 tool=select,方便连续操作)
+      // 双击组件改文字(选择工具语义;印章/绘制工具下前两次 click 各自完成
+      // 放置/落笔,属预期行为 —— 改文案请切 ↖ 选择工具)
       canvas.addEventListener("dblclick", (e) => this.onDblClick(e));
 
       // 文字浮层输入:回车提交 / Esc 放弃;失焦提交
@@ -129,7 +156,7 @@
           e.preventDefault();
           this.commitTextInput();
         } else if (e.key === "Escape") {
-          textInput.value = "";
+          textInput.dataset.discard = "1";
           this.commitTextInput();
         }
       });
@@ -148,6 +175,12 @@
           this.manip = null;
           this.redraw();
         } else if (e.key === "Escape") {
+          // 面板开着时 Esc 只关面板,不清选中
+          const panel = $("canvas-stencil-panel");
+          if (panel && panel.style.display !== "none") {
+            panel.style.display = "none";
+            return;
+          }
           this.selectedId = null;
           this.manip = null;
           this.redraw();
@@ -191,6 +224,8 @@
         .forEach((b) => b.classList.toggle("active", b.dataset.tool === "pen"));
       document.querySelectorAll("#canvas-toolbar .canvas-stencil-btn")
         .forEach((b) => b.classList.remove("active"));
+      const panel = document.getElementById("canvas-stencil-panel");
+      if (panel) panel.style.display = "none";
     },
 
     /** 画布物理像素尺寸跟随容器 × devicePixelRatio;CSS 尺寸由样式表铺满。 */
@@ -303,7 +338,7 @@
         if (meta.hasText) {
           this.openTextInput({
             x: s.x, y: s.y, color: s.color, fontSize: 14,
-            targetId: s.id, placeholder: meta.placeholder, value: "",
+            targetId: s.id, placeholder: meta.placeholder, value: s.text,
           });
         }
         return;
@@ -553,11 +588,19 @@
         w = meta.defW; h = meta.defH;
         x = draft.x0 - w / 2; y = draft.y0 - h / 2;
       }
-      return { id: draft.id, type: draft.type, x, y, w, h, color: draft.color, text: "" };
+      return {
+        id: draft.id, type: draft.type, x, y, w, h, color: draft.color,
+        text: meta.defaultText || "",
+      };
     },
 
     textFontSize(lineWidth) {
       return 14 + (lineWidth || 3) * 2;
+    },
+
+    /** 多段文案切分(表格列名/页签/面包屑),中英文逗号皆可。 */
+    splitLabels(text) {
+      return String(text || "").split(/[,，]/).map((s) => s.trim()).filter(Boolean);
     },
 
     // ── 文字工具 / 组件文案浮层 ──
@@ -582,10 +625,14 @@
     commitTextInput() {
       const input = document.getElementById("canvas-text-input");
       if (!input || input.style.display === "none") return;
+      const discarded = input.dataset.discard === "1";
       const text = input.value.trim();
       const targetId = input.dataset.targetId || null;
       input.style.display = "none";
+      input.dataset.discard = "";
       input.value = "";
+
+      if (discarded) return; // Esc 放弃:保留既有文案(含组件默认文案)
 
       if (targetId) {
         // 组件文案:写入既有 shape(内容没变则不产生撤销步)
@@ -692,14 +739,15 @@
       ctx.fillStyle = s.color;
       ctx.font = "14px system-ui, sans-serif";
 
-      const roundRectPath = (r) => {
+      const rr = (x, y, w, h, r) => {
         ctx.beginPath();
         if (ctx.roundRect) {
-          ctx.roundRect(b.x, b.y, b.w, b.h, Math.min(r, b.w / 2, b.h / 2));
+          ctx.roundRect(x, y, w, h, Math.min(r, w / 2, h / 2));
         } else {
-          ctx.rect(b.x, b.y, b.w, b.h);
+          ctx.rect(x, y, w, h);
         }
       };
+      const roundRectPath = (r) => rr(b.x, b.y, b.w, b.h, r);
       const fillWhite = () => {
         ctx.save();
         ctx.fillStyle = "#ffffff";
@@ -833,6 +881,312 @@
             ctx.fill();
           }
           break;
+        case "textarea": {
+          rr(b.x, b.y, b.w, b.h, 4);
+          fillWhite();
+          ctx.stroke();
+          if (text) {
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            ctx.font = "12px system-ui, sans-serif";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+            ctx.fillText(text, b.x + 10, b.y + 8, b.w - 20);
+            ctx.restore();
+          }
+          // 占位横线
+          ctx.save();
+          ctx.globalAlpha = 0.25;
+          ctx.lineWidth = 1;
+          for (let ly = b.y + 30; ly < b.y + b.h - 14; ly += 18) {
+            ctx.beginPath();
+            ctx.moveTo(b.x + 10, ly);
+            ctx.lineTo(b.x + b.w - 10, ly);
+            ctx.stroke();
+          }
+          ctx.restore();
+          // 右下 resize 标记
+          ctx.save();
+          ctx.lineWidth = 1;
+          ctx.globalAlpha = 0.6;
+          ctx.beginPath();
+          ctx.moveTo(b.x + b.w - 10, b.y + b.h - 4);
+          ctx.lineTo(b.x + b.w - 4, b.y + b.h - 10);
+          ctx.moveTo(b.x + b.w - 14, b.y + b.h - 4);
+          ctx.lineTo(b.x + b.w - 4, b.y + b.h - 14);
+          ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case "tag": {
+          roundRectPath(b.h / 2);
+          ctx.save();
+          ctx.globalAlpha = 0.12;
+          ctx.fill();
+          ctx.restore();
+          ctx.stroke();
+          if (text) {
+            ctx.font = "12px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, b.x + b.w / 2, b.y + b.h / 2 + 1, b.w - 12);
+          }
+          break;
+        }
+        case "switch": {
+          const tw = Math.min(b.w * 0.5, 44);
+          const th = Math.min(b.h, 24);
+          const ty = b.y + (b.h - th) / 2;
+          rr(b.x, ty, tw, th, th / 2);
+          ctx.save();
+          ctx.globalAlpha = 0.2;
+          ctx.fill();
+          ctx.restore();
+          ctx.stroke();
+          // 滑块(开启态靠右)
+          ctx.beginPath();
+          ctx.arc(b.x + tw - th / 2, ty + th / 2, th / 2 - 3, 0, Math.PI * 2);
+          ctx.fill();
+          if (text) {
+            ctx.font = "13px system-ui, sans-serif";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, b.x + tw + 8, b.y + b.h / 2, b.w - tw - 8);
+          }
+          break;
+        }
+        case "formitem": {
+          ctx.font = "13px system-ui, sans-serif";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.fillText(text || " ", b.x, b.y + 2, b.w);
+          rr(b.x, b.y + 22, b.w, b.h - 22, 4);
+          fillWhite();
+          ctx.stroke();
+          break;
+        }
+        case "table": {
+          rr(b.x, b.y, b.w, b.h, 6);
+          fillWhite();
+          ctx.stroke();
+          const labels = this.splitLabels(text);
+          const cols = Math.max(labels.length, 1);
+          const colW = b.w / cols;
+          const headH = 36;
+          // 表头分隔线
+          ctx.beginPath();
+          ctx.moveTo(b.x + 1, b.y + headH);
+          ctx.lineTo(b.x + b.w - 1, b.y + headH);
+          ctx.stroke();
+          // 列分隔线(表头以下)
+          for (let c = 1; c < cols; c++) {
+            const cx0 = b.x + colW * c;
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(cx0, b.y + headH);
+            ctx.lineTo(cx0, b.y + b.h - 1);
+            ctx.stroke();
+            ctx.restore();
+          }
+          // 表头列名
+          ctx.font = "600 13px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          labels.forEach((lb, c) =>
+            ctx.fillText(lb, b.x + colW * (c + 0.5), b.y + headH / 2, colW - 12));
+          // 3 数据行:行分隔 + 数据淡线 + 操作列小按钮
+          const rows = 3;
+          const rowH = (b.h - headH) / rows;
+          for (let r = 0; r < rows; r++) {
+            const ry = b.y + headH + rowH * r;
+            if (r > 0) {
+              ctx.save();
+              ctx.globalAlpha = 0.5;
+              ctx.beginPath();
+              ctx.moveTo(b.x + 1, ry);
+              ctx.lineTo(b.x + b.w - 1, ry);
+              ctx.stroke();
+              ctx.restore();
+            }
+            for (let c = 0; c < cols - 1; c++) {
+              ctx.save();
+              ctx.globalAlpha = 0.25;
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.moveTo(b.x + colW * c + 12, ry + rowH / 2);
+              ctx.lineTo(b.x + colW * (c + 1) - 12, ry + rowH / 2);
+              ctx.stroke();
+              ctx.restore();
+            }
+            const ax = b.x + colW * (cols - 1);
+            for (let k = 0; k < 2; k++) {
+              rr(ax + 6 + k * (colW / 2 - 2), ry + rowH / 2 - 9, colW / 2 - 10, 18, 4);
+              ctx.save();
+              ctx.globalAlpha = 0.7;
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+          break;
+        }
+        case "pagination": {
+          const sz = Math.min(b.h, 28);
+          const y0 = b.y + (b.h - sz) / 2;
+          const boxes = 5; // ‹ 1 2 3 ›
+          const gap = 6;
+          let px = b.x + b.w - (boxes * sz + (boxes - 1) * gap); // 右对齐
+          for (let i = 0; i < boxes; i++) {
+            rr(px, y0, sz, sz, 4);
+            if (i === 1) {
+              ctx.save();
+              ctx.fill();
+              ctx.restore();
+            } else {
+              fillWhite();
+              ctx.stroke();
+            }
+            ctx.save();
+            if (i === 1) ctx.fillStyle = "#ffffff";
+            ctx.font = "12px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const glyph = i === 0 ? "‹" : i === 4 ? "›" : String(i);
+            ctx.fillText(glyph, px + sz / 2, y0 + sz / 2 + 1);
+            ctx.restore();
+            px += sz + gap;
+          }
+          break;
+        }
+        case "toolbar": {
+          rr(b.x, b.y, b.w, b.h, 6);
+          fillWhite();
+          ctx.stroke();
+          const pad = 8;
+          const ih = b.h - pad * 2;
+          // 左:搜索框 + 占位线
+          const sw = b.w * 0.5;
+          rr(b.x + pad, b.y + pad, sw, ih, 4);
+          ctx.save();
+          ctx.globalAlpha = 0.8;
+          ctx.stroke();
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(b.x + pad + 10, b.y + b.h / 2);
+          ctx.lineTo(b.x + pad + sw * 0.6, b.y + b.h / 2);
+          ctx.stroke();
+          ctx.restore();
+          // 右:实心主按钮
+          const bw2 = 88;
+          rr(b.x + b.w - pad - bw2, b.y + pad, bw2, ih, 4);
+          ctx.save();
+          ctx.fill();
+          if (text) {
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "13px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, b.x + b.w - pad - bw2 / 2, b.y + b.h / 2 + 1, bw2 - 12);
+          }
+          ctx.restore();
+          break;
+        }
+        case "tabs": {
+          const labels = this.splitLabels(text);
+          const baseY = b.y + b.h - 1;
+          ctx.save();
+          ctx.globalAlpha = 0.4;
+          ctx.beginPath();
+          ctx.moveTo(b.x, baseY);
+          ctx.lineTo(b.x + b.w, baseY);
+          ctx.stroke();
+          ctx.restore();
+          const tw2 = b.w / Math.max(labels.length, 1);
+          labels.forEach((lb, i) => {
+            const cx0 = b.x + tw2 * i;
+            ctx.save();
+            ctx.font = (i === 0 ? "600 " : "") + "13px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            if (i !== 0) ctx.globalAlpha = 0.6;
+            ctx.fillText(lb, cx0 + tw2 / 2, b.y + b.h / 2 - 2, tw2 - 16);
+            ctx.restore();
+            if (i === 0) {
+              ctx.save();
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.moveTo(cx0 + 8, baseY);
+              ctx.lineTo(cx0 + tw2 - 8, baseY);
+              ctx.stroke();
+              ctx.restore();
+            }
+          });
+          break;
+        }
+        case "breadcrumb": {
+          const labels = this.splitLabels(text);
+          ctx.font = "13px system-ui, sans-serif";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          let tx = b.x;
+          labels.forEach((lb, i) => {
+            ctx.save();
+            ctx.globalAlpha = i === labels.length - 1 ? 1 : 0.55;
+            ctx.fillText(lb, tx, b.y + b.h / 2);
+            tx += ctx.measureText(lb).width;
+            ctx.restore();
+            if (i < labels.length - 1) {
+              ctx.save();
+              ctx.globalAlpha = 0.4;
+              ctx.fillText("/", tx + 6, b.y + b.h / 2);
+              tx += 12 + ctx.measureText("/").width;
+              ctx.restore();
+            }
+          });
+          break;
+        }
+        case "modal": {
+          rr(b.x, b.y, b.w, b.h, 8);
+          fillWhite();
+          ctx.stroke();
+          const headH = 40;
+          ctx.beginPath();
+          ctx.moveTo(b.x + 1, b.y + headH);
+          ctx.lineTo(b.x + b.w - 1, b.y + headH);
+          ctx.stroke();
+          // 标题 + 关闭 ×
+          ctx.font = "600 14px system-ui, sans-serif";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(text || "", b.x + 16, b.y + headH / 2, b.w - 60);
+          ctx.save();
+          ctx.globalAlpha = 0.6;
+          ctx.font = "16px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("×", b.x + b.w - 20, b.y + headH / 2);
+          ctx.restore();
+          // 底栏 + 取消/确定
+          const footH = 48;
+          const fy = b.y + b.h - footH;
+          ctx.save();
+          ctx.globalAlpha = 0.6;
+          ctx.beginPath();
+          ctx.moveTo(b.x + 1, fy);
+          ctx.lineTo(b.x + b.w - 1, fy);
+          ctx.stroke();
+          ctx.restore();
+          const bw3 = 64;
+          const bh3 = 28;
+          const by3 = fy + (footH - bh3) / 2;
+          rr(b.x + b.w - 16 - bw3 * 2 - 8, by3, bw3, bh3, 4);
+          ctx.stroke();
+          rr(b.x + b.w - 16 - bw3, by3, bw3, bh3, 4);
+          ctx.save();
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
       }
       ctx.restore();
     },

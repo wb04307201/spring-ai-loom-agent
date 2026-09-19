@@ -201,6 +201,14 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
                 null, WF_10S);
     }
 
+    /** 打开组件分类弹出面板(印章按钮收纳其中)。 */
+    private void openStencilPanel(Page page) {
+        page.click("#canvas-stencil-toggle");
+        page.waitForFunction(
+                "() => document.getElementById('canvas-stencil-panel').style.display !== 'none'",
+                null, WF_10S);
+    }
+
     @Test
     @DisplayName("撤销还原像素、重做恢复;橡皮点击整笔擦除")
     void undoRedoAndEraserRemoveStrokes() {
@@ -292,7 +300,12 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
             String empty = canvasPixelFingerprint(page);
 
             // 选「按钮」组件印章 → 点击画布中心(像素指纹采样区内)→ 默认尺寸组件入栈
+            openStencilPanel(page);
             page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='button']");
+            // 选中印章后面板自动收起,进入放置态
+            page.waitForFunction(
+                    "() => document.getElementById('canvas-stencil-panel').style.display === 'none'",
+                    null, WF_10S);
             com.microsoft.playwright.options.BoundingBox box =
                     page.locator("#canvas-board").boundingBox();
             page.mouse().click(box.x + box.width / 2, box.y + box.height / 2);
@@ -325,6 +338,7 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
             openCanvasModal(page);
 
             // 拖拽放置一张自定义尺寸的卡片组件
+            openStencilPanel(page);
             page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='card']");
             com.microsoft.playwright.options.BoundingBox box =
                     page.locator("#canvas-board").boundingBox();
@@ -412,6 +426,7 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
             openCanvasModal(page);
 
             // 放置一个按钮组件,文案「保存」
+            openStencilPanel(page);
             page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='button']");
             com.microsoft.playwright.options.BoundingBox box =
                     page.locator("#canvas-board").boundingBox();
@@ -441,6 +456,67 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
                     "() => window.CanvasBoard.shapes.length === 1"
                             + " && window.CanvasBoard.shapes[0].text === '取消'",
                     null, WF_10S);
+
+            page.click("#canvas-cancel-btn");
+            assertThat(consoleErrorsOf(page)).as("全程 console 无 error").isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("CRUD 组件:表格默认多段表头(Esc 保留),双击改表头;表单字段默认标签")
+    void crudStencilsTableHeadersAndFormitem() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openIndex(ctx);
+            waitForUploadGate(page);
+            openCanvasModal(page);
+
+            String empty = canvasPixelFingerprint(page);
+
+            // 拖拽放置表格组件 → 默认多段表头「名称,状态,操作」
+            openStencilPanel(page);
+            page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='table']");
+            com.microsoft.playwright.options.BoundingBox box =
+                    page.locator("#canvas-board").boundingBox();
+            page.mouse().move(box.x + 200, box.y + 100);
+            page.mouse().down();
+            page.mouse().move(box.x + 680, box.y + 320,
+                    new com.microsoft.playwright.Mouse.MoveOptions().setSteps(10));
+            page.mouse().up();
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes.length === 1"
+                            + " && window.CanvasBoard.shapes[0].type === 'table'",
+                    null, WF_10S);
+            // 文案浮层预填默认表头;Esc 放弃 → 默认表头保留(不被清空)
+            page.waitForSelector("#canvas-text-input:not([style*='display: none'])",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+            assertThat(page.inputValue("#canvas-text-input")).isEqualTo("名称,状态,操作");
+            page.keyboard().press("Escape");
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes[0].text === '名称,状态,操作'", null, WF_10S);
+            assertThat(canvasPixelFingerprint(page)).as("表格已渲染").isNotEqualTo(empty);
+
+            // 双击表格改表头(逗号分段渲染到列)—— 操纵语义在选择工具下
+            page.click("#canvas-toolbar .canvas-tool-btn[data-tool='select']");
+            double[] tb = shapeBBoxOf(page, 0);
+            page.mouse().click(box.x + tb[0] + tb[2] / 2, box.y + tb[1] + tb[3] / 2,
+                    new com.microsoft.playwright.Mouse.ClickOptions().setClickCount(2));
+            page.waitForSelector("#canvas-text-input:not([style*='display: none'])",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+            page.locator("#canvas-text-input").fill("ID,姓名,操作");
+            page.keyboard().press("Enter");
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes[0].text === 'ID,姓名,操作'", null, WF_10S);
+
+            // 点击放置表单字段组件 → 默认标签「字段名」
+            openStencilPanel(page);
+            page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='formitem']");
+            page.mouse().click(box.x + box.width / 2, box.y + box.height - 80);
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes.length === 2"
+                            + " && window.CanvasBoard.shapes[1].type === 'formitem'"
+                            + " && window.CanvasBoard.shapes[1].text === '字段名'",
+                    null, WF_10S);
+            page.keyboard().press("Escape"); // 放弃默认文案浮层
 
             page.click("#canvas-cancel-btn");
             assertThat(consoleErrorsOf(page)).as("全程 console 无 error").isEmpty();
