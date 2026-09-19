@@ -30,6 +30,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       slideUp 入场动画会在拖拽期间位移画布,导致笔画按事件瞬间坐标记录成
  *       偏移曲线、后续命中检测(橡皮/像素断言)失准。所有绘制交互依赖
  *       模态框打开后画布<b不发生位移</b>,该规则不可回退。</li>
+ *   <li><b>Web 组件印章</b>:{@code .canvas-stencil-btn[data-stencil]} 8 件
+ *       (button/input/card/navbar/imgph/checkbox/radio/select)。点击放置=默认
+ *       尺寸居中(拖拽 &lt;6px 判定),拖拽放置=自定义尺寸;定型后入栈为带 id 的
+ *       复合 shape,有文案的组件立即弹 {@code #canvas-text-input} 浮层(targetId
+ *       写入既有 shape,文案未变不产生撤销步)。像素指纹采样区为画布中心
+ *       300×100,放置类断言须落在该区内。</li>
+ *   <li><b>选择工具操纵</b>:{@code [data-tool=select]} —— 点本体选中并移动、
+ *       四角手柄(bbox 类 shape)缩放、双击改文字、Delete 删除、Esc 取消;
+ *       选中态是瞬时 UI 态不进撤销栈,但撤销/重做保留同 id 形状的选中
+ *       ({@code syncSelectionAfterHistory}),仅 id 消失才清除。每次操纵一次
+ *       commit 快照 → 移动/缩放/删除/改字各自可独立撤销。</li>
  * </ol>
  *
  * <p><b>数据隔离</b>:上传用例经真实 POST 落盘 {@code ./target/e2e-files/users}
@@ -266,5 +277,183 @@ class CanvasBoardBrowserIT extends BrowserTestBase {
             page.click("#canvas-cancel-btn");
             assertThat(consoleErrorsOf(page)).as("全程 console 无 error").isEmpty();
         }
+    }
+
+    // ============= Web 组件(印章式 stencil + 选择操纵) =============
+
+    @Test
+    @DisplayName("组件印章:点击放置按钮组件,浮层输入文案;像素落地")
+    void stencilButtonPlacementAndLabelEditing() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openIndex(ctx);
+            waitForUploadGate(page);
+            openCanvasModal(page);
+
+            String empty = canvasPixelFingerprint(page);
+
+            // 选「按钮」组件印章 → 点击画布中心(像素指纹采样区内)→ 默认尺寸组件入栈
+            page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='button']");
+            com.microsoft.playwright.options.BoundingBox box =
+                    page.locator("#canvas-board").boundingBox();
+            page.mouse().click(box.x + box.width / 2, box.y + box.height / 2);
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes.length === 1"
+                            + " && window.CanvasBoard.shapes[0].type === 'button'",
+                    null, WF_10S);
+
+            // 放置后自动弹文案浮层,输入按钮文案回车 → 写入 shape.text
+            page.waitForSelector("#canvas-text-input:not([style*='display: none'])",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+            page.locator("#canvas-text-input").fill("立即提交");
+            page.keyboard().press("Enter");
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes[0].text === '立即提交'", null, WF_10S);
+
+            assertThat(canvasPixelFingerprint(page)).as("组件已渲染到画布").isNotEqualTo(empty);
+
+            page.click("#canvas-cancel-btn");
+            assertThat(consoleErrorsOf(page)).as("全程 console 无 error").isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("选择工具:点选组件 → 拖动移动 → 角手柄缩放 → Delete 删除 → 撤销还原")
+    void selectToolMoveResizeDeleteUndo() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openIndex(ctx);
+            waitForUploadGate(page);
+            openCanvasModal(page);
+
+            // 拖拽放置一张自定义尺寸的卡片组件
+            page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='card']");
+            com.microsoft.playwright.options.BoundingBox box =
+                    page.locator("#canvas-board").boundingBox();
+            page.mouse().move(box.x + 200, box.y + 120);
+            page.mouse().down();
+            page.mouse().move(box.x + 440, box.y + 300,
+                    new com.microsoft.playwright.Mouse.MoveOptions().setSteps(10));
+            page.mouse().up();
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes.length === 1"
+                            + " && window.CanvasBoard.shapes[0].type === 'card'",
+                    null, WF_10S);
+            // 卡片文案浮层:Esc 跳过(组件保留,无文案)
+            page.keyboard().press("Escape");
+            page.waitForFunction(
+                    "() => document.getElementById('canvas-text-input').style.display === 'none'",
+                    null, WF_10S);
+
+            double[] orig = shapeBBoxOf(page, 0);
+            assertThat(orig[2]).as("拖拽放置宽度 ≈240").isBetween(230.0, 250.0);
+            assertThat(orig[3]).as("拖拽放置高度 ≈180").isBetween(170.0, 190.0);
+
+            // 选择工具 → 点击组件内部 → 选中
+            page.click("#canvas-toolbar .canvas-tool-btn[data-tool='select']");
+            page.mouse().click(box.x + orig[0] + orig[2] / 2, box.y + orig[1] + orig[3] / 2);
+            page.waitForFunction(
+                    "() => window.CanvasBoard.selectedId != null"
+                            + " && window.CanvasBoard.selectedId === window.CanvasBoard.shapes[0].id",
+                    null, WF_10S);
+
+            // 拖动移动 +50/+40
+            double cx = box.x + orig[0] + orig[2] / 2;
+            double cy = box.y + orig[1] + orig[3] / 2;
+            page.mouse().move(cx, cy);
+            page.mouse().down();
+            page.mouse().move(cx + 50, cy + 40,
+                    new com.microsoft.playwright.Mouse.MoveOptions().setSteps(8));
+            page.mouse().up();
+            double[] moved = shapeBBoxOf(page, 0);
+            assertThat(moved[0]).as("移动后 x +50").isCloseTo(orig[0] + 50, org.assertj.core.data.Offset.offset(3.0));
+            assertThat(moved[1]).as("移动后 y +40").isCloseTo(orig[1] + 40, org.assertj.core.data.Offset.offset(3.0));
+            assertThat(moved[2]).isEqualTo(orig[2]);
+            assertThat(moved[3]).isEqualTo(orig[3]);
+
+            // 撤销移动 → 回到原位
+            page.click("#canvas-undo-btn");
+            double[] undone = shapeBBoxOf(page, 0);
+            assertThat(undone[0]).as("撤销后 x 还原").isCloseTo(orig[0], org.assertj.core.data.Offset.offset(0.5));
+            assertThat(undone[1]).as("撤销后 y 还原").isCloseTo(orig[1], org.assertj.core.data.Offset.offset(0.5));
+            // 重做恢复移动(为后续步骤保持 moved 状态)
+            page.click("#canvas-redo-btn");
+            moved = shapeBBoxOf(page, 0);
+
+            // SE 角手柄缩放 +40/+40(手柄在 bbox 右下角)
+            page.mouse().move(box.x + moved[0] + moved[2], box.y + moved[1] + moved[3]);
+            page.mouse().down();
+            page.mouse().move(box.x + moved[0] + moved[2] + 40, box.y + moved[1] + moved[3] + 40,
+                    new com.microsoft.playwright.Mouse.MoveOptions().setSteps(8));
+            page.mouse().up();
+            double[] resized = shapeBBoxOf(page, 0);
+            assertThat(resized[2]).as("SE 手柄拉宽 +40").isCloseTo(moved[2] + 40, org.assertj.core.data.Offset.offset(3.0));
+            assertThat(resized[3]).as("SE 手柄拉高 +40").isCloseTo(moved[3] + 40, org.assertj.core.data.Offset.offset(3.0));
+            assertThat(resized[0]).as("SE 缩放不动 x").isCloseTo(moved[0], org.assertj.core.data.Offset.offset(3.0));
+
+            // Delete 键删除选中组件
+            page.mouse().click(box.x + resized[0] + resized[2] / 2, box.y + resized[1] + resized[3] / 2);
+            page.keyboard().press("Delete");
+            page.waitForFunction("() => window.CanvasBoard.shapes.length === 0", null, WF_10S);
+
+            // 撤销删除 → 组件回来
+            page.click("#canvas-undo-btn");
+            page.waitForFunction("() => window.CanvasBoard.shapes.length === 1", null, WF_10S);
+
+            page.click("#canvas-cancel-btn");
+            assertThat(consoleErrorsOf(page)).as("全程 console 无 error").isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("双击组件改文字:浮层预填旧值,新值写入 shape.text")
+    void stencilDblclickEditsLabel() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openIndex(ctx);
+            waitForUploadGate(page);
+            openCanvasModal(page);
+
+            // 放置一个按钮组件,文案「保存」
+            page.click("#canvas-toolbar .canvas-stencil-btn[data-stencil='button']");
+            com.microsoft.playwright.options.BoundingBox box =
+                    page.locator("#canvas-board").boundingBox();
+            page.mouse().click(box.x + 300, box.y + 200);
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes.length === 1", null, WF_10S);
+            page.waitForSelector("#canvas-text-input:not([style*='display: none'])",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+            page.locator("#canvas-text-input").fill("保存");
+            page.keyboard().press("Enter");
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes[0].text === '保存'", null, WF_10S);
+
+            // 选择工具 → 双击组件 → 浮层预填旧文案
+            page.click("#canvas-toolbar .canvas-tool-btn[data-tool='select']");
+            double[] b = shapeBBoxOf(page, 0);
+            page.mouse().click(box.x + b[0] + b[2] / 2, box.y + b[1] + b[3] / 2,
+                    new com.microsoft.playwright.Mouse.ClickOptions().setClickCount(2));
+            page.waitForSelector("#canvas-text-input:not([style*='display: none'])",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+            assertThat(page.inputValue("#canvas-text-input")).as("双击浮层预填旧文案").isEqualTo("保存");
+
+            // 改文案回车 → 写回 shape.text,且不新增形状
+            page.locator("#canvas-text-input").fill("取消");
+            page.keyboard().press("Enter");
+            page.waitForFunction(
+                    "() => window.CanvasBoard.shapes.length === 1"
+                            + " && window.CanvasBoard.shapes[0].text === '取消'",
+                    null, WF_10S);
+
+            page.click("#canvas-cancel-btn");
+            assertThat(consoleErrorsOf(page)).as("全程 console 无 error").isEmpty();
+        }
+    }
+
+    /** 读 shapes[i] 的 bbox [x,y,w,h](CSS 逻辑像素)。 */
+    private double[] shapeBBoxOf(Page page, int i) {
+        return page.evaluate(
+                "(i) => { const b = window.CanvasBoard.shapeBBox(window.CanvasBoard.shapes[i]);"
+                        + " return [b.x, b.y, b.w, b.h]; }", i) instanceof java.util.List<?> l
+                ? new double[]{((Number) l.get(0)).doubleValue(), ((Number) l.get(1)).doubleValue(),
+                        ((Number) l.get(2)).doubleValue(), ((Number) l.get(3)).doubleValue()}
+                : new double[4];
     }
 }
