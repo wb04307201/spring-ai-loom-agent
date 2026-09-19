@@ -219,6 +219,7 @@
                 class="image-add-btn"
                 id="image-add-btn"
                 title="上传图片/文档"
+                style="display: none"
               >
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <path
@@ -230,6 +231,21 @@
                 </svg>
               </button>
               <input type="file" id="image-file-input" style="display: none" />
+              <button
+                class="image-add-btn"
+                id="canvas-add-btn"
+                title="画板绘图"
+                style="display: none"
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M13.2 3.4a1.5 1.5 0 0 1 2.1 0l1.3 1.3a1.5 1.5 0 0 1 0 2.1L8.4 15l-4.1 1.2L5.5 12l7.7-8.6z"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
               <div class="button-area">
                 <button id="send-btn">发送消息</button>
                 <button
@@ -650,6 +666,55 @@
       </div>
     </div>
 
+    <!-- Canvas Board Modal（画板绘图 → 确定后转 PNG 上传为聊天附件） -->
+    <div id="canvas-modal-overlay" class="modal-overlay" style="display: none">
+      <div class="modal-content canvas-modal-content">
+        <div class="modal-header">
+          <h3>画板</h3>
+          <div class="close-button" id="canvas-close-btn">&times;</div>
+        </div>
+        <div class="canvas-toolbar" id="canvas-toolbar">
+          <div class="canvas-tool-group">
+            <button class="canvas-tool-btn active" data-tool="pen" title="画笔">✎</button>
+            <button class="canvas-tool-btn" data-tool="line" title="直线">╱</button>
+            <button class="canvas-tool-btn" data-tool="rect" title="矩形">▭</button>
+            <button class="canvas-tool-btn" data-tool="ellipse" title="椭圆">◯</button>
+            <button class="canvas-tool-btn" data-tool="text" title="文字">T</button>
+            <button class="canvas-tool-btn" data-tool="eraser" title="橡皮(点击笔画整体擦除)">⌫</button>
+          </div>
+          <div class="canvas-tool-group" id="canvas-colors">
+            <button class="canvas-swatch active" data-color="#000000" style="background:#000000" title="黑色"></button>
+            <button class="canvas-swatch" data-color="#ef4444" style="background:#ef4444" title="红色"></button>
+            <button class="canvas-swatch" data-color="#f59e0b" style="background:#f59e0b" title="橙色"></button>
+            <button class="canvas-swatch" data-color="#22c55e" style="background:#22c55e" title="绿色"></button>
+            <button class="canvas-swatch" data-color="#3b82f6" style="background:#3b82f6" title="蓝色"></button>
+            <button class="canvas-swatch" data-color="#8b5cf6" style="background:#8b5cf6" title="紫色"></button>
+            <button class="canvas-swatch" data-color="#ec4899" style="background:#ec4899" title="粉色"></button>
+            <button class="canvas-swatch" data-color="#6b7280" style="background:#6b7280" title="灰色"></button>
+            <input type="color" id="canvas-custom-color" value="#4f46e5" title="自定义颜色" />
+          </div>
+          <div class="canvas-tool-group">
+            <label class="canvas-width-label" for="canvas-width">粗细</label>
+            <input type="range" id="canvas-width" min="1" max="16" step="1" value="3" />
+            <span class="canvas-width-value" id="canvas-width-value">3</span>
+          </div>
+          <div class="canvas-tool-group">
+            <button class="canvas-tool-btn" id="canvas-undo-btn" title="撤销">↺ 撤销</button>
+            <button class="canvas-tool-btn" id="canvas-redo-btn" title="重做">↻ 重做</button>
+          </div>
+        </div>
+        <div class="canvas-board-wrap" id="canvas-board-wrap">
+          <canvas id="canvas-board"></canvas>
+          <input type="text" id="canvas-text-input" class="canvas-text-input" style="display: none" placeholder="输入文字，回车确认" />
+        </div>
+        <div class="canvas-footer">
+          <button class="modal-action-btn" id="canvas-clear-btn">清空</button>
+          <button class="modal-action-btn" id="canvas-cancel-btn">取消</button>
+          <button class="primary-btn" id="canvas-confirm-btn">确定</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Generic Confirm Modal -->
     <div id="confirm-modal-overlay" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 440px">
@@ -706,5 +771,6 @@
     <script src="i18n/i18n.js"></script>
     <script type="module" src="app.js"></script>
     <script src="admin/market-admin.js"></script>
+    <script src="canvas-board.js"></script>
   </body>
 </html>

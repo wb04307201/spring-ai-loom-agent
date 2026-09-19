@@ -6023,38 +6023,46 @@ const imageUpload = {
     input.value = "";
 
     for (const file of files) {
-      const validation = this.validate(file);
-      if (!validation.valid) {
-        showToast(validation.error, "error");
-        continue;
-      }
+      await this.processFile(file);
+    }
+  },
 
-      // Defensive double-check: if the browser silently dropped the
-      // type (some file pickers filter even without `accept`),
-      // surface an honest error rather than a silent no-op.
-      if (file.size === 0 && file.name && !file.type) {
-        showToast(`文件「${file.name}」无法识别，已忽略`, "error");
-        continue;
-      }
+  /**
+   * 单文件附件管线:校验 → 缩略图 → 上传 → 回填 fileId。
+   * 由文件选择(handleFiles)与画板导出(canvas-board.js confirm)共用。
+   */
+  async processFile(file) {
+    const validation = this.validate(file);
+    if (!validation.valid) {
+      showToast(validation.error, "error");
+      return;
+    }
 
-      const isImage = this.isImage(file);
-      const objectUrl = isImage ? URL.createObjectURL(file) : null;
-      const docIcon = isImage ? null : this.getDocIcon(file);
-      const tempId = this.renderThumbnail(null, objectUrl, file.name, docIcon);
+    // Defensive double-check: if the browser silently dropped the
+    // type (some file pickers filter even without `accept`),
+    // surface an honest error rather than a silent no-op.
+    if (file.size === 0 && file.name && !file.type) {
+      showToast(`文件「${file.name}」无法识别，已忽略`, "error");
+      return;
+    }
 
-      // Upload to server
-      try {
-        const { fileId } = await api.uploadImage(file);
-        const entry = state.pendingImages.find((img) => img.thumbId === tempId);
-        if (entry) {
-          entry.fileId = fileId;
-        }
-        this.updateThumbnailFileId(tempId, fileId);
-      } catch (err) {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-        this.removeImageByObjectUrl(objectUrl || tempId);
-        showToast("文件上传失败：" + err.message, "error");
+    const isImage = this.isImage(file);
+    const objectUrl = isImage ? URL.createObjectURL(file) : null;
+    const docIcon = isImage ? null : this.getDocIcon(file);
+    const tempId = this.renderThumbnail(null, objectUrl, file.name, docIcon);
+
+    // Upload to server
+    try {
+      const { fileId } = await api.uploadImage(file);
+      const entry = state.pendingImages.find((img) => img.thumbId === tempId);
+      if (entry) {
+        entry.fileId = fileId;
       }
+      this.updateThumbnailFileId(tempId, fileId);
+    } catch (err) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      this.removeImageByObjectUrl(objectUrl || tempId);
+      showToast("文件上传失败：" + err.message, "error");
     }
   },
 
@@ -6233,6 +6241,9 @@ const init = async () => {
     if (uploadOk) {
       const ib = document.getElementById("image-add-btn");
       if (ib) ib.style.display = "flex";
+      // 画板按钮与 + 上传按钮同门联动:上传链路不可用时一起保持隐藏
+      const cb = document.getElementById("canvas-add-btn");
+      if (cb) cb.style.display = "flex";
     }
   } catch (e) {
     console.warn("[init] checkKnowledgeUpload failed, continuing:", e);
@@ -6622,6 +6633,7 @@ window._loomAgent = {
   conversation,
   ui,
   fileMgr,
+  showToast,
 };
 window.ui = ui;
 
