@@ -237,6 +237,7 @@ Organized into 7 nested static `@Configuration` classes:
  - Flyway 在同实例按版本号顺序执行:`V1.0__init.sql`(库)→ `V1.1__init_app_data.sql`(业务)
  - **升级注意**(已收紧):任何已有 V1/V2.x 历史数据库 → 必须清空后重跑(`rm -rf ~/.loom/datasource`),或 `flyway baseline` 后手动迁移数据。本项目**不接受在已运行实例上增量升级 schema**。#3 起向量(embedding BLOB)也存 H2 表 loom_vector_store —— 清库重跑后知识库文档需重传(一次性 re-embed);更换 embedding 模型同理(dim 守卫会跳过旧维度行并 WARN)。
 - **Chat memory**: Spring AI `JdbcChatMemoryRepository` (JDBC-backed, auto-initialized)
+- **AI 思考(reasoning)按轮持久化(2026-09-19)**: `loom_chat_reasoning` PK = `(conversation_id, seq)`,SseController 每轮流结束 append 一轮完整思考(旧结构每会话一行 UPDATE 覆盖,只有末轮存活)。读取:`ChatReasoningHistory.attachThinking` 把每轮思考按**时间戳就近配对**(容差 10s,双向唯一;不用序号——带工具调用的轮次有多条 ASSISTANT 行会错位)注入历史接口 `GET /conversation/{id}` 的 `AssistantMessage metadata.thinking`,前端 `renderMessages` 填充思考折叠区;admin 流水视图(ConversationFlowService)同一配对逻辑。配对纯函数 + append 语义回归锁:`ChatReasoningHistoryTest`(9 测试)。**相关修复**:`LastChunkMessageChatMemoryAdvisor` 累积 ASSISTANT 记忆时跳过 Anthropic thinking Generation(识别标记 = metadata `signature` key,与 `DefaultChat.bridgeAnthropicThinking` 共享常量)—— advisor 位于桥接上游,不跳过则思考文本混入库记忆(历史渲染成正文 + 污染回灌后续轮次 LLM 上下文);DashScope 等 provider 思考走 `metadata.reasoningContent`,天然不受影响
 - **Flyway table**: `flyway_schema_history`（Spring Boot 默认，库不覆盖）
 
 ### File System Storage

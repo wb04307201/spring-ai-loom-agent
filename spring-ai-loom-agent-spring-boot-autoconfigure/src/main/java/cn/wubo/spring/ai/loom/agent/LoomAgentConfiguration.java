@@ -2376,6 +2376,7 @@ public class LoomAgentConfiguration {
         public RouterFunction<ServerResponse> loomAgentConversationRouter(
                 JdbcChatMemoryRepository chatMemoryRepository,
                 IUserConversation userConversation,
+                cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory chatReasoningHistory,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
                 ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository,
@@ -2433,7 +2434,10 @@ public class LoomAgentConfiguration {
                     return ServerResponse.status(HttpStatus.FORBIDDEN).body(
                             java.util.List.of());
                 }
-                return ServerResponse.ok().body(chatMemoryRepository.findByConversationId(conversationId));
+                // 每轮思考按时间戳就近配对注入 AssistantMessage metadata.thinking,
+                // 前端历史视图填充思考折叠区(无 reasoning 时原样返回,零契约破坏)
+                return ServerResponse.ok().body(chatReasoningHistory.attachThinking(
+                        conversationId, chatMemoryRepository.findByConversationId(conversationId)));
             });
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");

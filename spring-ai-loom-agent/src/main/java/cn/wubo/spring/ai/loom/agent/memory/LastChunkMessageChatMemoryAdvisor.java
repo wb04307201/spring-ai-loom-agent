@@ -89,6 +89,15 @@ public class LastChunkMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor 
                     Generation gen = (cr == null) ? null : cr.getResult();
                     AssistantMessage am = (gen == null) ? null : gen.getOutput();
                     if (am != null) {
+                        // Anthropic thinking 块是独立 Generation(content=思考文本, metadata 仅 signature),
+                        // 且本 advisor 位于 DefaultChat.bridgeAnthropicThinking 上游 —— 不跳过会把思考文本
+                        // 累积进 ASSISTANT 记忆(历史对话把思考渲染成正文 + 污染文本回灌后续轮次上下文)。
+                        // DashScope 等 provider 的思考走 metadata.reasoningContent,getText() 本就不含,不受影响。
+                        if (am.getMetadata() != null
+                                && am.getMetadata().containsKey(cn.wubo.spring.ai.loom.agent.chat.DefaultChat.THINKING_SIGNATURE_KEY)) {
+                            lastResponse[0] = resp;
+                            return;
+                        }
                         String t = am.getText();
                         if (t != null) assistantTextBuf.append(t);
                     }

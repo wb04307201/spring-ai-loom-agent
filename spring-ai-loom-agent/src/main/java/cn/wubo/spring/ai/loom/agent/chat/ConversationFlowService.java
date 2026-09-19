@@ -177,9 +177,19 @@ public class ConversationFlowService {
 
   List<Event> events = new ArrayList<>();
   // ：假设从 chat_memory 反推 metadata.thinking 失效（content 是纯文本），
-  // 改从 loom_chat_reasoning 显式读。reasoning 是一次会话一条，绑到第一条 ASSISTANT。
-  String dbReasoning = types.contains("ASSISTANT") ? chatUsageService.getReasoning(conversationId) : null;
-  boolean reasoningBound = false;
+  // 改从 loom_chat_reasoning 显式读。2026-09-19 起每轮一条（seq append，不再覆盖），
+  // 用 ChatReasoningHistory.pair 按时间戳就近把每轮思考配到对应 ASSISTANT 行
+  // （替代旧的"最新一条绑第一张卡"——多轮会话下会张冠李戴）。
+  Map<Integer, String> reasoningByAssistant = Map.of();
+  if (types.contains("ASSISTANT")) {
+   List<Instant> assistantTs = new ArrayList<>();
+   for (ChatMemoryRow row : rows) {
+    if ("ASSISTANT".equals(row.type())) assistantTs.add(row.timestamp());
+   }
+   reasoningByAssistant = ChatReasoningHistory.pair(
+           assistantTs, chatUsageService.listReasoning(conversationId), ChatReasoningHistory.TOLERANCE);
+  }
+  int assistantOrdinal = 0;
   for (ChatMemoryRow row : rows) {
    String type = row.type();
    if (type == null) continue;
@@ -210,10 +220,10 @@ public class ConversationFlowService {
      } else {
       data.put("content", row.content() == null ? "" : row.content());
      }
-     // ：注入 loom_chat_reasoning 的最终思考文本（绑到第一条 ASSISTANT）
-     if (!reasoningBound && dbReasoning != null && !dbReasoning.isBlank()) {
-      data.put("thinking", dbReasoning);
-      reasoningBound = true;
+     // ：注入 loom_chat_reasoning 的本轮思考文本（时间戳就近配对到该 ASSISTANT）
+     String turnThinking = reasoningByAssistant.get(assistantOrdinal);
+     if (turnThinking != null && !turnThinking.isBlank()) {
+      data.put("thinking", turnThinking);
      }
      // AssistantMessage.content.toolCalls[]
      JsonNode toolCalls = contentNode != null ? contentNode.path("toolCalls") : null;
@@ -243,6 +253,7 @@ public class ConversationFlowService {
       data.put("toolCalls", tcList);
       events.add(new Event("ASSISTANT", row.timestamp(), data));
      }
+     assistantOrdinal++;
     }
     case "TOOL" -> {
      // +：跳过 SPRING_AI_CHAT_MEMORY 的 TOOL 行（Spring AI 流式 chunk

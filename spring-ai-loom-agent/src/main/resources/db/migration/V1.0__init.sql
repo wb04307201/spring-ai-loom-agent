@@ -526,14 +526,19 @@ CREATE INDEX idx_loom_chat_usage_conv_time
 
 -- ============== 4. 新建 loom_chat_reasoning（ 合并） ==============
 -- 背景：chat_memory 同样不持久化 metadata.reasoningContent（DashScope
--- enable_thinking 模式下的 AI 思考）。SseController 在流结束 doOnComplete
--- 时一次性写完整 reasoning；ConversationFlowService 优先读这张表，绑到
--- conversation.html 第一条 ASSISTANT 卡片的"思考"折叠区。
+-- enable_thinking / Anthropic thinking 模式下的 AI 思考）。SseController 在
+-- 每轮流结束 doOnComplete 时 append 一行完整 reasoning（seq = 轮次序号）。
+-- 读取方：ConversationFlowService（admin 流水视图）与 ChatReasoningHistory
+-- （聊天 UI 历史接口）按 created_at 就近配对到同轮 ASSISTANT 消息的"思考"折叠区。
+-- 2026-09-19：主键从 conversation_id 单列改为 (conversation_id, seq) ——
+-- 旧结构每轮 UPDATE 覆盖，只有最后一轮思考存活，历史视图无法按轮回看。
 CREATE TABLE loom_chat_reasoning (
- conversation_id VARCHAR(255) PRIMARY KEY,
+ conversation_id VARCHAR(255) NOT NULL,
+ seq INT NOT NULL,
  reasoning_text CLOB,
  created_at TIMESTAMP(9) WITH TIME ZONE NOT NULL,
- updated_at TIMESTAMP(9) WITH TIME ZONE NOT NULL
+ updated_at TIMESTAMP(9) WITH TIME ZONE NOT NULL,
+ PRIMARY KEY (conversation_id, seq)
 );
 
 
