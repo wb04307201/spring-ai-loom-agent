@@ -54,36 +54,43 @@ public class ChatUsageService {
     }
 
     /**
-     * ：保存一次对话的 AI 思考内容（DashScope enable_thinking 模式下 metadata
-     * reasoningContent 累积）。一条对话一条最终记录，conversation_id 是主键。
-     * 同一会话多次调用会覆盖（upsert）。
+     * ：保存一轮对话的 AI 思考内容（DashScope enable_thinking / Anthropic thinking
+     * 模式下 metadata reasoningContent 累积）。每轮 append 一行，seq = 轮次序号
+     * （max(seq)+1），历史轮次不再被覆盖 —— 历史视图按轮回看思考依赖此语义。
      */
     public void saveReasoning(String conversationId, String reasoningText) {
         if (conversationId == null || conversationId.isBlank()) return;
         if (reasoningText == null || reasoningText.isBlank()) return;
         Timestamp now = Timestamp.from(Instant.now());
-        int updated = jdbcTemplate.update(
-                "UPDATE loom_chat_reasoning SET reasoning_text = ?, updated_at = ? WHERE conversation_id = ?",
-                reasoningText, now, conversationId);
-        if (updated == 0) {
-            jdbcTemplate.update(
-                    "INSERT INTO loom_chat_reasoning (conversation_id, reasoning_text, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                    conversationId, reasoningText, now, now);
-        }
+        Integer maxSeq = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(seq), 0) FROM loom_chat_reasoning WHERE conversation_id = ?",
+                Integer.class, conversationId);
+        jdbcTemplate.update(
+                "INSERT INTO loom_chat_reasoning (conversation_id, seq, reasoning_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                conversationId, (maxSeq == null ? 0 : maxSeq) + 1, reasoningText, now, now);
     }
 
     /**
-     * ：读一次对话的 AI 思考。返回 null 表示没有。
+     * ：按轮次顺序读一次对话的全部 AI 思考。空列表表示没有。
+     */
+    public List<ReasoningRow> listReasoning(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) return List.of();
+        return jdbcTemplate.query(
+                "SELECT seq, reasoning_text, created_at FROM loom_chat_reasoning WHERE conversation_id = ? ORDER BY seq",
+                (rs, n) -> new ReasoningRow(
+                        rs.getInt("seq"),
+                        rs.getString("reasoning_text"),
+                        rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant()),
+                conversationId);
+    }
+
+    /**
+     * ：读一次对话最新一轮的 AI 思考。返回 null 表示没有。
      */
     public String getReasoning(String conversationId) {
         if (conversationId == null || conversationId.isBlank()) return null;
-        try {
-            return jdbcTemplate.queryForObject(
-                    "SELECT reasoning_text FROM loom_chat_reasoning WHERE conversation_id = ?",
-                    String.class, conversationId);
-        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
-            return null;
-        }
+        List<ReasoningRow> rows = listReasoning(conversationId);
+        return rows.isEmpty() ? null : rows.get(rows.size() - 1).reasoningText();
     }
 
     /**
@@ -202,5 +209,9 @@ public class ChatUsageService {
 
     public record ConversationUsage(String conversationId, long callCount, long totalTokens, long promptTokens,
                                     long completionTokens) {
+    }
+
+    /** loom_chat_reasoning 一行 = 一轮对话的完整思考。seq 从 1 起。 */
+    public record ReasoningRow(int seq, String reasoningText, Instant createdAt) {
     }
 }

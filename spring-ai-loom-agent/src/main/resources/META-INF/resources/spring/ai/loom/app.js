@@ -1225,6 +1225,15 @@ const ui = {
         if (el) el.innerHTML = renderMarkdown(content);
         const origin = document.getElementById("origin-" + id);
         if (origin) origin.innerHTML = content;
+        // 历史按轮思考：后端 attachThinking 注入 metadata.thinking，
+        // 填进 renderBotMessage 已创建的思考折叠区（默认隐藏，点开可见）
+        const thinking = msg.metadata && msg.metadata.thinking;
+        if (thinking) {
+          const tc = document.getElementById("thinking-" + id);
+          const tb = document.getElementById("thinking-body-" + id);
+          if (tc) tc.style.display = "";
+          if (tb) tb.innerHTML = renderMarkdown(thinking);
+        }
         // Show actions for historical messages
         const actions = document.getElementById("actions-" + id);
         if (actions) actions.style.display = "";

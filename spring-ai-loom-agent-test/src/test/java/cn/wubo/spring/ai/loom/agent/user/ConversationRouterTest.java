@@ -28,11 +28,26 @@ class ConversationRouterTest {
 
     private static RouterFunction<ServerResponse> router(IUserConversation conversations,
                                                          JdbcChatMemoryRepository memory) {
+        return router(conversations, memory, passThroughReasoningHistory());
+    }
+
+    private static RouterFunction<ServerResponse> router(IUserConversation conversations,
+                                                         JdbcChatMemoryRepository memory,
+                                                         cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory reasoningHistory) {
         LoomAgentConfiguration.WebConfiguration configuration = new LoomAgentConfiguration.WebConfiguration();
         return configuration.loomAgentConversationRouter(
                 memory,
                 conversations,
+                reasoningHistory,
                 emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider());
+    }
+
+    /** attachThinking 恒等透传：单测聚焦路由 wiring，配对逻辑由 ChatReasoningHistoryTest 覆盖。 */
+    private static cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory passThroughReasoningHistory() {
+        cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory h =
+                mock(cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory.class);
+        when(h.attachThinking(anyString(), any())).thenAnswer(inv -> inv.getArgument(1));
+        return h;
     }
 
     @SuppressWarnings("unchecked")
@@ -154,13 +169,18 @@ class ConversationRouterTest {
         when(conversations.exists(any())).thenReturn(true);
         JdbcChatMemoryRepository memory = mock(JdbcChatMemoryRepository.class);
         when(memory.findByConversationId("tmp-alice-id")).thenReturn(java.util.List.of());
-        RouterFunction<ServerResponse> router = router(conversations, memory);
+        // wiring 锁：owned GET 的返回体必须经过 attachThinking（历史按轮思考注入点）
+        cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory reasoningHistory =
+                mock(cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory.class);
+        when(reasoningHistory.attachThinking(eq("tmp-alice-id"), any())).thenAnswer(inv -> inv.getArgument(1));
+        RouterFunction<ServerResponse> router = router(conversations, memory, reasoningHistory);
         UserContextHolder.setCurrentUser("alice");
 
         ServerResponse response = route(router, "GET", "/spring/ai/loom/conversation/tmp-alice-id", "");
 
         assertThat(response.statusCode().value()).isEqualTo(200);
         verify(memory).findByConversationId("tmp-alice-id");
+        verify(reasoningHistory).attachThinking(eq("tmp-alice-id"), any());
     }
 
     @Test
