@@ -181,52 +181,15 @@ spring:
 
 ## 技能市场
 
-技能是给 LLM 用的 prompt 模板，描述固定的工作流——**数据完全在数据库里**（不再读 yml 的 `skills[]` 段），分三张表：
+技能是给 LLM 用的 prompt 模板，描述可复用的工作流。数据完全在数据库里（不再读 yml），通过聊天 UI 的 **🧠 技能库** 与 admin 控制台的 **Skill 市场** 页统一管理。
 
-| 表 | 作用 |
-|----------------|--------------------------------------------------------------------------------------------|
-| `market_skill` | 公共 **Skill 市场** — 每条只有 `(author, name)` 唯一约束（`version` 字段已移除）；admin 可新增（直发 `APPROVED`）/ 编辑 / 审批 / 下架 |
-| `user_skill` | 用户本地的 Skill 副本（`source = USER_CREATED / MARKET_PULLED / ROLE_GRANTED`）；关联 `market_skill_id` 时禁止删除；拉取时拒绝覆盖同名 `USER_CREATED` |
-| `role_skill` | 角色 → market_skill 的授权关系（给某个角色下放哪些 Skill）；admin 通过 `setRoleSkills` 写入，被授权技能在用户下次技能 list/get 时懒同步进各自的 `user_skill`（`ROLE_GRANTED` 条目被锁定） |
+- **三种来源** — 自建（完全可编辑）/ 市场拉取（重拉刷新内容；已有同名自建时拒绝拉取，需先「复制为我的技能」）/ 角色授权（admin 授权给角色后自动同步，锁定不可改删）
+- **审批流** — 自建技能经 **共享** Tab 提交到市场 → `PENDING` → admin 审批通过 / 拒绝（拒绝必须填评论）；被拒后重新提交会归档旧行并新建审核；同名重新提交仅更新内容，`APPROVED` 永不降级；**我的发布** Tab 查看状态与撤回
+- **角色下发** — admin 把 `APPROVED` 市场技能授权给角色，角色成员的技能列表自动同步；下架级联清理拉取与授权记录，无孤儿
+- **开箱即用** — 库自带 2 个官方技能（STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事）；演示应用首启另种子 6 个演示技能（网络月度事件报告、HTTP 测试等）
+- **使用** — 聊天输入 `/` 唤起 picker 精准选择技能（覆盖输入框应用）；技能 `content` 内以 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定
 
-### 6 个系统种子技能
-
-演示应用首次启动时，`V1.1` 迁移会把 6 个系统技能直接 seed 进**默认 admin 用户**的 `user_skill`（`source=USER_CREATED`、`default_loaded=true`），让新装环境开箱即用 — 包括 **网络月度事件报告**、**HTTP 测试**、**部署项目**、**自动 E2E** 等。admin 可随时在 **Skill 市场** 管理页新建 / 编辑 / 审批 / 下架市场技能。
-
-### 普通用户的技能生命周期
-
-1. **创建** — 聊天 UI → 技能库 → **我的** Tab → **+ 新增**，或 `PUT /spring/ai/loom/skill`。写入 `user_skill`，`source=USER_CREATED`，完全可编辑（名称/描述/内容/默认加载）。
-2. **提交到市场** — 技能库 → **共享** Tab，点击自建 Skill → 详情面板「共享到市场」。提交后 `status=PENDING`，等待 admin 审批通过/拒绝（拒绝必须填评论）；无需版本号。同 `(author, name)` 重复提交：原行为 **REJECTED** → 旧行整行归档到 `market_skill_archive`（保留拒绝评论/审核人/时间），新建一条 PENDING 行（新 id）；原行为 **PENDING / APPROVED** → 仅原地更新内容，状态不动（APPROVED 永不降级）。
-3. **从市场拉取** — 技能库 → **市场** Tab，点击列表项 → 右侧详情面板「拉取到我的 Skill」。写入 `user_skill`，`source=MARKET_PULLED`；同名重新拉取即刷新内容（UPSERT，无报错）。**注意**：已有同名 `USER_CREATED` 时拒绝拉取（403）—— 需先「复制为我的技能」。
-4. **通过角色授权获得** — admin 给角色授权 market_skill 后，每次技能 list/get 自动同步到你的 `user_skill`（`source=ROLE_GRANTED, locked=true`），**不能改不能删**（角色锁的是该市场条目）。
-
-### admin 的额外能力
-
-- **新建**（直发 `APPROVED`，`created_by_kind='ADMIN'`）、**编辑 / 审批通过 / 拒绝 / 下架 (delete)** 任意 `market_skill`——作者从聊天 UI 发布进 PENDING，admin 审核或直接新建
-- 给任意角色授权任意 APPROVED 的 market_skill（写入 `role_skill`，用户在下次技能 list/get 时自动同步）
-- 下架级联清理 `user_skill`（拉取者）+ `role_skill`（角色授权），无孤儿记录
-
-### 权限矩阵
-
-| 操作 | USER_CREATED | MARKET_PULLED | ROLE_GRANTED |
-|-------------|--------------|---------------|--------------|
-| 改 name | ✗（PK） | ✗ | ✗ |
-| 改 description | ✅ | ✗（锁定为市场快照） | ✗ |
-| 改 content | ✅ | ✗（重新拉取）| ✗ |
-| 改 default_loaded | ✅ | ✅ | ✗ |
-| 删除 | ✅ | ✅ | ✗ |
-| 提交到市场 | ✅ | ✗ | ✗ |
-
-### 聊天 UI 用法
-
-点 **🧠 技能库** 按钮打开 —— 四个 Tab：
-
-- **我的** — 你的 `user_skill`（admin 也只看自己的 `user_skill`，无 union view）。点技能看详情，按 **应用**（覆盖 textarea + **直接发给大模型**）或 **复制**（覆盖 textarea，不发送）。
-- **市场** — 浏览所有 `APPROVED` market skill，点 **拉取** 拉到自己名下（已有同名 `USER_CREATED` 时拒绝）。
-- **共享** — 选自建 skill，提交到 PENDING，等 admin 审批。
-- **我的发布** — 查看自己提交到市场的技能状态（PENDING / APPROVED / REJECTED，展示拒绝原因）。任意状态可撤回（按钮文案随状态变化：撤回投稿 / 下架并删除 / 删除被拒记录）；作者撤回删除市场条目并清空自己 `user_skill.market_skill_id` 反向链接 —— 他人已拉取的副本保留但不再同步更新（级联清理 `user_skill` + `role_skill` 的是 **admin** 下架/删除）。REJECTED 可重新提交（旧行归档 + 新建 PENDING 行）。
-
-`content` 里通过 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定（不是 yml）。完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
+完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
 
 ## 知识库 & 知识市场
 
