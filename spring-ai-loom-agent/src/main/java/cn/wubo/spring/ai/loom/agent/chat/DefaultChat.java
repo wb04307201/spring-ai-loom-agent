@@ -36,8 +36,9 @@ public class DefaultChat implements IChat {
 
  /** loom SSE 思考面板读取的 metadata key（DashScope 等 OpenAI 兼容 provider 原生会写）。 */
  static final String REASONING_CONTENT_KEY = "reasoningContent";
- /** Spring AI Anthropic 映射器为 thinking Generation 写的唯一 metadata key，用作识别标记。 */
- static final String THINKING_SIGNATURE_KEY = "signature";
+ /** Spring AI Anthropic 映射器为 thinking Generation 写的唯一 metadata key，用作识别标记。
+  *  public：LastChunkMessageChatMemoryAdvisor 在 advisor 链内(桥接上游)用同一标记跳过思考 chunk，防止思考文本混入 ASSISTANT 记忆。 */
+ public static final String THINKING_SIGNATURE_KEY = "signature";
 
  private final ChatClient chatClient;
  private final IMcp mcp;

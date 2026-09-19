@@ -169,6 +169,58 @@ class LastChunkMessageChatMemoryAdvisorTest {
         assertThat(rows).isZero();
     }
 
+    /** Builds an Anthropic-style thinking chunk: content=思考文本, metadata 带 signature key(与 DefaultChat.bridgeAnthropicThinking 识别标记一致). */
+    private static ChatClientResponse thinkingResp(String thinkingDelta, Map<String, Object> ctx) {
+        AssistantMessage msg = AssistantMessage.builder()
+                .content(thinkingDelta)
+                .properties(Map.of("signature", "sig-abc"))
+                .build();
+        ChatResponse chatResponse = new ChatResponse(List.of(new Generation(msg)));
+        return new ChatClientResponse(chatResponse, ctx);
+    }
+
+    @Test
+    void anthropic_thinking_chunks_are_excluded_from_persisted_assistant_content() {
+        // 回归锁:Anthropic 映射器把 thinking 块做成独立 Generation(content=思考文本),
+        // advisor 在 bridgeAnthropicThinking 上游,不得把思考文本累积进 ASSISTANT 记忆 ——
+        // 否则历史对话把思考渲染成正文,且污染文本回灌后续轮次 LLM 上下文。
+        Map<String, Object> ctx = Map.of("ChatMemory.CONVERSATION_ID", convId);
+        Flux<ChatClientResponse> upstream = Flux.just(
+                thinkingResp("让我想想,", ctx),
+                thinkingResp("这个问题分三步。", ctx),
+                resp("答案是 ", ctx),
+                resp("42。", ctx)
+        );
+
+        List<String> seen = new ArrayList<>();
+        advisor.adviseStream(userRequest("u", convId), chain(upstream))
+                .doOnNext(r -> seen.add(r.chatResponse().getResult().getOutput().getText()))
+                .blockLast();
+
+        // thinking chunk 原样透传给下游(桥接由 DefaultChat 在 advisor 链之外做)
+        assertThat(seen).containsExactly("让我想想,", "这个问题分三步。", "答案是 ", "42。");
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "select type, content from spring_ai_chat_memory where conversation_id = ? and type = 'ASSISTANT'", convId);
+        assertThat(rows).hasSize(1);
+        // 持久化内容 = 纯正文,不含思考文本
+        assertThat(rows.get(0).get("content")).isEqualTo("答案是 42。");
+    }
+
+    @Test
+    void thinking_only_stream_writes_no_assistant_row() {
+        // 全是 thinking chunk(正文为空)→ 累积文本为空 → 不写 ASSISTANT 行(insertMessage blank 跳过)
+        Map<String, Object> ctx = Map.of("ChatMemory.CONVERSATION_ID", convId);
+        Flux<ChatClientResponse> upstream = Flux.just(
+                thinkingResp("思考中…", ctx)
+        );
+        advisor.adviseStream(userRequest("u", convId), chain(upstream)).blockLast();
+
+        Long rows = jdbcTemplate.queryForObject(
+                "select count(*) from spring_ai_chat_memory where conversation_id = ? and type = 'ASSISTANT'", Long.class, convId);
+        assertThat(rows).isZero();
+    }
+
     @Test
     void downstream_sees_chunks_in_order() {
         Flux<ChatClientResponse> upstream = Flux.just(
