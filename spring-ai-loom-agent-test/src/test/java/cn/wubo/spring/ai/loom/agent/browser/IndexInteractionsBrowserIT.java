@@ -197,9 +197,14 @@ class IndexInteractionsBrowserIT extends BrowserTestBase {
             page.waitForSelector("#file-modal-overlay",
                     new Page.WaitForSelectorOptions().setTimeout(5000));
             assertThat(page.isVisible("#file-list")).as("#file-list 容器可见").isTrue();
-            // loadTree 异步(GET /file/tree 恒 200)→ renderTree 必写两个分支之一
+            // loadTree 异步(GET /file/tree 恒 200)→ renderTree 必写两个分支之一。
+            // 等待条件必须排除静态「加载中...」占位(.loading-indicator,index.html):
+            // 只等 innerHTML 非空会被占位立即满足,高负载下 fetch 未返回就断言 → 竞态
+            // (2026-09-19 全量 *IT 门禁 flake 实证,画板功能引入时暴露)。
             page.waitForFunction(
-                    "() => document.getElementById('file-list').innerHTML.trim().length > 0",
+                    "() => { const el = document.getElementById('file-list');"
+                            + " return !!el && el.innerHTML.trim().length > 0"
+                            + " && !el.querySelector('.loading-indicator'); }",
                     null, WF_10S);
             String html = page.locator("#file-list").innerHTML();
             assertThat(html.contains("file-tree") || html.contains("目录为空"))
