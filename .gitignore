@@ -48,3 +48,5 @@ build/
 /spring-ai-loom-agent-test/.local/
 /spring-ai-loom-agent-test/mcp/
 /spring-ai-loom-agent-test/.playwright-mcp/
+__pycache__/
+*.pyc

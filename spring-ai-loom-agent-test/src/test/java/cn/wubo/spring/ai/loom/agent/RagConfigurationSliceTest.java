@@ -31,11 +31,14 @@ import static org.mockito.Mockito.when;
  *       关掉 embedding 时,h2VectorStore 因 {@code EmbeddingModelAvailableCondition} 整体跳过,
  *       上下文正常启动 —— 修复前该场景构造器 eager 注入 NoSuchBeanDefinition 直接启动失败;</li>
  *   <li><b>全局开关(方案 A)</b>:{@code spring.ai.loom.agent.rag.enabled=false}
- *       时即使 EmbeddingModel 在场,RAG 链(VectorStore/IUpload/IDocumentRead)
+ *       时即使 EmbeddingModel 在场,RAG 链(VectorStore/IDocumentRead)
  *       也整段不激活;</li>
  *   <li><b>正向对照</b>:默认(不配置)+ EmbeddingModel 在场 → 链完整创建。
  *       守卫 @ConditionalOnProperty 的 matchIfMissing=true 语义(键名笔误会
- *       静默把所有人的 RAG 关掉,此用例即回归锁)。</li>
+ *       静默把所有人的 RAG 关掉,此用例即回归锁);</li>
+ *   <li><b>解耦契约(2026-09-19)</b>:IUpload 迁至 StorageConfiguration 后<b>恒在</b> ——
+ *       Storage 独立切片无 RAG 配置也创建 IUpload;合切片降级态 IUpload 在而
+ *       VectorStore 缺席(知识腿经 ObjectProvider 运行时降级)。</li>
  * </ol>
  * 注:RagConfiguration 是包私有嵌套类,本测试须与其同包。
  * <p>
@@ -52,6 +55,10 @@ class RagConfigurationSliceTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.RagConfiguration.class);
 
+    /** StorageConfiguration 切片(2026-09-19 解耦后 IUpload 的家):锁"IUpload 恒在"契约。 */
+    private final ApplicationContextRunner storageRunner = new ApplicationContextRunner()
+            .withUserConfiguration(TestConfig.class, LoomAgentConfiguration.StorageConfiguration.class);
+
     private static EmbeddingModel embeddingModel() {
         EmbeddingModel model = mock(EmbeddingModel.class);
         when(model.dimensions()).thenReturn(1024);
@@ -59,13 +66,12 @@ class RagConfigurationSliceTest {
     }
 
     @Test
-    @DisplayName("embedding.text=none → 上下文正常启动,VectorStore/IUpload/IDocumentRead 全部缺席(方案 B 崩溃防护)")
+    @DisplayName("embedding.text=none → 上下文正常启动,VectorStore/IDocumentRead 缺席(方案 B 崩溃防护)")
     void embeddingTextNone_contextStartsWithoutVectorStoreChain() {
         runner.withPropertyValues("spring.ai.model.embedding.text=none")
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     assertThat(ctx).doesNotHaveBean(VectorStore.class);
-                    assertThat(ctx).doesNotHaveBean(IUpload.class);
                     assertThat(ctx).doesNotHaveBean(IDocumentRead.class);
                 });
     }
@@ -77,7 +83,6 @@ class RagConfigurationSliceTest {
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     assertThat(ctx).doesNotHaveBean(VectorStore.class);
-                    assertThat(ctx).doesNotHaveBean(IUpload.class);
                     assertThat(ctx).doesNotHaveBean(IDocumentRead.class);
                 });
     }
@@ -90,20 +95,60 @@ class RagConfigurationSliceTest {
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     assertThat(ctx).doesNotHaveBean(VectorStore.class);
-                    assertThat(ctx).doesNotHaveBean(IUpload.class);
                     assertThat(ctx).doesNotHaveBean(IDocumentRead.class);
                 });
     }
 
     @Test
-    @DisplayName("默认(不配置)+ EmbeddingModel 在场 → VectorStore/IUpload/IDocumentRead 链完整创建")
+    @DisplayName("默认(不配置)+ EmbeddingModel 在场 → VectorStore/IDocumentRead 链完整创建")
     void defaultWithEmbeddingModel_createsFullChain() {
         runner.withBean(EmbeddingModel.class, RagConfigurationSliceTest::embeddingModel)
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     assertThat(ctx).hasSingleBean(VectorStore.class);
-                    assertThat(ctx).hasSingleBean(IUpload.class);
                     assertThat(ctx).hasSingleBean(IDocumentRead.class);
+                });
+    }
+
+    // ===== 2026-09-19 解耦契约:IUpload 迁至 StorageConfiguration,恒在 =====
+
+    @Test
+    @DisplayName("解耦:StorageConfiguration 独立切片(无 RAG 配置无 embedding)→ IUpload 恒在")
+    void storageSlice_uploadPresentWithoutAnyRag() {
+        storageRunner.run(ctx -> {
+            assertThat(ctx).hasNotFailed();
+            assertThat(ctx).hasSingleBean(IUpload.class);
+            assertThat(ctx).doesNotHaveBean(VectorStore.class);
+        });
+    }
+
+    @Test
+    @DisplayName("解耦:RAG+Storage 合切片,embedding.text=none → IUpload 在、VectorStore 缺席(降级组合)")
+    void combinedSlice_degraded_uploadPresentVectorStoreAbsent() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(TestConfig.class,
+                        LoomAgentConfiguration.RagConfiguration.class,
+                        LoomAgentConfiguration.StorageConfiguration.class)
+                .withPropertyValues("spring.ai.model.embedding.text=none")
+                .run(ctx -> {
+                    assertThat(ctx).hasNotFailed();
+                    assertThat(ctx).hasSingleBean(IUpload.class);
+                    assertThat(ctx).doesNotHaveBean(VectorStore.class);
+                });
+    }
+
+    @Test
+    @DisplayName("解耦:RAG+Storage 合切片 + EmbeddingModel → IUpload 与 VectorStore 同在(知识腿可用)")
+    void combinedSlice_fullChain_uploadAndVectorStorePresent() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(TestConfig.class,
+                        LoomAgentConfiguration.RagConfiguration.class,
+                        LoomAgentConfiguration.StorageConfiguration.class)
+                .withBean(EmbeddingModel.class, RagConfigurationSliceTest::embeddingModel)
+                .run(ctx -> {
+                    assertThat(ctx).hasNotFailed();
+                    assertThat(ctx).hasSingleBean(IUpload.class);
+                    assertThat(ctx).hasSingleBean(VectorStore.class);
                 });
     }
 
@@ -154,6 +199,34 @@ class RagConfigurationSliceTest {
         @Bean
         IFileStorage iFileStorage() {
             return mock(IFileStorage.class);
+        }
+
+        /** StorageConfiguration.defaultUser 的协作者(session 缓存)。 */
+        @Bean
+        org.springframework.cache.Cache sessionCache() {
+            return mock(org.springframework.cache.Cache.class);
+        }
+
+        /** StorageConfiguration.defaultUserConversation 的协作者。 */
+        @Bean
+        org.springframework.ai.chat.memory.ChatMemory chatMemory() {
+            return mock(org.springframework.ai.chat.memory.ChatMemory.class);
+        }
+
+        /** StorageConfiguration.defaultSkillStorage / 统计服务的协作者。 */
+        @Bean
+        org.springframework.core.io.ResourceLoader resourceLoader() {
+            return mock(org.springframework.core.io.ResourceLoader.class);
+        }
+
+        @Bean
+        cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin skillRoleAdmin() {
+            return mock(cn.wubo.spring.ai.loom.agent.skill.ISkillRoleAdmin.class);
+        }
+
+        @Bean
+        cn.wubo.spring.ai.loom.agent.market.BatchedCounterService batchedCounterService() {
+            return mock(cn.wubo.spring.ai.loom.agent.market.BatchedCounterService.class);
         }
     }
 }

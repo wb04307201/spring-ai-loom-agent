@@ -1,322 +1,264 @@
 #!/usr/bin/env python3
+"""项目概览图确定性渲染器(2026-09-19 取代 wan2.7-image 文生图管线)。
+
+布局单一真源 = 本文件的 DATA(结构)+ LABELS(双语文案)。渲染为自包含
+HTML/CSS(深色海报 + 霓虹青卡片 + 橙色市场高亮,与旧版视觉语言一致),
+经本地无头 Chromium(Playwright)截图为 1280x1280 @2x PNG。
+
+为什么不再用文生图:信息密集海报(11 工具卡+徽章+8 技术芯片+双语)在
+文生图下随机缺陷压不住(旧 zh 图实测:章节跳号 03→04、平台行重复「会话」,
+规格里明确禁止仍复发);本管线文字/编号/计数由 DOM 构造,**不可能**重复或漏卡,
+统计胶囊数字由 DATA 自动计算,双语同模板渲染,git 可 diff,无 API 依赖。
+
+依赖:pip install playwright && playwright install chromium
+用法:python scripts/generate.py   → 覆盖 docs/project-overview-{en,zh}.png
 """
-Generate 2 project overview images (English + Chinese) using 阿里云百炼 wan2.7-image.
+from __future__ import annotations
 
-Output: <project>/docs/project-overview-{en,zh}.png
-
-wan2.7-image endpoint (sync):
-  POST https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
-  Body: {model, input.messages[role=user, content[{text}]], parameters.{n, size}}
-
-Set WORKSPACE_ID env var (or DASHSCOPE_WORKSPACE_ID) to your business space ID.
-Set DASHSCOPE_PERSON_TOKEN_API_KEY env var (personal token, sk- prefix; works
-against the wan2.7-image workspace endpoint).
-
-Use RUN_ID env var to generate candidate files (project-overview-{en,zh}-r{N}.png).
-"""
-import os
-import re
+import pathlib
 import sys
-import json
-import argparse
-import urllib.request
-from pathlib import Path
 
-# ===== 配置 =====
-# 同步端点（wan2.7-image 用同步 multimodal-generation/generation）
-SUBMIT_URL_TPL = (
-    "https://{workspace_id}.cn-beijing.maas.aliyuncs.com"
-    "/api/v1/services/aigc/multimodal-generation/generation"
-)
-PRIMARY_MODEL = "wan2.7-image"
-FALLBACK_MODEL = "qwen-image"  # 旧端点 fallback
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+DOCS = REPO_ROOT / "docs"
+
+SIZE = 1280  # CSS px;截图 device_scale_factor=2 → 2560x2560 物理像素
+
+# ---------------------------------------------------------------- 图标(24 viewBox,stroke 继承)
+ICONS = {
+    "bubble": '<path d="M4 5h16v10H9l-5 4z"/>',
+    "ribbon": '<circle cx="12" cy="9" r="5"/><path d="M9.5 13.5 7.5 21l4.5-2.7L16.5 21l-2-7.5"/>',
+    "doc": '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>',
+    "plug": '<rect x="3.5" y="8" width="10" height="10" rx="2"/><circle cx="16.5" cy="12.5" r="4"/>',
+    "spark": '<path d="M12 3l2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4z"/>',
+    "palette": '<path d="M12 3a9 9 0 1 0 0 18c1.5 0 2.1-1 2.1-2s-.9-1.4-.9-2.4c0-1 .8-1.7 1.9-1.7H17a4 4 0 0 0 4-4c0-4.4-4-7.9-9-7.9z"/>'
+               '<circle cx="8.6" cy="9.4" r="1.05"/><circle cx="12.4" cy="7.4" r="1.05"/><circle cx="16" cy="9.6" r="1.05"/>',
+    "shield": '<path d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/>',
+    "branch": '<circle cx="7" cy="6" r="2.4"/><circle cx="7" cy="18" r="2.4"/><circle cx="17" cy="9" r="2.4"/>'
+              '<path d="M7 8.4v7.2M17 11.4c-1.6 3-6.4 2.2-8.6 4.4"/>',
+    "grid": '<path d="M4 9l8-5 8 5-8 5z"/><path d="M4 14l8 5 8-5"/>',
+    "deploy": '<path d="M12 3v9M8.5 6.5 12 3l3.5 3.5"/><path d="M4 13v7h16v-7"/>',
+    "clock": '<circle cx="12" cy="12" r="8"/><path d="M12 8v4.2l3 2"/>',
+    "cal": '<rect x="4" y="6" width="16" height="14" rx="2"/><path d="M4 10.5h16M9 4v4M15 4v4"/>',
+    "ask": '<path d="M4 5h16v10H9l-5 4z"/><circle cx="12" cy="10" r="1.7"/>',
+    "layers": '<rect x="8.5" y="3" width="11" height="12" rx="1.5"/><path d="M5 8v11.5h10.5"/>',
+    "monitor": '<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/>',
+}
+
+# ---------------------------------------------------------------- 结构(语言无关)
+PILLARS = [  # 核心区卡片:(label_id, icon)
+    ("chat", "bubble"), ("knowledge", "ribbon"), ("files", "doc"),
+    ("mcp", "plug"), ("skill", "spark"), ("canvas", "palette"), ("rbac", "shield"),
+]
+TOOLS = [  # 工具区卡片:(label_id, icon, 方法数徽章)
+    ("tool_file", "doc", 16), ("tool_knowledge", "ribbon", 1), ("tool_git", "branch", 28),
+    ("tool_maven", "grid", 6), ("tool_deploy", "deploy", 1), ("tool_time", "clock", 2),
+    ("tool_skill", "spark", 2), ("tool_subtask", "layers", 4), ("tool_schedule", "cal", 4),
+    ("tool_askuser", "ask", 1), ("tool_render", "monitor", 1),
+]
+UNIVERSAL_COUNT = 7   # file/knowledge/time/skill/subtask/schedule/askUser
+RBAC_COUNT = 4        # git/maven/compile/render
+PLATFORM = ["user", "role", "session", "market_skill", "market_kb", "console"]
+MARKET_IDS = {"market_skill", "market_kb"}  # 全海报唯一两个橙色芯片
+TECH = ["Spring Boot", "Spring AI", "JDK 17", "JVector", "JGit", "H2", "Flyway", "ChatMemory"]
+BUILD = ["build_core", "build_config", "build_starter", "build_test"]
+
+# ---------------------------------------------------------------- 双语文案
+LABELS = {
+    "en": {
+        "subtitle": "Spring Boot AI Agent Out-of-the-Box Solution",
+        "sec_pillars": "01 PILLARS", "sec_tools": "02 TOOLS",
+        "sec_platform": "03 PLATFORM", "sec_build": "04 BUILD",
+        "tools_note": "7 universal  ·  04 RBAC",
+        "chat": "Chat", "knowledge": "Knowledge", "files": "Files", "mcp": "MCP",
+        "skill": "Skill", "canvas": "Canvas", "rbac": "RBAC",
+        "tool_file": "Files", "tool_knowledge": "Knowledge", "tool_git": "Git",
+        "tool_maven": "Maven", "tool_deploy": "Deploy", "tool_time": "Time",
+        "tool_skill": "Skill", "tool_subtask": "Sub-task", "tool_schedule": "Schedule",
+        "tool_askuser": "Ask-user", "tool_render": "Html render",
+        "user": "Users", "role": "Roles", "session": "Sessions",
+        "market_skill": "Skill Market", "market_kb": "KB Market", "console": "Admin Console",
+        "build_core": "core", "build_config": "autoconfigure",
+        "build_starter": "starter", "build_test": "test app",
+        "footer": "Interface  ·  Default  ·  Replaceable",
+    },
+    "zh": {
+        "subtitle": "Spring Boot AI Agent 开箱即用方案",
+        "sec_pillars": "01 核心", "sec_tools": "02 工具",
+        "sec_platform": "03 平台", "sec_build": "04 构建",
+        "tools_note": "7 通用  ·  4 RBAC",
+        "chat": "对话", "knowledge": "知识库", "files": "文件", "mcp": "MCP",
+        "skill": "技能", "canvas": "画板", "rbac": "权限",
+        "tool_file": "文件", "tool_knowledge": "知识库", "tool_git": "Git",
+        "tool_maven": "Maven", "tool_deploy": "部署", "tool_time": "时间",
+        "tool_skill": "技能", "tool_subtask": "子任务", "tool_schedule": "定时",
+        "tool_askuser": "问答", "tool_render": "HTML渲染",
+        "user": "用户", "role": "角色", "session": "会话",
+        "market_skill": "技能市场", "market_kb": "知识市场", "console": "管理控制台",
+        "build_core": "核心", "build_config": "自动配置",
+        "build_starter": "Starter", "build_test": "测试应用",
+        "footer": "接口  ·  默认  ·  可替换",
+    },
+}
 
 
-# ===== 6 大板块布局（语义描述，无坐标）=====
+def stats_line() -> str:
+    """统计胶囊由 DATA 自动计算 —— 与卡片数量构造上一致,不会过时。"""
+    return (f"{len(PILLARS):02d} PILLARS  -  {len(TOOLS):02d} TOOLS  -  "
+            f"{UNIVERSAL_COUNT:02d} UNIVERSAL  -  {RBAC_COUNT:02d} RBAC")
 
-EN_LAYOUT = """\
-A dark navy infographic poster, square aspect ratio. Modern enterprise tech poster aesthetic.
 
-Overall palette: deep navy background, neon cyan for nearly every graphical element, white for the main typographic content. There are EXACTLY TWO warm orange accents on the poster, reserved for the **Skill Market** and **KB Market** pills in ZONE 4 (PLATFORM). These two orange pills sit side by side, forming a visual "Market block". Every other element is cyan or white. Do not use orange anywhere else.
+def _icon(name: str) -> str:
+    return (f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            f'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
+            f'{ICONS[name]}</svg>')
 
-Card icon rule (applies to every card in every zone below):
-  Each card has EXACTLY two regions. Region 1 is an icon area containing one simple geometric icon ONLY, with absolutely no text, letters, numbers, or ghost characters inside. A digit inside a circle is still a digit — forbidden in the icon area; digits may appear ONLY in the small top-corner badge described for ZONE 3. Region 2 is a label at the bottom edge of the card, exactly one short label, appearing only ONCE.
 
-No-duplicate rule (applies to every row in every zone below):
-  Every label in a row appears EXACTLY ONCE in that row. The most common rendering error on this poster is duplicating one card (often Files in the pillars row, Deploy in the tools row, Sessions in the platform row). Never render the same label twice in one row; if the row feels tight, shrink card width and padding instead.
+def build_html(lang: str) -> str:
+    t = LABELS[lang]
+    pillar_cards = "\n".join(
+        f'      <div class="card"><span class="ico">{_icon(ic)}</span>'
+        f'<span class="lbl">{t[lid]}</span></div>'
+        for lid, ic in PILLARS)
+    tool_cards = "\n".join(
+        f'      <div class="card tool"><span class="badge">{n}</span>'
+        f'<span class="ico">{_icon(ic)}</span><span class="lbl">{t[lid]}</span></div>'
+        for lid, ic, n in TOOLS)
+    platform_chips = "\n".join(
+        f'      <div class="chip{" market" if pid in MARKET_IDS else ""}">{t[pid]}</div>'
+        for pid in PLATFORM)
+    tech_chips = "\n".join(f'      <div class="tech">{name}</div>' for name in TECH)
+    build_row = f'\n      <span class="arrow">→</span>\n      '.join(
+        f'<div class="buildbox">{t[bid]}</div>' for bid in BUILD)
 
-Generous breathing space between zones. Within a zone the elements sit close to each other.
-
-ZONE 1: HERO (top third of the poster, centered). In this order top to bottom:
-  - One very large bold white single-line title: Spring AI LoomAgent
-  - One smaller cyan tagline directly below: Spring Boot AI Agent Out-of-the-Box Solution
-  - A clear empty gap
-  - At the center, a thin horizontal outline pill (a rounded rectangle with a hairline cyan border, no fill) containing on a single line, in small uppercase: 06 PILLARS  -  11 TOOLS  -  07 UNIVERSAL  -  04 RBAC
-
-ZONE 2: small uppercase section label on the left in cyan: 01 PILLARS. Below it one horizontal row of six plain rounded rectangle cards, all cyan, all the same size, in this exact order from left to right: Chat, Knowledge, Files, MCP, Skill, RBAC.
-
-ZONE 3: small uppercase section label on the left in cyan: 02 TOOLS. To the right of that label on the same horizontal line, a small caption reading: 7 universal  4 RBAC. Below the label, ONE horizontal row containing EXACTLY 11 plain rounded rectangle cards — no more, no fewer, all eleven visible in the order listed — in this exact order from left to right. Every card is equal to every other card (no card is highlighted, no card is a different color, no card has a star):
-  Files, Knowledge, Git, Maven, Deploy, Time, Skill, Sub-task, Schedule, Ask-user, Html render
-  For each of these eleven cards, put a small badge with the tool count (just the digit) inside the icon area at the top: 16, 1, 28, 6, 1, 2, 2, 4, 4, 1, 1. The badge digits pair with the card labels strictly in order — Files=16, Knowledge=1, Git=28, Maven=6, Deploy=1, Time=2, Skill=2, Sub-task=4, Schedule=4, Ask-user=1, Html render=1 — each badge sits on its own card, never shifted onto a neighbour. The card label sits at the bottom edge. The single most common rendering error is dropping one card (often Time) to fit the row; render all eleven even if each card becomes narrower, prefer smaller width over omission, never omit a card or merge two cards into one.
-
-ZONE 4: small uppercase section label on the left in cyan: 03 PLATFORM. Below it, two stacked rows:
-  Row A: one horizontal row of six small chip rectangles on the left in this order: Users, Roles, Sessions, Skill Market, KB Market, Admin Console. The **Skill Market** and **KB Market** pills are the ONLY orange-filled elements on the whole poster, sitting side by side to form a visual "Market block". All other chips are cyan-filled.
-  Row B: ONE horizontal row containing EXACTLY 8 thin cyan pill labels — no more, no fewer, all eight visible — in this exact order: Spring Boot, Spring AI, JDK 17, JVector, JGit, H2, Flyway, ChatMemory. JVector is one seven-letter word starting with capital J, then capital V, then lower-case e c t o r. The single most common rendering error is dropping one of these labels; render all eight even if the row becomes tighter, prefer smaller padding over omission.
-
-ZONE 5: small uppercase section label on the left in cyan: 04 BUILD. Below it, one horizontal row of four plain rounded rectangle boxes connected by right-pointing arrows, in this order: core, config, starter, test.
-
-FOOTER at the very bottom: one thin horizontal cyan hairline spanning most of the poster width, with a centered white tagline written ON the line: Interface  ·  Default  ·  Replaceable. Below the line, a small amount of empty breathing space and nothing else.
+    return f"""<!DOCTYPE html>
+<html lang="{lang}">
+<head>
+<meta charset="utf-8">
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  html, body {{ width: {SIZE}px; height: {SIZE}px; overflow: hidden; }}
+  body {{
+    background: #232a3d;
+    font-family: "Inter", "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #ffffff;
+    padding: 56px 64px 40px;
+    display: flex; flex-direction: column;
+    justify-content: space-between;  /* 大区呼吸空白均匀分布,不留整块死空 */
+  }}
+  .hero {{ text-align: center; }}
+  .hero h1 {{ font-size: 64px; font-weight: 800; letter-spacing: 0.5px; }}
+  .hero .sub {{ font-size: 27px; font-weight: 700; color: #45e3cf; margin-top: 10px; }}
+  .hero .stats {{
+    display: inline-block; margin-top: 26px; padding: 9px 26px;
+    border: 1.6px solid #45e3cf; border-radius: 999px;
+    font-size: 17px; font-weight: 700; letter-spacing: 1.2px; color: #ffffff;
+  }}
+  section {{ margin-bottom: 6px; }}
+  .sec-head {{ display: flex; align-items: baseline; gap: 18px; margin-bottom: 14px; }}
+  .sec-head .tag {{ font-size: 24px; font-weight: 800; color: #45e3cf; letter-spacing: 1px; }}
+  .sec-head .note {{ font-size: 17px; font-weight: 700; color: #ffffff; }}
+  .row {{ display: flex; gap: 14px; }}
+  .card {{
+    flex: 1; background: #45e3cf; color: #16202e; border-radius: 14px;
+    min-height: 96px; padding: 14px 6px 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    position: relative;
+  }}
+  .card .ico svg {{ width: 34px; height: 34px; display: block; }}
+  .card .lbl {{ font-size: 17px; font-weight: 700; white-space: nowrap; }}
+  .card.tool {{ min-height: 104px; }}
+  .card .badge {{
+    position: absolute; top: -10px; left: -6px;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #eafcf9; color: #16202e; border: 1.4px solid #16202e;
+    font-size: 13px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+  }}
+  .chiprow {{ display: flex; gap: 14px; margin-bottom: 14px; }}
+  .chip {{
+    flex: 1; background: #45e3cf; color: #16202e; border-radius: 10px;
+    padding: 13px 4px; text-align: center; font-size: 17px; font-weight: 700; white-space: nowrap;
+  }}
+  .chip.market {{ background: #f5a020; color: #201409; }}
+  .techrow {{ display: flex; gap: 12px; }}
+  .tech {{
+    flex: 1; border: 1.5px solid #45e3cf; border-radius: 999px;
+    padding: 10px 4px; text-align: center;
+    font-size: 15.5px; font-weight: 700; color: #45e3cf; white-space: nowrap;
+  }}
+  .buildrow {{ display: flex; align-items: center; gap: 16px; }}
+  .buildbox {{
+    flex: 1; background: #45e3cf; color: #16202e; border-radius: 12px;
+    padding: 18px 4px; text-align: center; font-size: 19px; font-weight: 800; white-space: nowrap;
+  }}
+  .arrow {{ color: #45e3cf; font-size: 30px; font-weight: 800; }}
+  footer {{ text-align: center; }}
+  footer .line {{ border-top: 1.6px solid #45e3cf; margin-bottom: 16px; }}
+  footer .txt {{ font-size: 20px; font-weight: 700; letter-spacing: 2px; }}
+</style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Spring AI LoomAgent</h1>
+    <div class="sub">{t['subtitle']}</div>
+    <div class="stats">{stats_line()}</div>
+  </div>
+  <section>
+    <div class="sec-head"><span class="tag">{t['sec_pillars']}</span></div>
+    <div class="row">
+{pillar_cards}
+    </div>
+  </section>
+  <section>
+    <div class="sec-head"><span class="tag">{t['sec_tools']}</span><span class="note">{t['tools_note']}</span></div>
+    <div class="row">
+{tool_cards}
+    </div>
+  </section>
+  <section>
+    <div class="sec-head"><span class="tag">{t['sec_platform']}</span></div>
+    <div class="chiprow">
+{platform_chips}
+    </div>
+    <div class="techrow">
+{tech_chips}
+    </div>
+  </section>
+  <section>
+    <div class="sec-head"><span class="tag">{t['sec_build']}</span></div>
+    <div class="buildrow">
+      {build_row}
+    </div>
+  </section>
+  <footer>
+    <div class="line"></div>
+    <div class="txt">{t['footer']}</div>
+  </footer>
+</body>
+</html>
 """
 
-ZH_LAYOUT = """\
-深蓝色信息图海报，正方形。现代企业科技海报风格。
 
-整体配色：深蓝色背景，霓虹青色作为几乎所有图形的颜色，白色作为主文字。海报上 EXACTLY 只有两个暖橙色高亮，保留给 04 区（PLATFORM）里的"技能市场"和"知识市场"芯片。这两个橙色芯片并排相邻，形成视觉上的"市场板块"。其他任何元素都不能用橙色。
-
-卡片图标规则（下面每个区的所有卡片都遵守）：
-  每张卡片严格只有两个区域：(1) 图标区 —— 一个干净简单的几何图标，绝对不允许任何文字、字母、数字、伪字符出现在图标里；圆圈里的数字也是数字 —— 图标区禁止，数字只能出现在 03 区描述的顶角小徽章里；(2) 标签区 —— 在卡片底边恰好一个简短标签。同一张卡片里标签只能出现一次。
-
-禁止重复规则（下面每个区的每一行都遵守）：
-  一行里每个标签只能出现恰好一次。这张海报最常见的渲染错误是在同一行里重复某张卡（核心行经常重复"文件"、工具行经常重复"部署"、平台行经常重复"会话"）。同一行绝不重复同一标签；如果一行太挤，缩小卡片宽度和 padding，而不是重复或省略。
-
-每个大区之间留出明显的空白呼吸。区内部元素紧凑排列。
-
-01 区 HERO（海报上 1/3，居中）。从上到下依次为：
-  - 一行超大白色粗体标题：Spring AI LoomAgent
-  - 紧接下方一行较小的青色副标题：Spring Boot AI Agent 开箱即用方案
-  - 一段空白
-  - 居中位置一个细轮廓横向胶囊（圆角矩形，只有青色描边，没有填充），里面单行小号大写英文：06 PILLARS  -  11 TOOLS  -  07 UNIVERSAL  -  04 RBAC
-
-02 区：左侧一行青色小号大写章节标签：01 核心。其下方一行六张圆角矩形卡片，全部青色等大，从左到右依次为：对话、知识库、文件、MCP、技能、权限。
-
-03 区：左侧一行青色小号大写章节标签：02 工具。在章节标签右侧同一行小号说明文字：7 通用  4 RBAC。下方 EXACTLY 11 张圆角矩形卡片组成一行 — 不能多也不能少，11 张全部可见 — 全部青色等大，从左到右依次为。每张卡片完全相同（没有高亮、没有其他颜色、没有五角星）：
-  文件、知识库、Git、Maven、部署、时间、技能、子任务、定时、问答、HTML渲染
-  每张卡片在图标区顶端放一个小数字徽章：16、1、28、6、1、2、2、4、4、1、1。徽章数字与卡片标签严格按顺序配对 —— 文件=16、知识库=1、Git=28、Maven=6、部署=1、时间=2、技能=2、子任务=4、定时=4、问答=1、HTML渲染=1 —— 每个徽章放在自己那张卡上，绝不串到邻卡。卡片标签贴在底部。最常见的渲染错误是漏掉一张卡（经常是"时间"）；即使每张更窄也要全部画出来，绝对不能省略一张或两张并一张。
-
-04 区：左侧一行青色小号大写章节标签：03 平台。其下方两行堆叠：
-  第 A 行：一行六个小芯片矩形，依次为：用户、角色、会话、技能市场、知识市场、管理控制台。**技能市场**和**知识市场**是全海报 EXACTLY 唯一的两个橙色填充芯片，并排相邻形成"市场板块"。其他芯片都是青色填充。
-  第 B 行：一行 EXACTLY 8 个细青色胶囊标签（不能多也不能少，8 个全部可见），依次为：Spring Boot、Spring AI、JDK 17、JVector、JGit、H2、Flyway、ChatMemory。JVector 是一个单词：以大写 J 和大写 V 开头，后接小写 e、c、t、o、r。最常见的渲染错误是漏掉一个；如果空间紧张就缩小 padding 而不是省略。
-
-05 区：左侧一行青色小号大写章节标签：04 构建。其下方一行四个圆角矩形方框，用向右箭头连接，从左到右：核心、配置、启动、测试。
-
-最底部页脚：一根贯穿海报大部分宽度的细青色水平线，线上正中位置写一行白色文字：接口  ·  默认  ·  可替换。线下方留一点空白呼吸空间，其他什么也不写。
-"""
+def render(lang: str, out: pathlib.Path) -> None:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sys.exit("缺少依赖:pip install playwright && playwright install chromium")
+    html = build_html(lang)
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(
+            viewport={"width": SIZE, "height": SIZE}, device_scale_factor=2)
+        page.set_content(html, wait_until="networkidle")
+        page.screenshot(path=str(out))
+        browser.close()
+    print(f"[overview] {lang} -> {out}")
 
 
-NO_META_EN = """\
-Strict rules. Any violation makes this image unusable:
-- DO NOT include version numbers like v1, v2, 1.0, 3.5.
-- DO NOT include years or dates like 2024 or 2025.
-- DO NOT include hex color codes like #0f172a or rgb().
-- DO NOT include any text that looks like coordinates, code, or debug output.
-- Every text element MUST be a real English word or short phrase.
-- Project name MUST be exactly "Spring AI LoomAgent" with capital A and capital I.
-- Keep names like JVector, JGit, Maven, Flyway, REST, MCP in their original form.
-- Use simple geometric icons. No real product logos.
-- All text must be horizontal and readable. No rotated text.
-- Render every zone listed above. Do not omit any.
-"""
-
-NO_META_ZH = """\
-严格要求。任何一条违反都让图片作废：
-- 不要出现版本号，例如 v1、v2、1.0、3.5。
-- 不要出现年份或日期，例如 2024 或 2025。
-- 不要出现 hex 颜色代码，例如 #0f172a 或 rgb。
-- 不要出现任何看起来像坐标、代码或调试输出的文字。
-- 每个文字必须是真实中文或英文词汇。
-- 项目名必须是 Spring AI LoomAgent。
-- 专有名词保持原样：JVector、JGit、Maven、Flyway、REST、MCP。
-- 只使用简单几何图标，不能出现真实产品 logo。
-- 所有文字必须水平方向且可读，不能旋转。
-- 上面列出的每个区块都要画出来，不能省略任何一个。
-"""
-
-
-def build_en_prompt() -> str:
-    return (
-        "Modern dark themed infographic poster, square aspect ratio.\n\n"
-        + EN_LAYOUT
-        + "\n\n"
-        + NO_META_EN
-        + "\n\nOverall mood: clean grid, neon-on-dark, looks like a tech conference slide."
-    )
-
-
-def build_zh_prompt() -> str:
-    return (
-        "现代深色信息图海报，正方形。\n\n"
-        + ZH_LAYOUT
-        + "\n\n"
-        + NO_META_ZH
-        + "\n\n整体风格：干净的栅格，霓虹色配深色背景，类似技术大会幻灯片。"
-    )
-
-
-def call_wan27(prompt: str, api_key: str, workspace_id: str, size: str = "1280*1280") -> bytes:
-    """调 wan2.7-image 同步端点。返回 PNG 字节。"""
-    submit_url = SUBMIT_URL_TPL.format(workspace_id=workspace_id)
-    payload = {
-        "model": PRIMARY_MODEL,
-        "input": {
-            "messages": [
-                {"role": "user", "content": [{"text": prompt}]}
-            ]
-        },
-        "parameters": {"n": 1, "size": size},
-    }
-    req = urllib.request.Request(
-        submit_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-
-    # 同步响应直接返回图像
-    choices = (data.get("output") or {}).get("choices") or []
-    if not choices:
-        raise RuntimeError(f"No choices in response: {data}")
-    content = choices[0].get("message", {}).get("content") or []
-    for item in content:
-        if item.get("type") == "image" and item.get("image"):
-            url = item["image"]
-            with urllib.request.urlopen(url, timeout=60) as img_resp:
-                return img_resp.read()
-    raise RuntimeError(f"No image URL in response: {data}")
-
-
-def call_qwen_image_fallback(prompt: str, api_key: str) -> bytes:
-    """回退到旧 qwen-image 端点（异步）。"""
-    submit_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
-    task_url_tpl = "https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
-    payload = {
-        "model": FALLBACK_MODEL,
-        "input": {"prompt": prompt},
-        "parameters": {"size": "1328*1328", "n": 1},
-    }
-    req = urllib.request.Request(
-        submit_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "X-DashScope-Async": "enable",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    task_id = (data.get("output") or {}).get("task_id")
-    if not task_id:
-        raise RuntimeError(f"No task_id: {data}")
-
-    import time
-    deadline = time.time() + 240
-    while time.time() < deadline:
-        time.sleep(3)
-        req2 = urllib.request.Request(
-            task_url_tpl.format(task_id=task_id),
-            headers={"Authorization": f"Bearer {api_key}"},
-            method="GET",
-        )
-        with urllib.request.urlopen(req2, timeout=30) as r:
-            d2 = json.loads(r.read().decode("utf-8"))
-        status = (d2.get("output") or {}).get("task_status")
-        if status == "SUCCEEDED":
-            url = d2["output"]["results"][0]["url"]
-            with urllib.request.urlopen(url, timeout=60) as img_resp:
-                return img_resp.read()
-        if status == "FAILED":
-            raise RuntimeError(f"Task failed: {d2}")
-    raise RuntimeError("Task timeout")
-
-
-def generate_one(prompt: str, api_key: str, workspace_id: str, out_path: Path) -> None:
-    """优先 wan2.7-image，失败回退 qwen-image。"""
-    if workspace_id:
-        try:
-            print(f"  [model={PRIMARY_MODEL}] submitting...", file=sys.stderr)
-            png = call_wan27(prompt, api_key, workspace_id)
-            out_path.write_bytes(png)
-            print(f"  [model={PRIMARY_MODEL}] OK -> {out_path} ({len(png):,} bytes)", file=sys.stderr)
-            return
-        except Exception as e:
-            print(f"  [model={PRIMARY_MODEL}] FAILED: {e}", file=sys.stderr)
-    # 回退
-    print(f"  [model={FALLBACK_MODEL}] submitting...", file=sys.stderr)
-    png = call_qwen_image_fallback(prompt, api_key)
-    out_path.write_bytes(png)
-    print(f"  [model={FALLBACK_MODEL}] OK -> {out_path} ({len(png):,} bytes)", file=sys.stderr)
-
-
-def normalize_workspace_id(ws: str | None) -> str | None:
-    """Strip a trailing '.cn-<region>' segment if present.
-
-    MaaS URL template already adds `.cn-beijing.maas.aliyuncs.com`,
-    so workspace IDs that already include the region (e.g. `ws-xxx.cn-beijing`)
-    would otherwise produce duplicate `.cn-beijing.cn-beijing.maas.aliyuncs.com`
-    hosts, triggering SSL hostname mismatch errors.
-    """
-    if not ws:
-        return ws
-    # Only strip when the trailing segment matches `.cn-<word>` to avoid
-    # mangling bare IDs that just happen to contain dots.
-    if re.match(r"^.*\.cn-[a-z0-9]+$", ws, flags=re.IGNORECASE):
-        return ws.rsplit(".", 1)[0]
-    return ws
-
-
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--project", default=".", help="project root path")
-    p.add_argument("--out-dir", default=None, help="output dir (default: <project>/docs)")
-    p.add_argument("--api-key", default=os.environ.get("DASHSCOPE_PERSON_TOKEN_API_KEY"))
-    p.add_argument("--workspace-id", default=os.environ.get("DASHSCOPE_WORKSPACE_ID")
-                                     or os.environ.get("WORKSPACE_ID"))
-    p.add_argument("--size", default="1280*1280", help="wan2.7-image size (default 1280*1280)")
-    p.add_argument("--only", choices=["en", "zh", "both"], default="both")
-    args = p.parse_args()
-
-    if not args.api_key:
-        sys.exit("DASHSCOPE_PERSON_TOKEN_API_KEY not set")
-    args.workspace_id = normalize_workspace_id(args.workspace_id)
-    if not args.workspace_id:
-        print("[WARN] DASHSCOPE_WORKSPACE_ID not set, will use qwen-image fallback",
-              file=sys.stderr)
-
-    project_root = Path(args.project).resolve()
-    out_dir = Path(args.out_dir).resolve() if args.out_dir else project_root / "docs"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    en_prompt = build_en_prompt()
-    zh_prompt = build_zh_prompt()
-    print(f"[INFO] en_prompt: {len(en_prompt)} chars", file=sys.stderr)
-    print(f"[INFO] zh_prompt: {len(zh_prompt)} chars", file=sys.stderr)
-    print(f"[INFO] workspace_id: {args.workspace_id or '(fallback)'}", file=sys.stderr)
-
-    suffix = f"-r{os.environ.get('RUN_ID', '')}" if os.environ.get("RUN_ID") else ""
-
-    if args.only in ("en", "both"):
-        out = out_dir / "project-overview-en.png"
-        if suffix:
-            out = out_dir / f"project-overview-en{suffix}.png"
-        print(f"[GEN] en -> {out}", file=sys.stderr)
-        generate_one(en_prompt, args.api_key, args.workspace_id, out)
-        print(f"[OK]  en: {out}", file=sys.stderr)
-
-    if args.only in ("zh", "both"):
-        out = out_dir / "project-overview-zh.png"
-        if suffix:
-            out = out_dir / f"project-overview-zh{suffix}.png"
-        print(f"[GEN] zh -> {out}", file=sys.stderr)
-        generate_one(zh_prompt, args.api_key, args.workspace_id, out)
-        print(f"[OK]  zh: {out}", file=sys.stderr)
-
-    print("[DONE]", file=sys.stderr)
+def main() -> None:
+    DOCS.mkdir(parents=True, exist_ok=True)
+    render("en", DOCS / "project-overview-en.png")
+    render("zh", DOCS / "project-overview-zh.png")
 
 
 if __name__ == "__main__":

@@ -230,6 +230,24 @@
                 </svg>
               </button>
               <input type="file" id="image-file-input" style="display: none" />
+              <button
+                class="image-add-btn"
+                id="canvas-add-btn"
+                title="画板绘图"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.12a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                  />
+                  <circle cx="13.5" cy="6.5" r="1.1" fill="currentColor" />
+                  <circle cx="17.5" cy="10.5" r="1.1" fill="currentColor" />
+                  <circle cx="8.5" cy="7.5" r="1.1" fill="currentColor" />
+                  <circle cx="6.5" cy="12.5" r="1.1" fill="currentColor" />
+                </svg>
+              </button>
               <div class="button-area">
                 <button id="send-btn">发送消息</button>
                 <button
@@ -650,6 +668,91 @@
       </div>
     </div>
 
+    <!-- Canvas Board Modal（画板绘图 → 确定后转 PNG 上传为聊天附件） -->
+    <div id="canvas-modal-overlay" class="modal-overlay" style="display: none">
+      <div class="modal-content canvas-modal-content">
+        <div class="modal-header">
+          <h3>画板</h3>
+          <div class="close-button" id="canvas-close-btn">&times;</div>
+        </div>
+        <div class="canvas-toolbar" id="canvas-toolbar">
+          <div class="canvas-tool-group">
+            <button class="canvas-tool-btn" data-tool="select" title="选择/移动组件(拖动移动,角手柄缩放,双击改文字,Delete 删除)">↖</button>
+            <button class="canvas-tool-btn active" data-tool="pen" title="画笔">✎</button>
+            <button class="canvas-tool-btn" data-tool="line" title="直线">╱</button>
+            <button class="canvas-tool-btn" data-tool="rect" title="矩形">▭</button>
+            <button class="canvas-tool-btn" data-tool="ellipse" title="椭圆">◯</button>
+            <button class="canvas-tool-btn" data-tool="text" title="文字">T</button>
+            <button class="canvas-tool-btn" data-tool="eraser" title="橡皮(点击笔画整体擦除)">⌫</button>
+          </div>
+          <div class="canvas-tool-group canvas-stencil-host">
+            <button class="canvas-tool-btn" id="canvas-stencil-toggle" title="Web UI 组件(18 件,CRUD 原型骨架)">组件 ▾</button>
+            <div id="canvas-stencil-panel" class="canvas-stencil-panel" style="display: none">
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">基础</span>
+                <button class="canvas-stencil-btn" data-stencil="button" title="按钮">按钮</button>
+                <button class="canvas-stencil-btn" data-stencil="input" title="输入框">输入</button>
+                <button class="canvas-stencil-btn" data-stencil="textarea" title="多行输入">多行</button>
+                <button class="canvas-stencil-btn" data-stencil="tag" title="状态标签">标签</button>
+                <button class="canvas-stencil-btn" data-stencil="switch" title="开关">开关</button>
+                <button class="canvas-stencil-btn" data-stencil="imgph" title="图片占位">图片</button>
+              </div>
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">表单</span>
+                <button class="canvas-stencil-btn" data-stencil="formitem" title="表单字段(标签+输入框)">字段</button>
+                <button class="canvas-stencil-btn" data-stencil="checkbox" title="复选框">勾选</button>
+                <button class="canvas-stencil-btn" data-stencil="radio" title="单选框">单选</button>
+                <button class="canvas-stencil-btn" data-stencil="select" title="下拉选择">下拉</button>
+              </div>
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">数据展示</span>
+                <button class="canvas-stencil-btn" data-stencil="table" title="数据表格(表头列名逗号分隔)">表格</button>
+                <button class="canvas-stencil-btn" data-stencil="pagination" title="分页条">分页</button>
+                <button class="canvas-stencil-btn" data-stencil="toolbar" title="操作栏(搜索+主按钮)">操作栏</button>
+              </div>
+              <div class="canvas-panel-group">
+                <span class="canvas-group-label">导航/容器</span>
+                <button class="canvas-stencil-btn" data-stencil="navbar" title="导航栏">导航</button>
+                <button class="canvas-stencil-btn" data-stencil="tabs" title="页签(逗号分隔)">页签</button>
+                <button class="canvas-stencil-btn" data-stencil="breadcrumb" title="面包屑(逗号分隔)">面包屑</button>
+                <button class="canvas-stencil-btn" data-stencil="modal" title="对话框">对话框</button>
+                <button class="canvas-stencil-btn" data-stencil="card" title="卡片">卡片</button>
+              </div>
+            </div>
+          </div>
+          <div class="canvas-tool-group" id="canvas-colors">
+            <button class="canvas-swatch active" data-color="#000000" style="background:#000000" title="黑色"></button>
+            <button class="canvas-swatch" data-color="#ef4444" style="background:#ef4444" title="红色"></button>
+            <button class="canvas-swatch" data-color="#f59e0b" style="background:#f59e0b" title="橙色"></button>
+            <button class="canvas-swatch" data-color="#22c55e" style="background:#22c55e" title="绿色"></button>
+            <button class="canvas-swatch" data-color="#3b82f6" style="background:#3b82f6" title="蓝色"></button>
+            <button class="canvas-swatch" data-color="#8b5cf6" style="background:#8b5cf6" title="紫色"></button>
+            <button class="canvas-swatch" data-color="#ec4899" style="background:#ec4899" title="粉色"></button>
+            <button class="canvas-swatch" data-color="#6b7280" style="background:#6b7280" title="灰色"></button>
+            <input type="color" id="canvas-custom-color" value="#4f46e5" title="自定义颜色" />
+          </div>
+          <div class="canvas-tool-group">
+            <label class="canvas-width-label" for="canvas-width">粗细</label>
+            <input type="range" id="canvas-width" min="1" max="16" step="1" value="3" />
+            <span class="canvas-width-value" id="canvas-width-value">3</span>
+          </div>
+          <div class="canvas-tool-group">
+            <button class="canvas-tool-btn" id="canvas-undo-btn" title="撤销">↺ 撤销</button>
+            <button class="canvas-tool-btn" id="canvas-redo-btn" title="重做">↻ 重做</button>
+          </div>
+        </div>
+        <div class="canvas-board-wrap" id="canvas-board-wrap">
+          <canvas id="canvas-board"></canvas>
+          <input type="text" id="canvas-text-input" class="canvas-text-input" style="display: none" placeholder="输入文字，回车确认" />
+        </div>
+        <div class="canvas-footer">
+          <button class="modal-action-btn" id="canvas-clear-btn">清空</button>
+          <button class="modal-action-btn" id="canvas-cancel-btn">取消</button>
+          <button class="primary-btn" id="canvas-confirm-btn">确定</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Generic Confirm Modal -->
     <div id="confirm-modal-overlay" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 440px">
@@ -706,5 +809,6 @@
     <script src="i18n/i18n.js"></script>
     <script type="module" src="app.js"></script>
     <script src="admin/market-admin.js"></script>
+    <script src="canvas-board.js"></script>
   </body>
 </html>

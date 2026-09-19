@@ -785,13 +785,6 @@ public class LoomAgentConfiguration {
         public IDocumentRead defaultDocumentRead() {
             return new DefaultDocumentRead();
         }
-
-        @ConditionalOnBean(VectorStore.class)
-        @ConditionalOnMissingBean(IUpload.class)
-        @Bean
-        public IUpload defaultUpload(IFile file, IFileDocument fileDocument, IDocumentRead documentRead, VectorStore vectorStore, IKnowledge knowledge, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage, LoomAgentProperties properties) {
-            return new DefaultUpload(file, fileDocument, documentRead, vectorStore, knowledge, fileStorage, properties.getUsersBasePath());
-        }
     }
 
     /**
@@ -1505,6 +1498,23 @@ public class LoomAgentConfiguration {
     @Configuration
     @EnableScheduling
     static class StorageConfiguration {
+
+        /**
+         * 上传管线(2026-09-19 解耦改造):自 RagConfiguration 迁出 —— 聊天附件腿
+         * (落盘 + file_info)不依赖任何 RAG 组件,bean 恒在,无 embedding 的纯聊天
+         * 部署同样可用;知识腿的两个 RAG 依赖经 ObjectProvider 注入,降级部署
+         * provider 为空 → DefaultUpload 运行时抛 503 业务错误(路由层如实映射)。
+         */
+        @ConditionalOnMissingBean(IUpload.class)
+        @Bean
+        public IUpload defaultUpload(IFile file, IFileDocument fileDocument,
+                                     org.springframework.beans.factory.ObjectProvider<IDocumentRead> documentReadProvider,
+                                     org.springframework.beans.factory.ObjectProvider<VectorStore> vectorStoreProvider,
+                                     IKnowledge knowledge, cn.wubo.spring.ai.loom.agent.file.IFileStorage fileStorage,
+                                     LoomAgentProperties properties) {
+            return new DefaultUpload(file, fileDocument, documentReadProvider, vectorStoreProvider,
+                    knowledge, fileStorage, properties.getUsersBasePath());
+        }
 
         @ConditionalOnMissingBean(IUser.class)
         @Bean
@@ -4471,18 +4481,20 @@ public class LoomAgentConfiguration {
         }
 
         /**
-         * 知识库路由。RAG 全局关闭(spring.ai.loom.agent.rag.enabled=false 或无
-         * EmbeddingModel)时 IUpload 缺席,但 KB 元数据 CRUD(IKnowledge,不依赖
-         * VectorStore)保留 —— IUpload 走 ObjectProvider 降级注入:
-         * checkKnowledgeUpload 如实返回 false,上传/删除文件类端点 503,
-         * DELETE KB 降级为仅删元数据行。前端据 features.knowledge 隐藏知识空间按钮。
+         * 知识库路由。IUpload bean 恒在(2026-09-19 解耦:聊天附件腿不依赖 RAG),
+         * 降级判据改为 <b>VectorStore 缺席</b>(rag.enabled=false 或无 EmbeddingModel):
+         * checkKnowledgeUpload 如实返回 false(语义=知识上传链路可用度),
+         * 知识上传/删文件端点 503,DELETE KB 经 DefaultUpload 内部跳过向量清理
+         * (元数据/存储照常清)。KB 元数据 CRUD(IKnowledge)不受影响。
+         * 前端据 features.knowledge 隐藏知识空间按钮;+/画板按钮不再与本门控联动。
          */
         @Bean("loomAgentKnowledgeRouter")
         public RouterFunction<ServerResponse> loomAgentKnowledgeRouter(IKnowledge knowledge,
                                                                        org.springframework.beans.factory.ObjectProvider<IUpload> uploadProvider,
+                                                                       org.springframework.beans.factory.ObjectProvider<org.springframework.ai.vectorstore.VectorStore> vectorStoreProvider,
                                                                        IFile file) {
             RouterFunctions.Builder builder = RouterFunctions.route();
-            builder.GET("/spring/ai/loom/knowledge/checkKnowledgeUpload", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(uploadProvider.getIfAvailable() != null));
+            builder.GET("/spring/ai/loom/knowledge/checkKnowledgeUpload", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(uploadProvider.getIfAvailable() != null && vectorStoreProvider.getIfAvailable() != null));
             builder.GET("/spring/ai/loom/knowledge", request -> ServerResponse.ok().contentType(MediaType.APPLICATION_JSON).body(knowledge.list()));
             builder.PUT("/spring/ai/loom/knowledge", request -> {
                 KnowledgeRecord knowledgeRecord = request.body(KnowledgeRecord.class);
@@ -4551,9 +4563,9 @@ public class LoomAgentConfiguration {
             });
             builder.POST("/spring/ai/loom/knowledge/{knowledgeId}/upload", request -> {
                 IUpload upload = uploadProvider.getIfAvailable();
-                if (upload == null) {
+                if (upload == null || vectorStoreProvider.getIfAvailable() == null) {
                     return ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
-                            .body(java.util.Map.of("message", "知识库文件功能未启用(RAG 已关闭)"));
+                            .body(java.util.Map.of("message", "知识库文件功能未启用(知识空间未启用/embedding 未配置)"));
                 }
                 // 与 /file/upload 同理：缺 multipart header / body 走 400 而不是 500
                 String fileErrMsg = "上传的文件不能为空，请检查请求参数中是否包含名为'file'的文件";
@@ -4577,9 +4589,9 @@ public class LoomAgentConfiguration {
             });
             builder.DELETE("/spring/ai/loom/knowledge/{knowledgeId}/file/{fileId}", request -> {
                 IUpload upload = uploadProvider.getIfAvailable();
-                if (upload == null) {
+                if (upload == null || vectorStoreProvider.getIfAvailable() == null) {
                     return ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
-                            .body(java.util.Map.of("message", "知识库文件功能未启用(RAG 已关闭)"));
+                            .body(java.util.Map.of("message", "知识库文件功能未启用(知识空间未启用/embedding 未配置)"));
                 }
                 String fileId = request.pathVariable("fileId");
                 // upload.delete 内部调 file.getById，row 不存在抛 EmptyResultDataAccessException → 404

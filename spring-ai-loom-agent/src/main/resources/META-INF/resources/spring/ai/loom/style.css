@@ -3999,3 +3999,195 @@ textarea::placeholder {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .askuser-summary-arrow { flex: none; font-size: 12px; }
+
+/* ===================== Canvas Board（画板绘图模态框） ===================== */
+.canvas-modal-content {
+  width: 96vw;
+  max-width: 96vw;
+  height: 92vh;
+  max-height: 92vh;
+  /* 绘画表面必须静止:slideUp 位移动画期间落笔会随画布移动产生偏移
+     (同 operations-modal 禁用动画的裁定),确定性优先于入场效果 */
+  animation: none;
+}
+
+.canvas-board-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #fff;
+  overflow: hidden;
+}
+
+#canvas-board {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.canvas-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 32px;
+  border-top: 1px solid var(--border-color);
+}
+
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 32px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.canvas-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-tool-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.canvas-tool-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.canvas-tool-btn.active {
+  border-color: var(--primary-color);
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--primary-color);
+}
+
+.canvas-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--transition-fast);
+}
+
+.canvas-swatch:hover { transform: scale(1.15); }
+
+.canvas-swatch.active {
+  border-color: var(--text-primary);
+  transform: scale(1.15);
+}
+
+#canvas-custom-color {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.canvas-width-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+#canvas-width { width: 90px; cursor: pointer; }
+
+.canvas-width-value {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 18px;
+  text-align: center;
+}
+
+.canvas-text-input {
+  position: absolute;
+  z-index: 10;
+  min-width: 120px;
+  padding: 2px 6px;
+  border: 1px dashed var(--primary-color);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.95);
+  outline: none;
+  font-family: inherit;
+}
+
+.canvas-group-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.canvas-stencil-btn {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.canvas-stencil-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.canvas-stencil-btn.active {
+  border-color: var(--primary-color);
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--primary-color);
+}
+
+/* 组件分类弹出面板(18 件印章收纳) */
+.canvas-stencil-host {
+  position: relative;
+}
+
+.canvas-stencil-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  padding: 14px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  width: max-content;
+  max-width: 420px;
+}
+
+.canvas-panel-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-panel-group .canvas-group-label {
+  width: 100%;
+  margin-bottom: 2px;
+}

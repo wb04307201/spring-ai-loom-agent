@@ -3,7 +3,6 @@ package cn.wubo.spring.ai.loom.agent.skill;
 import cn.wubo.spring.ai.loom.agent.market.IMarketContentAdminService;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkill;
 import cn.wubo.spring.ai.loom.agent.model.MarketSkillSubmitRequest;
-import cn.wubo.spring.ai.loom.agent.model.MarketSkillUpsertRequest;
 import cn.wubo.spring.ai.loom.agent.model.UserSkill;
 
 import java.util.List;
@@ -47,29 +46,6 @@ public interface ISkillMarketService {
      * 成功后反写 author 自己的 user_skill.market_skill_id 指向当前 market_skill 行。
      */
     MarketSkill submit(String username, MarketSkillSubmitRequest req);
-
-    /* ===== admin 直接 CRUD ===== */
-
-    /**
-     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
-     * {@code IMarketContentAdminService#createApproved} 取代
-     */
-    @Deprecated
-    MarketSkill adminCreate(String adminUsername, MarketSkillUpsertRequest req);
-
-    /**
-     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
-     * {@code IMarketContentAdminService#update} 取代
-     */
-    @Deprecated
-    MarketSkill adminUpdate(String adminUsername, Long id, MarketSkillUpsertRequest req);
-
-    /**
-     * @deprecated v1 路由已退役（#4），保留 1 个 minor 版本；由
-     * {@code IMarketContentAdminService#delete}（含 cascadeCleanup 级联）取代
-     */
-    @Deprecated
-    void adminDelete(String adminUsername, Long id);
 
     /* ===== 用户拉取 ===== */
 
