@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.45
+> **Version**: 1.1.46
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -940,7 +940,7 @@ GET /spring/ai/chat/loom/mcp
  {
  "name": "weather-mcp",
  "title": "Weather",
- "version": "1.1.45",
+ "version": "1.1.46",
  "description": "Provides real-time weather query service",
  "defaultSelected": true,
  "tools": [
@@ -1264,7 +1264,7 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
-| GET | `/admin/ask-logs?limit=&username=` | AskUser question-card logs (read-only view over `loom_tool_call_log` where `tool_name='askUser'`; `limit` default 50, max 200; `status`: ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN). Powers the "提问卡片" block on `admin/stats.html` |
+| GET | `/admin/ask-logs?limit=&username=` | AskUser question-card logs (read-only view over `loom_tool_call_log` where `tool_name='askUser'`; `limit` default 50, max 200; `status`: ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN). Powers the "提问卡片" block on `admin/user.html?username=X` (per-user, always filtered by URL param) |
 
 ### 10.4 Role / MCP / Skill / Knowledge Management
 

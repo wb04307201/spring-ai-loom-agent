@@ -30,16 +30,17 @@ public class JdbcAskUserLogQuery implements IAskUserLogQuery {
     }
 
     @Override
-    public List<AskUserLogRecord> recent(int limit, String usernameOrNull) {
+    public List<AskUserLogRecord> recent(int limit, int offset, String usernameOrNull) {
         int eff = Math.max(1, Math.min(limit, MAX_LIMIT));
+        int off = Math.max(0, offset);
         boolean byUser = usernameOrNull != null && !usernameOrNull.isBlank();
         String sql = BASE_SQL
                 + (byUser ? "and username = ? " : "")
-                + "order by created_at desc, log_id desc limit ?";
-        // H2 支持 LIMIT ?(仓库先例:DefaultKnowledgeMarketService L289 / KnowledgeTagService L151)
+                + "order by created_at desc, log_id desc limit ? offset ?";
+        // H2 支持 LIMIT/OFFSET ?(仓库先例:DefaultKnowledgeMarketService L289 / KnowledgeTagService L151)
         return byUser
-                ? jdbcTemplate.query(sql, JdbcAskUserLogQuery::mapRow, usernameOrNull, eff)
-                : jdbcTemplate.query(sql, JdbcAskUserLogQuery::mapRow, eff);
+                ? jdbcTemplate.query(sql, JdbcAskUserLogQuery::mapRow, usernameOrNull, eff, off)
+                : jdbcTemplate.query(sql, JdbcAskUserLogQuery::mapRow, eff, off);
     }
 
     private static AskUserLogRecord mapRow(ResultSet rs, int rowNum) throws SQLException {

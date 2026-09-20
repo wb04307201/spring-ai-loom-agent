@@ -88,7 +88,7 @@
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.45</version>
+ <version>1.1.46</version>
 </dependency>
 ```
 
@@ -249,6 +249,7 @@ spring:
 | 知识库市场 | `admin/knowledge-market.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架知识库 |
 | MCP 描述维护 | `admin/mcps.html` | 给 SDK MCP 工具维护中文描述 |
 | 日志 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
+| 用户详情 | `admin/user.html?username=X` | 单用户视图：6 个月用量 + 角色 + 提问卡片日志 + 会话列表 |
 | 返回主页 | `/` | 回到聊天首页 |
 
 - **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护——未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401。

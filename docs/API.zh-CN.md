@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API 文档
 
 > **Base URL**: `http://localhost:8080`（测试环境默认端口）
-> **版本**: 1.1.45
+> **版本**: 1.1.46
 > **认证**: 项目采用 **BFF（Backend-For-Frontend）+ HttpOnly Cookie** 鉴权模式。登录成功后，服务器通过 `Set-Cookie` 响应头设置 `loom-agent-session` Cookie，浏览器会在后续请求中自动携带该 Cookie。无需在客户端存储或手动管理 Token。
 
 ---
@@ -940,7 +940,7 @@ GET /spring/ai/chat/loom/mcp
  {
  "name": "weather-mcp",
  "title": "天气查询",
- "version": "1.1.45",
+ "version": "1.1.46",
  "description": "提供实时天气查询服务",
  "defaultSelected": true,
  "tools": [
@@ -1794,5 +1794,5 @@ spring:
 | 18 | `PUT` | `/spring/ai/loom/skill` | 创建/更新技能 |
 | 19 | `GET` | `/spring/ai/loom/skill/{name}` | 获取单个技能 |
 | 20 | `DELETE` | `/spring/ai/loom/skill/{name}` | 删除技能 |
-| 20a| `GET` | `/spring/ai/loom/admin/ask-logs?limit=&username=` | 提问卡片（askUser）日志 —— `loom_tool_call_log`（tool_name='askUser'）的只读视图；`limit` 默认 50、上限 200；`username` 可选过滤；`status`：ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN。供 admin 日志页（stats.html）"提问卡片"区块使用，adminPathPatterns 门禁 |
+| 20a| `GET` | `/spring/ai/loom/admin/ask-logs?limit=&username=` | 提问卡片（askUser）日志 —— `loom_tool_call_log`（tool_name='askUser'）的只读视图；`limit` 默认 50、上限 200；`username` 可选过滤；`status`：ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN。供 admin 用户详情页（user.html）"提问卡片"区块使用（按 username 过滤），adminPathPatterns 门禁 |
 | — | `GET` | `/spring/ai/loom` | 重定向到 UI 首页 |

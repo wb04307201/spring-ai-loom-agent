@@ -89,7 +89,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.45</version>
+ <version>1.1.46</version>
 </dependency>
 ```
 
@@ -261,6 +261,7 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 | 知识库市场 | `admin/knowledge-market.html` | Approve / reject / directly create / edit / delete Knowledge |
 | MCP 描述维护 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
 | 日志 | `admin/stats.html` | Monthly Token usage (year + month filter) |
+| 用户详情 | `admin/user.html?username=X` | 单用户视图:6 个月用量 + 角色 + 提问卡片日志 + 会话列表 |
 | 返回主页 | `/` | Back to chat home page |
 
 - **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.
