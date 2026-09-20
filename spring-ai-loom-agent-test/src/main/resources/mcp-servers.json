@@ -2,6 +2,7 @@
   "mcpServers": {
     "bing-search": {
       "args": [
+        "--prefer-offline",
         "-y",
         "bing-cn-mcp"
       ],
@@ -10,6 +11,7 @@
     "@tokenizin-agency/mcp-npx-fetch": {
       "command": "npx.cmd",
       "args": [
+        "--prefer-offline",
         "-y",
         "@tokenizin/mcp-npx-fetch"
       ]
@@ -17,22 +19,17 @@
     "sequential-thinking": {
       "command": "npx.cmd",
       "args": [
+        "--prefer-offline",
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
     },
-    "memory": {
-      "command": "npx.cmd",
+    "mcp-server-chart": {
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory"
-      ]
-    },
-    "cn-weather-mcp": {
-      "args": [
-        "io.github.wb04307201:cn-weather-mcp:1.0.1"
+        "@antv/mcp-server-chart"
       ],
-      "command": "jbang.cmd"
+      "command": "npx.cmd"
     }
   }
 }

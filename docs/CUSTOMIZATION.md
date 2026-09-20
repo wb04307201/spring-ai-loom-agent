@@ -91,7 +91,7 @@ All properties are prefixed with `spring.ai.loom.agent`.
 >
 > 1. Creates three tables — `market_skill`, `user_skill`, `role_skill` (fresh-DB policy: schema only, no data seeding at the library level)
 >
-> The bundled demo/test app's `V1.1__init_app_data.sql` then seeds 6 sample system skills into the **default admin user's** `user_skill` (`source=USER_CREATED`, `default_loaded=true`, `locked=false`) — the full Prompt template content is hard-coded directly in the migration:
+> The bundled demo/test app's `V1.2__init_app_data.sql` then seeds 6 sample system skills into the **default admin user's** `user_skill` (`source=USER_CREATED`, `default_loaded=true`, `locked=false`) — the full Prompt template content is hard-coded directly in the migration:
 > - `Monthly Event Report` (网络月度事件报告)
 > - `HTTP Test` (http测试)
 > - `Save/Download/Preview Demo 1` (测试保存、下载、预览1)

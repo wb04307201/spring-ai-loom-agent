@@ -87,11 +87,11 @@ spring-ai-loom-agent/
 
 ### 1.5 技能配置（yml 不再读取）
 
-> ⚠️ Skill 配置**不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。库主 schema（`V1.0__init.sql`）会：
+> ⚠️ Skill 配置 **不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。库主 schema（`V1.0__init.sql`）会：
 >
 > 1. 建三张表 —— `market_skill` / `user_skill` / `role_skill`（全新库政策：库层只建 schema，不 seed 业务数据）
 >
-> 随附的演示/test 应用的 `V1.1__init_app_data.sql` 再把 6 个示例系统技能 seed 进**默认 admin 用户**的 `user_skill`（`source=USER_CREATED`、`default_loaded=true`、`locked=false`）—— 它们的完整 Prompt 模板内容直接 hardcode 在迁移脚本里：
+> 随附的演示/test 应用的 `V1.2__init_app_data.sql` 再把 6 个示例系统技能 seed 进 **默认 admin 用户**的 `user_skill`（`source=USER_CREATED`、`default_loaded=true`、`locked=false`）—— 它们的完整 Prompt 模板内容直接 hardcode 在迁移脚本里：
 > - 网络月度事件报告
 > - http 测试
 > - 测试保存、下载、预览 1
@@ -99,7 +99,7 @@ spring-ai-loom-agent/
 > - 部署项目
 > - 测试自动 E2E 功能验证
 >
-> 新增 / 编辑 / 授权 Skill 都在**控制台 → Skill 市场** 页面操作，或调 `/spring/ai/loom/admin/market-skills*` 与 `/spring/ai/loom/admin/roles/{code}/skills` REST API。详见 [./API.zh-CN.md → §6 技能管理](./API.zh-CN.md#6-技能管理)。
+> 新增 / 编辑 / 授权 Skill 都在 **控制台 → Skill 市场** 页面操作，或调 `/spring/ai/loom/admin/market-skills*` 与 `/spring/ai/loom/admin/roles/{code}/skills` REST API。详见 [./API.zh-CN.md → §6 技能管理](./API.zh-CN.md#6-技能管理)。
 
 ### 1.6 鉴权配置 (`auth.*`)
 

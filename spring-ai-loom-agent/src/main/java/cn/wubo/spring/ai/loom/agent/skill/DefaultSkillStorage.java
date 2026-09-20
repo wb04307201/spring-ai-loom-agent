@@ -19,7 +19,7 @@ import java.util.Map;
  * 基于 user_skill 表 + 角色授权自动同步。
  * 旧 admin 特权视图（market_skill APPROVED union）已移除—— admin 也只看到自己 user_skill，
  * 与普通用户行为完全一致。skill 数据一律从 user_skill 出，没有"市场 union"虚拟视图。
- * 旧 yml 嵌入的 skill 完全废弃（demo 数据改 seed 到默认 admin 的 user_skill，详见 __init_app_data.sql）。
+ * 旧 yml 嵌入的 skill 完全废弃（demo 数据改 seed 到默认 admin 的 user_skill，详见 test 模块 V1.2__init_app_data.sql）。
  */
 @Component
 public class DefaultSkillStorage implements ISkillStorage {
