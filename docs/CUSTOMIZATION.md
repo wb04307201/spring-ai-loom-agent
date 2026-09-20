@@ -85,6 +85,10 @@ All properties are prefixed with `spring.ai.loom.agent`.
 >
 > Per-user "default selected" is no longer a yml-level config; it's derived from the **role authorization** in `role_mcp.default_enabled` for the user's roles.
 
+> **⚠️ JDK 17 + Windows encoding pitfall (required reading for stdio MCP)**: MCP Java SDK 0.18.x `StdioClientTransport` reads the MCP server's stdout with the **platform default charset** (only the write side is explicitly UTF-8). On JDK 17 with a Chinese Windows locale the default is GBK — when a tool response contains non-ASCII characters (e.g. `×`, curly quotes, CJK text) the decoding corrupts the JSON structure → `JsonParseException` → the response is dropped → `listTools` times out after 20s → that MCP **silently disappears** from the tool list / admin "MCP 描述维护" page (log signature: `Error processing inbound message` + `JsonParseException`, followed by `SyncMcp ... listTools 失败，跳过本次`).
+>
+> **Fix**: add the JVM argument `-Dfile.encoding=UTF-8` — for `mvn spring-boot:run`, pin it via `<jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>` in the spring-boot-maven-plugin configuration (this repo's test module pom already ships it); for a packaged jar run `java -Dfile.encoding=UTF-8 -jar ...`. JDK 18+ defaults to UTF-8 and is unaffected. MCP servers with pure-ASCII responses are unaffected either way (which is why some servers work and others vanish on the same machine).
+
 ### 1.5 Skill Configuration (no longer read from yml)
 
 > ⚠️ Skill configuration is **no longer done via yml**. The old `skills[]` block (under `spring.ai.loom.agent`) has been removed. The library init migration (`V1.0__init.sql`):

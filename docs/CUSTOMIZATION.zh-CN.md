@@ -85,6 +85,10 @@ spring-ai-loom-agent/
 >
 > 用户级别的"是否默认选中"不再是 yml 配置，而是由用户在角色授权中的 `role_mcp.default_enabled` 推导出来。
 
+> **⚠️ JDK 17 + Windows 编码坑（stdio MCP 必读）**：MCP Java SDK 0.18.x 的 `StdioClientTransport` 读取 MCP 服务器 stdout 时使用**平台默认字符集**（只有写侧显式 UTF-8）。JDK 17 在中文 Windows 上默认 GBK —— 工具响应含非 ASCII 字符（如 `×`、弯引号、中文）时解码破坏 JSON 结构 → `JsonParseException` → 响应被丢弃 → `listTools` 20s 超时 → 该 MCP **静默缺席**工具列表 / admin「MCP 描述维护」页（日志特征：`Error processing inbound message` + `JsonParseException`，随后 `SyncMcp ... listTools 失败，跳过本次`）。
+>
+> **修复**：加 JVM 参数 `-Dfile.encoding=UTF-8` —— `mvn spring-boot:run` 在 spring-boot-maven-plugin 配置 `<jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>` 固化（本仓 test 模块 pom 已带）；打包 jar 运行则 `java -Dfile.encoding=UTF-8 -jar ...`。JDK 18+ 默认 UTF-8，无此问题。纯 ASCII 响应的 MCP 服务器不受影响（这也是同机部分 server 正常、部分消失的原因）。
+
 ### 1.5 技能配置（yml 不再读取）
 
 > ⚠️ Skill 配置 **不再通过 yml**。原来的 `spring.ai.loom.agent.skills[]` 段已废弃。库主 schema（`V1.0__init.sql`）会：
