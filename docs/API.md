@@ -1264,7 +1264,6 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
-| GET | `/admin/ask-logs?limit=&username=` | AskUser question-card logs (read-only view over `loom_tool_call_log` where `tool_name='askUser'`; `limit` default 50, max 200; `status`: ANSWERED/TIMEOUT/CANCELLED/FAILED/UNKNOWN). Powers the "提问卡片" block on `admin/user.html?username=X` (per-user, always filtered by URL param) |
 
 ### 10.4 Role / MCP / Skill / Knowledge Management
 

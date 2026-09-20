@@ -192,7 +192,7 @@ Organized into 7 nested static `@Configuration` classes:
 8. **admin UI 整合**(M6 + M7):
    - 聊天面板 `🔧 MCP服务` 按钮 → `🔧 工具` 按钮,带类型徽章("本地" / "MCP")
    - admin 角色管理页 "授权本地工具组" section,真实从 `/admin/capabilities` 拉动态列表(替换之前的硬编码 `KNOWN_TOOL_GROUPS` 9 行)
-   - admin 用户详情页 `user.html`(user.js)含"提问卡片"(askUser)日志区块(时间/问题/答案或状态/等待时长/会话,按当前页 username 过滤;会话列跳转 conversation.html);月度 Token 用量仍由 `stats.html` 提供
+   - admin 用户详情页 `user.html`(user.js)= **纯只读审计视图**(月度 Token 用量柱图 + 会话列表搜索/排序/筛选,会话行跳 conversation.html)。**2026-09-20 删除两块**:(1) "提问卡片"(askUser)日志区块及后端 `IAskUserLogQuery`/`JdbcAskUserLogQuery`/`GET admin/ask-logs` —— askUser 在数据层只是 `loom_tool_call_log` 普通行,专属聚合卡与其他工具不一致(高危工具反而无审计视图),单会话回放由 conversation.html 流水覆盖,未来跨会话工具审计做通用"工具调用日志"页而非 per-tool 卡;(2) 角色分配卡 —— 与 console.html 分配角色弹窗同 API 双 UI 重复,唯一入口收敛到 console。回归锁:`KnowledgeMarketAndUserBrowserIT`(断言 #role-card/#ask-logs-card 不回潮)
    - `app.js` 所有 fetch 显式 `Content-Type: application/json; charset=UTF-8`(解决 GBK 解析错)
 
 #### Universal 工具(M6:平台默认能力,不受 RBAC 控制)

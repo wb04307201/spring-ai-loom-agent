@@ -10,8 +10,8 @@ import java.time.LocalDate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * P2 admin 深路径收尾浏览器 IT:knowledge-market.html(tag UI)+ user.html(per-user
- * ask-logs 区块)。只读体检,不创建持久数据,无需清理。
+ * P2 admin 深路径收尾浏览器 IT:knowledge-market.html(tag UI)+ user.html(只读
+ * 审计页)。只读体检,不创建持久数据,无需清理。
  *
  * <p><b>执行时校准点 1 —— knowledge-market tag UI(knowledge-market.js 源码核实):</b>
  * 表格单元格 tag 渲染为 {@code div.tag-chip-group} 包 {@code span.tag-chip[data-tag]}
@@ -25,17 +25,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 因此本用例的实质断言落在容器 + 空态文案 + toolbar 按钮(非条件),tag 编辑弹窗
  * 开合按 brief 条件执行(count>0 才点),两条路径互斥覆盖、绝不恒真。
  *
- * <p><b>执行时校准点 2 —— user.html ask-logs 区块(user.js 源码核实):</b>
- * 所有 id 真实存在于 user.html:{@code #ask-logs-card}(角色分配卡之后)/
- * {@code #ask-logs-table}(div.table-container 含初始"加载中..."指示);数据源
- * {@code GET /admin/ask-logs?limit=50&username=<URL>}(loom_tool_call_log 无
- * askUser 行 → renderAskLogs 空态"暂无提问记录");per-user 视图无"用户"列(永远
- * 链接到当前 URL 用户)、无"用户"过滤输入框(URL 已固定)、会话列是可点击链接
- * {@code <a class="user-link" href="conversation.html?id=...">}(跳转上下文)。
- * 顶部 {@code #refresh-btn} 点击 → loadAskLogsForUser() 重拉(user.js 顶部
- * refresh 处理器 L430-434 末尾追加);无原生 dialog、无 confirm,console 无 error。
+ * <p><b>执行时校准点 2 —— user.html 只读审计页(2026-09-20 收敛):</b>
+ * 角色分配卡与 askUser 日志卡已删除 —— 角色分配唯一入口 = console.html 弹窗
+ * (同一 API 双 UI 属重复维护面);askUser 跨会话聚合审计与其他工具不一致
+ * (高危工具反而无审计视图),单会话回放由 conversation.html 流水覆盖,未来如需
+ * 跨会话工具审计做通用"工具调用日志"页。user.html 保留:Token 用量柱图
+ * {@code #bar-chart} + 会话列表 {@code #conv-list-container}(搜索/排序/状态筛选)
+ * + {@code #refresh-btn}(重拉 chart + conversations)。本 IT 锁删除不回潮。
  */
-@DisplayName("P2 knowledge-market.html(tag UI)+ user.html(per-user ask-logs 区块)")
+@DisplayName("P2 knowledge-market.html(tag UI)+ user.html(只读审计页,无角色/askUser 卡)")
 class KnowledgeMarketAndUserBrowserIT extends BrowserTestBase {
 
     @Test
@@ -84,35 +82,32 @@ class KnowledgeMarketAndUserBrowserIT extends BrowserTestBase {
     }
 
     @Test
-    void userPageRendersAskLogsSection() {
+    void userPageIsReadOnlyAuditViewWithoutRoleAndAskLogCards() {
         try (BrowserContext ctx = adminContext()) {
             Page page = newPage(ctx);
             page.navigate(baseUrl + UI + "admin/user.html?username=" + ADMIN_USER);
-            // 校准点 2:#ask-logs-table 初始即存在(加载中指示),等 loadAskLogsForUser 完成
-            page.waitForSelector("#ask-logs-table");
+            // 校准点 2:会话列表容器初始即存在(加载中指示),等 loadConversations 完成
+            page.waitForSelector("#conv-list-container");
             page.waitForSelector(
-                    "#ask-logs-table .empty-state, #ask-logs-table table",
+                    "#conv-list-container .empty-state, #conv-list-container table",
                     new Page.WaitForSelectorOptions().setTimeout(15000));
 
-            assertThat(page.isVisible("#ask-logs-card")).isTrue();
-            if (page.locator("#ask-logs-table table").count() == 0) {
-                // 无 askUser 行 → 空态文案必须精确(不是"加载失败",加载失败走另一分支)
-                assertThat(page.locator("#ask-logs-table .empty-state").innerText())
-                        .isEqualTo("暂无提问记录");
-            } else {
-                // 有数据(历史残留)→ 表头不含"用户"列(per-user 视图自带过滤)且含
-                // "答案 / 状态"列;thead 单元素定位(多元素 th 触发 strict mode violation)
-                assertThat(page.locator("#ask-logs-table thead").innerText())
-                        .contains("答案 / 状态")
-                        .doesNotContain("用户");
-            }
+            // 只读审计视图保留项:Token 用量柱图 + 会话工具栏
+            assertThat(page.isVisible("#bar-chart")).isTrue();
+            assertThat(page.isVisible("#refresh-btn")).isTrue();
 
-            // ===== 校准点 2 续:顶部 #refresh-btn 点击 → loadAskLogsForUser 重拉 =====
+            // 回归锁(2026-09-20 删除):角色分配卡与 askUser 日志卡不得回潮 ——
+            // 角色分配唯一入口 = console.html 弹窗;askUser 审计走 conversation.html 流水
+            assertThat(page.locator("#role-card").count()).isZero();
+            assertThat(page.locator("#save-roles-btn").count()).isZero();
+            assertThat(page.locator("#ask-logs-card").count()).isZero();
+            assertThat(page.locator("#ask-logs-load-more").count()).isZero();
+
+            // 刷新按钮:重拉 chart + conversations,不报错
             page.click("#refresh-btn");
             page.waitForSelector(
-                    "#ask-logs-table .empty-state, #ask-logs-table table",
+                    "#conv-list-container .empty-state, #conv-list-container table",
                     new Page.WaitForSelectorOptions().setTimeout(15000));
-            assertThat(page.isVisible("#ask-logs-table")).isTrue();
             assertThat(consoleErrorsOf(page)).isEmpty();
         }
     }
