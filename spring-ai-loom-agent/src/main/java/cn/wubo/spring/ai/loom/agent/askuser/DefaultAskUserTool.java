@@ -73,15 +73,23 @@ public class DefaultAskUserTool implements IAskUserTool {
         }
     }
 
-    @Tool(description = "当需要用户在若干明确选项中做出选择、确认或澄清时,向当前用户提出一个问题。"
-            + "问题会以选项卡片形式出现在聊天窗口,用户点选后你会收到答案并继续当前任务。"
-            + "等待期间当前回复会暂停,这是正常的。仅在确实需要用户决策时使用;"
-            + "能自行合理决定的不要问。一次只问一个问题,需要多个答案时分多次调用。")
+    // 描述措辞契约(2026-09-20 触发率优化,AskUserGuidanceContractTest 锁定):
+    // 旧版"仅在确实需要用户决策时使用;能自行合理决定的不要问"是抑制型措辞,
+    // 实测模型几乎不主动提问(研究: LLM 能感知歧义但很少行动,基线澄清率仅 ~5%)。
+    // 新版对齐 Claude Code AskUserQuestion 机制: 正向场景枚举 + 澄清模式循环协议
+    // + 推荐项放首位的选项约定;防打扰条款弱化为收尾一句。
+    @Tool(description = "在聊天窗口弹出一张选项卡片向当前用户提问,用户点选后你会收到答案并继续任务。"
+            + "以下情形优先提问而不是猜测:(1)请求含糊或缺少关键信息(目标、范围、技术选型、风格、部署方式等),"
+            + "不同假设会导致明显不同的结果;(2)存在多个可行方案,选择会影响用户后续工作;"
+            + "(3)用户要求'澄清''一问一答''先确认再做'——此时必须进入澄清模式:每次只问一个问题,"
+            + "收到答案后重新评估是否还有疑问,持续调用本工具逐轮提问,直到没有疑问才开始执行;一次任务中可以多次调用。"
+            + "等待期间当前回复会暂停,这是正常的。选项给 2-4 个,把你推荐的放第一位并在 label 后标注'(推荐)'。"
+            + "仅对无法自行合理决定的事项提问,常规细节不要打扰用户。")
     @Override
     public String askUser(@ToolParam(description = "要问用户的问题文本,一句话,清晰具体") String question,
                           @ToolParam(description = "问题的短标题(2-6 字,如'部署方式'),可传 null") String header,
                           @ToolParam(description = "为什么问这个问题的背景说明(1-2 句),可传 null") String background,
-                          @ToolParam(description = "选项 JSON 数组,2-4 个,形如 [{\"label\":\"选项A\",\"description\":\"补充说明\"},{\"label\":\"选项B\"}]") String optionsJson,
+                          @ToolParam(description = "选项 JSON 数组,2-4 个,推荐项放第一位并在 label 后标注'(推荐)',形如 [{\"label\":\"选项A(推荐)\",\"description\":\"补充说明\"},{\"label\":\"选项B\"}]") String optionsJson,
                           @ToolParam(description = "是否允许多选,默认 false") Boolean multiSelect,
                           @ToolParam(description = "是否允许用户自由输入自定义答案,默认 false") Boolean allowCustomInput,
                           ToolContext toolContext) {

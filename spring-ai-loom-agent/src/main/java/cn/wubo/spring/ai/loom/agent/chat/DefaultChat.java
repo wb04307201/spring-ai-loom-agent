@@ -314,6 +314,7 @@ public class DefaultChat implements IChat {
   sb.append("• 技能市场：浏览 / 提交 / 拉取 Prompt 技能\n");
   sb.append("• 子任务与定时任务：委派后台执行、按计划自动运行\n");
   sb.append("• 文件管理：预览 / 下载 / 删除上传与工具产生的文件\n");
+  sb.append("• 交互式提问：在聊天中弹出选项卡片，一问一答澄清关键决策\n");
   java.util.Set<String> visibleToolGroups = capabilityService.visibleToolGroupsFor(username);
   if (visibleToolGroups.contains("tool_git")) {
    sb.append("• Git 仓库管理：clone / commit / push / 分支等仓库操作\n");
@@ -328,6 +329,27 @@ public class DefaultChat implements IChat {
    sb.append("• HTML 渲染截图：把单页 HTML 渲染成界面原型图\n");
   }
   sb.append("\n当用户询问你有哪些功能时，基于本提示中列出的真实能力（含下方【技能】【知识库】清单）回答；未列出的能力不要提及。");
+
+  // 【提问与澄清】— askUser 是 universal 工具(defaultGranted=true,主聊天流恒在),
+  // 故静态注入,对齐 Claude Code "AskUserQuestion 工具可用即注入 system prompt 引导
+  // 片段"机制。三层引导共同提升触发率(2026-09-20 触发率优化):
+  // 1) 正向场景枚举(研究结论: 模型能感知歧义但很少行动,需显式协议)
+  // 2) 澄清模式循环指令(用户"一问一答"要求从普通 user message 升格为系统级协议)
+  // 3) few-shot 轨迹(LangChain 实验: 示例是提升工具调用率最强杠杆,对 qwen 系尤甚)
+  // 措辞契约由 AskUserGuidanceContractTest 锁定。
+  sb.append("\n\n【提问与澄清】\n");
+  sb.append("你可以调用 askUser 工具在聊天流中弹出选项卡片向用户提问，用户点选后你会收到答案并继续任务。\n");
+  sb.append("触发时机（优先提问而不是猜测）：\n");
+  sb.append("1. 请求含糊或缺少关键信息（目标、范围、技术选型、风格、部署方式等），不同假设会导致明显不同的结果\n");
+  sb.append("2. 存在多个可行方案，选择会影响用户后续工作\n");
+  sb.append("3. 用户要求“澄清”“一问一答”“先确认再做”——必须进入澄清模式：每次只问一个问题，收到答案后重新评估是否还有疑问，持续调用 askUser 逐轮提问，直到没有疑问才开始执行\n");
+  sb.append("护栏：澄清模式连续提问不超过 5 个；仍有疑问时，把剩余疑问合并为一问，或基于最合理假设继续并向用户说明假设。命名、格式等常规细节自行决定，不要打扰用户。\n");
+  sb.append("选项约定：2-4 个选项，把你推荐的放第一位并在 label 后标注“(推荐)”。\n");
+  sb.append("示例（澄清模式）：\n");
+  sb.append("用户：帮我写一个部署脚本，用一问一答的方式澄清，直到你认为没有问题为止\n");
+  sb.append("→ 调用 askUser（问：部署什么类型的项目？选项：Spring Boot(推荐) / Node / Python）→ 用户答“Spring Boot”\n");
+  sb.append("→ 仍有疑问，再调用 askUser（问：部署到什么环境？选项：Docker 容器(推荐) / 裸机 jar / K8s）→ 用户答“Docker 容器”\n");
+  sb.append("→ 没有关键疑问了，开始编写脚本，不再提问\n");
 
   // 动态拼装可用能力 + 对应使用说明
   // - skills: 列技能 + 调 getSkill 的说明
