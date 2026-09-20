@@ -192,7 +192,7 @@ Organized into 7 nested static `@Configuration` classes:
 8. **admin UI 整合**(M6 + M7):
    - 聊天面板 `🔧 MCP服务` 按钮 → `🔧 工具` 按钮,带类型徽章("本地" / "MCP")
    - admin 角色管理页 "授权本地工具组" section,真实从 `/admin/capabilities` 拉动态列表(替换之前的硬编码 `KNOWN_TOOL_GROUPS` 9 行)
-   - admin 日志页 `stats.html`(stats.js)除月度 Token 用量外,含"提问卡片"(askUser)日志区块(时间/用户/问题/答案或状态/等待时长/会话),数据源 `GET /spring/ai/loom/admin/ask-logs` —— `loom_tool_call_log` 表(tool_name='askUser')的只读视图,adminPathPatterns 门禁
+   - admin 用户详情页 `user.html`(user.js)含"提问卡片"(askUser)日志区块(时间/问题/答案或状态/等待时长/会话,按当前页 username 过滤;会话列跳转 conversation.html);月度 Token 用量仍由 `stats.html` 提供
    - `app.js` 所有 fetch 显式 `Content-Type: application/json; charset=UTF-8`(解决 GBK 解析错)
 
 #### Universal 工具(M6:平台默认能力,不受 RBAC 控制)

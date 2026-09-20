@@ -91,6 +91,19 @@
           ></div>
         </div>
 
+        <!-- 提问卡片(askUser)日志：数据源 loom_tool_call_log,按 URL ?username= 过滤,无需用户输入 -->
+        <div class="stats-card" id="ask-logs-card">
+          <h3 style="margin: 0 0 12px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">
+            提问卡片(askUser)日志
+            <span style="font-size: 12px; margin-left: 8px; color: var(--text-muted);">
+              仅显示当前用户的最近 50 条
+            </span>
+          </h3>
+          <div id="ask-logs-table" class="table-container">
+            <div class="loading-indicator">加载中...</div>
+          </div>
+        </div>
+
         <div
           class="admin-toolbar"
           style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap"

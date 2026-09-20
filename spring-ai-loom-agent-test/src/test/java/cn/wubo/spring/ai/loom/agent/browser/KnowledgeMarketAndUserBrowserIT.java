@@ -10,8 +10,8 @@ import java.time.LocalDate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * P2 admin 深路径收尾浏览器 IT:knowledge-market.html(tag UI)+ stats.html
- * (token 用量 + ask-logs 双区块)。只读体检,不创建持久数据,无需清理。
+ * P2 admin 深路径收尾浏览器 IT:knowledge-market.html(tag UI)+ user.html(per-user
+ * ask-logs 区块)。只读体检,不创建持久数据,无需清理。
  *
  * <p><b>执行时校准点 1 —— knowledge-market tag UI(knowledge-market.js 源码核实):</b>
  * 表格单元格 tag 渲染为 {@code div.tag-chip-group} 包 {@code span.tag-chip[data-tag]}
@@ -25,24 +25,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 因此本用例的实质断言落在容器 + 空态文案 + toolbar 按钮(非条件),tag 编辑弹窗
  * 开合按 brief 条件执行(count>0 才点),两条路径互斥覆盖、绝不恒真。
  *
- * <p><b>执行时校准点 2 —— stats 双区块(stats.js 源码核实):</b>
- * 所有 id 真实存在于 stats.html:{@code #bar-chart}(L113 div.bar-chart,非 canvas)/
- * {@code #stats-table}(L118)/ {@code #year-input} {@code #month-input}(stats.js L12-14
- * 初始化为当前年月)/ {@code #reload-btn}(查询,L201)/ {@code #month-label}(load 时置
- * "{year}-{MM} 月用量",L32);数据源 {@code GET /admin/stats/tokens/monthly?year&month}
- * (L36-37,loom_chat_usage 初始空 → renderBarChart 空态"本月无用量"L62、renderTable
- * 空态"{year}-{month} 无用量记录"L81)。ask-logs 区块:{@code #ask-logs-table}(L155)/
- * {@code #ask-logs-user}(过滤输入,L145)/ {@code #ask-logs-refresh}(L203 →
- * loadAskLogs);数据源 {@code GET /admin/ask-logs?limit=50[&username=]}(L148,
- * loom_tool_call_log 无 askUser 行 → renderAskLogs 空态"暂无提问记录"L167)。
- * 断言适配空态但每条都是具体文案/值匹配,非恒真。
- *
- * <p><b>执行时校准点 3 —— #ask-logs-refresh 点击(stats.js L203):</b>直接绑定
- * loadAskLogs,无原生 dialog、无 confirm;成功路径重渲染表格,失败也只写
- * empty-state 文案(不抛 console error)。断言:点击后容器仍可见 + consoleErrorsOf 为空。
+ * <p><b>执行时校准点 2 —— user.html ask-logs 区块(user.js 源码核实):</b>
+ * 所有 id 真实存在于 user.html:{@code #ask-logs-card}(角色分配卡之后)/
+ * {@code #ask-logs-table}(div.table-container 含初始"加载中..."指示);数据源
+ * {@code GET /admin/ask-logs?limit=50&username=<URL>}(loom_tool_call_log 无
+ * askUser 行 → renderAskLogs 空态"暂无提问记录");per-user 视图无"用户"列(永远
+ * 链接到当前 URL 用户)、无"用户"过滤输入框(URL 已固定)、会话列是可点击链接
+ * {@code <a class="user-link" href="conversation.html?id=...">}(跳转上下文)。
+ * 顶部 {@code #refresh-btn} 点击 → loadAskLogsForUser() 重拉(user.js 顶部
+ * refresh 处理器 L430-434 末尾追加);无原生 dialog、无 confirm,console 无 error。
  */
-@DisplayName("P2 knowledge-market.html(tag UI)+ stats.html(token 用量 + ask-logs 区块)")
-class KnowledgeMarketAndStatsBrowserIT extends BrowserTestBase {
+@DisplayName("P2 knowledge-market.html(tag UI)+ user.html(per-user ask-logs 区块)")
+class KnowledgeMarketAndUserBrowserIT extends BrowserTestBase {
 
     @Test
     void knowledgeMarketPageRendersTagUi() {
@@ -90,58 +84,33 @@ class KnowledgeMarketAndStatsBrowserIT extends BrowserTestBase {
     }
 
     @Test
-    void statsPageRendersBothSections() {
+    void userPageRendersAskLogsSection() {
         try (BrowserContext ctx = adminContext()) {
             Page page = newPage(ctx);
-            page.navigate(baseUrl + UI + "admin/stats.html");
-            // 校准点 2:#bar-chart 初始即存在("加载中..."),等 load() 完成 = 空态或 bar 行出现
-            page.waitForSelector("#bar-chart");
-            page.waitForSelector("#bar-chart .empty-state, #bar-chart .bar-row",
+            page.navigate(baseUrl + UI + "admin/user.html?username=" + ADMIN_USER);
+            // 校准点 2:#ask-logs-table 初始即存在(加载中指示),等 loadAskLogsForUser 完成
+            page.waitForSelector("#ask-logs-table");
+            page.waitForSelector(
+                    "#ask-logs-table .empty-state, #ask-logs-table table",
                     new Page.WaitForSelectorOptions().setTimeout(15000));
 
-            // ===== 区块一:token 用量(loom_chat_usage 初始空 → 空态文案精确)=====
-            LocalDate now = LocalDate.now();
-            assertThat(page.inputValue("#year-input"))
-                    .isEqualTo(String.valueOf(now.getYear()));
-            assertThat(page.inputValue("#month-input"))
-                    .isEqualTo(String.valueOf(now.getMonthValue()));
-            // month-label 由 load() 置为 "{year}-{MM} 月用量"(stats.js L32,月补零)
-            assertThat(page.innerText("#month-label")).isEqualTo(
-                    now.getYear() + "-" + String.format("%02d", now.getMonthValue()) + " 月用量");
-            assertThat(page.isVisible("#reload-btn")).isTrue();
-            assertThat(page.isVisible("#stats-table")).isTrue();
-            if (page.locator("#bar-chart .bar-row").count() == 0) {
-                assertThat(page.locator("#bar-chart .empty-state").innerText())
-                        .isEqualTo("本月无用量");
-                assertThat(page.locator("#stats-table .empty-state").innerText())
-                        .isEqualTo(now.getYear() + "-" + now.getMonthValue() + " 无用量记录");
-            } else {
-                // 有用量(历史数据)→ 表格含 6 列表头 + 合计行(renderTable L99-115);
-                // thead 单元素定位(多元素 th 会触发 strict mode violation);
-                // console.css 对 th 施加 text-transform:uppercase → innerText 返回
-                // "总 TOKEN" 等大写形态,断言一律大小写不敏感
-                assertThat(page.locator("#stats-table thead").innerText())
-                        .contains("用户").containsIgnoringCase("总 Token");
-                assertThat(page.locator("#stats-table tfoot").innerText()).contains("合计");
-            }
-
-            // ===== 区块二:ask-logs(loom_tool_call_log 无 askUser 行 → 空态)=====
-            assertThat(page.isVisible("#ask-logs-table")).isTrue();
-            assertThat(page.isVisible("#ask-logs-user")).isTrue();
-            page.waitForSelector("#ask-logs-table .empty-state, #ask-logs-table table",
-                    new Page.WaitForSelectorOptions().setTimeout(15000));
+            assertThat(page.isVisible("#ask-logs-card")).isTrue();
             if (page.locator("#ask-logs-table table").count() == 0) {
+                // 无 askUser 行 → 空态文案必须精确(不是"加载失败",加载失败走另一分支)
                 assertThat(page.locator("#ask-logs-table .empty-state").innerText())
                         .isEqualTo("暂无提问记录");
             } else {
-                // thead 单元素定位(多元素 th 会触发 strict mode violation)
+                // 有数据(历史残留)→ 表头不含"用户"列(per-user 视图自带过滤)且含
+                // "答案 / 状态"列;thead 单元素定位(多元素 th 触发 strict mode violation)
                 assertThat(page.locator("#ask-logs-table thead").innerText())
-                        .contains("答案 / 状态");
+                        .contains("答案 / 状态")
+                        .doesNotContain("用户");
             }
 
-            // ===== 校准点 3:点击 #ask-logs-refresh → loadAskLogs 重拉,console 无 error =====
-            page.click("#ask-logs-refresh");
-            page.waitForSelector("#ask-logs-table .empty-state, #ask-logs-table table",
+            // ===== 校准点 2 续:顶部 #refresh-btn 点击 → loadAskLogsForUser 重拉 =====
+            page.click("#refresh-btn");
+            page.waitForSelector(
+                    "#ask-logs-table .empty-state, #ask-logs-table table",
                     new Page.WaitForSelectorOptions().setTimeout(15000));
             assertThat(page.isVisible("#ask-logs-table")).isTrue();
             assertThat(consoleErrorsOf(page)).isEmpty();
