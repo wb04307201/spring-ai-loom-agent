@@ -74,7 +74,7 @@ spring:
     mcp:
       client:
         stdio:
-          servers-configuration: classpath:mcp-servers.json
+          servers-configuration: classpath:mcp-servers-none.json
     loom:
       agent:
         # 单点 git / maven 工具默认 disabled —— 编译/部署请走 ICompileAndDeployTool（始终 enabled）。
