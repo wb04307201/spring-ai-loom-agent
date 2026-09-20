@@ -16,7 +16,8 @@ public interface IAskUserLogQuery {
      * 最近的提问日志,按 created_at 倒序。
      *
      * @param limit           返回条数;实现必须钳制到 [1, 200](防滥用)
+     * @param offset          跳过前 N 条;实现必须钳制到 [0, ∞);offset >= total → 返回空列表
      * @param usernameOrNull  可选用户名过滤;null/blank = 全部用户
      */
-    List<AskUserLogRecord> recent(int limit, String usernameOrNull);
+    List<AskUserLogRecord> recent(int limit, int offset, String usernameOrNull);
 }

@@ -427,9 +427,14 @@
     }
   });
 
-  // ===== 提问卡片(askUser)日志（per-user，按 URL ?username= 过滤） =====
+  // ===== 提问卡片(askUser)日志（per-user，按 URL ?username= 过滤；分页追加：点"加载更多"取下一页） =====
 
   const askLogsTable = document.getElementById("ask-logs-table");
+  const askLogsLoadMore = document.getElementById("ask-logs-load-more");
+  const ASK_LOGS_PAGE_SIZE = 50;
+  let askLogsOffset = 0;
+  let askLogsHasMore = true;
+  let askLogsFetching = false;
 
   function fmtWait(ms) {
     // durationMs 主体是用户思考+作答的阻塞时间 —— 标注"等待"而非"耗时"(spec D3)
@@ -454,46 +459,19 @@
     return `<span style="color: ${color}; font-weight: 600; font-size: 12px;">${label}</span>`;
   }
 
-  async function loadAskLogsForUser() {
-    askLogsTable.innerHTML = '<div class="loading-indicator">加载中...</div>';
-    try {
-      const r = await fetch(
-        `/spring/ai/loom/admin/ask-logs?limit=50&username=${encodeURIComponent(username)}`,
-        { credentials: "include" },
-      );
-      if (r.status === 401) {
-        window.location.replace("/spring/ai/loom/login.html");
-        return;
-      }
-      if (!r.ok) {
-        askLogsTable.innerHTML = `<div class="empty-state">加载失败：HTTP ${r.status}</div>`;
-        return;
-      }
-      renderAskLogs(await r.json());
-    } catch (e) {
-      askLogsTable.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
-    }
-  }
-
-  function renderAskLogs(list) {
-    if (!list || list.length === 0) {
-      askLogsTable.innerHTML = '<div class="empty-state">暂无提问记录</div>';
-      return;
-    }
-    const rows = list
-      .map((rec) => {
-        const q = rec.question || "";
-        const qShort = q.length > 60 ? q.slice(0, 60) + "…" : q;
-        const answer =
-          rec.status === "ANSWERED" && rec.answerText
-            ? escapeHtml(rec.answerText)
-            : askStatusBadge(rec.status);
-        const when = rec.createdAt
-          ? new Date(rec.createdAt).toLocaleString("zh-CN", { hour12: false })
-          : "-";
-        const convShort = (rec.conversationId || "").slice(0, 8);
-        const convFull = rec.conversationId || "";
-        return `<tr>
+  function askLogRowHtml(rec) {
+    const q = rec.question || "";
+    const qShort = q.length > 60 ? q.slice(0, 60) + "…" : q;
+    const answer =
+      rec.status === "ANSWERED" && rec.answerText
+        ? escapeHtml(rec.answerText)
+        : askStatusBadge(rec.status);
+    const when = rec.createdAt
+      ? new Date(rec.createdAt).toLocaleString("zh-CN", { hour12: false })
+      : "-";
+    const convShort = (rec.conversationId || "").slice(0, 8);
+    const convFull = rec.conversationId || "";
+    return `<tr>
  <td style="white-space: nowrap;">${when}</td>
  <td title="${escapeHtml(q)}">${escapeHtml(qShort)}</td>
  <td>${answer}</td>
@@ -502,8 +480,80 @@
  <a class="user-link" href="conversation.html?id=${encodeURIComponent(convFull)}" target="_blank">${escapeHtml(convShort)}</a>
  </td>
  </tr>`;
-      })
-      .join("");
+  }
+
+  function updateLoadMoreVisibility() {
+    if (!askLogsLoadMore) return;
+    askLogsLoadMore.style.display = askLogsHasMore ? "" : "none";
+    askLogsLoadMore.disabled = askLogsFetching;
+    askLogsLoadMore.textContent = askLogsFetching ? "加载中…" : "加载更多";
+  }
+
+  async function fetchAskLogsPage(limit, offset) {
+    const r = await fetch(
+      `/spring/ai/loom/admin/ask-logs?limit=${limit}&offset=${offset}&username=${encodeURIComponent(username)}`,
+      { credentials: "include" },
+    );
+    if (r.status === 401) {
+      window.location.replace("/spring/ai/loom/login.html");
+      return null;
+    }
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status}`);
+    }
+    return await r.json();
+  }
+
+  async function loadAskLogsForUser() {
+    askLogsOffset = 0;
+    askLogsHasMore = true;
+    askLogsTable.innerHTML = '<div class="loading-indicator">加载中...</div>';
+    updateLoadMoreVisibility();
+    askLogsFetching = true;
+    try {
+      const list = await fetchAskLogsPage(ASK_LOGS_PAGE_SIZE, 0);
+      if (list === null) return;
+      askLogsOffset = list.length;
+      askLogsHasMore = list.length === ASK_LOGS_PAGE_SIZE;
+      renderAskLogs(list);
+      updateLoadMoreVisibility();
+    } catch (e) {
+      askLogsTable.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+      askLogsHasMore = false;
+      updateLoadMoreVisibility();
+    } finally {
+      askLogsFetching = false;
+      updateLoadMoreVisibility();
+    }
+  }
+
+  async function loadMoreAskLogs() {
+    if (askLogsFetching || !askLogsHasMore) return;
+    askLogsFetching = true;
+    updateLoadMoreVisibility();
+    try {
+      const list = await fetchAskLogsPage(ASK_LOGS_PAGE_SIZE, askLogsOffset);
+      if (list === null) return;
+      appendAskLogs(list);
+      askLogsOffset += list.length;
+      askLogsHasMore = list.length === ASK_LOGS_PAGE_SIZE;
+    } catch (e) {
+      askLogsTable.insertAdjacentHTML(
+        "beforeend",
+        `<div class="empty-state">加载更多失败：${escapeHtml(e.message)}</div>`,
+      );
+    } finally {
+      askLogsFetching = false;
+      updateLoadMoreVisibility();
+    }
+  }
+
+  function renderAskLogs(list) {
+    if (!list || list.length === 0) {
+      askLogsTable.innerHTML = '<div class="empty-state">暂无提问记录</div>';
+      return;
+    }
+    const rows = list.map(askLogRowHtml).join("");
     askLogsTable.innerHTML = `
  <table class="user-table">
  <thead>
@@ -511,6 +561,22 @@
  </thead>
  <tbody>${rows}</tbody>
  </table>`;
+  }
+
+  function appendAskLogs(list) {
+    if (!list || list.length === 0) return;
+    // 首次 render 后用 <table><tbody> 结构;append 直接往 tbody 加 <tr>
+    let tbody = askLogsTable.querySelector("tbody");
+    if (!tbody) {
+      // 极端边缘:之前是 empty-state, 此次拿到数据, 走完整渲染
+      renderAskLogs(list);
+      return;
+    }
+    tbody.insertAdjacentHTML("beforeend", list.map(askLogRowHtml).join(""));
+  }
+
+  if (askLogsLoadMore) {
+    askLogsLoadMore.addEventListener("click", loadMoreAskLogs);
   }
 
   document.getElementById("refresh-btn").addEventListener("click", () => {

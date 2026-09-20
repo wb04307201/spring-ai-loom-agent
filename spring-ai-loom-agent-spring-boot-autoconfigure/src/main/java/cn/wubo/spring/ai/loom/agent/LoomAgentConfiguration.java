@@ -1967,6 +1967,7 @@ public class LoomAgentConfiguration {
          * §2 admin 日志页"提问卡片"区块数据源(spec 2026-09-08-askuser-followups-design.md)。
          * 路径落在 adminPathPatterns(/spring/ai/loom/admin/**)门禁内,自动 admin-only,
          * 无需路由内校验。limit 非法 → 400(镜像 stats/tokens/monthly 的 year/month 先例)。
+         * offset 非法 → 400;offset 用于前端"分页追加"加载更多,offset >= total → 自动空列表(无 4xx)。
          */
         @Bean("loomAgentAskLogRouter")
         public RouterFunction<ServerResponse> loomAgentAskLogRouter(
@@ -1983,8 +1984,18 @@ public class LoomAgentConfiguration {
                                 "error", "limit 必须是数字: limit=" + l));
                     }
                 }
+                int offset = 0;
+                String o = request.param("offset").orElse(null);
+                if (o != null && !o.isBlank()) {
+                    try {
+                        offset = Integer.parseInt(o.trim());
+                    } catch (NumberFormatException nfe) {
+                        return ServerResponse.badRequest().body(Map.of(
+                                "error", "offset 必须是数字: offset=" + o));
+                    }
+                }
                 String username = request.param("username").orElse(null);
-                return ServerResponse.ok().body(askUserLogQuery.recent(limit, username));
+                return ServerResponse.ok().body(askUserLogQuery.recent(limit, offset, username));
             });
             return builder.build();
         }

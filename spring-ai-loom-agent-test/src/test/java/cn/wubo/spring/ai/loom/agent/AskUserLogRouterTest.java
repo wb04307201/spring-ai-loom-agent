@@ -36,9 +36,11 @@ class AskUserLogRouterTest {
     @Test
     void defaultLimitIs50AndNoUsernameFilter() throws Exception {
         AtomicInteger seenLimit = new AtomicInteger();
+        AtomicInteger seenOffset = new AtomicInteger(-1);
         AtomicReference<String> seenUser = new AtomicReference<>();
-        RouterFunction<ServerResponse> router = routerWith((limit, username) -> {
+        RouterFunction<ServerResponse> router = routerWith((limit, offset, username) -> {
             seenLimit.set(limit);
+            seenOffset.set(offset);
             seenUser.set(username);
             return List.of(sample());
         });
@@ -47,15 +49,18 @@ class AskUserLogRouterTest {
         assertThat(resp).isNotNull();
         assertThat(resp.statusCode().value()).isEqualTo(200);
         assertThat(seenLimit.get()).isEqualTo(50);
+        assertThat(seenOffset.get()).isEqualTo(0);
         assertThat(seenUser.get()).isNull();
     }
 
     @Test
     void limitAndUsernameParamsPassThrough() throws Exception {
         AtomicInteger seenLimit = new AtomicInteger();
+        AtomicInteger seenOffset = new AtomicInteger(-1);
         AtomicReference<String> seenUser = new AtomicReference<>();
-        RouterFunction<ServerResponse> router = routerWith((limit, username) -> {
+        RouterFunction<ServerResponse> router = routerWith((limit, offset, username) -> {
             seenLimit.set(limit);
+            seenOffset.set(offset);
             seenUser.set(username);
             return List.of();
         });
@@ -64,12 +69,13 @@ class AskUserLogRouterTest {
         assertThat(resp).isNotNull();
         assertThat(resp.statusCode().value()).isEqualTo(200);
         assertThat(seenLimit.get()).isEqualTo(10);
+        assertThat(seenOffset.get()).isEqualTo(0);
         assertThat(seenUser.get()).isEqualTo("alice");
     }
 
     @Test
     void nonNumericLimitIs400() throws Exception {
-        RouterFunction<ServerResponse> router = routerWith((limit, username) -> List.of());
+        RouterFunction<ServerResponse> router = routerWith((limit, offset, username) -> List.of());
         ServerResponse resp = LoomAgentTestUtil.safeRoute(router, "GET",
                 "/spring/ai/loom/admin/ask-logs?limit=abc", null);
         assertThat(resp).isNotNull();
@@ -77,8 +83,31 @@ class AskUserLogRouterTest {
     }
 
     @Test
+    void nonNumericOffsetIs400() throws Exception {
+        RouterFunction<ServerResponse> router = routerWith((limit, offset, username) -> List.of());
+        ServerResponse resp = LoomAgentTestUtil.safeRoute(router, "GET",
+                "/spring/ai/loom/admin/ask-logs?offset=xyz", null);
+        assertThat(resp).isNotNull();
+        assertThat(resp.statusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void offsetPassThroughToQuery() throws Exception {
+        AtomicInteger seenOffset = new AtomicInteger(-1);
+        RouterFunction<ServerResponse> router = routerWith((limit, offset, username) -> {
+            seenOffset.set(offset);
+            return List.of();
+        });
+        ServerResponse resp = LoomAgentTestUtil.safeRoute(router, "GET",
+                "/spring/ai/loom/admin/ask-logs?limit=20&offset=100", null);
+        assertThat(resp).isNotNull();
+        assertThat(resp.statusCode().value()).isEqualTo(200);
+        assertThat(seenOffset.get()).isEqualTo(100);
+    }
+
+    @Test
     void bodyCarriesParsedRecord() throws Exception {
-        RouterFunction<ServerResponse> router = routerWith((limit, username) -> List.of(sample()));
+        RouterFunction<ServerResponse> router = routerWith((limit, offset, username) -> List.of(sample()));
         ServerResponse resp = LoomAgentTestUtil.safeRoute(router, "GET",
                 "/spring/ai/loom/admin/ask-logs", null);
         assertThat(resp).isNotNull();

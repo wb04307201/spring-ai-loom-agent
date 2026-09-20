@@ -66,7 +66,7 @@ class JdbcAskUserLogQueryIT {
 
     @Test
     void recentReturnsParsedRowsNewestFirstFilteredByUser() {
-        List<AskUserLogRecord> rows = askUserLogQuery.recent(50, username);
+        List<AskUserLogRecord> rows = askUserLogQuery.recent(50, 0, username);
         assertThat(rows).hasSize(2);
         // created_at desc:超时行(60s 前)在已答行(120s 前)之前
         assertThat(rows.get(0).status()).isEqualTo("TIMEOUT");
@@ -83,7 +83,30 @@ class JdbcAskUserLogQueryIT {
 
     @Test
     void limitClampedToOneMinimum() {
-        List<AskUserLogRecord> rows = askUserLogQuery.recent(0, username);
+        List<AskUserLogRecord> rows = askUserLogQuery.recent(0, 0, username);
         assertThat(rows).hasSize(1); // 钳制到 1
+    }
+
+    @Test
+    void offsetSkipsFirstN() {
+        // offset=1 → 跳过最新的 1 行(TIMEOUT),返回剩余 1 行(ANSWERED)
+        List<AskUserLogRecord> rows = askUserLogQuery.recent(50, 1, username);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).status()).isEqualTo("ANSWERED");
+        assertThat(rows.get(0).question()).isEqualTo("用哪种数据库?");
+    }
+
+    @Test
+    void offsetBeyondTotalReturnsEmpty() {
+        List<AskUserLogRecord> rows = askUserLogQuery.recent(50, 999, username);
+        assertThat(rows).isEmpty();
+    }
+
+    @Test
+    void negativeOffsetClampedToZero() {
+        // 负数 offset 钳制为 0,行为等同 offset=0
+        List<AskUserLogRecord> rows = askUserLogQuery.recent(50, -5, username);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).status()).isEqualTo("TIMEOUT");
     }
 }

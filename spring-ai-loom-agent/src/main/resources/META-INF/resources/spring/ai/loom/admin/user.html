@@ -96,11 +96,20 @@
           <h3 style="margin: 0 0 12px 0; font-size: 14px; color: var(--text-muted); font-weight: 500;">
             提问卡片(askUser)日志
             <span style="font-size: 12px; margin-left: 8px; color: var(--text-muted);">
-              仅显示当前用户的最近 50 条
+              仅显示当前用户的最近 50 条（点"加载更多"追加下一页）
             </span>
           </h3>
           <div id="ask-logs-table" class="table-container">
             <div class="loading-indicator">加载中...</div>
+          </div>
+          <div id="ask-logs-pagination" style="margin-top: 12px; text-align: center;">
+            <button
+              id="ask-logs-load-more"
+              class="secondary-btn"
+              style="display: none"
+            >
+              加载更多
+            </button>
           </div>
         </div>
 
