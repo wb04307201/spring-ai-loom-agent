@@ -1,22 +1,22 @@
 -- =============================================================
--- Spring AI LoomAgent — consolidated database schema (one-shot init)
+-- Spring AI LoomAgent — 库主 schema 一站式初始化（V1.0，只跑全新库）
 -- =============================================================
--- 一站式初始化脚本：合并原 + + + + 五个迁移。
--- 新装环境：删除 .local/datasource/db 即可让 Flyway 从 V1 重跑。
--- 旧装环境：已通过增量迁移（V1-V5）完成 schema 升级，无需重新跑此合并脚本。
+-- 政策（CLAUDE.md）：项目只跑全新库，不接受已有实例增量升级 schema。
+-- 任何历史数据库 → `rm -rf ~/.loom/datasource` 后由 Flyway 从本文件重跑。
 --
--- 合并要点：
--- 1. market_skill.version / user_skill.market_version 字段已移除
--- （ 之前 schema 仍含这些列，新装环境直接没有）
--- 2. market_skill 唯一约束改为 (author, name)（原是三元组）
--- 3. skill / chat_token_usage 等早期表保留（原文 + 兼容）
+-- 本文件 = 库层全部内容：建表 + 索引 + FK + 库层种子（尾部）：
+--   · 默认 admin 账号 wb04307201
+--   · 2 条官方 market_skill（author='system'，APPROVED，is_official）
+--   · 默认基础角色 base：role_skill 授 2 官方技能 + user_role 授予 admin
+-- MCP 演示数据与 base 角色的 role_mcp 授权**不在库层**——mcp_server 元数据
+-- 归应用方 seed（示例见 test 模块 V1.1__mcp_data.sql）；库只建空表。
+--
+-- 历史备注：本文件由早期 V1~V5 增量迁移与 V12~V17 演进合并而来
+-- （market_skill.version / user_skill.market_version 已移除；market_skill
+-- 唯一约束 = (author, name)；skill / chat_token_usage 等早期表保留兼容）。
 -- =============================================================
 --
--- M3+ T5.1 — 源码组织拆分（policy A）
--- ---------------------------------
--- CLAUDE.md 政策：项目只跑全新库；不接受已有实例上增量升级 schema。
--- 因此本文件保持 V1.0__init.sql 单文件，fresh init 一次跑全。
--- 拆分靠 SQL 注释段标记，不靠多文件：
+-- 源码组织（M3+ T5.1 policy A）：单文件 + SQL 注释分段，不拆多文件：
 --
 --   § 1  知识库 / 文件 / 用户 / 用户会话 / Token 用量
 --   § 2  Skill 系统（旧 per-user 表，被 Skill 市场取代）
@@ -926,34 +926,19 @@ SELECT '靶心人公式 讲好一个故事',
 WHERE NOT EXISTS (SELECT 1 FROM market_skill WHERE author = 'system' AND name = '靶心人公式 讲好一个故事');
 
 -- =============================================================
--- ==== 默认基础角色 base(4 常用 MCP + 2 官方表达技能)+ 授予默认 admin ====
+-- ==== 默认基础角色 base(2 官方表达技能)+ 授予默认 admin ====
 -- 放在 market_skill 种子之后:role_skill 按名查 market_skill.id(不硬编码自增值)。
+-- base 角色的 role_mcp 授权**不在库层 seed**:mcp_server 元数据与 MCP 授权都归
+-- 应用方(示例:test 模块 V1.1__mcp_data.sql 授 base 4 个常用 MCP)。
 -- role_mcp.mcp_name = 运行时 SDK client 名(spring-ai-mcp-client - X),无 FK 到
--- mcp_server;getVisibleMcpsForUser 运行时与活跃 client 名匹配,mcp_server 元数据
--- (title/description)在 V1.1 seed。is_system=FALSE(可在控制台删除,CASCADE 清子表)。
--- default_enabled / default_loaded = TRUE(聊天面板默认勾选启动 / 技能默认加载)。
+-- mcp_server;getVisibleMcpsForUser 运行时与活跃 client 名匹配。
+-- is_system=FALSE(可在控制台删除,CASCADE 清子表)。default_loaded = TRUE(技能默认加载)。
 -- 全部 INSERT...SELECT...WHERE NOT EXISTS 幂等(镜像上方 admin / market_skill 种子风格)。
 -- =============================================================
 
 INSERT INTO role (code, name, is_system, description)
-SELECT 'base', '基础角色', FALSE, '默认基础角色:4 个常用 MCP + 2 个官方表达技能,默认启用/加载'
-WHERE NOT EXISTS (SELECT 1 FROM role WHERE code = 'base');
-
-INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
-SELECT 'base', 'spring-ai-mcp-client - sequential-thinking', 0, TRUE
-WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - sequential-thinking');
-
-INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
-SELECT 'base', 'spring-ai-mcp-client - bing-search', 1, TRUE
-WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - bing-search');
-
-INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
-SELECT 'base', 'spring-ai-mcp-client - memory', 2, TRUE
-WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - memory');
-
-INSERT INTO role_mcp (role_code, mcp_name, sort_order, default_enabled)
-SELECT 'base', 'spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch', 3, TRUE
-WHERE NOT EXISTS (SELECT 1 FROM role_mcp WHERE role_code = 'base' AND mcp_name = 'spring-ai-mcp-client - @tokenizin-agency/mcp-npx-fetch');
+SELECT 'base', '基础角色', FALSE, '默认基础角色'
+    WHERE NOT EXISTS (SELECT 1 FROM role WHERE code = 'base');
 
 INSERT INTO role_skill (role_code, market_skill_id, sort_order, default_loaded)
 SELECT 'base', ms.id, 0, TRUE FROM market_skill ms
