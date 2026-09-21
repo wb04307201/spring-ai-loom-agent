@@ -92,6 +92,9 @@ public record SubTaskEvent(
 
 **File**: `spring-ai-loom-agent/src/main/resources/META-INF/resources/spring/ai/loom/app.js`
 
+> **2026-09-22 实施记录**：spec 初稿原写 `chip.addEventListener("click", () => subTaskPanel.open(ev.subTaskId))`,但 `subTaskPanel` 从未实现(全代码仅 1 次引用 → click 永远走 fallback toast)。实际落地方案改为 **inline 展开**：click chip → `wrapper.classList.toggle("expanded")`,展开 detail 面板显示完整 prompt / ID / 状态 / 错误信息。详见 commit `801ab019`。  
+> 另:2026-09-22 修了 chip 渲染位置 bug(#3 askUser 同气泡修复时改了 `_currentAskUserBubble` 语义,但 `subTaskChips.renderStart` 用了旧语义 → chip 跑到 chat-item 顶层被 flex 拉成行内)。详见 commit `69be9dfb`。
+
 新增模块 `subTaskChips`：
 ```js
 const subTaskChips = (() => {
@@ -125,8 +128,8 @@ const subTaskChips = (() => {
       if (el) el.textContent = fmtElapsed(Date.now() - startedAt);
     }, 1000);
     active.set(ev.subTaskId, { el: chip, timer, status: "RUNNING" });
-    // 点击 chip → 打开子任务面板
-    chip.addEventListener("click", () => subTaskPanel.open(ev.subTaskId));
+    // 点击 chip → toggle inline 展开(原始设计是 subTaskPanel.open,但 panel 未实现)
+    chip.addEventListener("click", () => wrapper.classList.toggle("expanded"));
   }
 
   function renderUpdate(ev) {
