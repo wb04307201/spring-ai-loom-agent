@@ -281,6 +281,21 @@ public class DefaultChat implements IChat {
    if (name.contains("ResourceAccessException") || (message != null && message.contains("Connection refused"))) {
     return "无法连接模型服务，请检查网络或稍后重试。";
    }
+   // Spring AI 1.1.8 StreamHelper.mergeToolUseEvents:当 LLM 启动 tool_use 块后流被截断(上游超时/
+   // max_tokens 命中/Qwen 代理 idle close 等),累积的 input_json 字符串是不完整的;
+   // squashIntoContentBlock 仍尝试 jsonToMap → Jackson 在字符串字面量中间碰 EOF →
+   // JsonEOFException("Unexpected end-of-input: was expecting closing quote for a string value")。
+   // 2026-09-21 实测:5 轮 askUser 澄清后 LLM 走 6W 字 reasoning → tool_use JSON 未闭合即被截断 →
+   // 流空载 ~234 秒 → JsonEOFException 集中爆发。
+   // 修复路径——短:重发对话(单次偶发);长:把 spring.ai.anthropic.chat.options.max-tokens 调到 32768+
+   // 让 LLM 在 token 上限内闭合 tool_use;根治:升级 Spring AI 2.0+(官方 SDK,无此 bug)。
+   if (name.contains("JsonEOFException")
+       || (message != null && message.contains("Unexpected end-of-input"))) {
+    return "模型响应流被中途截断(Spring AI 1.1.8 在 tool_use JSON 未完整到达时强制解析触发)。"
+        + "建议:1) 直接重发该对话(单次偶发可恢复);"
+        + "2) 联系管理员把 spring.ai.anthropic.chat.options.max-tokens 调到 32768+ 让 LLM 能闭合 tool_use;"
+        + "3) 根治需升级 Spring AI 2.0+(官方 SDK 已修复此聚合器)。";
+   }
    t = t.getCause();
   }
   String name = err.getClass().getSimpleName();
