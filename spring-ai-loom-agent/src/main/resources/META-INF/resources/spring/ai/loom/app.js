@@ -1122,9 +1122,32 @@ const userImage = "/static/user.png";
 
 const ui = {
   mainContent: null,
+  _isAtBottom: true,
+  _backToBottomBtn: null,
+  _currentAskUserBubble: null,  // #3
+  _currentAnswerEl: null,
+  _currentOriginEl: null,
+  _currentActionsEl: null,
+  _currentBubbleId: null,
 
   init() {
     this.mainContent = document.getElementById("mainContent");
+    this._backToBottomBtn = document.getElementById("back-to-bottom-btn");
+    this.mainContent.addEventListener("scroll", () => {
+      const el = this.mainContent;
+      const threshold = 80;
+      this._isAtBottom = (el.scrollTop + el.clientHeight >= el.scrollHeight - threshold);
+      if (this._backToBottomBtn) {
+        this._backToBottomBtn.classList.toggle("visible", !this._isAtBottom);
+      }
+    });
+    if (this._backToBottomBtn) {
+      this._backToBottomBtn.addEventListener("click", () => {
+        this._isAtBottom = true;
+        this.scrollToBottom();
+        this._backToBottomBtn.classList.remove("visible");
+      });
+    }
   },
 
   clearChat() {
@@ -1190,7 +1213,7 @@ const ui = {
  </div>
  </div>
  <div id="origin-${id}" style="display: none"></div>
- <div id="${id}" style="margin: 16px"></div>
+ <div id="${id}" class="bot-content" style="margin: 16px"></div>
  <div class="bubble-actions" id="actions-${id}" style="display: none;">
  <button class="bubble-action-btn" onclick="ui.copyMarkdown('origin-${id}')">
  <span>📋</span><span>复制</span>
@@ -1206,6 +1229,11 @@ const ui = {
 
   renderMessages(messages) {
     this.clearChat();
+    this._currentAskUserBubble = null;
+    this._currentAnswerEl = null;
+    this._currentOriginEl = null;
+    this._currentActionsEl = null;
+    this._currentBubbleId = null;
     if (!messages || messages.length === 0) return;
     for (const msg of messages) {
       const role = msg.messageType || msg.role || msg.getMessage?.();
@@ -1242,6 +1270,7 @@ const ui = {
   },
 
   scrollToBottom() {
+    if (!this._isAtBottom) return;     // 智能滚动守卫 (#2)
     if (this.mainContent)
       this.mainContent.scrollTop = this.mainContent.scrollHeight;
   },
@@ -1760,12 +1789,38 @@ const askUserCards = (() => {
         </div>`
       : "";
 
-    const item = document.createElement("div");
-    item.className = "chat-item chat-item-left";
-    item.innerHTML = `
+    // #3 askUser 与 AI 后续回复共用同一气泡:若尚未建气泡,先建一个
+    // 包含 .askuser-slot(放卡片)+ .bot-content(放流式回复)+ actions/origin 的
+    // 长寿命气泡;流式回调据此把 answerEl/originEl 写到同气泡的 .bot-content。
+    // 后续 askUser 直接把新卡片 append 到已有 .askuser-slot,不再开新气泡。
+    let item = ui._currentAskUserBubble;
+    if (!item) {
+      item = document.createElement("div");
+      item.className = "chat-item chat-item-left askuser-message-item";
+      item.innerHTML = `
       <div class="avatar"><img src="${aiImage}" alt="AI"/></div>
-      <div class="bubble">
-        <div class="askuser-wrap">
+      <div class="bubble askuser-bubble">
+        <div class="askuser-slot"></div>
+        <div class="bot-content current-bot-content" id="askuser-bot-content-${qid}" style="margin: 16px"></div>
+        <div class="bubble-actions" id="actions-askuser-${qid}" style="display: none;">
+          <button class="bubble-action-btn" onclick="ui.copyMarkdown('origin-askuser-${qid}')"><span>📋</span><span>复制</span></button>
+          <button class="bubble-action-btn" onclick="ui.downloadMarkdown('origin-askuser-${qid}')"><span>💾</span><span>下载</span></button>
+        </div>
+        <div id="origin-askuser-${qid}" style="display: none"></div>
+      </div>`;
+      ui.mainContent.appendChild(item);
+      ui._currentAskUserBubble = item;
+      ui._currentAnswerEl = document.getElementById(`askuser-bot-content-${qid}`);
+      ui._currentOriginEl = document.getElementById(`origin-askuser-${qid}`);
+      ui._currentActionsEl = document.getElementById(`actions-askuser-${qid}`);
+      ui._currentBubbleId = qid;
+    }
+
+    // 把这张卡片 append 到气泡的 .askuser-slot(可能一张/多张卡片并存)
+    const slot = item.querySelector(".askuser-slot");
+    const wrap = document.createElement("div");
+    wrap.className = "askuser-wrap";
+    wrap.innerHTML = `
         <div class="askuser-summary" style="display: none;">
           <span class="askuser-summary-text"></span><span class="askuser-summary-arrow">▸</span>
         </div>
@@ -1779,14 +1834,12 @@ const askUserCards = (() => {
           ${ev.background ? `<div class="askuser-background">${escapeHtml(ev.background)}</div>` : ""}
           <div class="askuser-options">${optionsHtml}${customHtml}</div>
           <button class="askuser-submit">提交答案</button>
-        </div>
-        </div>
-      </div>`;
-    ui.mainContent.appendChild(item);
+        </div>`;
+    slot.appendChild(wrap);
     ui.scrollToBottom();
 
-    const el = item.querySelector(".askuser-card");
-    const summaryEl = item.querySelector(".askuser-summary");
+    const el = wrap.querySelector(".askuser-card");
+    const summaryEl = wrap.querySelector(".askuser-summary");
     // 摘要行点击 toggle 展开/收起完整卡片(终态只读回看;卡片保持冻结态)
     summaryEl.addEventListener("click", () => {
       const cardHidden = el.style.display === "none";
@@ -1835,6 +1888,67 @@ const askUserCards = (() => {
   }
 
   return { render, cancelAllActive };
+})();
+
+// ===================== §1c SubTask chip (spec § 4.3 #1) =====================
+const subTaskChips = (() => {
+  const active = new Map();  // subTaskId -> { el, timer, startedAt }
+
+  function fmtElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + "s";
+    return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  }
+
+  function renderStart(ev) {
+    const bubble = ui._currentAskUserBubble || lastBotBubble();
+    if (!bubble) return;
+    const chip = document.createElement("div");
+    chip.className = "subtask-chip subtask-chip-running";
+    chip.dataset.subTaskId = ev.subTaskId;
+    chip.innerHTML = `
+      <span class="subtask-chip-spinner">⏳</span>
+      <span class="subtask-chip-id">${escapeHtml(ev.subTaskId.slice(0, 8))}</span>
+      <span class="subtask-chip-elapsed">0s</span>
+      <span class="subtask-chip-prompt">${escapeHtml(ev.prompt || "")}</span>
+      <span class="subtask-chip-expand">▸</span>
+    `;
+    bubble.appendChild(chip);
+    const startedAt = ev.startedAt || Date.now();
+    const timer = setInterval(() => {
+      const el = chip.querySelector(".subtask-chip-elapsed");
+      if (el) el.textContent = fmtElapsed(Date.now() - startedAt);
+    }, 1000);
+    active.set(ev.subTaskId, { el: chip, timer, startedAt });
+    chip.addEventListener("click", () => {
+      if (window.subTaskPanel) window.subTaskPanel.open(ev.subTaskId);
+      else showToast("子任务 " + ev.subTaskId.slice(0, 8) + " 的执行流已在主对话中显示", "info");
+    });
+  }
+
+  function renderEnd(ev) {
+    const c = active.get(ev.subTaskId);
+    if (!c) return;
+    clearInterval(c.timer);
+    c.el.classList.remove("subtask-chip-running");
+    c.el.classList.add(`subtask-chip-${(ev.status || "completed").toLowerCase()}`);
+    const spinner = c.el.querySelector(".subtask-chip-spinner");
+    if (spinner) spinner.textContent =
+      ev.status === "COMPLETED" ? "✓" : ev.status === "FAILED" ? "✗" : "⊘";
+    const elapsed = c.el.querySelector(".subtask-chip-elapsed");
+    if (elapsed) elapsed.textContent = fmtElapsed(ev.elapsedMs || (Date.now() - c.startedAt));
+    const expand = c.el.querySelector(".subtask-chip-expand");
+    if (expand) expand.textContent = "详情";
+    setTimeout(() => c.el.classList.add("subtask-chip-fading"), 30000);
+    active.delete(ev.subTaskId);
+  }
+
+  function lastBotBubble() {
+    const items = ui.mainContent.querySelectorAll(".chat-item-left .bubble");
+    return items.length ? items[items.length - 1] : null;
+  }
+
+  return { renderStart, renderEnd };
 })();
 
 // ===================== §7 Chat Engine =====================
@@ -1900,6 +2014,15 @@ const chat = {
       await api.streamChat(
         record,
         (data) => {
+          // spec § 4.3 #1: 子任务生命周期事件帧(RUNNING 启动 / 其他 终止)
+          if (data.subTaskEvent) {
+            const ev = data.subTaskEvent;
+            if (ev.status === "RUNNING") {
+              subTaskChips.renderStart(ev);
+            } else {
+              subTaskChips.renderEnd(ev);
+            }
+          }
           // #1 AskUser:提问卡片事件帧(按字段分派,普通内容帧不受影响)
           if (data.askUser) {
             askUserCards.render(data.askUser);
@@ -1914,19 +2037,26 @@ const chat = {
           // answer content
           if (data.content) {
             answerText += data.content;
-            if (answerEl) answerEl.innerHTML = renderMarkdown(answerText);
+            const targetEl = ui._currentAnswerEl || answerEl;
+            const targetOrigin = ui._currentOriginEl || originEl;
+            if (targetEl) targetEl.innerHTML = renderMarkdown(answerText);
             // origin-* is the "copy raw / download" payload; it is read
             // via textContent downstream, so write raw text rather than
             // parsing it as HTML. Keeps `<img onerror>` etc. inert.
-            if (originEl) originEl.textContent = answerText;
+            if (targetOrigin) targetOrigin.textContent = answerText;
           }
           ui.scrollToBottom();
         },
         () => {
           askUserCards.cancelAllActive("已结束");
           // complete
-          const actionsEl = document.getElementById("actions-" + id);
+          const actionsEl = ui._currentActionsEl || document.getElementById("actions-" + id);
           if (actionsEl) actionsEl.style.display = "";
+          ui._currentAskUserBubble = null;
+          ui._currentAnswerEl = null;
+          ui._currentOriginEl = null;
+          ui._currentActionsEl = null;
+          ui._currentBubbleId = null;
           ui.enableSend();
           ui.setStopButtonVisible(false);
           conversation.loadList();
@@ -1939,8 +2069,13 @@ const chat = {
         (error) => {
           askUserCards.cancelAllActive("已取消");
           // error
-          const actionsEl = document.getElementById("actions-" + id);
+          const actionsEl = ui._currentActionsEl || document.getElementById("actions-" + id);
           if (actionsEl) actionsEl.style.display = "";
+          ui._currentAskUserBubble = null;
+          ui._currentAnswerEl = null;
+          ui._currentOriginEl = null;
+          ui._currentActionsEl = null;
+          ui._currentBubbleId = null;
           if (answerEl)
             answerEl.innerHTML +=
               '<br/><span style="color:var(--error-color)">发送失败：' +
