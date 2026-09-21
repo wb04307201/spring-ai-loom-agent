@@ -366,6 +366,43 @@ public class DefaultChat implements IChat {
   sb.append("→ 仍有疑问，再调用 askUser（问：部署到什么环境？选项：Docker 容器(推荐) / 裸机 jar / K8s）→ 用户答“Docker 容器”\n");
   sb.append("→ 没有关键疑问了，开始编写脚本，不再提问\n");
 
+  // 【任务分段执行】— 引导 LLM 主动把长 reasoning 风险任务拆给 start_sub_task,避免主对话
+  // 流被截断后 JsonEOFException(spec § 5.1;契约由 DefaultChatSubTaskGuidanceContractTest 锁定)。
+  // 结构对齐【提问与澄清】段(正向场景枚举 + 触发协议 + few-shot 轨迹 + 护栏),复用 askUser
+  // 触发率优化的三层引导范式(2026-09-20 askUser 验证有效)。
+  sb.append("\n\n【任务分段执行】\n");
+  sb.append("单次主对话的流式输出长度有上限（Spring AI 1.1.8 Anthropic 协议下，max_tokens=16384 时\n");
+  sb.append("thinking 占用后留给 tool_use JSON 的 token 不到 8K）。当你判断一个任务超出单次主对话的\n");
+  sb.append("能力边界时，应主动调 start_sub_task(prompt, systemContext)把它拆出去异步执行，避免\n");
+  sb.append("主对话 reasoning 撞上限导致流截断（症状：聊天最终弹\"工具响应流被中途截断\"，工具\n");
+  sb.append("调用被强制中断）。\n");
+  sb.append("\n");
+  sb.append("必须主动拆的 4 类场景：\n");
+  sb.append("1. 大型代码/HTML 生成：单次要写出超过 200 行的完整文件（HTML 原型、SQL 脚本、复杂配置）\n");
+  sb.append("2. 多工具链调用：一次任务里需要顺序或并行调多个工具\n");
+  sb.append("   （writeFile → renderHtmlFile → 桥接 fileId → 拼装 markdown 链接）\n");
+  sb.append("3. 长 reasoning 风险：用户需求模糊、需先枚举可能方案再收敛\n");
+  sb.append("   （视觉风格选型、方案权衡、数据建模字段确认）\n");
+  sb.append("4. 大文件写入/编辑：整文件替换、超 5K 字符单 patch、整段重写\n");
+  sb.append("\n");
+  sb.append("触发协议（拆之前先评估）：\n");
+  sb.append("1. 估算任务是否含 ≥3 个独立子目标（如 4 张表 = 4 个独立 HTML 生成）\n");
+  sb.append("2. 是 → 第一步先调 start_sub_task，每个子目标一个独立 prompt\n");
+  sb.append("3. 子任务在 loomSubTaskExecutor 池异步执行，子任务完成会自动回流结果\n");
+  sb.append("4. 主对话做收口/汇总，不重复执行子任务的实际工作\n");
+  sb.append("护栏：能 1 步完成的任务不要拆；子任务总数 ≤ 5（与 askUser 5-ask 护栏对齐）。\n");
+  sb.append("\n");
+  sb.append("示例（任务分段）：\n");
+  sb.append("用户：帮我写一个四张表的 CRUD 维护页面原型 HTML（工厂/产线/工序/产品工序关系），下载为图片\n");
+  sb.append("→ 主对话先评估：4 张表 + 多工具链调用 + 需生成大型 HTML（命中场景 1、2）→ 第一步先\n");
+  sb.append("   start_sub_task(prompt=\"生成工厂表 HTML，含查询区、表格、分页；Ant Design 风格；\n");
+  sb.append("   列：工厂编码/工厂名称/删除标识\", systemContext=\"Ant Design 蓝白风格，标签化展示删除标识\")\n");
+  sb.append("→ start_sub_task(prompt=\"生成产线表 HTML ...\", systemContext=\"...\")\n");
+  sb.append("→ start_sub_task(prompt=\"生成工序表 HTML ...\", systemContext=\"...\")\n");
+  sb.append("→ start_sub_task(prompt=\"生成产品工序关系表 HTML ...\", systemContext=\"...\")\n");
+  sb.append("→ 主对话不做 HTML 生成，统一调 renderHtmlFile(...) 把拼好的 HTML 渲染成图片，\n");
+  sb.append("   返回预览+下载链接给用户\n");
+
   // 动态拼装可用能力 + 对应使用说明
   // - skills: 列技能 + 调 getSkill 的说明
   // - knowledge bases: 列用户启用的 KB + 调 searchKnowledge 的说明
