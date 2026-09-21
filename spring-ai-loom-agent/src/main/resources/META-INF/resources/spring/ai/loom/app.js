@@ -1793,8 +1793,28 @@ const askUserCards = (() => {
     // 包含 .askuser-slot(放卡片)+ .bot-content(放流式回复)+ actions/origin 的
     // 长寿命气泡;流式回调据此把 answerEl/originEl 写到同气泡的 .bot-content。
     // 后续 askUser 直接把新卡片 append 到已有 .askuser-slot,不再开新气泡。
+    // 1) 已有 askuser 气泡 → 直接复用
+    // 2) 退化到上一个 AI 回复气泡(renderBotMessage 已建)→ 补 .askuser-slot,
+    //    指向现有 bot-content/origin/actions —— 让 AI 已写的思考 + 后续流式
+    //    答案与 askUser 卡片在同一个气泡里(#3 askUser 同气泡 bug 修复)
+    // 3) 都没才新建独立 askuser-message-item 气泡
     let item = ui._currentAskUserBubble;
     if (!item) {
+      const lastBotBubbles = ui.mainContent.querySelectorAll(".chat-item-left .bubble");
+      if (lastBotBubbles.length) {
+        item = lastBotBubbles[lastBotBubbles.length - 1].parentElement;
+      }
+    }
+    if (item && !item.querySelector(".askuser-slot")) {
+      const bubbleEl = item.querySelector(".bubble");
+      const slot = document.createElement("div");
+      slot.className = "askuser-slot";
+      const botContent = bubbleEl.querySelector(".bot-content");
+      bubbleEl.insertBefore(slot, botContent);
+      ui._currentAnswerEl = botContent;
+      ui._currentOriginEl = bubbleEl.querySelector('[id^="origin-"]');
+      ui._currentActionsEl = bubbleEl.querySelector(".bubble-actions");
+    } else if (!item) {
       item = document.createElement("div");
       item.className = "chat-item chat-item-left askuser-message-item";
       item.innerHTML = `
@@ -1809,12 +1829,12 @@ const askUserCards = (() => {
         <div id="origin-askuser-${qid}" style="display: none"></div>
       </div>`;
       ui.mainContent.appendChild(item);
-      ui._currentAskUserBubble = item;
       ui._currentAnswerEl = document.getElementById(`askuser-bot-content-${qid}`);
       ui._currentOriginEl = document.getElementById(`origin-askuser-${qid}`);
       ui._currentActionsEl = document.getElementById(`actions-askuser-${qid}`);
-      ui._currentBubbleId = qid;
     }
+    ui._currentAskUserBubble = item;
+    ui._currentBubbleId = qid;
 
     // 把这张卡片 append 到气泡的 .askuser-slot(可能一张/多张卡片并存)
     const slot = item.querySelector(".askuser-slot");

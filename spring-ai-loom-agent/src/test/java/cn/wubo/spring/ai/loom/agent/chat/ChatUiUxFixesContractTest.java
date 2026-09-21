@@ -69,4 +69,27 @@ class ChatUiUxFixesContractTest {
         assertTrue(src.contains(".askuser-slot"),
                 ".askuser-slot CSS class not found in app.js");
     }
+
+    @Test
+    @DisplayName("#3: askUser 退化到上一个 AI 气泡（fix lastBotBubble fallback）")
+    void askUserFallsBackToLastBotBubble() throws IOException {
+        // 回归 bug:2026-09-21 端到端验证发现 askUserCards.render 在
+        // _currentAskUserBubble === null 时无条件新建独立 chat-item,导致
+        // AI 第一次回复(renderBotMessage)+ 两轮 askUser 变成 3 个独立气泡。
+        // 修复:render 应退化到上一个 .chat-item-left .bubble(renderBotMessage 已建),
+        // 补 .askuser-slot 并指向现有 bot-content/origin/actions,与 subTaskChips.renderStart
+        // 的 lastBotBubble() 对称。
+        String src = readAppJs();
+        // 关键 fallback:查询 .chat-item-left .bubble 集合(与 subTaskChips.lastBotBubble 一致)
+        assertTrue(src.contains(".chat-item-left .bubble"),
+                "askUserCards.render must fall back to last .chat-item-left .bubble");
+        // 必须把 .askuser-slot 插入到现有 .bot-content 前 —— 否则流式答案会写到 askuser-slot
+        // 后面,视觉割裂。插入到 .bot-content 前意味着 askUser 卡片出现在 AI 文本上方
+        assertTrue(src.contains("insertBefore(slot, botContent)"),
+                "askuser-slot must be inserted before existing bot-content (above AI text)");
+        // 必须指向现有 bot-content(不能新建 askuser-bot-content-${qid})—— 否则流式
+        // 答案写不到 AI 原本要写的元素里
+        assertTrue(src.contains("ui._currentAnswerEl = botContent"),
+                "_currentAnswerEl must point at existing bot-content, not new askuser-bot-content");
+    }
 }
