@@ -63,17 +63,13 @@ public class AskUserRegistry {
      */
     public boolean answer(String questionId, String username, String answerText) {
         PendingQuestion q = get(questionId);
-        // DIAG-2026-09-22: 诊断 #1 subTaskChips 不显示 — 排查 answer 404 根因
-        log.info("[DIAG-AU] answer: qid={} caller={} lookupResult={}", questionId, username, q == null ? "NULL" : "FOUND");
         if (q == null) return false;
         if (q.username() == null || !q.username().equals(username)) {
             // 与"不存在"同语义,不泄露 questionId 是否存在于其他用户(spec D8)
-            log.warn("[DIAG-AU] REJECT cross-user: caller={} qid={} pendingUser={}", username, questionId, q.username());
+            log.warn("拒绝跨用户提交 askUser 答案: caller={}, qid={}", username, questionId);
             return false;
         }
-        boolean result = q.answer().complete(answerText);
-        log.info("[DIAG-AU] answer complete: qid={} result={} (true=this call completed it, false=already done)", questionId, result);
-        return result;
+        return q.answer().complete(answerText);
     }
 
     /**

@@ -152,9 +152,6 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         this.capabilityService = capabilityService;
         this.subTaskProperty = subTaskProperty;
         this.sseEmitterRegistry = sseEmitterRegistry;
-        // DIAG-2026-09-22: 诊断 sseEmitterRegistry is null 问题 — 构造时打印
-        log.info("[DIAG-CTOR] 10-arg ctor called. sseEmitterRegistry={} (null={})",
-                sseEmitterRegistry, sseEmitterRegistry == null);
     }
 
     /**
@@ -164,15 +161,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private void publishEvent(cn.wubo.spring.ai.loom.agent.model.SubTaskRequest req,
                               String subTaskId, String status,
                               long startedAt, long endedAt, String errorMessage) {
-        // DIAG-2026-09-22: 诊断 #1 subTaskChips 不显示问题 — 在入口打印 entry 状态
-        if (sseEmitterRegistry == null) {
-            log.warn("[DIAG] publishEvent: sseEmitterRegistry is null — subTaskId={} status={}", subTaskId, status);
-            return;
-        }
-        if (req == null) {
-            log.warn("[DIAG] publishEvent: req is null — subTaskId={} status={}", subTaskId, status);
-            return;
-        }
+        if (sseEmitterRegistry == null || req == null) return;
         String prompt = req.prompt() == null ? "" : req.prompt();
         if (prompt.length() > 80) prompt = prompt.substring(0, 80) + "…";
         cn.wubo.spring.ai.loom.agent.model.SubTaskEvent ev =
@@ -181,26 +170,13 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         try {
             cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry.Entry entry =
                     sseEmitterRegistry.get(req.username(), req.parentConversationId());
-            if (entry == null) {
-                // DIAG: registry 已被清理（autoCleanup / stop），event 推不到前端 ——
-                // 这是 #1 subTaskChips 不显示的根因之一：askUser 多轮 + 期间 stream 终止
-                log.warn("[DIAG] publishEvent: registry entry MISSING — subTaskId={} status={} user={} parentConv={} (entry null → cannot reach frontend)",
-                        subTaskId, status, req.username(), req.parentConversationId());
-                return;
+            if (entry != null && entry.emitter() != null) {
+                entry.emitter().send(
+                        new cn.wubo.spring.ai.loom.agent.model.ChatResponseRecord(null, null, null, ev),
+                        MediaType.APPLICATION_JSON);
             }
-            if (entry.emitter() == null) {
-                log.warn("[DIAG] publishEvent: entry.emitter() null — subTaskId={} status={}", subTaskId, status);
-                return;
-            }
-            log.info("[DIAG] publishEvent: sending to emitter — subTaskId={} status={}", subTaskId, status);
-            entry.emitter().send(
-                    new cn.wubo.spring.ai.loom.agent.model.ChatResponseRecord(null, null, null, ev),
-                    MediaType.APPLICATION_JSON);
-            log.info("[DIAG] publishEvent: sent OK — subTaskId={} status={}", subTaskId, status);
         } catch (Exception ex) {
-            // DIAG: catch 块打印完整 stack trace 而非仅 message
-            log.warn("[DIAG] publishEvent FAILED — subTaskId={} status={} ex={}: {}", subTaskId, status,
-                    ex.getClass().getName(), ex.getMessage(), ex);
+            log.warn("Failed to publish SubTaskEvent for {}: {}", subTaskId, ex.getMessage());
         }
     }
 
