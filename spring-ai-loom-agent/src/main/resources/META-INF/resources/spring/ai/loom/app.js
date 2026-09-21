@@ -1932,6 +1932,15 @@ const subTaskChips = (() => {
     if (!item) return;
     const bubble = item.querySelector(":scope > .bubble") || item.querySelector(".bubble");
     if (!bubble) return;
+    const startedAt = ev.startedAt || Date.now();
+    const promptFull = ev.prompt || "";
+
+    // chip + detail 包在 wrapper 里,顺序插入气泡底部;
+    // 原本 window.subTaskPanel 从未定义,click 只能走 toast fallback —— 改成
+    // inline 展开:点击 chip 切换 .expanded,detail 显示完整 prompt / ID / 状态 / 错误信息。
+    const wrapper = document.createElement("div");
+    wrapper.className = "subtask-chip-wrapper";
+
     const chip = document.createElement("div");
     chip.className = "subtask-chip subtask-chip-running";
     chip.dataset.subTaskId = ev.subTaskId;
@@ -1939,36 +1948,90 @@ const subTaskChips = (() => {
       <span class="subtask-chip-spinner">⏳</span>
       <span class="subtask-chip-id">${escapeHtml(ev.subTaskId.slice(0, 8))}</span>
       <span class="subtask-chip-elapsed">0s</span>
-      <span class="subtask-chip-prompt">${escapeHtml(ev.prompt || "")}</span>
+      <span class="subtask-chip-prompt">${escapeHtml(promptFull)}</span>
       <span class="subtask-chip-expand">▸</span>
     `;
-    bubble.appendChild(chip);
-    const startedAt = ev.startedAt || Date.now();
+
+    const detail = document.createElement("div");
+    detail.className = "subtask-detail";
+    detail.innerHTML = `
+      <div class="subtask-detail-row">
+        <span class="subtask-detail-label">子任务 ID:</span>
+        <code>${escapeHtml(ev.subTaskId)}</code>
+      </div>
+      <div class="subtask-detail-row">
+        <span class="subtask-detail-label">任务描述:</span>
+        <div class="subtask-detail-prompt">${escapeHtml(promptFull)}</div>
+      </div>
+      <div class="subtask-detail-row">
+        <span class="subtask-detail-label">状态:</span>
+        <span class="subtask-detail-status subtask-detail-state">RUNNING</span>
+        <span class="subtask-detail-elapsed"> · 0s</span>
+      </div>
+      <div class="subtask-detail-row subtask-detail-error-row" style="display:none">
+        <span class="subtask-detail-label">错误信息:</span>
+        <div class="subtask-detail-error"></div>
+      </div>
+    `;
+
+    wrapper.appendChild(chip);
+    wrapper.appendChild(detail);
+    bubble.appendChild(wrapper);
+
     const timer = setInterval(() => {
-      const el = chip.querySelector(".subtask-chip-elapsed");
-      if (el) el.textContent = fmtElapsed(Date.now() - startedAt);
+      const e = fmtElapsed(Date.now() - startedAt);
+      const chipEl = chip.querySelector(".subtask-chip-elapsed");
+      if (chipEl) chipEl.textContent = e;
+      const detailEl = detail.querySelector(".subtask-detail-elapsed");
+      if (detailEl) detailEl.textContent = ` · ${e}`;
     }, 1000);
-    active.set(ev.subTaskId, { el: chip, timer, startedAt });
+
     chip.addEventListener("click", () => {
-      if (window.subTaskPanel) window.subTaskPanel.open(ev.subTaskId);
-      else showToast("子任务 " + ev.subTaskId.slice(0, 8) + " 的执行流已在主对话中显示", "info");
+      const expanded = wrapper.classList.toggle("expanded");
+      const exp = chip.querySelector(".subtask-chip-expand");
+      if (exp) exp.textContent = expanded ? "▾" : "▸";
     });
+
+    active.set(ev.subTaskId, { wrapper, chip, detail, timer, startedAt, promptFull });
   }
 
   function renderEnd(ev) {
     const c = active.get(ev.subTaskId);
     if (!c) return;
     clearInterval(c.timer);
-    c.el.classList.remove("subtask-chip-running");
-    c.el.classList.add(`subtask-chip-${(ev.status || "completed").toLowerCase()}`);
-    const spinner = c.el.querySelector(".subtask-chip-spinner");
+    c.chip.classList.remove("subtask-chip-running");
+    c.chip.classList.add(`subtask-chip-${(ev.status || "completed").toLowerCase()}`);
+    const spinner = c.chip.querySelector(".subtask-chip-spinner");
     if (spinner) spinner.textContent =
       ev.status === "COMPLETED" ? "✓" : ev.status === "FAILED" ? "✗" : "⊘";
-    const elapsed = c.el.querySelector(".subtask-chip-elapsed");
+    const elapsed = c.chip.querySelector(".subtask-chip-elapsed");
     if (elapsed) elapsed.textContent = fmtElapsed(ev.elapsedMs || (Date.now() - c.startedAt));
-    const expand = c.el.querySelector(".subtask-chip-expand");
+    // 同步 detail 面板的状态
+    const detailStatus = c.detail.querySelector(".subtask-detail-state");
+    if (detailStatus) {
+      const statusMap = { COMPLETED: "已完成", FAILED: "失败", CANCELLED: "已取消", TIMEOUT: "超时" };
+      detailStatus.textContent = statusMap[ev.status] || ev.status;
+      detailStatus.classList.remove("completed", "failed", "cancelled");
+      if (ev.status === "COMPLETED") detailStatus.classList.add("completed");
+      else if (ev.status === "FAILED") detailStatus.classList.add("failed");
+      else if (ev.status === "CANCELLED" || ev.status === "TIMEOUT") detailStatus.classList.add("cancelled");
+    }
+    const detailElapsed = c.detail.querySelector(".subtask-detail-elapsed");
+    if (detailElapsed) detailElapsed.textContent = ` · ${fmtElapsed(ev.elapsedMs || (Date.now() - c.startedAt))}`;
+    // 失败时显示错误信息
+    if (ev.status === "FAILED" && ev.errorMessage) {
+      const errRow = c.detail.querySelector(".subtask-detail-error-row");
+      const errBox = c.detail.querySelector(".subtask-detail-error");
+      if (errRow) errRow.style.display = "";
+      if (errBox) errBox.textContent = ev.errorMessage;
+      // 自动展开 detail 便于用户立刻看到错误
+      c.wrapper.classList.add("expanded");
+      const exp = c.chip.querySelector(".subtask-chip-expand");
+      if (exp) exp.textContent = "▾";
+    }
+    const expand = c.chip.querySelector(".subtask-chip-expand");
     if (expand) expand.textContent = "详情";
-    setTimeout(() => c.el.classList.add("subtask-chip-fading"), 30000);
+    setTimeout(() => c.chip.classList.add("subtask-chip-fading"), 30000);
     active.delete(ev.subTaskId);
   }
 

@@ -4219,6 +4219,46 @@ textarea::placeholder {
 .subtask-chip-fading { opacity: 0.3; }
 .subtask-chip-prompt { color: var(--text-3, rgba(0,0,0,0.65)); overflow: hidden; text-overflow: ellipsis; }
 .subtask-chip-spinner { animation: spin 1.2s linear infinite; display: inline-block; }
+/* 2026-09-22 #1 chip inline 展开:点击 chip 显示完整 prompt / ID / 状态 / elapsed / 错误信息 */
+.subtask-chip-wrapper { display: block; margin: 4px 0; max-width: 100%; }
+.subtask-chip-wrapper .subtask-chip { margin: 0; }
+.subtask-detail {
+  display: none;
+  margin: 6px 0 10px 4px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.025);
+  border-left: 3px solid var(--primary-color, #4f46e5);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3, rgba(0, 0, 0, 0.65));
+  max-width: 760px;
+  word-break: break-word;
+}
+.subtask-chip-wrapper.expanded .subtask-detail { display: block; }
+.subtask-detail-row { margin: 4px 0; }
+.subtask-detail-label { color: var(--text-3, rgba(0, 0, 0, 0.45)); margin-right: 6px; font-weight: 500; }
+.subtask-detail-prompt {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+.subtask-detail-error {
+  background: rgba(255, 77, 79, 0.08);
+  border-left: 3px solid #ff4d4f;
+  padding: 8px 10px;
+  border-radius: 4px;
+  color: #cf1322;
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+.subtask-detail-status { font-weight: 500; }
+.subtask-detail-status.completed { color: #389e0d; }
+.subtask-detail-status.failed { color: #cf1322; }
+.subtask-detail-status.cancelled { color: #8c8c8c; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
 
 /* #2: Back-to-bottom floating button */

@@ -110,4 +110,25 @@ class ChatUiUxFixesContractTest {
         assertTrue(src.contains(":scope > .bubble"),
                 "renderStart must use :scope > .bubble direct child selector when querying the bubble inside chat-item");
     }
+
+    @Test
+    @DisplayName("#1: chip click 切换 inline detail 展开(window.subTaskPanel 承诺未实现)")
+    void subTaskChipClickExpandsInline() throws IOException {
+        // 2026-09-22:原 chip click 调 window.subTaskPanel.open(id),但该 panel 从未
+        // 定义过 —— 全代码只被引用 1 次。click 永远走 fallback toast。改为
+        // inline 展开:点 chip 切 .expanded,detail panel 显示完整 prompt/ID/状态。
+        String src = readAppJs();
+        // renderStart 必须创建 subTaskDetail 元素并 attach click handler
+        assertTrue(src.contains("subtask-chip-wrapper"),
+                "renderStart must wrap chip+detail in subtask-chip-wrapper");
+        assertTrue(src.contains("subtask-detail") && src.contains("className") && src.contains("subtask-detail-row"),
+                "renderStart must build a subtask-detail element with rows for prompt/id/status");
+        assertTrue(src.contains("subtask-detail-prompt"),
+                "subtask-detail must include subtask-detail-prompt showing FULL prompt (not 80-char truncated)");
+        // 不能继续承诺未实现的 window.subTaskPanel
+        assertFalse(src.contains("window.subTaskPanel.open"),
+                "chip click handler must not call window.subTaskPanel.open — that panel was never implemented");
+        assertTrue(src.contains("wrapper.classList.toggle(\"expanded\")") || src.contains("wrapper.classList.toggle('expanded')"),
+                "chip click must toggle wrapper.expanded to show/hide detail");
+    }
 }
