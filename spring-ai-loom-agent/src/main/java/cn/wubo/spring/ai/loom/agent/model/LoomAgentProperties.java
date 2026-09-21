@@ -358,6 +358,10 @@ public class LoomAgentProperties {
  * <li>{@code enabled} — 是否注册子任务相关 bean（默认 true）</li>
  * <li>{@code maxConcurrent} — 同时在飞子任务数上限；超过则启动请求被拒（默认 4）</li>
  * <li>{@code maxHistory} — 每用户历史保留条数；超出 FIFO 丢弃最旧的（默认 200）</li>
+ * <li>{@code timeoutSeconds} — 单个子任务最长执行秒数;超时后取消 future 并向主对话返回可读诊断(默认 600 = 10 分钟,spec § 5.3 B)。
+ * 2026-09-21 端到端测试复现 Qwen 代理对 ~700 行 HTML 一次生成 15+ 分钟无响应,
+ * 主对话同步等待卡死;该字段配合 DefaultSubTaskExecutor#execute 的 TimeoutException 捕获
+ * 防御。回归锁见 DefaultSubTaskToolTimeoutTest。</li>
  * </ul>
  */
  @Data
@@ -365,6 +369,8 @@ public class LoomAgentProperties {
  private boolean enabled = true;
  private int maxConcurrent = 4;
  private int maxHistory = 200;
+ // 2026-09-21: Sub-task timeout defense (spec § 5.3 B). Default 600s (10 min).
+ private long timeoutSeconds = 600;
  }
 
  /**

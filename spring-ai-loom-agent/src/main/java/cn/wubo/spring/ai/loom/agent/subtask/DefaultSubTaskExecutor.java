@@ -1,6 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.subtask;
 
 import cn.wubo.spring.ai.loom.agent.mcp.IMcp;
+import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskRequest;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskResult;
 import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
@@ -19,6 +20,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Default {@link ISubTaskExecutor}.
@@ -70,6 +73,11 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private final List<IEmbedTool> embedTools;
     private final SubTaskRegistry subTaskRegistry;
     private final cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService;
+    /**
+     * 2026-09-21 (spec § 5.3 B):子任务超时配置。null 时退化为默认 600s,
+     * 走无参构造器即可使用默认值(向旧调用方保持兼容)。
+     */
+    private final LoomAgentProperties.SubTaskProperty subTaskProperty;
 
     /**
      * RBAC 剔除日志去重(spec 2026-09-10-subtask-rbac-filter D6):
@@ -95,6 +103,23 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
                                   List<IEmbedTool> embedTools,
                                   SubTaskRegistry subTaskRegistry,
                                   cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
+        this(chatClient, memoryAdvisor, executor, mcp, embedTools, subTaskRegistry, capabilityService, null);
+    }
+
+    /**
+     * 2026-09-21 (spec § 5.3 B):新增 {@code subTaskProperty} 形参 —— 子任务超时防御。
+     * 调用方（LoomAgentConfiguration SubTaskConfiguration）传 {@code properties.getSubtask()},
+     * 老调用方（既有测试 {@code DefaultSubTaskExecutorTest}）走上面的无参回退,
+     * 内部 {@code timeoutSeconds=null 时退化到 600s 默认值}。
+     */
+    public DefaultSubTaskExecutor(ChatClient chatClient,
+                                  BaseChatMemoryAdvisor memoryAdvisor,
+                                  ExecutorService executor,
+                                  IMcp mcp,
+                                  List<IEmbedTool> embedTools,
+                                  SubTaskRegistry subTaskRegistry,
+                                  cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
+                                  LoomAgentProperties.SubTaskProperty subTaskProperty) {
         this.chatClient = chatClient;
         this.memoryAdvisor = memoryAdvisor;
         this.executor = executor;
@@ -102,6 +127,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         this.embedTools = embedTools;
         this.subTaskRegistry = subTaskRegistry;
         this.capabilityService = capabilityService;
+        this.subTaskProperty = subTaskProperty;
     }
 
     /**
@@ -166,10 +192,22 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
         // (wired via the SubTaskRegistry constructor Consumer<String>)
         // handles kill routing from the REST endpoint to the running worker.
         // attachFuture only exists for legacy CompletableFuture callers.
+        // 2026-09-21 (spec § 5.3 B):future.get 改为带超时的 get(timeout, unit),
+        // 超时则 cancel(true) 中断 worker thread,向主对话返回可读诊断而非无限阻塞。
+        long timeoutSec = (subTaskProperty != null) ? subTaskProperty.getTimeoutSeconds() : 600L;
         try {
-            SubTaskResult result = future.get();
+            SubTaskResult result = future.get(timeoutSec, TimeUnit.SECONDS);
             subTaskRegistry.markFinished(subTaskId, result.status(), result.text(), result.errorMessage());
             return result;
+        } catch (TimeoutException te) {
+            boolean cancelled = future.cancel(true);
+            log.warn("Sub-task timed out after {}s, id={}, cancel={}", timeoutSec, subTaskId, cancelled);
+            String diagnostic = String.format(
+                    "[子任务超时 %d 秒,已自动取消。请基于已有结果继续,或拆分更小的子任务重试。]",
+                    timeoutSec);
+            SubTaskResult r = SubTaskResult.failed(req, startedAt, System.currentTimeMillis(), diagnostic);
+            subTaskRegistry.markFinished(subTaskId, r.status(), r.text(), r.errorMessage());
+            return r;
         } catch (InterruptedException ie) {
             future.cancel(true);
             SubTaskResult r = SubTaskResult.cancelled(req, startedAt, System.currentTimeMillis());
