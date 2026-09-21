@@ -112,4 +112,24 @@ class DefaultChatSubTaskGuidanceContractTest {
         assertTrue(prompt.contains("≤ 5") || prompt.contains("≤5"),
                 "护栏缺 ≤5,实际:" + prompt);
     }
+
+    @Test
+    @DisplayName("A8: Tool description 含\"流协议截断\"关键短语（spec § 5.2 D1 改动到位）")
+    void toolDescriptionCoversStreamTruncation() throws Exception {
+        // 反射读 DefaultSubTaskTool.startSubTask 上的 @Tool(description=...)
+        // 注意:Java 方法名是 camelCase 的 startSubTask;LLM-facing 的工具名是 Spring AI
+        // 从方法名派生的 startSubTask / start_sub_task（取决于版本）。反射必须用
+        // 实际 Java 方法名。
+        Class<?> subTaskToolClass = Class.forName("cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskTool");
+        // 注意:ToolContext 在 spring-ai 1.x 里位于 org.springframework.ai.chat.model 包（不是 .tool.context）
+        Class<?> toolContextClass = Class.forName("org.springframework.ai.chat.model.ToolContext");
+        Method startSubTask = subTaskToolClass.getDeclaredMethod("startSubTask",
+                String.class, String.class, toolContextClass);
+        org.springframework.ai.tool.annotation.Tool toolAnnotation =
+                startSubTask.getAnnotation(org.springframework.ai.tool.annotation.Tool.class);
+        assertNotNull(toolAnnotation, "DefaultSubTaskTool.startSubTask 必须有 @Tool 注解");
+        String desc = toolAnnotation.description();
+        assertTrue(desc.contains("流协议截断"),
+                "Tool description 应明确提及流协议截断根因,实际:" + desc);
+    }
 }
