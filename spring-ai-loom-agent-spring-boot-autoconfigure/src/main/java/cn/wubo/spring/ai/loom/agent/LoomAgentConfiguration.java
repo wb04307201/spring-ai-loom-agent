@@ -1129,10 +1129,14 @@ public class LoomAgentConfiguration {
                 // 构造器注入的环 Spring 不可解。@Lazy 代理在 worker 线程首次 doExecute 时
                 // 解析(与本 bean 既有 @Lazy embedTools / @Lazy SubTaskRegistry 同一手法)。
                 @Lazy cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
+                // 2026-09-21 chat-ui-ux-fixes #1:SseEmitterRegistry 用于子任务生命周期事件
+                // 推送到父 conversation SSE 流。@Lazy 避免构造期强行解析(registry 自身依赖
+                // 聊天工具链 bean,提前拉会触发同类循环)。
+                @Lazy cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry sseEmitterRegistry,
                 LoomAgentProperties properties) {
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
                     chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools,
-                    subTaskRegistry, capabilityService, properties.getSubtask());
+                    subTaskRegistry, capabilityService, properties.getSubtask(), sseEmitterRegistry);
         }
 
         /**
