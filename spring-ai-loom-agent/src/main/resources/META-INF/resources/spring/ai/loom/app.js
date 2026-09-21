@@ -1921,7 +1921,16 @@ const subTaskChips = (() => {
   }
 
   function renderStart(ev) {
-    const bubble = ui._currentAskUserBubble || lastBotBubble();
+    // BUG-FIX-2026-09-22:#3 askUser 修复后,ui._currentAskUserBubble 指向
+    // chat-item(不再指向 .bubble);lastBotBubble() 仍返回 .bubble。统一处理:
+    //   1. 取一个 chat-item(_currentAskUserBubble 或 lastBotBubble 升级)
+    //   2. 在 chat-item 里找 .bubble 子元素
+    // 修复前:bubble 变量在 _currentAskUserBubble 有值时 = chat-item,
+    //       chip 被 append 到 chat-item 顶层(被 flex 拉成行内),不是 bubble
+    const item = ui._currentAskUserBubble || lastBotBubble()?.closest(".chat-item-left")
+        || lastBotBubble()?.parentElement?.closest?.(".chat-item-left");
+    if (!item) return;
+    const bubble = item.querySelector(":scope > .bubble") || item.querySelector(".bubble");
     if (!bubble) return;
     const chip = document.createElement("div");
     chip.className = "subtask-chip subtask-chip-running";

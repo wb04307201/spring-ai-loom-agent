@@ -92,4 +92,22 @@ class ChatUiUxFixesContractTest {
         assertTrue(src.contains("ui._currentAnswerEl = botContent"),
                 "_currentAnswerEl must point at existing bot-content, not new askuser-bot-content");
     }
+
+    @Test
+    @DisplayName("#1: subTaskChip append 到 bubble 内(不是 chat-item 顶层)")
+    void subTaskChipInsideBubble() throws IOException {
+        // 回归 bug:2026-09-22 发现 #3 askUser 同气泡修复把 ui._currentAskUserBubble
+        // 语义从 .bubble 改为 .chat-item,但 subTaskChips.renderStart 还按老语义
+        // bubble.appendChild(chip) —— chip 跑到 chat-item 顶层被 flex 拉成行内
+        // (71×1692px),与 AI 头像/气泡横排。
+        String src = readAppJs();
+        // renderStart 必须先升级到 chat-item 再找 bubble 子元素,而不是直接用
+        // _currentAskUserBubble 当作 bubble 用
+        assertTrue(src.contains("closest(\".chat-item-left\")") || src.contains("closest('.chat-item-left')"),
+                "renderStart must normalize _currentAskUserBubble to a chat-item-left via closest() before finding .bubble");
+        // 必须用 :scope > .bubble 直接子选择器,避免 querySelector 匹配到嵌套的
+        // .bubble(askuser-message-item 里的 .askuser-bubble 不会被误选中)
+        assertTrue(src.contains(":scope > .bubble"),
+                "renderStart must use :scope > .bubble direct child selector when querying the bubble inside chat-item");
+    }
 }
