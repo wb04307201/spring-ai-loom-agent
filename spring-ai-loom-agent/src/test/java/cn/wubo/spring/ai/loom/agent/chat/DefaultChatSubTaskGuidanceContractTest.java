@@ -132,4 +132,19 @@ class DefaultChatSubTaskGuidanceContractTest {
         assertTrue(desc.contains("流协议截断"),
                 "Tool description 应明确提及流协议截断根因,实际:" + desc);
     }
+
+    @Test
+    @DisplayName("A10: few-shot 例子含「150-200 行」模块化指导（spec § 5.1 C 改写后）")
+    void fewShotSaysEachSubtaskIsOneModule() {
+        // C 改写后必须明确"每个子任务只生成 1 张表 HTML（约 150-200 行）",避免 LLM
+        // 一次塞 700 行触发 Qwen 长输出限流（端到端测试 2026-09-21 复现）。
+        assertTrue(prompt.contains("150-200 行")
+                        || prompt.contains("150到200 行")
+                        || prompt.contains("约 150"),
+                "few-shot 必须明确每个子任务约 150-200 行,实际:" + prompt);
+        assertTrue(prompt.contains("每个 start_sub_task 只生成 1 张表")
+                        || prompt.contains("每个子任务只生成 1 张表")
+                        || prompt.contains("每个子任务"),
+                "few-shot 必须含'每个子任务只生成 1 张表'的指导,实际:" + prompt);
+    }
 }

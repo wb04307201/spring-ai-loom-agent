@@ -395,13 +395,20 @@ public class DefaultChat implements IChat {
   sb.append("示例（任务分段）：\n");
   sb.append("用户：帮我写一个四张表的 CRUD 维护页面原型 HTML（工厂/产线/工序/产品工序关系），下载为图片\n");
   sb.append("→ 主对话先评估：4 张表 + 多工具链调用 + 需生成大型 HTML（命中场景 1、2）→ 第一步先\n");
-  sb.append("   start_sub_task(prompt=\"生成工厂表 HTML，含查询区、表格、分页；Ant Design 风格；\n");
-  sb.append("   列：工厂编码/工厂名称/删除标识\", systemContext=\"Ant Design 蓝白风格，标签化展示删除标识\")\n");
-  sb.append("→ start_sub_task(prompt=\"生成产线表 HTML ...\", systemContext=\"...\")\n");
-  sb.append("→ start_sub_task(prompt=\"生成工序表 HTML ...\", systemContext=\"...\")\n");
-  sb.append("→ start_sub_task(prompt=\"生成产品工序关系表 HTML ...\", systemContext=\"...\")\n");
-  sb.append("→ 主对话不做 HTML 生成，统一调 renderHtmlFile(...) 把拼好的 HTML 渲染成图片，\n");
-  sb.append("   返回预览+下载链接给用户\n");
+  sb.append("   start_sub_task(prompt=\"生成工厂表 HTML（含查询区、表格、分页；Ant Design 风格；\n");
+  sb.append("   列：工厂编码/工厂名称/删除标识）\", systemContext=\"Ant Design 蓝白风格，标签化展示删除标识\")\n");
+  sb.append("→ start_sub_task(prompt=\"生成产线表 HTML（含查询区、表格、分页；Ant Design 风格；\n");
+  sb.append("   列：工厂编码/工厂名称/产线编码/产线名称/删除标识）\", systemContext=\"同上风格，列增 2\")\n");
+  sb.append("→ start_sub_task(prompt=\"生成工序表 HTML（含查询区、表格、分页；Ant Design 风格；\n");
+  sb.append("   列：工厂编码/工厂名称/产线编码/产线名称/工序顺序号/工序编码/工序名称/\n");
+  sb.append("   工序类型（自制/外委）/删除标识）\", systemContext=\"同上风格，列增 4\")\n");
+  sb.append("→ start_sub_task(prompt=\"生成产品工序关系表 HTML（含查询区、表格、分页；Ant Design 风格；\n");
+  sb.append("   列：工厂编码/工厂名称/产线编码/产线名称/工序顺序号/工序编码/工序名称/\n");
+  sb.append("   工序类型（自制/外委）/产品编码/产品名称/删除标识）\", systemContext=\"同上风格，列增 2\")\n");
+  sb.append("→ 四个 start_sub_task 完成，主对话拿到 4 段 HTML 片段，用 JS 渲染引擎或模板拼接合并，\n");
+  sb.append("   调用 renderHtmlFile(...) 把拼好的 HTML 渲染成图片，返回预览+下载链接给用户\n");
+  sb.append("→ 重要约束：每个 start_sub_task 只生成 1 张表的 HTML（约 150-200 行 CSS + 结构 + JS 数据 + 表头），\n");
+  sb.append("   不要在单子任务里塞多张表；Qwen 等模型对短输出响应快、长输出易卡住或超时\n");
 
   // 动态拼装可用能力 + 对应使用说明
   // - skills: 列技能 + 调 getSkill 的说明
