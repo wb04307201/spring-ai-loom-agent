@@ -85,27 +85,34 @@ v1.1.48 解决了一个 Spring AI 1.1.8 流式协议的 `JsonEOFException` 致�
 
 ## 📊 数据
 
-| 指标 | 值 |
-|------|---|
-| 总 commit 数 | 26 |
-| 后端 Java 文件改动 | 6(LoomAgentConfiguration / DefaultSubTaskExecutor / AskUserRegistry / DefaultChat / DefaultAskUserTool / ChatResponseRecord + SubTaskEvent 新 record) |
-| 前端 JS/CSS 改动 | 2(app.js + style.css) |
-| 新增测试 | 3(FriendlyMessageJsonEofTest / DefaultChatSubTaskGuidanceContractTest / DefaultSubTaskToolTimeoutTest) |
-| 回归测试 | 6 / 6 全绿(ChatUiUxFixesContractTest + DefaultSubTaskToolTimeoutTest 等) |
-| 新 spec/plans(已删) | 3 + 2 = 5 文件 |
-| 代码净增 | +约 700 行(含 3 个新 record + 2 个新类内函数 + CSS) |
+**总 commit 数**: 26
+
+**后端 Java 文件改动**: 6 个文件(`LoomAgentConfiguration` / `DefaultSubTaskExecutor` / `AskUserRegistry` / `DefaultChat` / `DefaultAskUserTool` / `ChatResponseRecord` + `SubTaskEvent` 新 record)
+
+**前端 JS/CSS 改动**: 2 个文件(`app.js` + `style.css`)
+
+**新增测试**: 3 个(`FriendlyMessageJsonEofTest` / `DefaultChatSubTaskGuidanceContractTest` / `DefaultSubTaskToolTimeoutTest`)
+
+**回归测试**: 6 / 6 全绿(`ChatUiUxFixesContractTest` + `DefaultSubTaskToolTimeoutTest` 等)
+
+**新 spec/plans(已删)**: 3 + 2 = 5 文件
+
+**代码净增**: 约 +700 行(含 3 个新 record + 2 个新类内函数 + CSS)
 
 ---
 
 ## ⚠️ 已知问题(留作后续)
 
-- **`[DIAG-AU] answer: qid=... lookupResult=NULL`**(测试脚本时序陷阱):Python SSE 客户端在 AI 流阻塞 `future.get(300s)` 期间,SseEmitter 缓冲 askUser 帧约 5 分钟才 flush。脚本收到帧时已超时,PendingQuestion 被 finally 清掉。生产无影响(浏览器 1 秒内 flush + 用户 < 5 分钟内答)。
-- **`subTaskPanel` 撤销承诺**: 0965ac48 设计文档里的弹窗从未实现,801ab019 已替换为 inline 展开方案。
+**`[DIAG-AU] answer: qid=... lookupResult=NULL`**(测试脚本时序陷阱):Python SSE 客户端在 AI 流阻塞 `future.get(300s)` 期间,SseEmitter 缓冲 askUser 帧约 5 分钟才 flush。脚本收到帧时已超时,PendingQuestion 被 finally 清掉。生产无影响(浏览器 1 秒内 flush + 用户 < 5 分钟内答)。
+
+**`subTaskPanel` 撤销承诺**: 0965ac48 设计文档里的弹窗从未实现,801ab019 已替换为 inline 展开方案。
 
 ---
 
 ## 🔗 相关链接
 
-- 上版 release: v1.1.47 (2026-09-21) — `git log a89beaee..23b1ef3d`
-- 历史 spec/plans(已删,git history 可恢复): `docs/superpowers/{specs,plans}/2026-09-21-*.md`(`git log --all -- '*2026-09-21*'`)
-- 上一里程碑 v1.2.0 (M0 + M1 + M2,Skill + Knowledge market): `git log 26834b0..dceaddc`
+**上版 release**: v1.1.47 (2026-09-21) — `git log a89beaee..23b1ef3d`
+
+**历史 spec/plans(已删,git history 可恢复)**: `docs/superpowers/{specs,plans}/2026-09-21-*.md`(`git log --all -- '*2026-09-21*'`)
+
+**上一里程碑**: v1.2.0 (M0 + M1 + M2,Skill + Knowledge market) — `git log 26834b0..dceaddc`
