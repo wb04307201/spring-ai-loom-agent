@@ -325,6 +325,12 @@ class BatchedCounterServiceTest {
 
             // One final synchronous flush to drain anything left in the buffer
             // (increments that landed AFTER the last concurrent flush).
+            // The race window is between incrementsDone=true and the last
+            // increment's compute() returning — fix the test by running a
+            // *synchronous* flush (flush() blocks until executor.flush().get()
+            // completes) so any entry written after the last concurrent flush
+            // is captured here.
+            svc.flush();
             assertEquals(0, svc.bufferSizeForTest(),
                     "concurrent flush workers should have drained everything; "
                             + "remaining buffer means a drainBuffer() race lost an update");
