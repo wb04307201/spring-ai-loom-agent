@@ -4191,3 +4191,96 @@ textarea::placeholder {
   width: 100%;
   margin-bottom: 2px;
 }
+
+/* ===== 2026-09-21 chat-ui-ux-fixes ===== */
+
+/* #1: Sub-task chip */
+.subtask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 8px 0;
+  background: #f5f5f5;
+  border: 1px solid #d9d9d9;
+  border-radius: 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 1s, background 0.3s;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subtask-chip-running { background: #e6f7ff; border-color: #91d5ff; }
+.subtask-chip-completed { background: #f6ffed; border-color: #b7eb8f; }
+.subtask-chip-failed { background: #fff1f0; border-color: #ffa39e; }
+.subtask-chip-cancelled { background: #f5f5f5; border-color: #bfbfbf; }
+.subtask-chip-fading { opacity: 0.3; }
+.subtask-chip-prompt { color: var(--text-3, rgba(0,0,0,0.65)); overflow: hidden; text-overflow: ellipsis; }
+.subtask-chip-spinner { animation: spin 1.2s linear infinite; display: inline-block; }
+/* 2026-09-22 #1 chip inline 展开:点击 chip 显示完整 prompt / ID / 状态 / elapsed / 错误信息 */
+.subtask-chip-wrapper { display: block; margin: 4px 0; max-width: 100%; }
+.subtask-chip-wrapper .subtask-chip { margin: 0; }
+.subtask-detail {
+  display: none;
+  margin: 6px 0 10px 4px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.025);
+  border-left: 3px solid var(--primary-color, #4f46e5);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3, rgba(0, 0, 0, 0.65));
+  max-width: 760px;
+  word-break: break-word;
+}
+.subtask-chip-wrapper.expanded .subtask-detail { display: block; }
+.subtask-detail-row { margin: 4px 0; }
+.subtask-detail-label { color: var(--text-3, rgba(0, 0, 0, 0.45)); margin-right: 6px; font-weight: 500; }
+.subtask-detail-prompt {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+.subtask-detail-error {
+  background: rgba(255, 77, 79, 0.08);
+  border-left: 3px solid #ff4d4f;
+  padding: 8px 10px;
+  border-radius: 4px;
+  color: #cf1322;
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+.subtask-detail-status { font-weight: 500; }
+.subtask-detail-status.completed { color: #389e0d; }
+.subtask-detail-status.failed { color: #cf1322; }
+.subtask-detail-status.cancelled { color: #8c8c8c; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+/* #2: Back-to-bottom floating button */
+.back-to-bottom-btn {
+  position: absolute;
+  right: 20px;
+  bottom: 90px;
+  padding: 8px 14px;
+  background: var(--primary-color, #4f46e5);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  font-size: 13px;
+  z-index: 100;
+}
+.back-to-bottom-btn.visible { opacity: 1; pointer-events: auto; }
+
+/* #3: askUser in same bubble — reduce gap */
+.askuser-bubble .askuser-slot { margin-bottom: 0; }
+.askuser-bubble .bot-content { margin-top: 8px !important; }

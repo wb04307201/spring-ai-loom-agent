@@ -1128,10 +1128,15 @@ public class LoomAgentConfiguration {
                 // 该 list 含 defaultSubTaskTool → defaultSubTaskExecutor → CapabilityService,
                 // 构造器注入的环 Spring 不可解。@Lazy 代理在 worker 线程首次 doExecute 时
                 // 解析(与本 bean 既有 @Lazy embedTools / @Lazy SubTaskRegistry 同一手法)。
-                @Lazy cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
+                @Lazy cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
+                // DIAG-FIX-2026-09-22:#1 subTaskChips bug 修复 —— 去掉 @Lazy 后能正确注入。
+                // 原因:@Lazy 在最后一个参数 + 该 bean 已在容器中时,某些 Spring 版本
+                // 会直接传 null(代理未触发)。SseEmitterRegistry 不是循环依赖,无需 @Lazy。
+                cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry sseEmitterRegistry,
+                LoomAgentProperties properties) {
             return new cn.wubo.spring.ai.loom.agent.subtask.DefaultSubTaskExecutor(
                     chatClient, memoryAdvisor, loomSubTaskExecutor, mcp, embedTools,
-                    subTaskRegistry, capabilityService);
+                    subTaskRegistry, capabilityService, properties.getSubtask(), sseEmitterRegistry);
         }
 
         /**

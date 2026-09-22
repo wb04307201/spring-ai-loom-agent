@@ -41,7 +41,11 @@ public class DefaultSubTaskTool implements ISubTaskTool {
             + "并返回执行结果:它拥有与主对话相同的工具访问(文件/MCP/Skill/时间等),"
             + "但不能再次启动子任务、创建定时器,也不能直接向用户提问 —— 需要用户决策的"
             + "疑问应写入委派指令的已知约束,或让子任务把疑问写进返回结果,由你收到结果后"
-            + "决定是否向用户提问。主对话会同步等待子任务完成,然后拿到最终文本。")
+            + "决定是否向用户提问。主对话会同步等待子任务完成,然后拿到最终文本。" +
+            "用途：把需要大量 reasoning、规划或多步工具调用的大型任务拆出来异步执行，避免主对话" +
+            "因 reasoning 超长被 Spring AI 1.1.8 流协议截断（截断症状：聊天最终弹\"工具响应流被" +
+            "中途截断\"，用户体验断裂）。单次主对话适合 ≤ 200 行代码 / ≤ 3 个工具调用 / ≤ 5K 字符" +
+            "文件的简单任务；超过这个尺度的任务请用 start_sub_task 拆分。")
     @Override
     public String startSubTask(String prompt, String systemContext, ToolContext toolContext) {
         // Validate prompt at the tool boundary. Spring AI's ChatClient throws

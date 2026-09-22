@@ -88,7 +88,7 @@
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.47</version>
+ <version>1.1.48</version>
 </dependency>
 ```
 
