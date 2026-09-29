@@ -60,6 +60,9 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
             ctor.setAccessible(true);
             evaluator = ctor.newInstance();
             method = clazz.getMethod("evaluate", Filter.Expression.class, Map.class);
+            // The class is package-private; the public `evaluate` method must be marked
+            // accessible too, otherwise Method.invoke() throws IllegalAccessException.
+            method.setAccessible(true);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(
                     "Spring AI 2.0 removed public API for Filter.Expression evaluation; "
