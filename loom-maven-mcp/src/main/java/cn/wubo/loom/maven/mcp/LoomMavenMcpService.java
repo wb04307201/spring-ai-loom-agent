@@ -1,7 +1,7 @@
 package cn.wubo.loom.maven.mcp;
 
 import cn.wubo.loom.maven.core.MavenOperations;
-import org.springaicommunity.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.io.File;

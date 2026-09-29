@@ -4,7 +4,7 @@ import cn.wubo.spring.ai.loom.agent.model.AskUserEvent;
 import cn.wubo.spring.ai.loom.agent.model.AskUserOption;
 import cn.wubo.spring.ai.loom.agent.model.ChatResponseRecord;
 import cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -64,7 +64,7 @@ public class DefaultAskUserTool implements IAskUserTool {
         if (optionsJson == null || optionsJson.isBlank()) return List.of();
         // Spring AI 的共享 ObjectMapper:InfrastructureConfiguration 已开
         // ALLOW_COMMENTS / ALLOW_SINGLE_QUOTES(qwen tool-args 容错先例)
-        ObjectMapper om = org.springframework.ai.util.json.JsonParser.getObjectMapper();
+        JsonMapper om = org.springframework.ai.util.json.JsonParser.getJsonMapper();
         try {
             return om.readValue(optionsJson,
                     om.getTypeFactory().constructCollectionType(List.class, AskUserOption.class));

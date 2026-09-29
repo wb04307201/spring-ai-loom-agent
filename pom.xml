@@ -54,7 +54,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>4.1.1</spring-boot.version>
         <spring-ai.version>2.0.1</spring-ai.version>
-        <lombok.version>1.18.38</lombok.version>
+        <lombok.version>1.18.46</lombok.version>
         <flyway.version>12.8.0</flyway.version>
         <jvector.version>3.0.6</jvector.version>
         <file-view.version>1.4.2-sb3</file-view.version>

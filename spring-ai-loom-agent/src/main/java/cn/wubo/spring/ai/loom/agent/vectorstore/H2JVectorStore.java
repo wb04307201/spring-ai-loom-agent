@@ -14,13 +14,8 @@ import org.springframework.ai.observation.conventions.VectorStoreSimilarityMetri
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.filter.converter.SimpleVectorStoreFilterExpressionConverter;
 import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
-import org.springframework.expression.Expression;
-import org.springframework.expression.ExpressionParser;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -49,8 +44,30 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class H2JVectorStore extends AbstractObservationVectorStore {
 
     private static final Logger logger = LoggerFactory.getLogger(H2JVectorStore.class);
-    private static final SimpleVectorStoreFilterExpressionConverter FILTER_CONVERTER =
-            new SimpleVectorStoreFilterExpressionConverter();
+
+    // Spring AI 2.0 moved filter evaluation out of the public API surface — the evaluator
+    // (org.springframework.ai.vectorstore.SimpleVectorStoreFilterExpressionEvaluator) is now
+    // package-private. We invoke it via reflection so we don't fork upstream behavior.
+    // Constructed lazily once; constructor + evaluate(Filter.Expression, Map) are looked up by name.
+    private static final Object FILTER_EVALUATOR;
+    private static final java.lang.reflect.Method FILTER_EVALUATE_METHOD;
+    static {
+        Object evaluator;
+        java.lang.reflect.Method method;
+        try {
+            Class<?> clazz = Class.forName("org.springframework.ai.vectorstore.SimpleVectorStoreFilterExpressionEvaluator");
+            java.lang.reflect.Constructor<?> ctor = clazz.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            evaluator = ctor.newInstance();
+            method = clazz.getMethod("evaluate", Filter.Expression.class, Map.class);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(
+                    "Spring AI 2.0 removed public API for Filter.Expression evaluation; "
+                            + "reflective fallback failed", e);
+        }
+        FILTER_EVALUATOR = evaluator;
+        FILTER_EVALUATE_METHOD = method;
+    }
 
     static final String UPSERT_SQL =
             "MERGE INTO loom_vector_store (document_id, content, metadata_json, embedding, dim, score) "
@@ -67,7 +84,6 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
     // Ordered list of document IDs -- index matches JVector graph node index
     private final List<String> documentIds = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, VectorFloat<?>> embeddingMap = new ConcurrentHashMap<>();
-    private final ExpressionParser expressionParser;
     private final VectorizationProvider vectorizationProvider;
     private volatile List<VectorFloat<?>> currentVectors = List.of();
     @SuppressWarnings("rawtypes")
@@ -83,7 +99,6 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
         this.efConstruction = builder.efConstruction;
         this.efSearch = builder.efSearch;
         this.similarityFunction = builder.similarityFunction;
-        this.expressionParser = new SpelExpressionParser();
         this.vectorizationProvider = VectorizationProvider.getInstance();
         createNewIndex();
     }
@@ -423,14 +438,11 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
         if (filterExpression == null) {
             return true;
         }
-        StandardEvaluationContext context = new StandardEvaluationContext();
-        context.setVariable("metadata", document.getMetadata());
-        String spelExpression = FILTER_CONVERTER.convertExpression(filterExpression);
-        logger.debug("[H2Vector] SpEL filter: '{}' on metadata: {}", spelExpression, document.getMetadata());
-        Expression expression = expressionParser.parseExpression(spelExpression);
-        Boolean result = expression.getValue(context, Boolean.class);
-        logger.debug("[H2Vector] SpEL result: {} for docId={}", result, document.getId());
-        return result != null && result;
+        try {
+            return (boolean) FILTER_EVALUATE_METHOD.invoke(FILTER_EVALUATOR, filterExpression, document.getMetadata());
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Filter evaluation failed for expression=" + filterExpression, e);
+        }
     }
 
     private String getDocIdByNodeIndex(int nodeIndex) {

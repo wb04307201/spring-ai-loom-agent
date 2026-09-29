@@ -1,7 +1,7 @@
 package cn.wubo.loom.git.mcp;
 
 import cn.wubo.loom.git.core.GitOperations;
-import org.springaicommunity.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.nio.file.Path;

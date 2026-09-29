@@ -29,10 +29,10 @@
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-ollama</artifactId>-->
 <!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>org.springframework.ai</groupId>-->
-<!--            <artifactId>spring-ai-starter-model-anthropic</artifactId>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-anthropic</artifactId>
+        </dependency>
 <!--        <dependency>-->
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-minimax</artifactId>-->
@@ -57,6 +57,15 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Spring Boot 4 split web-test utilities into a separate module:
+             org.springframework.boot.test.web.client.TestRestTemplate moved to
+             org.springframework.boot.resttestclient.* (FQN may change in 4.2; the
+             class is still TestRestTemplate but lives in spring-boot-resttestclient). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-resttestclient</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- lib 的 playwright 是 optional(不传递);IT(HtmlRenderEngineIT)要真跑 Chromium,显式引入 -->

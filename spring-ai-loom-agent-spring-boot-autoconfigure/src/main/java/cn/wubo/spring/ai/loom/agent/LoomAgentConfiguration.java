@@ -425,18 +425,63 @@ public class LoomAgentConfiguration {
         @Bean
         public org.springframework.beans.factory.SmartInitializingSingleton springAiJsonParserConfig() {
             return () -> {
-                try {
-                    com.fasterxml.jackson.databind.ObjectMapper om =
-                            org.springframework.ai.util.json.JsonParser.getObjectMapper();
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_YAML_COMMENTS, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
-                } catch (Throwable t) {
-                    // 静默失败 —— Spring AI 内部 API 可能在新版本里被替换
-                    LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
-                }
+                // Spring AI 2.0 ships Jackson 3 (tools.jackson.databind.json.JsonMapper).
+                // The old Jackson 2 com.fasterxml.jackson.databind.ObjectMapper + JsonParser.Feature
+                // enum was removed. Reflectively enable the StreamReadFeature equivalents so this
+                // config stays compatible across Jackson 2 (Spring AI 1.x) and Jackson 3 (2.x+).
+                enableAllowCommentsViaReflection();
             };
+        }
+
+        private static void enableAllowCommentsViaReflection() {
+            try {
+                Object mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getObjectMapper").invoke(null);
+                if (mapper == null) {
+                    // Spring AI 2.0 renamed the accessor — fall back to Jackson 3's getJsonMapper().
+                    try {
+                        mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getJsonMapper").invoke(null);
+                    } catch (NoSuchMethodException ignored) {
+                        LOG.warn("Spring AI JsonParser exposes neither getObjectMapper nor getJsonMapper; "
+                                + "skipping lenient-JSON configuration");
+                        return;
+                    }
+                }
+                invokeConfigure(mapper, "ALLOW_COMMENTS");
+                invokeConfigure(mapper, "ALLOW_YAML_COMMENTS");
+                invokeConfigure(mapper, "ALLOW_SINGLE_QUOTES");
+                invokeConfigure(mapper, "ALLOW_UNQUOTED_FIELD_NAMES");
+            } catch (Throwable t) {
+                LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
+            }
+        }
+
+        /**
+         * Jackson 2 used {@code om.configure(JsonParser.Feature.X, true)}; Jackson 3 uses
+         * {@code om.enable(StreamReadFeature.X)}. The Jackson 2 class may not even be on the
+         * classpath under Spring AI 2.0. We look up both feature enums via reflection and call
+         * whichever one we find.
+         */
+        private static void invokeConfigure(Object mapper, String featureName) {
+            // Try Jackson 2 first
+            try {
+                Class<?> jackson2Feature = Class.forName("com.fasterxml.jackson.core.JsonParser$Feature");
+                Object feature = Enum.valueOf((Class<Enum>) jackson2Feature, featureName);
+                mapper.getClass().getMethod("configure", jackson2Feature, boolean.class)
+                        .invoke(mapper, feature, true);
+                return;
+            } catch (ClassNotFoundException | NoSuchMethodException ignored) {
+                // fall through to Jackson 3 path
+            } catch (ReflectiveOperationException e) {
+                LOG.debug("Jackson 2 configure({}) failed, will try Jackson 3: {}", featureName, e.getMessage());
+            }
+            // Jackson 3 path: mapper.enable(StreamReadFeature.X)
+            try {
+                Class<?> jackson3Feature = Class.forName("tools.jackson.core.StreamReadFeature");
+                Object feature = Enum.valueOf((Class<Enum>) jackson3Feature, featureName);
+                mapper.getClass().getMethod("enable", jackson3Feature).invoke(mapper, feature);
+            } catch (ReflectiveOperationException e) {
+                LOG.debug("Jackson 3 enable({}) not available: {}", featureName, e.getMessage());
+            }
         }
 
         @Bean
@@ -492,7 +537,7 @@ public class LoomAgentConfiguration {
          * 版本号字典序：< ，库 SQL 先建表 + admin，业务的 后 seed mcp / skill。
          */
         @Bean
-        public org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer libraryFlywayCustomizer() {
+        public org.springframework.boot.flyway.autoconfigure.FlywayConfigurationCustomizer libraryFlywayCustomizer() {
             return configuration -> {
                 // baseline-on-migrate 让空 schema 也能跑（库 + 业务都能跑）
                 configuration.baselineOnMigrate(true);

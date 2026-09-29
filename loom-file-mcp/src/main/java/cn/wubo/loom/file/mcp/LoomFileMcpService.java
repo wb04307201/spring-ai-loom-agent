@@ -1,7 +1,7 @@
 package cn.wubo.loom.file.mcp;
 
 import cn.wubo.loom.file.core.FileOperations;
-import org.springaicommunity.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.nio.file.Path;

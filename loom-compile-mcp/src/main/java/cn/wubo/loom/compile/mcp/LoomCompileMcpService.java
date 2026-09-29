@@ -4,7 +4,7 @@ import cn.wubo.loom.compile.core.CompileAndDeployOperations;
 import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.loom.compile.core.CompileConfig;
 import cn.wubo.loom.compile.core.ImageTemplate;
-import org.springaicommunity.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.nio.file.Path;
