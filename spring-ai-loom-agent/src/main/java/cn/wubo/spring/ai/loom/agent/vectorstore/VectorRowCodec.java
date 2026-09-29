@@ -1,8 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.vectorstore;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -16,7 +15,7 @@ import java.util.Map;
  */
 public final class VectorRowCodec {
 
-    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+    private static final JsonMapper MAPPER = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 

@@ -3,12 +3,12 @@ package cn.wubo.spring.ai.loom.agent.chat;
 import cn.wubo.spring.ai.loom.agent.model.ToolCallLog;
 import cn.wubo.spring.ai.loom.agent.token.ChatUsageService;
 import cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
 import java.util.*;
@@ -36,18 +36,18 @@ public class ConversationFlowService {
  private final JdbcTemplate jdbcTemplate;
  private final IToolCallLogRepository toolCallLogRepository;
  private final ChatUsageService chatUsageService;
- private final ObjectMapper objectMapper;
+ private final JsonMapper jsonMapper;
  private static final Set<String> DEFAULT_TYPES = Set.of("USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "SUBTASK", "SCHEDULE", "SCHEDULE_FIRE", "SYSTEM");
  /**
   * @Lazy 避免 DefaultChat → ConversationFlowService → ... 循环依赖
   */
  private final IChat chat;
 
- public ConversationFlowService(JdbcTemplate jdbcTemplate, IToolCallLogRepository toolCallLogRepository, ChatUsageService chatUsageService, ObjectMapper objectMapper, @Lazy IChat chat) {
+ public ConversationFlowService(JdbcTemplate jdbcTemplate, IToolCallLogRepository toolCallLogRepository, ChatUsageService chatUsageService, JsonMapper jsonMapper, @Lazy IChat chat) {
   this.jdbcTemplate = jdbcTemplate;
   this.toolCallLogRepository = toolCallLogRepository;
   this.chatUsageService = chatUsageService;
-  this.objectMapper = objectMapper;
+  this.jsonMapper = jsonMapper;
   this.chat = chat;
  }
 
@@ -272,7 +272,7 @@ public class ConversationFlowService {
  private JsonNode readContentNode(String content) {
   if (content == null || content.isBlank()) return null;
   try {
-   return objectMapper.readTree(content);
+   return jsonMapper.readTree(content);
   } catch (Exception e) {
    return null;
   }
