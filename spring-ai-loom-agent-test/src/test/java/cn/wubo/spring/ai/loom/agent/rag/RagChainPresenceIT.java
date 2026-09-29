@@ -40,16 +40,16 @@ class RagChainPresenceIT {
     private ApplicationContext ctx;
 
     @Test
-    @DisplayName("IUpload 恒在(Storage 解耦) + 上传/知识工具链通路可注入")
+    @DisplayName("IUpload 恒在 + EmbeddingModel bean 在场")
     void defaultConfigBuildsFullRagChain() {
-        // Spring Boot 4.1.1 + Spring AI 2.0.1: the library's h2VectorStore
-        // (EmbeddingModelAvailableCondition + @ConditionalOnMissingBean(VectorStore)) chain
-        // doesn't materialise a VectorStore bean when the test app only has a manually-imported
-        // fake EmbeddingModel — Spring Boot 4 re-evaluates @Conditional at a point where
-        // the fake bean's bean definition is not yet visible to allowEagerInit=false lookups.
-        // The upload chain (StorageConfiguration, rules 2026-09-19 解耦) is unconditional
-        // and is the more robust regression gate here; the actual VectorStore functionality
-        // is verified by H2VectorStoreIT (uses a real BeanOverride + explicit VectorStore).
+        // Test app ships a fake EmbeddingModel bean in TestAnthropicOptionsConfig so the
+        // library's EmbeddingModelAvailableCondition branch (1) matches — the h2VectorStore
+        // bean still doesn't materialize reliably in Spring Boot 4.1.1 (separate investigation),
+        // so the strong assertion stays in RagConfigurationSliceTest. Here we lock the
+        // always-on Storage 解耦 contract + the fake EmbeddingModel presence.
+        assertThat(ctx.getBeanNamesForType(EmbeddingModel.class))
+                .as("test fake EmbeddingModel bean registered by TestAnthropicOptionsConfig")
+                .isNotEmpty();
         assertThat(ctx.getBeanNamesForType(IUpload.class))
                 .as("StorageConfiguration (rules 2026-09-19 解耦): IUpload 必须恒在")
                 .isNotEmpty();
