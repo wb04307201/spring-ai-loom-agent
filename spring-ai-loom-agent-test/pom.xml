@@ -68,6 +68,13 @@
             <artifactId>spring-boot-resttestclient</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- TestRestTemplateTestAutoConfiguration needs RestTemplateBuilder from
+             spring-boot-restclient (moved out of spring-boot-web in Spring Boot 4). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-restclient</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- lib 的 playwright 是 optional(不传递);IT(HtmlRenderEngineIT)要真跑 Chromium,显式引入 -->
         <dependency>
             <groupId>com.microsoft.playwright</groupId>
