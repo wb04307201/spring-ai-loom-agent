@@ -36,9 +36,16 @@ public class DefaultChat implements IChat {
 
  /** loom SSE 思考面板读取的 metadata key（DashScope 等 OpenAI 兼容 provider 原生会写）。 */
  static final String REASONING_CONTENT_KEY = "reasoningContent";
- /** Spring AI Anthropic 映射器为 thinking Generation 写的唯一 metadata key，用作识别标记。
-  *  public：LastChunkMessageChatMemoryAdvisor 在 advisor 链内(桥接上游)用同一标记跳过思考 chunk，防止思考文本混入 ASSISTANT 记忆。 */
+ /** Spring AI 2.0.x: Anthropic 映射器把 thinking blocks 放进 AssistantMessage metadata 的
+  *  "anthropicThinkingContents" key(值是 List<AnthropicThinkingContent> record,
+  *  每条 record 含 thinking/signature/redactedData 三个访问器);不再单字段化请求的 signature。
+  *  public：LastChunkMessageChatMemoryAdvisor 在 advisor 链内(桥接上游)用同一标记跳过思考 chunk，
+  *  防止思考文本混入 ASSISTANT 记忆。 */
  public static final String THINKING_SIGNATURE_KEY = "signature";
+ /** Spring AI 2.0+ Anthropic SDK 用的 thinking contents metadata key(Replacement for 1.x
+  *  的 {@link #THINKING_SIGNATURE_KEY},which only carried the signature).2.0+ 这里整个 List 都
+  * 在，这里不再走 signature 单 key 路径,改读 list 后反射提取每条的 thinking() 文本。 */
+ public static final String ANTHROPIC_THINKING_CONTENTS_KEY = "anthropicThinkingContents";
 
  private final ChatClient chatClient;
  private final IMcp mcp;
@@ -238,18 +245,111 @@ public class DefaultChat implements IChat {
   */
  static ChatResponse bridgeAnthropicThinking(ChatResponse response) {
   Generation thinking = response == null ? null : response.getResult();
-  if (thinking == null || thinking.getOutput() == null
-          || !thinking.getOutput().getMetadata().containsKey(THINKING_SIGNATURE_KEY)) {
+  if (thinking == null || thinking.getOutput() == null) {
    return response;
   }
-  String delta = thinking.getOutput().getText();
+  Map<String, Object> metadata = thinking.getOutput().getMetadata();
+  if (metadata == null) {
+   metadata = Map.of();
+  }
+  String thinkingText = extractAnthropicThinkingText(metadata, thinking.getOutput());
+  if (thinkingText == null || thinkingText.isEmpty()) {
+   return response;
+  }
   Generation bridged = new Generation(
           AssistantMessage.builder()
                   .content("")
-                  .properties(Map.of(REASONING_CONTENT_KEY, delta == null ? "" : delta))
+                  .properties(Map.of(REASONING_CONTENT_KEY, thinkingText))
                   .build(),
           thinking.getMetadata());
   return new ChatResponse(List.of(bridged), response.getMetadata());
+ }
+
+ /**
+  * 反射读 Spring AI 2.0+ 的 Anthropic SDK 私有 record
+  * {@code AnthropicChatModel.AnthropicThinkingContent#thinking()}。同一个反射点跨 Spring AI /
+   * Anthropic SDK 升级后重命名风险都跟着 provider 类走，我们只读 {@code thinking()} 访问器，
+   * 字段名变了也能继续工作（返回结构允许 {@code List.copyOf} 中放任意类型）。
+  */
+ private static final java.lang.reflect.Method ANTHROPIC_THINKING_CONTENT_THINKING_METHOD;
+ /**
+  * Spring AI 2.x 的 {@code AnthropicChatModel.AnthropicAssistantMessage#getThinkingContents()} 是
+  * package-private 但可反射调用；返回 {@code List<AnthropicThinkingContent>}，每条记录的
+  * {@code thinking()} 拿到思考文本。本字段缓存在 2.0+ streaming per-chunk metadata 上
+  * 不挂 {@code anthropicThinkingContents} key 的路径（只挂 {@code messageType}）。
+  */
+ private static final java.lang.reflect.Method ANTHROPIC_ASSISTANT_GET_THINKING_METHOD;
+ static {
+  java.lang.reflect.Method m = null;
+  try {
+   Class<?> clazz = Class.forName(
+           "org.springframework.ai.anthropic.AnthropicChatModel$AnthropicThinkingContent");
+   m = clazz.getMethod("thinking");
+   m.setAccessible(true);
+  } catch (ReflectiveOperationException ignored) {
+   // Spring AI may rename / drop the class in a future release; bridge just degrades to
+   // passthrough mode (no thinking surfaced in reasoningContent key, no UI thinking panel).
+  }
+  ANTHROPIC_THINKING_CONTENT_THINKING_METHOD = m;
+  java.lang.reflect.Method g = null;
+  try {
+   Class<?> assistantClazz = Class.forName(
+           "org.springframework.ai.anthropic.AnthropicChatModel$AnthropicAssistantMessage");
+   g = assistantClazz.getDeclaredMethod("getThinkingContents");
+   g.setAccessible(true);
+  } catch (ReflectiveOperationException ignored) {
+   // class is ahead
+  }
+  ANTHROPIC_ASSISTANT_GET_THINKING_METHOD = g;
+ }
+
+ private static String extractAnthropicThinkingText(Map<String, Object> metadata, Object assistantMessage) {
+  // Path A: Spring AI 2.0+ aggregated metadata("anthropicThinkingContents" → List<AnthropicThinkingContent>)
+  Object list = metadata.get(ANTHROPIC_THINKING_CONTENTS_KEY);
+  String text = readFirstThinkingText(list);
+  if (text != null && !text.isEmpty()) {
+   return text;
+  }
+  // Path B: Spring AI 2.x per-chunk streaming — AssistantMessage may be AnthropicAssistantMessage
+  // with private getThinkingContents(). Reflect into the AssistantMessage subclass.
+  // (Spring AI 2.0.1 streaming conversion returns plain AssistantMessage and drops the thinking
+  // field, so this path is currently dead — kept for forward compatibility.)
+  if (assistantMessage != null && ANTHROPIC_ASSISTANT_GET_THINKING_METHOD != null
+          && ANTHROPIC_ASSISTANT_GET_THINKING_METHOD.getDeclaringClass()
+                  .isInstance(assistantMessage)) {
+   try {
+    Object liveList = ANTHROPIC_ASSISTANT_GET_THINKING_METHOD.invoke(assistantMessage);
+    text = readFirstThinkingText(liveList);
+    if (text != null && !text.isEmpty()) {
+     return text;
+    }
+   } catch (ReflectiveOperationException ignored) {
+    // fall through to 1.x signature path
+   }
+  }
+  // Spring AI 1.x fallback: "signature" key held the thinking text directly.
+  Object sig = metadata.get(THINKING_SIGNATURE_KEY);
+  return sig == null ? null : sig.toString();
+ }
+
+ /** 反射读 List<AnthropicThinkingContent> 第一条的 thinking() 文本。 */
+ private static String readFirstThinkingText(Object listObj) {
+  if (listObj instanceof java.util.Collection<?> coll && !coll.isEmpty()) {
+   Object first = coll.iterator().next();
+   if (ANTHROPIC_THINKING_CONTENT_THINKING_METHOD != null && first != null
+           && ANTHROPIC_THINKING_CONTENT_THINKING_METHOD.getDeclaringClass()
+                   .isInstance(first)) {
+    try {
+     Object text = ANTHROPIC_THINKING_CONTENT_THINKING_METHOD.invoke(first);
+     if (text != null) {
+      return text.toString();
+     }
+    } catch (ReflectiveOperationException ignored) {
+     // reflection failed silently
+    }
+   }
+  }
+  return null;
  }
 
  /**
