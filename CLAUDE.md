@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Spring AI LoomAgent** — A Spring Boot auto-configuration library that provides an out-of-the-box chat UI with RAG knowledge base, MCP tool calling, **Skill library + Skill market**, and role-based access (RBAC) for Spring AI applications.
 
-- **JDK**: 17+
-- **Framework**: Spring Boot 3.x + Spring AI 1.x
+- **JDK**: 25+
+- **Framework**: Spring Boot 4.x + Spring AI 2.x
 - **Build**: Maven (multi-module)
 - **Database**: H2 (default), with Flyway migrations
 - **No CHANGELOG**: this project does not maintain a `CHANGELOG.md` — read `git log` for the change history
