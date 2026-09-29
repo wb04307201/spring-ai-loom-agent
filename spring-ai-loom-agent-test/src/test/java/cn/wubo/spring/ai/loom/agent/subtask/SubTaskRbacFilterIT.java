@@ -15,7 +15,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("子任务 RBAC 过滤 IT")
 class SubTaskRbacFilterIT {
 
-    @MockBean
+    @MockitoBean
     private ChatClient chatClient;   // @Qualifier("chatClient") 的同一 bean 被替换
 
     @Autowired
