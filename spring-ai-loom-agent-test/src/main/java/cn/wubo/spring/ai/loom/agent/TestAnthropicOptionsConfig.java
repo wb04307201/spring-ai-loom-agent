@@ -39,7 +39,8 @@ public class TestAnthropicOptionsConfig {
     public AnthropicChatOptions anthropicChatOptions() {
         return AnthropicChatOptions.builder()
                 .model("MiniMax-M3")
-                .thinkingAdaptive()
+                .temperature(1.0)  // Spring AI docs: temperature must be 1.0 when thinking is enabled
+                .thinkingEnabled(8192L)  // explicit budget (>= 1024, < maxTokens)
                 .build();
     }
 
