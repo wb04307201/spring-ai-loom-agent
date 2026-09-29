@@ -37,10 +37,14 @@ public class TestAnthropicOptionsConfig {
     @Bean
     @Primary
     public AnthropicChatOptions anthropicChatOptions() {
+        // DashScope's /apps/anthropic endpoint requires max_tokens > thinking_budget.
+        // yml's chat.options.model/multi_model/enable_thinking flow through the auto-config builder,
+        // but yml can't express the max-tokens-vs-budget math, so we override here.
         return AnthropicChatOptions.builder()
-                .model("MiniMax-M3")
-                .temperature(1.0)  // Spring AI docs: temperature must be 1.0 when thinking is enabled
-                .thinkingEnabled(8192L)  // explicit budget (>= 1024, < maxTokens)
+                .model("qwen3.8-max")
+                .maxTokens(16384)
+                .temperature(1.0)
+                .thinkingEnabled(8192L)
                 .build();
     }
 
