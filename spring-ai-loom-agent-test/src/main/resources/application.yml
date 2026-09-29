@@ -35,7 +35,9 @@ spring:
       # MiniMax Anthropic-compatible endpoint (Spring AI 2.0 official recommendation for MiniMax).
       # API key must be provided via env var ANTHROPIC_API_KEY — never commit a real key.
       api-key: ${ANTHROPIC_API_KEY}
-      base-url: https://api.minimaxi.cn/anthropic
+      # Use the same .com host Claude Code is configured with (the .cn host has a separate
+      # TLS chain with a stricter cert path that's expired).
+      base-url: https://api.minimaxi.com/anthropic
       chat:
         options:
           model: MiniMax-M3

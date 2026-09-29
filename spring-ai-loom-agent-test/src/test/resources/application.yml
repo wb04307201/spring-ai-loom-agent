@@ -2,16 +2,15 @@ spring:
   datasource:
     url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
+    anthropic:
+      # Tests don't actually call the LLM (mocked or real but optional) — a placeholder
+      # api-key is enough for autoconfig; the bean in TestAnthropicOptionsConfig sets the
+      # actual model + thinking. Tests run without network to MiniMax.
+      api-key: ${ANTHROPIC_API_KEY:test-key-not-used}
+      base-url: https://api.minimaxi.com/anthropic
       chat:
         options:
-          model: qwen3.8-max
-          multi_model: true
-          enable_thinking: true
-      embedding:
-        options:
-          model: text-embedding-v4
+          model: MiniMax-M3
 loom:
   agent:
     datasource-dir: ./target/test-ds

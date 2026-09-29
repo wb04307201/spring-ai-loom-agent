@@ -95,7 +95,19 @@
                          SyncMcp 跳过该 client（页面表现为该 MCP 缺席）。
                          强制 file.encoding=UTF-8 规避（JDK 18+ 默认 UTF-8 无此问题；
                          打包 jar 运行需同样加 -Dfile.encoding=UTF-8）。 -->
-                    <jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>
+                    <!-- Java 17 在中文 Windows 上默认字符集是 GBK；MCP SDK 0.18.x 的
+                         StdioClientTransport 读 MCP 服务器 stdout 用平台默认字符集（写侧才是显式 UTF-8），
+                         含非 ASCII 字符的 MCP 工具响应（如 mcp-server-chart 的 × / 弯引号）会被 GBK
+                         解码破坏 JSON 结构 → JsonParseException → 响应被丢弃 → listTools 20s 超时 →
+                         SyncMcp 跳过该 client（页面表现为该 MCP 缺席）。
+                         强制 file.encoding=UTF-8 规避（JDK 18+ 默认 UTF-8 无此问题；
+                         打包 jar 运行需同样加 -Dfile.encoding=UTF-8）。
+
+                         2026-09：api.minimaxi.com 的 TLS 证书 CRL/OCSP 检查在 Windows 上
+                         CRYPT_E_REVOCATION_OFFLINE（JDK 走 OCSP 失败回退 CRL，CRL endpoint 也连不通）。
+                         关掉 CRL/OCSP 检查（仅关掉过期检查不影响证书签名验证）。
+                         Claude Code (Node.js) 默认就不做 OCSP 检查，所以同样的 URL 能通。 -->
+                    <jvmArguments>-Dfile.encoding=UTF-8 -Dcom.sun.security.enableCRLDP=false -Dcom.sun.net.ssl.checkRevocation=false</jvmArguments>
                 </configuration>
             </plugin>
         </plugins>
