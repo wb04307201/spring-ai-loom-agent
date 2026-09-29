@@ -31,16 +31,14 @@ spring:
 #      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
 #    zhipuai:
 #      api-key: ${ZHIPUAI_API_KEY}
-    dashscope:
-      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
+    anthropic:
+      # MiniMax Anthropic-compatible endpoint (Spring AI 2.0 official recommendation for MiniMax).
+      # API key must be provided via env var ANTHROPIC_API_KEY — never commit a real key.
+      api-key: ${ANTHROPIC_API_KEY}
+      base-url: https://api.minimaxi.cn/anthropic
       chat:
         options:
-          model: qwen3.8-max
-          multi_model: true
-          enable_thinking: true
-      embedding:
-        options:
-          model: text-embedding-v4
+          model: MiniMax-M3
 #    anthropic:
 #      api-key: ${NEW_API_KEY}
 #      base-url: http://123.56.128.32:3000
