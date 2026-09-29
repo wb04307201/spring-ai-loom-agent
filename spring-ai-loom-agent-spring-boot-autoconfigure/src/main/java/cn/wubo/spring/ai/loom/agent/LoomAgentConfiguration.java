@@ -894,10 +894,13 @@ public class LoomAgentConfiguration {
         public ConditionOutcome getMatchOutcome(org.springframework.context.annotation.ConditionContext context,
                                                 org.springframework.core.type.AnnotatedTypeMetadata metadata) {
             ConditionMessage.Builder message = ConditionMessage.forCondition("EmbeddingModelAvailable");
-            // 1) bean 定义已在场 → 确定性通过(allowEagerInit=false,不触发 FactoryBean 初始化)
+            // 1) bean 定义已在场 → 确定性通过(allowEagerInit=true 在 Spring AI 2.x + Spring Boot 4
+            //   下能识别 @TestConfiguration + main-src @Bean 注入的 EmbeddingModel;1.x 时代的
+            //   allowEagerInit=false 在某些场景下会把 FactoryBean 排除掉,导致即使 EmbeddingModel
+            //   已经在测试 app 注册了也无法触发本分支 → h2VectorStore 静默跳过)
             org.springframework.beans.factory.ListableBeanFactory beanFactory = context.getBeanFactory();
             if (beanFactory != null
-                    && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, false).length > 0) {
+                    && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, true).length > 0) {
                 return ConditionOutcome.match(message.because("EmbeddingModel bean definition present"));
             }
             // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)
