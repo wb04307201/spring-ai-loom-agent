@@ -40,6 +40,28 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  *   <li>删:先 DELETE FROM loom_vector_store,后清内存(DB 删 0 行幂等);</li>
  *   <li>搜索:零改动照搬旧实现 —— 不读 DB。</li>
  * </ul>
+ *
+ * <p>Filter 评估语义契约(Spring AI 2.0.1+ 引入,f93d7f01 适配):
+ * 上游删除了 {@code SimpleVectorStoreFilterExpressionConverter}(Spring AI 1.x 的
+ * SpEL 解析路径),换为 package-private
+ * {@code SimpleVectorStoreFilterExpressionEvaluator.evaluate(Filter.Expression, Map)}
+ * 直接 AST 评估 —— 本类静态 init 块反射调用之。新评估器与旧 SpEL 路径有以下 5 处
+ * 行为差异,callers(尤其是 KB UI / 自定义 filter 构造器)需知悉:
+ * <ul>
+ *   <li><b>NULLS FIRST</b>:GT/GTE/LT/LTE 中 {@code null &lt; 任何非 null}(旧 SpEL
+ *       走 {@code ConversionService},行为依类型而异);</li>
+ *   <li><b>数值 promote-to-double</b>:跨类型数字比较先统一 promote 到
+ *       {@code double}(旧 SpEL 保留原类型,可能出现 {@code Integer == Long} 失败);</li>
+ *   <li><b>Date → ISO-8601 UTC</b>:{@link java.util.Date} 过滤器值归一化到
+ *       ISO-8601 UTC 字符串后比较(旧 SpEL 走 {@code Date.compareTo});</li>
+ *   <li><b>引号 key 名去引号</b>:{@code "foo"} / {@code 'foo'} 形式的 key 在
+ *       metadata 查表前先 strip 引号(旧 SpEL 视引号为字面量);</li>
+ *   <li><b>IN/NIN 必须 List</b>:RHS 必须是 {@code List<?>},否则抛(旧 SpEL 接受
+ *       任何 iterable 并尝试转换)。</li>
+ * </ul>
+ * 项目当前 KB UI 经 {@code FilterExpressionBuilder} 产生 unquoted 单 key 字符串/
+ * 数字 metadata filter,<b>5 项差异都不会触发</b>;此处仅作未来维护者契约存档,避免
+ * 误用边角 case 时回归行为难以追溯。
  */
 public class H2JVectorStore extends AbstractObservationVectorStore {
 
