@@ -12,7 +12,10 @@
         "--java-options=-Dfile.encoding=UTF-8",
         "--java-options=-Dsun.jnu.encoding=UTF-8",
         "./loom-file-mcp/target/loom-file-mcp-1.0-SNAPSHOT.jar"
-      ]
+      ],
+      "env": {
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-25.0.3"
+      }
     },
     "loom-git-mcp": {
       "command": "jbang",

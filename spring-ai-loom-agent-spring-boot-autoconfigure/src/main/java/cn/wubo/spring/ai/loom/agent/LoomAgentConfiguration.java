@@ -700,21 +700,52 @@ public class LoomAgentConfiguration {
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
-                        // ：累积 DashScope enable_thinking 模式下的 reasoningContent
-                        // Spring AI DashScope 实测是 incremental（每条 chunk 是当前为止的
-                        // 增量片段），所以得 append 不是覆盖。content 文本也是增量同理。
+                        // 2026-10-01 (thinking-stream A 方案 fix):Spring AI OpenAI SDK 把 reasoningContent
+                        // 累加成「全量文本」emit per chunk(每帧 metadata.reasoningContent 是「截至目前
+                        // 的全部 thinking」,而非增量)。前端 APPEND 模式按 cumulative 输入会重复 N 次。
+                        // 这里 SseController 端算 delta(只发「新增的部分」),与 Anthropic 路径兼容 —
+                        // Anthropic SDK 大多数帧 metadata.reasoningContent=null(delta=null → 不发帧),
+                        // 最后一帧一次性给全量 → delta = 全量 → 前端一次性 append 显示正确。
+                        //
+                        // content 文本同 cumulative(chatResponse.getResult().getOutput().getText() 也是累加),
+                        // 但 **content 必须保持原样发** — 同一会话多消息的 chat 历史/前端渲染状态机依赖
+                        // "text 是全量"语义,改成 delta 会破坏 ChatMemory 持久化与未来历史回放。
                         final StringBuilder reasoningAccum = new StringBuilder();
+                        final java.util.concurrent.atomic.AtomicInteger lastReasoningLen = new java.util.concurrent.atomic.AtomicInteger(0);
 
                         reactor.core.Disposable subscription = chatResponseFlux
                                 .filter(chatResponse -> chatResponse.getResult() != null)
                                 .subscribe(chatResponse -> {
-                                    log.info(" stream NEXT: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
                                     try {
-                                        String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
-                                        if (reasoningContent != null && !reasoningContent.isBlank()) {
-                                            reasoningAccum.append(reasoningContent);
+                                        String text = chatResponse.getResult().getOutput().getText();
+                                        Object rcObj = chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
+                                        String fullReasoning = rcObj instanceof String s ? s : null;
+                                        // 算 delta:cumulative 减上次长度,得到本帧新增片段。
+                                        // 不常见边界:length 倒退(理论上不该发生,容错按 "" 处理)
+                                        String reasoningDelta = null;
+                                        if (fullReasoning != null && !fullReasoning.isEmpty()) {
+                                            int last = lastReasoningLen.get();
+                                            if (fullReasoning.length() > last) {
+                                                reasoningDelta = fullReasoning.substring(last);
+                                                lastReasoningLen.set(fullReasoning.length());
+                                            } else if (fullReasoning.length() < last) {
+                                                // Provider 重启 / 流跨回合复用 → 整体重发,不 delta,前端会再次 append
+                                                // (虽然不完美但不该发生,记录日志便于排查)
+                                                log.warn(" stream reasoning length shrunk: {} -> {}", last, fullReasoning.length());
+                                                reasoningDelta = fullReasoning;
+                                                lastReasoningLen.set(fullReasoning.length());
+                                            } else {
+                                                // 长度未变(thinking 已完成,provider 仍发同长度帧)→ 空 delta
+                                                reasoningDelta = "";
+                                            }
+                                            reasoningAccum.append(reasoningDelta);
                                         }
-                                        emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
+                                        log.info(" stream NEXT: conv={} textLen={} reasoningAccumLen={} reasoningDeltaLen={}",
+                                                conversationId,
+                                                text == null ? 0 : text.length(),
+                                                reasoningAccum.length(),
+                                                reasoningDelta == null ? -1 : reasoningDelta.length());
+                                        emitter.send(new ChatResponseRecord(text, reasoningDelta), MediaType.APPLICATION_JSON);
                                         // ：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_usage
                                         // (假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
                                         var chatMeta = chatResponse.getMetadata();

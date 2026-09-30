@@ -34,18 +34,12 @@ public class DefaultChat implements IChat {
 
  private static final Logger log = LoggerFactory.getLogger(DefaultChat.class);
 
- /** loom SSE 思考面板读取的 metadata key（DashScope 等 OpenAI 兼容 provider 原生会写）。 */
+ /** loom SSE 思考面板读取的 metadata key。
+  *  Spring AI OpenAI SDK(DashScope / MiniMax OpenAI 兼容 / 真 OpenAI)默认把每帧
+  *  reasoning_content 累积进 AssistantMessage metadata 的 {@code reasoningContent} key,
+  *  SseController 算 delta 后通过 SSE 推给前端(累积 → delta 转换在 LoomAgentConfiguration)。
+  *  该 key 是 OpenAI provider 路径下 thinking 流式面板的契约字段,不能删。 */
  static final String REASONING_CONTENT_KEY = "reasoningContent";
- /** Spring AI 2.0.x: Anthropic 映射器把 thinking blocks 放进 AssistantMessage metadata 的
-  *  "anthropicThinkingContents" key(值是 List<AnthropicThinkingContent> record,
-  *  每条 record 含 thinking/signature/redactedData 三个访问器);不再单字段化请求的 signature。
-  *  public：MessageChatMemoryAdvisor 在 advisor 链内(桥接上游)用同一标记跳过思考 chunk，
-  *  防止思考文本混入 ASSISTANT 记忆。 */
- public static final String THINKING_SIGNATURE_KEY = "signature";
- /** Spring AI 2.0+ Anthropic SDK 用的 thinking contents metadata key(Replacement for 1.x
-  *  的 {@link #THINKING_SIGNATURE_KEY},which only carried the signature).2.0+ 这里整个 List 都
-  * 在，这里不再走 signature 单 key 路径,改读 list 后反射提取每条的 thinking() 文本。 */
- public static final String ANTHROPIC_THINKING_CONTENTS_KEY = "anthropicThinkingContents";
 
  private final ChatClient chatClient;
  private final IMcp mcp;
@@ -230,130 +224,7 @@ public class DefaultChat implements IChat {
   }
 
   return requestSpec.stream().chatResponse()
-          .map(DefaultChat::bridgeAnthropicThinking)
           .onErrorResume(err -> reactor.core.publisher.Flux.just(toErrorResponse(err)));
- }
-
- /**
-  * 把 Spring AI Anthropic 的 thinking 块桥接进 reasoningContent 通道（SseController 思考面板的数据源）。
-  *
-  * Anthropic 映射器不写 metadata.reasoningContent（那是 DashScope 等 OpenAI 兼容 provider 的约定），
-  * 而是把 thinking 块做成独立 Generation：content=思考文本、metadata 仅含 signature。后果是
-  * "思考过程"面板永远不出现，且思考文本混进回答正文。这里以 signature key 识别这类 Generation，
-  * 改写为 content="" + metadata.reasoningContent=思考增量；已带 reasoningContent 的 provider
-  * （DashScope enable_thinking 等）其 Generation 不含 signature key，原样透传不受影响。
-  */
- static ChatResponse bridgeAnthropicThinking(ChatResponse response) {
-  Generation thinking = response == null ? null : response.getResult();
-  if (thinking == null || thinking.getOutput() == null) {
-   return response;
-  }
-  Map<String, Object> metadata = thinking.getOutput().getMetadata();
-  if (metadata == null) {
-   metadata = Map.of();
-  }
-  String thinkingText = extractAnthropicThinkingText(metadata, thinking.getOutput());
-  if (thinkingText == null || thinkingText.isEmpty()) {
-   return response;
-  }
-  // 2026-09-30 (Issue #1 修复后回归): 保留原文 text 内容。旧实现把 content 设为 ""
-  // 导致 thinking 块出现时正文 text 被丢弃,用户看到的是"思考过程里有内容 + 正文只有
-  // 一句话"。修复:content 取原 text(可能含 thinking 冗余,容忍),thinking 进 reasoningContent。
-  String originalText = thinking.getOutput().getText();
-  Generation bridged = new Generation(
-          AssistantMessage.builder()
-                  .content(originalText != null ? originalText : "")
-                  .properties(Map.of(REASONING_CONTENT_KEY, thinkingText))
-                  .build(),
-          thinking.getMetadata());
-  return new ChatResponse(List.of(bridged), response.getMetadata());
- }
-
- /**
-  * 反射读 Spring AI 2.0+ 的 Anthropic SDK 私有 record
-  * {@code AnthropicChatModel.AnthropicThinkingContent#thinking()}。同一个反射点跨 Spring AI /
-   * Anthropic SDK 升级后重命名风险都跟着 provider 类走，我们只读 {@code thinking()} 访问器，
-   * 字段名变了也能继续工作（返回结构允许 {@code List.copyOf} 中放任意类型）。
-  */
- private static final java.lang.reflect.Method ANTHROPIC_THINKING_CONTENT_THINKING_METHOD;
- /**
-  * Spring AI 2.x 的 {@code AnthropicChatModel.AnthropicAssistantMessage#getThinkingContents()} 是
-  * package-private 但可反射调用；返回 {@code List<AnthropicThinkingContent>}，每条记录的
-  * {@code thinking()} 拿到思考文本。本字段缓存在 2.0+ streaming per-chunk metadata 上
-  * 不挂 {@code anthropicThinkingContents} key 的路径（只挂 {@code messageType}）。
-  */
- private static final java.lang.reflect.Method ANTHROPIC_ASSISTANT_GET_THINKING_METHOD;
- static {
-  java.lang.reflect.Method m = null;
-  try {
-   Class<?> clazz = Class.forName(
-           "org.springframework.ai.anthropic.AnthropicChatModel$AnthropicThinkingContent");
-   m = clazz.getMethod("thinking");
-   m.setAccessible(true);
-  } catch (ReflectiveOperationException ignored) {
-   // Spring AI may rename / drop the class in a future release; bridge just degrades to
-   // passthrough mode (no thinking surfaced in reasoningContent key, no UI thinking panel).
-  }
-  ANTHROPIC_THINKING_CONTENT_THINKING_METHOD = m;
-  java.lang.reflect.Method g = null;
-  try {
-   Class<?> assistantClazz = Class.forName(
-           "org.springframework.ai.anthropic.AnthropicChatModel$AnthropicAssistantMessage");
-   g = assistantClazz.getDeclaredMethod("getThinkingContents");
-   g.setAccessible(true);
-  } catch (ReflectiveOperationException ignored) {
-   // class is ahead
-  }
-  ANTHROPIC_ASSISTANT_GET_THINKING_METHOD = g;
- }
-
- private static String extractAnthropicThinkingText(Map<String, Object> metadata, Object assistantMessage) {
-  // Path A: Spring AI 2.0+ aggregated metadata("anthropicThinkingContents" → List<AnthropicThinkingContent>)
-  Object list = metadata.get(ANTHROPIC_THINKING_CONTENTS_KEY);
-  String text = readFirstThinkingText(list);
-  if (text != null && !text.isEmpty()) {
-   return text;
-  }
-  // Path B: Spring AI 2.x per-chunk streaming — AssistantMessage may be AnthropicAssistantMessage
-  // with private getThinkingContents(). Reflect into the AssistantMessage subclass.
-  // (Spring AI 2.0.1 streaming conversion returns plain AssistantMessage and drops the thinking
-  // field, so this path is currently dead — kept for forward compatibility.)
-  if (assistantMessage != null && ANTHROPIC_ASSISTANT_GET_THINKING_METHOD != null
-          && ANTHROPIC_ASSISTANT_GET_THINKING_METHOD.getDeclaringClass()
-                  .isInstance(assistantMessage)) {
-   try {
-    Object liveList = ANTHROPIC_ASSISTANT_GET_THINKING_METHOD.invoke(assistantMessage);
-    text = readFirstThinkingText(liveList);
-    if (text != null && !text.isEmpty()) {
-     return text;
-    }
-   } catch (ReflectiveOperationException ignored) {
-    // fall through to 1.x signature path
-   }
-  }
-  // Spring AI 1.x fallback: "signature" key held the thinking text directly.
-  Object sig = metadata.get(THINKING_SIGNATURE_KEY);
-  return sig == null ? null : sig.toString();
- }
-
- /** 反射读 List<AnthropicThinkingContent> 第一条的 thinking() 文本。 */
- private static String readFirstThinkingText(Object listObj) {
-  if (listObj instanceof java.util.Collection<?> coll && !coll.isEmpty()) {
-   Object first = coll.iterator().next();
-   if (ANTHROPIC_THINKING_CONTENT_THINKING_METHOD != null && first != null
-           && ANTHROPIC_THINKING_CONTENT_THINKING_METHOD.getDeclaringClass()
-                   .isInstance(first)) {
-    try {
-     Object text = ANTHROPIC_THINKING_CONTENT_THINKING_METHOD.invoke(first);
-     if (text != null) {
-      return text.toString();
-     }
-    } catch (ReflectiveOperationException ignored) {
-     // reflection failed silently
-    }
-   }
-  }
-  return null;
  }
 
  /**
@@ -385,20 +256,22 @@ public class DefaultChat implements IChat {
    if (name.contains("ResourceAccessException") || (message != null && message.contains("Connection refused"))) {
     return "无法连接模型服务，请检查网络或稍后重试。";
    }
-   // Spring AI 1.1.8 StreamHelper.mergeToolUseEvents:当 LLM 启动 tool_use 块后流被截断(上游超时/
-   // max_tokens 命中/Qwen 代理 idle close 等),累积的 input_json 字符串是不完整的;
-   // squashIntoContentBlock 仍尝试 jsonToMap → Jackson 在字符串字面量中间碰 EOF →
+   // 流截断(2026-10-01 复盘):Spring AI 流聚合器在 LLM 启动 tool_use 块后被截断(上游超时 /
+   // max_completion_tokens 命中 / 代理 idle close 等),累积的 tool_use input_json 字符串不完整;
+   // 聚合器仍尝试 jsonToMap → Jackson 在字符串字面量中间碰 EOF →
    // JsonEOFException("Unexpected end-of-input: was expecting closing quote for a string value")。
-   // 2026-09-21 实测:5 轮 askUser 澄清后 LLM 走 6W 字 reasoning → tool_use JSON 未闭合即被截断 →
-   // 流空载 ~234 秒 → JsonEOFException 集中爆发。
-   // 修复路径——短:重发对话(单次偶发);长:把 spring.ai.anthropic.chat.options.max-tokens 调到 32768+
-   // 让 LLM 在 token 上限内闭合 tool_use;根治:升级 Spring AI 2.0+(官方 SDK,无此 bug)。
+   // 旧文案标注"Spring AI 1.1.8",实测 2026-10-01 MiniMax-M3 + thinking + tool_use + 追问修正场景
+   // 在 Spring AI 2.0.1 仍触发 — 2.0+ 没根治,只是减少概率。"升级 Spring AI 2.0+" 建议过期。
+   // 修复路径:1) 直接重发(单次偶发);2) 调大 max_completion_tokens 让 LLM 在 token 上限内闭合 tool_use。
+   // 当前默认 OpenAI SDK,yml key 为 spring.ai.openai.chat.options.max-completion-tokens;
+   // 切回 Anthropic SDK 用 spring.ai.anthropic.chat.options.max-tokens(值同样建议 32768+)。
    if (name.contains("JsonEOFException")
        || (message != null && message.contains("Unexpected end-of-input"))) {
-    return "模型响应流被中途截断(Spring AI 1.1.8 在 tool_use JSON 未完整到达时强制解析触发)。"
+    return "模型响应流被中途截断(Spring AI 流聚合器在 tool_use JSON 未完整到达时尝试解析触发)。"
         + "建议:1) 直接重发该对话(单次偶发可恢复);"
-        + "2) 联系管理员把 spring.ai.anthropic.chat.options.max-tokens 调到 32768+ 让 LLM 能闭合 tool_use;"
-        + "3) 根治需升级 Spring AI 2.0+(官方 SDK 已修复此聚合器)。";
+        + "2) 联系管理员调大 max_completion_tokens:"
+        + " OpenAI 路径 spring.ai.openai.chat.options.max-completion-tokens;"
+        + " Anthropic 路径 spring.ai.anthropic.chat.options.max-tokens(值建议 32768+)。";
    }
    t = t.getCause();
   }
@@ -475,7 +348,7 @@ public class DefaultChat implements IChat {
   // 结构对齐【提问与澄清】段(正向场景枚举 + 触发协议 + few-shot 轨迹 + 护栏),复用 askUser
   // 触发率优化的三层引导范式(2026-09-20 askUser 验证有效)。
   sb.append("\n\n【任务分段执行】\n");
-  sb.append("单次主对话的流式输出长度有上限（Spring AI 1.1.8 Anthropic 协议下，max_tokens=16384 时\n");
+  sb.append("单次主对话的流式输出长度有上限（默认 max_completion_tokens=16384 时\n");
   sb.append("thinking 占用后留给 tool_use JSON 的 token 不到 8K）。当你判断一个任务超出单次主对话的\n");
   sb.append("能力边界时，应主动调 start_sub_task(prompt, systemContext)把它拆出去异步执行，避免\n");
   sb.append("主对话 reasoning 撞上限导致流截断（症状：聊天最终弹\"工具响应流被中途截断\"，工具\n");

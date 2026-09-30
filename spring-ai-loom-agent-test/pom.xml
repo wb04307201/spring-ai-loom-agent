@@ -29,10 +29,13 @@
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-ollama</artifactId>-->
 <!--        </dependency>-->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-anthropic</artifactId>
-        </dependency>
+        <!-- 2026-10-01: 切换到 OpenAI SDK + DashScope OpenAI 兼容端点,验证流式 thinking
+             (Anthropic SDK 2.0.1 内部 buffer 了 thinking_delta,只在流末尾 emit 一次;
+             OpenAI SDK 通过 metadata.reasoningContent 逐帧 emit,见 docs/notes/2026-10-01-thinking-stream.md) -->
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.ai</groupId>-->
+<!--            <artifactId>spring-ai-starter-model-anthropic</artifactId>-->
+<!--        </dependency>-->
 <!--        <dependency>-->
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-minimax</artifactId>-->
@@ -50,10 +53,10 @@
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>-->
 <!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>org.springframework.ai</groupId>-->
-<!--            <artifactId>spring-ai-starter-model-openai</artifactId>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
