@@ -41,9 +41,6 @@ spring:
           model: qwen3.8-max
           multi_model: true
           enable_thinking: true
-      embedding:
-        options:
-          model: text-embedding-v4
 #    anthropic:
 #      # MiniMax Anthropic-compatible endpoint (Spring AI 2.0 official recommendation for MiniMax).
 #      # API key must be provided via env var ANTHROPIC_API_KEY — never commit a real key.
