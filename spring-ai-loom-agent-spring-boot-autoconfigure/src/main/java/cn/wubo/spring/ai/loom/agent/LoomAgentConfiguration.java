@@ -559,11 +559,11 @@ public class LoomAgentConfiguration {
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
         public ChatClient chatClient(ChatModel chatModel,
-                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor,
+                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor messageChatMemoryAdvisor,
                                      LoomAgentProperties properties) {
             ChatClient.Builder builder = ChatClient.builder(chatModel);
             if (properties.getDefaultSystem() != null) builder.defaultSystem(properties.getDefaultSystem());
-            builder.defaultAdvisors((org.springframework.ai.chat.client.advisor.api.Advisor) messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
+            builder.defaultAdvisors(messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
                     new SimpleLoggerAdvisor() // logger advisor
             );
             return builder.build();
@@ -578,13 +578,25 @@ public class LoomAgentConfiguration {
          * {@code spec.advisors(memoryAdvisor)} 抛出
          * {@code IllegalArgumentException: advisors cannot contain null elements},
          * 子任务每次都被 fail,history 永远为空。
+         *
+         * <p>2026-09-30 (Issue #1 修复): 改用 Spring AI 2.0 自带的
+         * {@link MessageChatMemoryAdvisor}(默认 order = HIGHEST_PRECEDENCE + 200,
+         * < ToolCallingAdvisor 默认的 +300)。Spring AI 2.0 的 auto-register 逻辑
+         * 会判定"上游有 MemoryAdvisor" → hasDownstreamMemoryAdvisor=false →
+         * ToolCallingAdvisor 的 conversationHistoryEnabled=true,多轮 tool_use
+         * 时 LLM 能拿到完整 history。之前用 Loom 自定义
+         * {@code LastChunkMessageChatMemoryAdvisor}(order=0, > +300),导致
+         * hasDownstreamMemoryAdvisor=true → ToolCallingAdvisor 关闭内部 history,
+         * 中间轮次的 user 问句和 assistant tool_use 被丢,LLM hallucinated。
+         *
+         * <p>Spring AI 1.x 时代 {@code MessageChatMemoryAdvisor.adviseStream()}
+         * 每个 chunk 都触发 after() 写 chat_memory(已修复,2.0 不再有此 bug)。
+         * 保留 {@code LastChunkMessageChatMemoryAdvisor.java} 文件但不再装配,
+         * 仅作回滚保险 — 如 2.0 默认实现仍写库重复,可即时切回。
          */
         @Bean
-        // 返回自定义 LastChunkMessageChatMemoryAdvisor（只在流式最后一个 chunk
-        // 触发 chatMemory.add），替代 Spring AI 默认 MessageChatMemoryAdvisor（每个 chunk 都写
-        // → chat_memory TOOL 消息多次重复）。
-        public org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor(JdbcTemplate jdbcTemplate) {
-            return new cn.wubo.spring.ai.loom.agent.memory.LastChunkMessageChatMemoryAdvisor(jdbcTemplate, 0);
+        public org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor messageChatMemoryAdvisor(org.springframework.ai.chat.memory.ChatMemory chatMemory) {
+            return org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor.builder(chatMemory).build();
         }
 
         @ConditionalOnMissingBean(IChat.class)
@@ -1155,7 +1167,7 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
                 @Qualifier("chatClient") ChatClient chatClient,
-                @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor,
+                @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.MemoryAdvisor memoryAdvisor,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
                 cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
                 // Lazy lookup: the executor ALSO passes a cancel hook back to

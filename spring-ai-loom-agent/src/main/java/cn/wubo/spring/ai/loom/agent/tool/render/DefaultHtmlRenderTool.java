@@ -25,7 +25,7 @@ import java.util.Map;
  * 存在性 + 扩展名(.html/.htm)→ 读文件(大小上限 maxHtmlBytes)→ device 白名单
  * (非法值 fallback desktop)→ 渲染 → 存图 prototypes/ → FileIdBridge 桥接 → 三行返回契约。
  * <p>
- * <b>D8 铁律:所有失败分支返回文本,绝不抛异常</b> —— LastChunkMessageChatMemoryAdvisor
+ * <b>D8 铁律:所有失败分支返回文本,绝不抛异常</b> —— MessageChatMemoryAdvisor
  * 只在 ON_COMPLETE 落库,工具抛异常 = 整轮对话记忆丢失。
  */
 public class DefaultHtmlRenderTool implements IHtmlRenderTool {

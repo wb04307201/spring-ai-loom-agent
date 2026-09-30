@@ -9,7 +9,7 @@ import cn.wubo.spring.ai.loom.agent.tool.IEmbedTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.MemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.http.MediaType;
@@ -68,7 +68,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private static final Logger log = LoggerFactory.getLogger(DefaultSubTaskExecutor.class);
 
     private final ChatClient chatClient;
-    private final org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor;
+    private final org.springframework.ai.chat.client.advisor.api.MemoryAdvisor memoryAdvisor;
     private final ExecutorService executor;
     private final IMcp mcp;
     private final List<IEmbedTool> embedTools;
@@ -103,7 +103,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
     private final ConcurrentHashMap<String, Future<?>> activeFutures = new ConcurrentHashMap<>();
 
     public DefaultSubTaskExecutor(ChatClient chatClient,
-                                  BaseChatMemoryAdvisor memoryAdvisor,
+                                  MemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
                                   IMcp mcp,
                                   List<IEmbedTool> embedTools,
@@ -119,7 +119,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
      * 内部 {@code timeoutSeconds=null 时退化到 600s 默认值}。
      */
     public DefaultSubTaskExecutor(ChatClient chatClient,
-                                  BaseChatMemoryAdvisor memoryAdvisor,
+                                  MemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
                                   IMcp mcp,
                                   List<IEmbedTool> embedTools,
@@ -135,7 +135,7 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
      * SSE 流。{@code sseEmitterRegistry=null} 时 publishEvent 静默 no-op(8/9-arg 兼容路径)。
      */
     public DefaultSubTaskExecutor(ChatClient chatClient,
-                                  BaseChatMemoryAdvisor memoryAdvisor,
+                                  MemoryAdvisor memoryAdvisor,
                                   ExecutorService executor,
                                   IMcp mcp,
                                   List<IEmbedTool> embedTools,

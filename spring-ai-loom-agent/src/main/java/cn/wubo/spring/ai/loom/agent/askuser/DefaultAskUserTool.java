@@ -23,7 +23,7 @@ import java.util.concurrent.TimeoutException;
  * 默认实现:推卡片 → future.get(timeout) 阻塞 → 返回答案文本(spec §4 数据流)。
  * <p>
  * 所有失败路径都 return 文本、不抛异常 —— 保住 Flux ON_COMPLETE 让
- * LastChunkMessageChatMemoryAdvisor 落库(ChatMemory 硬约束,spec §0 目标 3)。
+ * MessageChatMemoryAdvisor 落库(ChatMemory 硬约束,spec §0 目标 3)。
  * 阻塞发生在 Spring AI 同步 tool 执行线程(subtask 的 future.get() 同模式先例);
  * D9 应急预案(复验卡顿才启用)见 plan Global Constraints。
  */

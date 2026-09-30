@@ -39,7 +39,7 @@ public class DefaultChat implements IChat {
  /** Spring AI 2.0.x: Anthropic 映射器把 thinking blocks 放进 AssistantMessage metadata 的
   *  "anthropicThinkingContents" key(值是 List<AnthropicThinkingContent> record,
   *  每条 record 含 thinking/signature/redactedData 三个访问器);不再单字段化请求的 signature。
-  *  public：LastChunkMessageChatMemoryAdvisor 在 advisor 链内(桥接上游)用同一标记跳过思考 chunk，
+  *  public：MessageChatMemoryAdvisor 在 advisor 链内(桥接上游)用同一标记跳过思考 chunk，
   *  防止思考文本混入 ASSISTANT 记忆。 */
  public static final String THINKING_SIGNATURE_KEY = "signature";
  /** Spring AI 2.0+ Anthropic SDK 用的 thinking contents metadata key(Replacement for 1.x
