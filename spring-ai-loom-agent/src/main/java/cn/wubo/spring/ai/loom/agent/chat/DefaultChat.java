@@ -256,9 +256,13 @@ public class DefaultChat implements IChat {
   if (thinkingText == null || thinkingText.isEmpty()) {
    return response;
   }
+  // 2026-09-30 (Issue #1 修复后回归): 保留原文 text 内容。旧实现把 content 设为 ""
+  // 导致 thinking 块出现时正文 text 被丢弃,用户看到的是"思考过程里有内容 + 正文只有
+  // 一句话"。修复:content 取原 text(可能含 thinking 冗余,容忍),thinking 进 reasoningContent。
+  String originalText = thinking.getOutput().getText();
   Generation bridged = new Generation(
           AssistantMessage.builder()
-                  .content("")
+                  .content(originalText != null ? originalText : "")
                   .properties(Map.of(REASONING_CONTENT_KEY, thinkingText))
                   .build(),
           thinking.getMetadata());
