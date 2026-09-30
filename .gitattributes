@@ -1,2 +1,5 @@
 /mvnw text eol=lf
 *.cmd text eol=crlf
+# 2026-09-30 增:锁 *.java 行尾 LF,显式化 f93d7f01 的隐式副作用 —— 该 commit 把 4 个 MCP server
+# 服务从 CRLF 改为 LF,但未文档化;本规则确保未来 checkout/add 始终规范化到 LF。
+*.java text eol=lf
