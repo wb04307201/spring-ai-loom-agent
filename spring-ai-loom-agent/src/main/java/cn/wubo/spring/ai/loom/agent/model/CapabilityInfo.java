@@ -22,6 +22,12 @@ import java.util.List;
  * 角色授权（role_*.default_enabled ∪ 默认行为）+ 用户会话勾选（{@code ChatRequestRecord.mcps()}
  * / {@code enabledToolGroups[]}）+ 服务端 is_active 等。{@code capabilityService.list(username)}
  * 把这个最终结果给前端；{@code DefaultChat} 在组装 tool callback 时也用同一份。
+ *
+ * <p>{@code defaultEnabled}（E2E 2026-10-01 Issue 3 修复新增）标识该 capability 在角色
+ * 授权里的 {@code default_enabled} 值——聊天面板 picker 用它做 localStorage 持久化缺失
+ * 项的 fallback 勾选：服务端 strict RBAC 启用后,缺省行为必须从 {@code role_tool.default_enabled}
+ * 透传,不能复用 {@code effectiveEnabled}（后者既含 RBAC 又含用户勾选,语义重叠）。
+ * 字段为 {@code null} 时由前端按"未配置"处理（向后兼容旧 client / 未实现的服务）。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record CapabilityInfo(
@@ -31,8 +37,19 @@ public record CapabilityInfo(
         String title,
         String description,
         List<ToolInfo> tools,
-        Boolean effectiveEnabled
+        Boolean effectiveEnabled,
+        Boolean defaultEnabled
 ) {
+    /**
+     * 旧构造器(7 参)— 仅供 MCP / 内部 helper 使用,默认 defaultEnabled=null。
+     * 公开 CapabilityService.list() 路径已统一走全字段构造器,以保证 picker
+     * 拿到的每个 LOCAL capability 都带 defaultEnabled(E2E Issue 3 要求)。
+     */
+    public CapabilityInfo(String id, Type type, String name, String title,
+                          String description, List<ToolInfo> tools, Boolean effectiveEnabled) {
+        this(id, type, name, title, description, tools, effectiveEnabled, null);
+    }
+
     public enum Type { LOCAL, MCP }
 
     /**

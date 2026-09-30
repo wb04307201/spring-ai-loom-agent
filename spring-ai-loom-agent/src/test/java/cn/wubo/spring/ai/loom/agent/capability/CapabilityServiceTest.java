@@ -305,6 +305,57 @@ class CapabilityServiceTest {
             assertTrue(svc.visibleToolGroupsFor("u").contains("tool_skill"),
                     () -> "universal 必须仍在 visibleToolGroupsFor,否则 LLM 无法调用");
         }
+
+        // ===== Issue 3 修复 — default_enabled 必须从 role_tool 透传到 CapabilityInfo =====
+        @Test
+        @DisplayName("default_enabled=true → CapabilityInfo.defaultEnabled=true")
+        void defaultEnabledReflectsRoleToolDefault() {
+            ITestFileTool fileImpl = mock(ITestFileTool.class);
+            ITestTimeTool timeImpl = mock(ITestTimeTool.class);
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(List.of("tool_file", "tool_time"));
+            when(roleService.getVisibleToolsForUserWithDefault("u")).thenReturn(List.of(
+                    new IRoleService.RoleToolItem("tool_file", true),
+                    new IRoleService.RoleToolItem("tool_time", false)
+            ));
+            when(roleService.getVisibleMcpsForUser("u")).thenReturn(List.of());
+
+            List<CapabilityInfo> caps = newService(fileImpl, timeImpl).list("u");
+            CapabilityInfo fileCap = caps.stream().filter(c -> "tool_file".equals(c.id())).findFirst().orElseThrow();
+            CapabilityInfo timeCap = caps.stream().filter(c -> "tool_time".equals(c.id())).findFirst().orElseThrow();
+            assertTrue(fileCap.defaultEnabled(), () -> "tool_file default_enabled=true 应映射到 CapabilityInfo.defaultEnabled=true");
+            assertFalse(timeCap.defaultEnabled(), () -> "tool_time default_enabled=false 应映射到 CapabilityInfo.defaultEnabled=false");
+        }
+
+        @Test
+        @DisplayName("未启用 default 服务：mock 仅返 List<String>，defaultEnabled 应为 null/false(向后兼容)")
+        void defaultEnabledBackCompatWhenServiceMethodAbsent() {
+            ITestFileTool fileImpl = mock(ITestFileTool.class);
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(List.of("tool_file"));
+            // getVisibleToolsForUserWithDefault 不 stub → Mockito 返 null
+            when(roleService.getVisibleToolsForUserWithDefault("u")).thenReturn(null);
+            when(roleService.getVisibleMcpsForUser("u")).thenReturn(List.of());
+
+            List<CapabilityInfo> caps = newService(fileImpl).list("u");
+            CapabilityInfo fileCap = caps.stream().filter(c -> "tool_file".equals(c.id())).findFirst().orElseThrow();
+            // null/empty 都映射到 null → @JsonInclude(NON_NULL) 序列化时省略,旧客户端无感
+            assertNull(fileCap.defaultEnabled(), () -> "role 服务未返 default 时应省略 defaultEnabled 字段(向后兼容)");
+        }
+
+        @Test
+        @DisplayName("空角色 → 所有 LOCAL defaultEnabled 为 null(向后兼容)")
+        void defaultEnabledEmptyRoles() {
+            ITestFileTool fileImpl = mock(ITestFileTool.class);
+            when(roleService.getVisibleToolsForUser("u")).thenReturn(List.of());
+            when(roleService.getVisibleToolsForUserWithDefault("u")).thenReturn(List.of());
+            when(roleService.getVisibleMcpsForUser("u")).thenReturn(List.of());
+
+            List<CapabilityInfo> caps = newService(fileImpl).list("u");
+            // 空角色时 tool_file 不在 list() 里(因为 effectiveEnabled=false → 仍展示但 disabled)
+            // 实际行为:list() 仍展示 LOCAL,只是 effectiveEnabled=false
+            CapabilityInfo fileCap = caps.stream().filter(c -> "tool_file".equals(c.id())).findFirst().orElseThrow();
+            assertFalse(fileCap.effectiveEnabled());
+            assertNull(fileCap.defaultEnabled(), () -> "空角色 → defaultEnabled=null(省略)");
+        }
     }
 
     // ============================================================

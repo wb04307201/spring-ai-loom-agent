@@ -3981,7 +3981,11 @@ textarea::placeholder {
   padding: 7px 18px; font-size: 13px; cursor: pointer;
 }
 .askuser-submit:disabled { opacity: .5; cursor: not-allowed; }
-.askuser-frozen { opacity: .65; }
+/* Freeze 状态:终态卡片仍展示完整选项(E2E 2026-10-01 Issue 8 要求)。
+   原 opacity:.65 太弱,展开回看时复选框视觉上几乎不可见 → 提升到 .82,
+   并保留 pointer-events:none 防止误触提交。 */
+.askuser-frozen { opacity: .82; }
+.askuser-frozen .askuser-card { pointer-events: none; }
 .askuser-frozen .askuser-opt { cursor: default; }
 .askuser-frozen .askuser-opt:hover { border-color: var(--border-color, #e2e8f0); background: none; }
 /* §1 终态折叠摘要行(点击展开回看完整卡片) */

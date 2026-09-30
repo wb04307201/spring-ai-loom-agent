@@ -16,9 +16,11 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -59,12 +61,19 @@ public class CapabilityService {
      * 实现要点:roleService.getVisibleMcpsForUser 现在还会返回 admin 全集 (待 M3 去掉 bypass
      * 之后才会真走 RBAC),这里直接读它的结果做 MCP 可见集合;本地 tool 通过
      * roleService.getVisibleToolsForUser (M3 新增) 计算。
+     * <p>
+     * <b>E2E 2026-10-01 Issue 3:</b> LOCAL capability 同时透传 role_tool.default_enabled
+     * 到 {@code CapabilityInfo.defaultEnabled} 字段 — 聊天面板 picker 拿它做
+     * localStorage 持久化缺失项的 fallback 勾选。空角色 / 服务未实现时返 null,
+     * 由 {@code @JsonInclude(NON_NULL)} 序列化时省略,旧客户端无感。
      */
     public List<CapabilityInfo> list(String username) {
         List<CapabilityInfo> all = new ArrayList<>();
         Set<String> visibleMcpNames = mcpNamesFor(username);
         Set<String> visibleToolGroups = toolGroupsFor(username);
         Set<String> universalGroups = universalToolGroups();
+        // group_name → default_enabled 索引。null 表示 role 服务未实现该方法(向后兼容)
+        Map<String, Boolean> defaultByGroup = defaultByGroupFor(username);
 
         // 本地 tool — M6 起,universal 工具不返回给聊天面板(Q4 "完全不显示" 决定)。
         // 它们仍然参与 tool callback filter(visibleToolGroupsFor 包含 universal),
@@ -74,11 +83,15 @@ public class CapabilityService {
             if (universalGroups.contains(ci.id())) continue;
             // RBAC 工具 effectiveEnabled 跟随 role
             boolean enabled = visibleToolGroups.contains(ci.id());
+            // defaultEnabled 来自 role_tool.default_enabled;索引里查不到(角色未授权 /
+            // 服务未实现) 留 null,由 @JsonInclude(NON_NULL) 序列化时省略
+            Boolean def = defaultByGroup.get(ci.id());
             all.add(new CapabilityInfo(
                     ci.id(), ci.type(), ci.name(), ci.title(), ci.description(), ci.tools(),
-                    enabled));
+                    enabled, def));
         }
-        // MCP server
+        // MCP server — MCP 路径已通过 McpSystemView.defaultSelected 在 SyncMcp / DB 层
+        // 表达;此处保留 null(E2E Issue 3 仅修复 LOCAL 路径,MCP 行为未变)。
         List<McpRecord> mcpRecords = mcp.mcps();
         for (McpRecord rec : mcpRecords) {
             String id = rec.name(); // live client name (不要改!)
@@ -91,7 +104,8 @@ public class CapabilityService {
                     rec.tools().stream()
                             .map(t -> new ToolInfo(t.name(), t.description()))
                             .toList(),
-                    visibleMcpNames.contains(id)
+                    visibleMcpNames.contains(id),
+                    null
             ));
         }
         // 稳定排序:本地在前 + MCP 在后,各自按 group_name / client_name 字典序
@@ -169,6 +183,36 @@ public class CapabilityService {
     }
 
     // ==================== private helpers ====================
+
+    /**
+     * 收集用户所有角色授权的 LOCAL tool group 的 {@code default_enabled} 值。
+     * <p>
+     * 返回 {@code Map<group_name, Boolean>};role 服务未实现新方法或返空 list 时返空 Map,
+     * 调用方按 group_name 查不到 → {@code defaultEnabled=null} → 序列化时省略字段
+     * (向后兼容,见 {@code CapabilityServiceTest.defaultEnabledBackCompatWhenServiceMethodAbsent}
+     * + {@code defaultEnabledEmptyRoles})。
+     */
+    private Map<String, Boolean> defaultByGroupFor(String username) {
+        Map<String, Boolean> out = new HashMap<>();
+        try {
+            List<IRoleService.RoleToolItem> items =
+                    roleService.getVisibleToolsForUserWithDefault(username);
+            if (items == null) return out;
+            for (IRoleService.RoleToolItem it : items) {
+                if (it == null || it.groupName() == null) continue;
+                // 任一角色 default_enabled=true → 结果 true(OR 语义,与 MCP 一致)
+                if (Boolean.TRUE.equals(it.defaultEnabled())) {
+                    out.put(it.groupName(), true);
+                } else {
+                    out.putIfAbsent(it.groupName(), false);
+                }
+            }
+        } catch (Exception e) {
+            // 角色服务未实现 / 抛异常 → 视为空 Map,保证 picker 渲染不退化
+            return out;
+        }
+        return out;
+    }
 
     private Set<String> mcpNamesFor(String username) {
         Set<String> s = new HashSet<>();

@@ -4612,26 +4612,46 @@ const mcp = {
     );
   },
 
-  /** Read persisted selection; returns null if missing/corrupt. */
+  /** Read persisted selection; returns null if missing/corrupt.
+   *  v2 schema = `{toolGroups: [...], mcps: [...]}`;v1 schema = `[...]`(仅 MCP ids,
+   *  E2E 2026-10-01 Issue 3 修复前遗物 — 只持久化 selectedMcps,reload 后 LOCAL 默认勾选丢失)。
+   *  返回统一形状 `{toolGroups, mcps}`,v1 schema 解析时 toolGroups=[] 触发 fallback。
+   */
   _loadPersisted() {
     try {
       const raw = localStorage.getItem(this._storageKey());
       if (!raw) return null;
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr)
-        ? arr.filter((s) => typeof s === "string")
-        : null;
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.toolGroups) && Array.isArray(parsed.mcps)) {
+        return {
+          toolGroups: parsed.toolGroups.filter((s) => typeof s === "string"),
+          mcps: parsed.mcps.filter((s) => typeof s === "string"),
+        };
+      }
+      // v1 schema 兼容:纯数组视为历史 MCP 列表(Issue 3 修复前唯一持久化对象)
+      if (Array.isArray(parsed)) {
+        return {
+          toolGroups: [],
+          mcps: parsed.filter((s) => typeof s === "string"),
+        };
+      }
+      return null;
     } catch (_) {
       return null;
     }
   },
 
-  /** Persist current selection. */
+  /** Persist current selection (v2 schema — toolGroups + mcps 双轨制)。
+   *  v2 起 LOCAL + MCP 都持久化,避免旧版"只存 MCP → reload 后 LOCAL 默认勾选丢失"的 bug。
+   */
   _savePersisted() {
     try {
       localStorage.setItem(
         this._storageKey(),
-        JSON.stringify(state.selectedMcps),
+        JSON.stringify({
+          toolGroups: state.selectedToolGroups,
+          mcps: state.selectedMcps,
+        }),
       );
     } catch (_) {
       // localStorage may be disabled (private mode, quota) — fail silently
@@ -4776,16 +4796,29 @@ const mcp = {
         // id 会自动剔除,UI 也不再出现 "checked + disabled" 死锁态。
         const toolIds = data.filter((c) => c.type === "LOCAL" && c.effectiveEnabled === true).map((c) => c.id);
         const mcpIds = data.filter((c) => c.type === "MCP" && c.effectiveEnabled === true).map((c) => c.id);
+        // E2E 2026-10-01 Issue 3:角色授权的 RBAC LOCAL tool 默认勾选必须由服务端
+        // role_tool.default_enabled 透传到 picker,而不是"全勾"。
+        const defaultToolIds = data
+          .filter((c) => c.type === "LOCAL" && c.effectiveEnabled === true && c.defaultEnabled === true)
+          .map((c) => c.id);
         const persisted = this._loadPersisted();
-        if (persisted && persisted.length > 0) {
-          state.selectedToolGroups = persisted.filter((n) => toolIds.includes(n));
-          state.selectedMcps = persisted.filter((n) => mcpIds.includes(n));
+        // v2 schema:peristed.toolGroups / persisted.mcps 都是数组,可独立判断是否有过 LOCAL 记录
+        const hasToolHistory = persisted && Array.isArray(persisted.toolGroups) && persisted.toolGroups.length > 0;
+        const hasMcpHistory = persisted && Array.isArray(persisted.mcps) && persisted.mcps.length > 0;
+        if (hasToolHistory || hasMcpHistory) {
+          // 恢复用户上次的勾选(v1 schema 兼容:toolGroups=[] 时走 defaultToolIds fallback)
+          state.selectedToolGroups = hasToolHistory
+            ? persisted.toolGroups.filter((n) => toolIds.includes(n))
+            : defaultToolIds.slice();
+          state.selectedMcps = hasMcpHistory
+            ? persisted.mcps.filter((n) => mcpIds.includes(n))
+            : mcpIds.slice();
         } else {
-          // 默认:effectiveEnabled=true 的全勾(角色授权的都能用)
-          state.selectedToolGroups = toolIds.slice();
+          // 首次 / 无持久化:LOCAL 用服务端 defaultEnabled,MCP 保持"角色授权的全勾"行为
+          state.selectedToolGroups = defaultToolIds.slice();
           state.selectedMcps = mcpIds.slice();
         }
-        // 重新持久化一次,顺手清理残留(下次 refresh 就干净了)
+        // 重新持久化一次,顺手把 v1 schema 升级到 v2,清理残留(下次 refresh 就干净了)
         this._savePersisted();
         return;
       }

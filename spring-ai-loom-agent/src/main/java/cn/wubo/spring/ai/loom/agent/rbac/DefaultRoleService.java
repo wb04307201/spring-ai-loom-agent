@@ -266,4 +266,45 @@ public class DefaultRoleService implements IRoleService {
         }
         return new ArrayList<>(allowed);
     }
+
+    /**
+     * 同 {@link #getVisibleToolsForUser},但额外返回每项的 {@code default_enabled} 值。
+     * 与 {@link #getVisibleMcpsForUser} 对称 — 该方法读 MCP 的 default_selected,
+     * 本方法读 LOCAL 的 default_enabled;用途是给聊天面板前端做 localStorage 持久化
+     * 缺失项的 fallback 勾选(E2E 2026-10-01 Issue 3)。
+     * <p>
+     * 语义:
+     * <ul>
+     *   <li>admin 走严格 RBAC,语义同 {@link #getVisibleToolsForUser},无 admin bypass。</li>
+     *   <li>多角色授权同一 group_name:任一角色 default_enabled=true → 结果 true
+     *       (OR 语义,与 MCP defaultSelected 一致)。</li>
+     *   <li>空角色 / 未授权工具 → 返空 list,不返 null(供 CapabilityService JSON @JsonInclude(NON_NULL) 友好处理)。</li>
+     * </ul>
+     */
+    @Override
+    public List<IRoleService.RoleToolItem> getVisibleToolsForUserWithDefault(String username) {
+        Map<String, Boolean> defaultByGroup = new HashMap<>();
+        for (String role : getUserRoles(username)) {
+            jdbcTemplate.query(
+                    "SELECT group_name, default_enabled FROM role_tool WHERE role_code = ?",
+                    (rs, rowNum) -> {
+                        String g = rs.getString(1);
+                        if (rs.getBoolean(2)) {
+                            defaultByGroup.put(g, true);
+                        } else {
+                            defaultByGroup.putIfAbsent(g, false);
+                        }
+                        return null;
+                    },
+                    role);
+        }
+        // 按 sort_order 升序稳定输出 — 与 getVisibleToolsForUser 保持顺序一致,
+        // 便于 CapabilityService 做 id→defaultEnabled 索引时按可见集遍历即可。
+        List<String> ordered = getVisibleToolsForUser(username);
+        List<IRoleService.RoleToolItem> out = new ArrayList<>(ordered.size());
+        for (String g : ordered) {
+            out.add(new IRoleService.RoleToolItem(g, defaultByGroup.getOrDefault(g, false)));
+        }
+        return out;
+    }
 }
