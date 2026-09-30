@@ -36,6 +36,11 @@ spring:
       # DASHSCOPE_PERSON_TOKEN_API_KEY in the run environment; the key is *not* committed.
       api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
       base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/apps/anthropic
+      # 2026-09-30 (sub-task 流稳定性修复): Spring AI Anthropic 默认 timeout=60s,
+      # 流式 sub-task 跑 12 个月 Bing 搜索时 200+ 秒,到 60s okhttp3 主动发
+      # RST_STREAM CANCEL 中断流(底层是 HTTP/2 stream was reset: CANCEL)。
+      # 提高到 10 分钟配合 sub-task timeout-seconds=300 一起工作。
+      timeout: 600s
       chat:
         options:
           model: qwen3.8-max
