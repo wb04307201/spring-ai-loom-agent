@@ -110,6 +110,11 @@ spring:
           enabled: true
           max-concurrent: 4
           max-history: 200
+          # 2026-09-30 (sub-task 性能优化): 默认超时 600s → 300s。
+          # Phase 2 并行化后(Bing 12 个月并行)实际耗时 1-1.5 分钟,
+          # 5 分钟足够覆盖;若 sub-task 真的卡 5 分钟,说明下游 LLM/网络出严重问题,
+          # 早点 fail 反馈比静默 10 分钟更好。仍可通过 spring.ai.loom.agent.subtask.timeout-seconds 调高。
+          timeout-seconds: 300
         # 定时任务：LLM 创建的定时器，触发时以子任务方式运行（间隔/存活上限见 flex.schedule.limits）
         schedule:
           enabled: true
