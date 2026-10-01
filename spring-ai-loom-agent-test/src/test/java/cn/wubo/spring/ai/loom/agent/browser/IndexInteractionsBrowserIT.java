@@ -173,6 +173,73 @@ class IndexInteractionsBrowserIT extends BrowserTestBase {
         }
     }
 
+    /**
+     * R3: 对话改名在<b>失焦</b>时保存而非丢弃。
+     *
+     * <p>2026-10-01-2 E2E 复盘发现 {@code app.js} 的 blur 处理器调的是 {@code cancel()}，
+     * 用户改完名点别处就静默丢失编辑。覆盖两条路径：
+     * <ul>
+     *   <li>改完名直接点别处 → PATCH 落库，标题持久化（covers R3 / S3.1）</li>
+     *   <li>改完名清空后失焦 → 不写空标题，退出编辑态且不抢回焦点</li>
+     * </ul>
+     */
+    @Test
+    void renameSavesOnBlur() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openIndex(ctx);
+
+            page.click("#new-chat-btn");
+            page.waitForSelector("#sidebarList .sidebar-item.active",
+                    new Page.WaitForSelectorOptions().setTimeout(10_000));
+            String conv = (String) page.evalOnSelector(
+                    "#sidebarList .sidebar-item.active", "el => el.dataset.conversationId");
+            assertThat(conv).as("UI 创建的会话有 data-conversation-id").isNotBlank();
+
+            try {
+                // ── 路径 1:改完名直接点别处 → blur → save() → PATCH ──
+                Locator item = page.locator(itemSelector(conv));
+                item.hover();
+                item.locator(".sidebar-item-rename").click();
+                Locator edit = item.locator(".sidebar-item-edit");
+                edit.waitFor(new Locator.WaitForOptions().setTimeout(5000));
+                edit.fill("blur-renamed");
+                // 点主区域把焦点移走 → blur 触发(不按 Enter)
+                page.click(".header-title");
+                page.waitForFunction(
+                        "(c) => { const t = document.querySelector("
+                                + "\"#sidebarList .sidebar-item[data-conversation-id='\" + c + \"'] .sidebar-item-text\");"
+                                + " return !!t && t.textContent === 'blur-renamed'; }",
+                        conv, WF_10S);
+                // 关键回归:失焦保存不得新建会话,列表仍只有这一条
+                assertThat(page.locator("#sidebarList .sidebar-item").count())
+                        .as("失焦保存只改名,不新建对话")
+                        .isEqualTo(1);
+
+                // ── 路径 2:清空后失焦 → 不写空标题,且不把焦点抢回输入框 ──
+                item = page.locator(itemSelector(conv));
+                item.hover();
+                item.locator(".sidebar-item-rename").click();
+                edit = item.locator(".sidebar-item-edit");
+                edit.waitFor(new Locator.WaitForOptions().setTimeout(5000));
+                edit.fill("");
+                page.click(".header-title");
+                page.waitForFunction(
+                        "(c) => { const el = document.querySelector("
+                                + "\"#sidebarList .sidebar-item[data-conversation-id='\" + c + \"']\");"
+                                + " return !!el && !el.querySelector('.sidebar-item-edit'); }",
+                        conv, WF_10S);
+                // 标题保持上一次成功保存的值,没有被空串覆盖
+                assertThat(page.textContent(itemSelector(conv) + " .sidebar-item-text"))
+                        .as("空标题不落库,保留原名")
+                        .isEqualTo("blur-renamed");
+
+                assertThat(consoleErrorsOf(page)).as("改名失焦路径 console 无 error").isEmpty();
+            } finally {
+                apiSend(ctx, "DELETE", UI + "conversation/" + conv, null);
+            }
+        }
+    }
+
     private void deleteViaUi(Page page, String convId) {
         Locator item = page.locator(itemSelector(convId));
         item.hover();

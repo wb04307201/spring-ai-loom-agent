@@ -1554,12 +1554,17 @@ const conversation = {
       text.style.removeProperty("display");
       actions.style.removeProperty("display");
     };
-    const save = async () => {
+    // focusOnEmpty=false 用于失焦路径：此时用户已经把焦点移到别处，
+    // 再 focus() 抢回焦点会打断他的下一次点击。
+    const save = async ({ focusOnEmpty = true } = {}) => {
       if (completed) return;
       const title = input.value.trim();
       if (!title) {
         showToast("对话名称不能为空", "warning");
-        input.focus();
+        // Enter 路径把焦点留在输入框继续编辑；失焦路径保持用户已经点走的位置，
+        // 直接退出编辑态，不制造「输入框又弹回来」的错觉。
+        if (focusOnEmpty) input.focus();
+        else cancel();
         return;
       }
       completed = true;
@@ -1590,7 +1595,9 @@ const conversation = {
       }
     });
     input.addEventListener("blur", () => {
-      if (!completed) cancel();
+      // 失焦即保存：用户改完名直接点别处是常见路径，静默丢弃编辑是数据丢失。
+      // Esc 走 cancel() 置 completed=true，到这里短路，不受影响。
+      if (!completed) save({ focusOnEmpty: false });
     });
   },
 
