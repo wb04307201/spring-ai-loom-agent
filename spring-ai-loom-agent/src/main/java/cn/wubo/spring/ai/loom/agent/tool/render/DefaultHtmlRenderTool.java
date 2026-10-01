@@ -2,7 +2,6 @@ package cn.wubo.spring.ai.loom.agent.tool.render;
 
 import cn.wubo.spring.ai.loom.agent.file.IFile;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
-import cn.wubo.spring.ai.loom.agent.tool.common.FileIdBridge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -41,7 +40,6 @@ public class DefaultHtmlRenderTool implements IHtmlRenderTool {
             "mobile", new HtmlRenderEngine.Viewport(390, 844));
 
     private final HtmlRenderEngine engine;
-    private final FileIdBridge fileIdBridge;
     /** 用户树根（沙箱 = {usersBasePath}/{username}/file），null/blank 回退 LoomPaths 默认。 */
     private final String usersBasePath;
     private final LoomAgentProperties.RenderProperty cfg;
@@ -49,14 +47,16 @@ public class DefaultHtmlRenderTool implements IHtmlRenderTool {
     public DefaultHtmlRenderTool(HtmlRenderEngine engine, IFile file, String usersBasePath,
                                  LoomAgentProperties.RenderProperty cfg) {
         this.engine = engine;
-        this.fileIdBridge = new FileIdBridge(file);
         this.usersBasePath = cn.wubo.loom.file.core.LoomPaths.orDefaultUsersBase(usersBasePath);
         this.cfg = cfg;
     }
 
-    @Tool(description = "把一个本地单页 HTML 文件用无头 Chromium 渲染成 PNG 截图,返回图片预览链接(markdown 可直接内嵌)。"
+    @Tool(description = "把一个本地单页 HTML 文件用无头 Chromium 渲染成 PNG 截图并保存。"
             + "适用:界面原型图、数据分析单页、报告可视化。HTML 必须自包含(内联 CSS/JS)——渲染时禁止一切外部网络请求。"
-            + "典型流程:先用文件写入工具生成 .html 文件,再调用本工具渲染,把返回的 markdown 图片片段嵌入需求文档。")
+            + "典型流程:1) 先用文件写入工具生成 .html 文件;2) 调本工具渲染;3) 调 viewFileUrl(path) 拿预览 markdown 链接(给用户点击查看);4) 可选 downloadFileUrl(path) 拿下载链接。"
+            + "本工具**只保存 PNG 并返回相对路径**,**不**生成可嵌入 markdown —— 把 markdown 语法选择权交回模型,"
+            + "**严禁**自己拼 ![alt](url) 因为 /file/view/<id> 返回 HTML viewer 页 不是 image bytes,内嵌会 broken image。"
+            + "要预览给用户用 viewFileUrl(path);要 inline 嵌入先调 viewFileUrl 拿到真实 URL 路径再决定 markdown 语法。")
     @Override
     public String renderHtmlFile(
             @ToolParam(description = "HTML 文件路径,相对于用户文件目录(如 prototypes/login.html);必须先用文件写入工具创建") String htmlFilePath,
@@ -135,18 +135,18 @@ public class DefaultHtmlRenderTool implements IHtmlRenderTool {
             return "[渲染失败] 截图写入失败: " + e.getMessage();
         }
 
-        String fileId = fileIdBridge.getOrCreateFileId(pngPath, username);
-        if (fileId == null) {
-            return "[渲染失败] 截图文件注册失败,无法生成预览链接";
-        }
-        String baseUrl = (String) toolContext.getContext().get("baseUrl");
-        String url = (baseUrl == null || baseUrl.isBlank())
-                ? "/file/view/" + fileId
-                : baseUrl + "/file/view/" + fileId;
+        // 2026-10-01 (Bug #5 重构): 工具只保存并返回文件路径 + 后续工具提示。
+        // **不**自己生成 markdown 链接 —— /file/view/<id> 是 HTML viewer 端点不是 image bytes,
+        // 直接拼 ![alt](url) 会 broken image;模型应该按需调用 viewFileUrl / downloadFileUrl 拿真实 URL,
+        // 由模型根据上下文选择 markdown 语法([预览:](url) 链接 或 ![alt](url) 嵌入)。
+        // 这样设计把 URL → markdown 翻译权交给有上下文的模型,避免本工具决定的语法跟 URL 类型不匹配。
         String rel = "prototypes/" + pngName;
-        return "渲染成功: " + rel + " (" + result.widthPx() + "x" + result.heightPx() + ")\n"
-                + "预览链接:" + url + "\n"
-                + "markdown格式:![" + baseName + "](" + url + ")\n";
+        return "PNG 已生成: " + rel + " (" + result.widthPx() + "x" + result.heightPx() + ")\n"
+                + "提示:\n"
+                + "  - 调 viewFileUrl('" + rel + "') 拿预览 markdown 链接(给用户点击查看 viewer 页)\n"
+                + "  - 调 downloadFileUrl('" + rel + "') 拿下载链接(带 Content-Disposition)\n"
+                + "  - 想 inline 嵌入:先调 viewFileUrl 拿到预览 URL,判断能否嵌入(取决于 viewer URL 类型),"
+                + "不要自己拼 ![alt] 指向 /file/view/<id>(那个 URL 是 HTML viewer 不是 image bytes)\n";
     }
 
     /** 默认 2MB 配置下渲染 spec §1.2 字面文本 "超过 2MB 上限";非整 MB 配置回退字节数。 */
