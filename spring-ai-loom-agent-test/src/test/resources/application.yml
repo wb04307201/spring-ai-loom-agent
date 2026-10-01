@@ -2,15 +2,18 @@ spring:
   datasource:
     url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
-    anthropic:
-      # Tests don't actually call the LLM (mocked or real but optional) — a placeholder
-      # api-key is enough for autoconfig; the bean in TestAnthropicOptionsConfig sets the
-      # actual model + thinking. Tests run without network to MiniMax.
-      api-key: ${ANTHROPIC_API_KEY:test-key-not-used}
-      base-url: https://api.minimaxi.com/anthropic
+    openai:
+      api-key: ${MINIMAX_API_KEY}
+      base-url: https://api.minimaxi.com/v1
       chat:
         options:
           model: MiniMax-M3
+          max-completion-tokens: 131072
+          extra-body:
+            thinking:
+              type: adaptive
+            reasoning_split: true
+          stream-usage: true
 loom:
   agent:
     datasource-dir: ./target/test-ds
