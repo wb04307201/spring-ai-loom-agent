@@ -194,6 +194,7 @@ class IndexInteractionsBrowserIT extends BrowserTestBase {
             String conv = (String) page.evalOnSelector(
                     "#sidebarList .sidebar-item.active", "el => el.dataset.conversationId");
             assertThat(conv).as("UI 创建的会话有 data-conversation-id").isNotBlank();
+            int countBefore = page.locator("#sidebarList .sidebar-item").count();
 
             try {
                 // ── 路径 1:改完名直接点别处 → blur → save() → PATCH ──
@@ -210,10 +211,13 @@ class IndexInteractionsBrowserIT extends BrowserTestBase {
                                 + "\"#sidebarList .sidebar-item[data-conversation-id='\" + c + \"'] .sidebar-item-text\");"
                                 + " return !!t && t.textContent === 'blur-renamed'; }",
                         conv, WF_10S);
-                // 关键回归:失焦保存不得新建会话,列表仍只有这一条
-                assertThat(page.locator("#sidebarList .sidebar-item").count())
-                        .as("失焦保存只改名,不新建对话")
-                        .isEqualTo(1);
+                // 关键回归:失焦保存不得新建会话。
+                // 用「前后差值」而非绝对值 —— 全量 *IT 共用同一个 test-ds,别的 IT 类
+                // 可能已留下会话(踩过一次:单跑本类时 count=1,全量跑时 count=2)。
+                int countAfterRename = page.locator("#sidebarList .sidebar-item").count();
+                assertThat(countAfterRename)
+                        .as("失焦保存只改名,不新建对话(前 %d → 后 %d)", countBefore, countAfterRename)
+                        .isEqualTo(countBefore);
 
                 // ── 路径 2:清空后失焦 → 不写空标题,且不把焦点抢回输入框 ──
                 item = page.locator(itemSelector(conv));
