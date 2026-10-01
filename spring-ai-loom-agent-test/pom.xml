@@ -53,6 +53,16 @@
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>-->
 <!--        </dependency>-->
+        <!-- 2026-10-01: 让 test app 也能演示 renderHtmlFile 工具(IFile + Playwright 触发 bean 创建)
+             让 model 在 chat 里实际跑通 renderHtmlFile → viewFileUrl 流程,验证 Bug #5 重构后
+             工具间协作是否正常。Playwright Chromium 首次运行会下载 ~150MB 浏览器到本地缓存,
+             后续运行复用缓存。详见 docs/provision-chromium.sh(D8/§2 镜像 provision 替代方案)。 -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.50.0</version>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
@@ -77,11 +87,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-restclient</artifactId>
             <scope>test</scope>
-        </dependency>
-        <!-- lib 的 playwright 是 optional(不传递);IT(HtmlRenderEngineIT)要真跑 Chromium,显式引入 -->
-        <dependency>
-            <groupId>com.microsoft.playwright</groupId>
-            <artifactId>playwright</artifactId>
         </dependency>
     </dependencies>
 
