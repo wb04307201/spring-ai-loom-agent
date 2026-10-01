@@ -14,9 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.cache.Cache;
 import org.springframework.cache.concurrent.ConcurrentMapCache;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,13 +53,21 @@ class KnowledgeMarketIntegrationTest {
     private Cache sessionCache;
 
     @BeforeEach
-    void setUp() {
-        // Create in-memory H2 database
-        DriverManagerDataSource ds = new DriverManagerDataSource();
-        ds.setDriverClassName("org.h2.Driver");
-        ds.setUrl("jdbc:h2:mem:test-km-" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL");
-        ds.setUsername("sa");
-        ds.setPassword("");
+    void setUp() throws SQLException {
+        // 内存 H2。注意不能直接用 DriverManagerDataSource:
+        // 它每条语句后都 close() 连接,而 DB_CLOSE_DELAY=-1 的内存库在最后一个连接关闭后
+        // 会丢失 CHECK 约束注册表 —— 于是 DDL 建好的约束在后续 INSERT 时不再生效校验,
+        // H2 报 "Check constraint invalid: CONSTRAINT_BC1"(值本身完全合法,实测
+        // type=[ADMIN] codes=[A,D,M,I,N] 仍被拒)。
+        // 已复现到项目外的独立程序:同一 DDL / 同一 INSERT,裸 JDBC 或保持 DDL 连接不关都正常,
+        // 走 DriverManagerDataSource 必炸(H2 2.4.240)。
+        // SingleConnectionDataSource(c, suppressClose=true) 复用一条连接且不关它,约束得以保留。
+        // 本库 12 个测试类里只有本类同时满足「DriverManagerDataSource + DB_CLOSE_DELAY + 含 CHECK
+        // 约束的表」,故只有这里需要改(对照:DefaultUserTest / SyncMcpTest 同样用
+        // DriverManagerDataSource 但建表无 CHECK,不受影响)。
+        Connection conn = DriverManager.getConnection(
+                "jdbc:h2:mem:test-km-" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL", "sa", "");
+        SingleConnectionDataSource ds = new SingleConnectionDataSource(conn, true);
         jdbcTemplate = new JdbcTemplate(ds);
 
         sessionCache = new ConcurrentMapCache("sessions");

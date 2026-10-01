@@ -164,18 +164,27 @@ class DefaultHtmlRenderToolTest {
 
         String out = tool.renderHtmlFile("prototypes/login.html", "login", null, null, ctx("u"));
 
-        assertThat(out).startsWith("渲染成功: prototypes/login-").contains(".png (2880x1800)");
-        assertThat(out).contains("预览链接:http://localhost:8080/file/view/").contains("markdown格式:![login](");
+        // 2026-10-01 (commit 6389e5c5, Bug #5):工具不再自己拼 ![alt](file/view/<id>) ——
+        // /file/view/<id> 是 HTML viewer 端点不是 image bytes,预拼必然 broken image。
+        // 改为只返回路径 + 后续工具提示,由模型按上下文选 markdown 语法。
+        // 本断言随之从旧的「渲染成功 + 内联 markdown」改为锁定新契约:
+        // 返回相对路径与尺寸,并**明确不含** markdown 图片语法。
+        assertThat(out).startsWith("PNG 已生成: prototypes/login-").contains(".png (2880x1800)")
+                .contains("viewFileUrl('prototypes/login-")
+                // 不能含**成对**的 markdown 图片语法 ![alt](url) ——
+                // 注意不能断言 doesNotContain("!["):提示文案本身就要举例说明
+                // 「不要自己拼 ![alt] 指向 /file/view/<id>」,那是给模型的告警,不是图片。
+                // 用正则锁「不存在 ![alt](url) 这种成对图片语法」:
+                // ![login](...) 会命中,但提示文案里的 ![alt] 不会(它后面不是「(」)。
+                .doesNotMatch("!\\[[^\\]]*\\]\\(");
         // PNG 真的落盘在 {base}/u/prototypes/ 下
         try (var stream = Files.list(html.getParent())) {
             assertThat(stream.map(p -> p.getFileName().toString()).toList())
                     .anyMatch(n -> n.startsWith("login-") && n.endsWith(".png"));
         }
-        // insert 走 usage='temp' + image/png
-        ArgumentCaptor<FileRecord> cap = ArgumentCaptor.forClass(FileRecord.class);
-        verify(file).insert(cap.capture(), eq("u"));
-        assertThat(cap.getValue().usage()).isEqualTo("temp");
-        assertThat(cap.getValue().mimeType()).isEqualTo("image/png");
+        // 6389e5c5 起不再注册 file_id(不再有 usage='temp' / image/png 的 file_info 行);
+        // 改为锁定「IFile 完全不被触碰」,即桥接确已解耦。
+        verify(file, never()).insert(any(FileRecord.class), anyString());
     }
 
     @Test
@@ -233,17 +242,28 @@ class DefaultHtmlRenderToolTest {
                 .thenReturn(new RenderResult(new byte[]{1}, 10, 10));
         when(file.getByExactPath(anyString(), anyString())).thenReturn(null);
         String out = tool.renderHtmlFile("dashboard.htm", null, null, null, ctx("u"));
-        assertThat(out).startsWith("渲染成功: prototypes/dashboard-").contains("![dashboard](");
+        assertThat(out).startsWith("PNG 已生成: prototypes/dashboard-")
+                .contains("viewFileUrl('prototypes/dashboard-")
+                // 6389e5c5 起工具不再预拼 markdown 图片语法(见 successWritesPngAndBridges 注释)
+                .doesNotContain("![dashboard]");
     }
 
     @Test
-    @DisplayName("fileId 桥接失败(insert 抛/返回后 getByExactPath null)→ [渲染失败] 文件注册失败")
-    void bridgeFailure() throws Exception {
+    @DisplayName("fileId 桥接已随 6389e5c5 移除 —— IFile 不再被调用,渲染只落盘返回路径")
+    void bridgeRemovedWithBug5Refactor() throws Exception {
+        // 2026-10-01 (6389e5c5, Bug #5):工具不再注册 file_id、不再生成预览链接,
+        // DefaultHtmlRenderTool 虽仍注入 IFile(构造签名未动),但字段从未被赋值/使用 ——
+        // 也就是说「桥接失败」这条路径已不存在。本用例据此改为锁定新契约:
+        // 即使 IFile 任何方法都抛异常,渲染仍然成功(证明桥接确实已解耦)。
         writeHtml("u", "a.html", "<p>x</p>");
         when(engine.render(anyString(), any(), anyBoolean(), anyInt()))
                 .thenReturn(new RenderResult(new byte[]{1}, 10, 10));
         when(file.getByExactPath(anyString(), anyString())).thenThrow(new RuntimeException("db down"));
+        when(file.insert(any(FileRecord.class), anyString())).thenThrow(new RuntimeException("db down"));
         String out = tool.renderHtmlFile("a.html", null, null, null, ctx("u"));
-        assertThat(out).isEqualTo("[渲染失败] 截图文件注册失败,无法生成预览链接");
+        assertThat(out).startsWith("PNG 已生成: prototypes/a-").contains(".png (10x10)");
+        // 关键:IFile 全程未被调用 —— 桥接与文件存储已彻底解耦
+        verify(file, never()).insert(any(FileRecord.class), anyString());
+        verify(file, never()).getByExactPath(anyString(), anyString());
     }
 }
