@@ -283,6 +283,101 @@ class IndexInteractionsBrowserIT extends BrowserTestBase {
         }
     }
 
+    /**
+     * 回归锁:聊天面板 picker 不得固化一份「残缺」的 MCP 列表。
+     *
+     * <p>对应 {@code SyncMcp.mcps()} 的缓存污染修复(commit 5260c6f8)。原缺陷:
+     * 某个 MCP 的 {@code listTools()} 超时被 catch-and-skip 后,残缺列表会被写入缓存并
+     * 由 {@code GET /api/capabilities} 原样返回;前端 {@code loadList()} 首次加载时
+     * {@code selectedMcps = mcpIds.slice()} 直接把这份残缺列表 {@code _savePersisted()}
+     * 落盘 —— 用户此后永久丢失该 MCP。
+     *
+     * <p><b>环境约束(必须知道,否则会误判用例失效)</b>:浏览器 IT 用
+     * {@code src/test/resources/application.yml},它<b>不</b>配置
+     * {@code spring.ai.mcp.client.stdio},所以该 profile 下 <b>0 个 MCP server 启动</b>
+     * (IT 要保持快,不起 npx 子进程;见 {@code mcp-servers-none.json})。
+     * 因此本用例锁定的是<b>不依赖 MCP 存在</b>的那条不变式:
+     * <b>picker 持久化的内容必须始终是服务端当前返回集合的子集</b>。
+     *
+     * <p>「有 MCP 时是否默认勾选」无法在本 IT 环境断言(没有 MCP 可勾);
+     * 若将来给 IT profile 接上 MCP,可再补一条正向断言。当前这条在 0-MCP 环境下
+     * 退化为「持久化不得凭空出现服务端没返回的 id」—— 这正是原 bug 的另一半
+     * (前端把某份列表固化下来却不与权威源核对)。
+     *
+     * <p>刻意<b>不</b>覆盖「新授权的 MCP 是否自动补勾」—— 那是 P1(持久化只做减法),
+     * 产品意图未定,不在此处锁定。
+     */
+    @Test
+    void pickerNeverPersistsCapabilitiesTheServerNoLongerReturns() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openIndex(ctx);
+
+            // 权威来源:服务端本次返回的 capability 全集。注意**不**按 effectiveEnabled 过滤 ——
+            // 本 profile 是全新库,RBAC 工具未授权(V1.0__init.sql:559 不 seed 授权),
+            // MCP 为 0,故 effectiveEnabled 全 false;卡片仍然渲染(disabled 态)。
+            @SuppressWarnings("unchecked")
+            List<String> serverIds = (List<String>) page.evaluate(
+                    "async () => { const r = await fetch('/spring/ai/loom/api/capabilities',"
+                            + "{credentials:'include'}); const d = await r.json();"
+                            + " return d.map(c => c.type + '::' + c.id); }");
+            assertThat(serverIds).as("服务端应返回 capability 列表(4 个 RBAC LOCAL 组)").isNotEmpty();
+
+            // 播种一个服务端根本不返回的 ghost id,验证 loadList 会用权威源把它清掉。
+            //
+            // 播种时机(2026-10-01 实测踩了两次,addInitScript 在此不可用):
+            // app.js L6498 在 init 里 `await mcp.loadList()` —— 即 init **确实**会跑一次,
+            // 权威过滤后就写好了 persisted。此后 openModal 的 `capabilities.length === 0`
+            // 分支不再触发,不会再跑第二次 loadList。
+            // 而 page.addInitScript 对**每个**页面都生效,包括 login.html —— 后者会重定向,
+            // 写入的 seed 被导航上下文销毁冲掉,reload 后又是空值(探针实测:
+            // after init = {"mcps":[]} 而 seeded 值消失),断言于是永远为真 = 空转。
+            // 正确做法:在 index 已完成 init **之后**播种,再 reload —— 这次 seed 落在同一个
+            // 已认证的 origin 上,随后 init 的 loadList 会读到它并做过滤。
+            page.evaluate("() => localStorage.setItem('loom.mcp.selectedNames.wb04307201',"
+                    + " JSON.stringify({toolGroups: [], mcps: ['ghost-mcp-not-returned-by-server']}))");
+            page.reload();
+            page.waitForSelector("#textarea");
+            page.waitForFunction("() => !!window._loomAgent", null, WF_10S);
+            // 等 init 的 loadList 完成过滤并回写(_savePersisted 是异步链路的一环,
+            // 不能只看 DOM 渲染完成就断言)
+            page.waitForFunction(
+                    "() => { const raw = localStorage.getItem('loom.mcp.selectedNames.wb04307201');"
+                            + " if (!raw) return true;"
+                            + " const m = JSON.parse(raw).mcps || [];"
+                            + " return !m.includes('ghost-mcp-not-returned-by-server'); }",
+                    null, WF_10S);
+
+            // loadList 跑完后:持久化的两份列表都必须是服务端全集的子集。
+            // 这条不变式与「有几个 MCP / 是否授权」无关,正是原 bug 的核心 ——
+            // 前端把某份列表固化进 localStorage,却不与权威源核对。
+            for (String field : new String[]{"mcps", "toolGroups"}) {
+                Object persisted = page.evaluate(
+                        "(f) => { const k = 'loom.mcp.selectedNames.wb04307201';"
+                                + " const raw = localStorage.getItem(k);"
+                                + " return raw ? (JSON.parse(raw)[f] || []) : []; }",
+                        field);
+                @SuppressWarnings("unchecked")
+                List<String> persistedList = (List<String>) persisted;
+                String prefix = "mcps".equals(field) ? "MCP::" : "LOCAL::";
+                assertThat(persistedList)
+                        .as("持久化的 %s 不得包含服务端未返回的能力: %s vs %s",
+                                field, persistedList, serverIds)
+                        .allSatisfy(id -> assertThat(serverIds).contains(prefix + id));
+            }
+
+            // picker 仍能正常打开并渲染(结构完整性)
+            page.click("#mcp-button");
+            page.waitForSelector("#mcp-list .skill-item",
+                    new Page.WaitForSelectorOptions().setTimeout(15_000));
+            assertThat(page.locator("#mcp-list .skill-item").count())
+                    .as("picker 渲染出 capability 卡片").isGreaterThanOrEqualTo(1);
+
+            assertThat(consoleErrorsOf(page)).as("MCP picker 持久化检查 console 无 error").isEmpty();
+            page.click("#mcp-close-btn");
+            assertOverlayHidden(page, "mcp-modal-overlay");
+        }
+    }
+
     @Test
     void toolsModalOpensAndListsCapabilities() {
         try (BrowserContext ctx = adminContext()) {
