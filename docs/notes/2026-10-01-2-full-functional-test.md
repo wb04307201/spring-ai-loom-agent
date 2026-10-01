@@ -126,8 +126,17 @@ state.selectedMcps = hasMcpHistory
 
 **遗留待办**:
 - [x] **P0** 修 `SyncMcp.mcps()` 缓存污染(方向 A)—— ✅ 已修 + Chrome 实测
-- [ ] P1 修 MCP picker 持久化恢复只做减法(方向 B)—— 让用户主动取消后能被自动补回
-- [ ] 补浏览器回归:授权新 MCP 后聊天面板应默认勾选它
+- [ ] P1 修 MCP picker 持久化恢复只做减法(方向 B)—— 让用户主动取消后能被自动补回(**Owner 裁定:暂不动**)
+- [x] 补浏览器回归:授权新 MCP 后聊天面板应默认勾选它 —— ✅ 已补(锁「持久化不得包含服务端未返回的 capability」;
+      注:IT profile 无 MCP,「有 MCP 时默认勾选」的正向断言待将来接入 MCP 后再加)
+- [x] 修 `SidebarFrontendContractTest` —— ✅ 已修(断言含 `\r\n` 而 app.js 一直是纯 LF,该断言自
+      2026-07-20 引入起从未成立;改 `\n` 后反向验证确实咬得住)
+- [x] 修 `KnowledgeMarketIntegrationTest` —— ✅ 已修(`DriverManagerDataSource` + H2 2.4.240:
+      DDL 连接关闭后 CHECK 约束注册表丢失,合法值也报 `CONSTRAINT_BC1`;改用
+      `SingleConnectionDataSource(conn, true)`)
+- [x] 修 `DefaultHtmlRenderToolTest` 3 条断言 —— ✅ 已修(停留在 6389e5c5 之前的旧文案与已移除的
+      file_id 桥接;改为锁定「PNG 已生成 + 不含成对 markdown 图片语法 + IFile 从不被调用」)
+- [ ] `api-key: ${MINIMAX_API_KEY}` 无 fallback,CI / 他机未设该环境变量会启动失败
 
 ### Issue #2 — MINOR/UI: 后续气泡的 thinking 面板 hidden
 
