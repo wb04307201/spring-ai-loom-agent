@@ -229,6 +229,11 @@ private List<String> allowedDomains = List.of();   // 空 = 拒绝一切外网�
 
 判定必须发生在**发出请求之前**，而非事后过滤响应。
 
+该判定挂在 `HttpConfig.failClosed` 开关上（core 侧），而非无条件改写：内部工具模式恒传 `true`，
+`loom-http-mcp` 由 `loom.http.mcp.fail-closed` 属性控制、默认 `false`。两个壳共用同一个
+`InvokeService`，写死会让未配 `allowedDomains` 的 jar 用户**全部调用失败**，而那正是已发布的
+http-mcp 1.1.1 的正常配置。
+
 ## 5. RBAC 接线
 
 ### 5.1 两个 tool group
@@ -283,12 +288,12 @@ if (!allowed) throw new ResponseStatusException(FORBIDDEN, "未授权 HTTP 管�
 | 测试 | 锁什么 |
 |---|---|
 | `HttpToolDualModeContractTest` | 同一份存储下 `IHttpTool` 与 `HttpEngine` 返回逐字一致 —— 两壳不得漂移 |
-| `HttpWhitelistFailClosedTest` | `allowedDomains` 空时 `invokeEndpoint` 拒绝，且**真的未发出网络请求**（以 WireMock 请求计数断言 0） |
-| `HttpToolInvokeIT` | 直接调 `DefaultHttpTool.invokeEndpoint(...)`（构造 `ToolContext` 注入 username），断言 WireMock 收到请求、响应正确 —— **不打 LLM，确定性覆盖工具→上游全链路** |
+| `HttpWhitelistFailClosedTest` | `allowedDomains` 空时 `invokeEndpoint` 拒绝，且**真的未发出网络请求**（以 WireMock 请求计数断言 0）—— 由 `HttpToolInvokeIT` 的前两个用例承担 |
+| `HttpToolInvokeIT` | 直接调 `DefaultHttpTool.invokeEndpoint(...)`（构造 `ToolContext` 注入 username），断言 WireMock 收到请求、响应正确 —— **不打 LLM，确定性覆盖工具→上游全链路**；同时承担上面那条 fail-closed 断言 |
 | `HttpManageRbacIT` | 未授权 POST `/api/http/profiles` → 403；授权后 → 200 |
 | `HttpPerUserIsolationTest` | user A 的 profile，user B 的 `invokeEndpoint` 读不到、REST 也读不到 |
 | `HttpToolGroupMetadataTest` | `@ToolGroup(value="http", defaultGranted=false)` 元数据正确，且 `tool_http` **不在** `universalToolGroups()` 内 |
-| `HttpPathIsolationTest` | `LoomPaths.userHttpDir` 卫生：username 消毒、`..` 逃逸被拒、与 `userFileDir` / `userCompileWorkspacesDir` 平级不重叠 |
+| `LoomPathsHttpTest` | `LoomPaths.userHttpDir` 卫生：username 消毒、`..` 逃逸被拒、与 `userFileDir` / `userCompileWorkspacesDir` 平级不重叠 |
 
 ### 6.3 第三层：浏览器 E2E（`*BrowserIT`）
 
