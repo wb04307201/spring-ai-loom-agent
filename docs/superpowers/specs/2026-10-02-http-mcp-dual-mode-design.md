@@ -317,13 +317,16 @@ admin 登录 → 角色授权 tool_http + tool_http_manage
 mvn clean install -Dgpg.skip=true                     # 全模块编译
 mvn test -pl loom-http-core                           # 第一层回归
 mvn test -pl spring-ai-loom-agent-test                # 单元（470+，默认不跑 *IT）
+rm -rf spring-ai-loom-agent-test/target/test-ds spring-ai-loom-agent-test/target/test-users
 mvn test -pl spring-ai-loom-agent-test -Dtest='*IT' \
       -Dsurefire.failIfNoSpecifiedTests=false       # IT 门（191+）
 mvn test -pl spring-ai-loom-agent-test -Dtest='*BrowserIT' \
       -Dsurefire.failIfNoSpecifiedTests=false       # 浏览器门
 ```
 
-`*IT` 必须从**清空的** `~/.loom/datasource` + `target/test-ds` 运行，否则脏数据会让 Flyway 相关 IT 假失败。
+`*IT` 的数据库隔离靠 `spring-ai-loom-agent-test/src/test/resources/application.yml`，该文件已把 `spring.datasource.url` 与 `datasource-dir` 覆盖到 `./target/test-ds`、`users-base-path` 覆盖到 `./target/test-users`，**测试期不触碰 `~/.loom`**。浏览器 IT 另在 `BrowserTestBase` 的 `@SpringBootTest(properties=...)` 里覆盖为 `./target/e2e-files/users`。
+
+因此清理仪式是 `rm -rf spring-ai-loom-agent-test/target/test-ds spring-ai-loom-agent-test/target/test-users spring-ai-loom-agent-test/target/e2e-files`，而非清理 `~/.loom/datasource`。
 
 ### 6.5 安全自审要点
 
