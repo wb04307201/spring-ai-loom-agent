@@ -655,6 +655,7 @@ class HttpPerUserIsolationTest {
         HttpEngine alice = new HttpEngine(LoomPaths.userHttpDir(tmp.toString(), "alice"), new HttpConfig());
         Profile p = new Profile();
         p.setName("prod");
+        p.getAuth().setType("bearer");   // addProfile 会跑 ProfileValidator,type 必填
         p.getAuth().setToken("super-secret-token");
         alice.addProfile(p);
 

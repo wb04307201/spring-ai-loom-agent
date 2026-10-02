@@ -133,9 +133,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
       public String getRequestHistory(String system, int limit, String statusFilter, Instant since);
 
       // 注册面（jar 的 @Tool 壳 + 内部 REST router）
-      public String addProfile(Profile p);
+      public String addProfile(Profile p);          // 先校验后落盘
+      public String updateProfile(String name, Profile patch);   // 合并后同样校验
       public String removeProfile(String name);
-      public String registerSystem(System s);
+      public String registerSystem(System s);      // 拒绝重名 + 校验 baseUrl
+      public String updateSystem(String name, System patch);
       public String removeSystem(String name, boolean deleteOpenApiCache);
       public String refreshSystem(String name);   // name 为 null/blank = 全部刷新
       public List<String> listProfiles();
@@ -143,7 +145,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   }
   ```
 
-**注意**：`updateProfile` / `updateSystem` / `addEndpoint` / `updateEndpoint` / `removeEndpoint` 五个"部分更新"方法**不在本 Task** —— 其合并逻辑来自 http-mcp 的 `*Tools` 类（属 `@Tool` 壳），在 Task 4 Step 5 才搬入 core 的无注解版本。Step 3 先只写上面这些能直接跑通的签名。
+**注意**：`addEndpoint` / `updateEndpoint` / `removeEndpoint` 三个 endpoint 写方法**不在 Step 3** —— 其合并逻辑来自 http-mcp 的 `EndpointTools`（属 `@Tool` 壳），在 Step 5 才搬入 core 的无注解版本。Step 3 先只写上面这些能直接跑通的签名。
+
+`updateProfile` 与 `updateSystem` 例外：它们与各自的 create 方法共用 `ProfileValidator`
+校验 + 信封构造，拆开写只会让两处校验规则漂移，故 Step 3 一并实现（`mergeProfile` /
+`mergeSystem` 私有方法也在 Step 3）。
 
 **这是整个移植的枢纽。** core 不知道 system/profile 归谁所有，存储根作为数据传入；两个壳唯一的差别就是 `storageRoot` 的来源。
 
@@ -291,6 +297,7 @@ public final class HttpEngine {
     private final OpenApiCache openApiCache;
     private final InvokeService invokeService;
     private final BatchService batchService;
+    private final ProfileValidator profileValidator = new ProfileValidator();
 
     public HttpEngine(Path storageRoot, HttpConfig config) {
         this.storage = new HttpStorage(storageRoot);
@@ -342,16 +349,110 @@ public final class HttpEngine {
 
     // ==================== 注册面 ====================
 
+    /**
+     * 新建 profile。<b>先校验后落盘</b>：ERROR 级问题（如 auth.type 拼错、bearer 缺
+     * token、header key 空白）直接拒绝，WARNING（如 ${} 占位符不闭合）随信封返回。
+     *
+     * <p>这一步是 http-mcp {@code ProfileTools.addProfile} 的校验逻辑 —— 它住在带
+     * {@code @Tool} 的壳里，不搬则失去校验。缺了它，{@code auth.type="beareer"} 这类
+     * 笔误要等到首次调用才暴露，且错误信息远不如注册时清晰。
+     */
     public String addProfile(Profile p) {
-        return toJson(() -> profileService.save(p));
+        return toJson(() -> {
+            List<ProfileValidator.ValidationError> findings = profileValidator.validate(p);
+            if (profileValidator.hasErrors(findings)) {
+                throw new IllegalArgumentException("Profile validation failed: " + joinErrors(findings));
+            }
+            profileService.save(p);
+            return profileEnvelope(p, "created", findings);
+        });
+    }
+
+    /** 更新 profile：先合并再校验，规则与 {@link #addProfile} 完全一致。 */
+    public String updateProfile(String name, Profile patch) {
+        return toJson(() -> {
+            Profile p = mergeProfile(profileService.get(name), patch);
+            List<ProfileValidator.ValidationError> findings = profileValidator.validate(p);
+            if (profileValidator.hasErrors(findings)) {
+                throw new IllegalArgumentException("Profile validation failed: " + joinErrors(findings));
+            }
+            profileService.save(p);
+            return profileEnvelope(p, "updated", findings);
+        });
+    }
+
+    /** 只取 ERROR 级拼成一句话；WARNING 不阻断，交给调用方决定。 */
+    private static String joinErrors(List<ProfileValidator.ValidationError> findings) {
+        return findings.stream()
+                .filter(f -> f.severity() == ProfileValidator.Severity.ERROR)
+                .map(ProfileValidator.ValidationError::toString)
+                .reduce((a, b) -> a + "; " + b)
+                .orElse("invalid profile");
+    }
+
+    /** 注册成功信封：{name, <verb>: true, file, warnings?} —— 与 http-mcp 的形状一致。 */
+    private Map<String, Object> profileEnvelope(Profile p, String verb,
+                                                List<ProfileValidator.ValidationError> findings) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("name", p.getName());
+        envelope.put(verb, true);
+        envelope.put("file", storage.profilesDir().resolve(p.getName() + ".json").toString());
+        if (!findings.isEmpty()) {
+            envelope.put("warnings", findings.stream()
+                    .filter(f -> f.severity() == ProfileValidator.Severity.WARNING)
+                    .map(ProfileValidator.ValidationError::toString)
+                    .toList());
+        }
+        return envelope;
     }
 
     public String removeProfile(String name) {
         return toJson(() -> { profileService.delete(name); return name; });
     }
 
+    /**
+     * 注册 system。拒绝重名（{@code SystemService.get} 抛异常即"不存在"，借此做
+     * exists? 检查而不碰 cache 内部），再跑 {@code ProfileValidator#validateSystem}
+     * —— baseUrl 必须是合法 http(s) URL，漏写 scheme 这类笔误在注册时拦住，
+     * 而不是等到首次调用变成 DNS 错误。
+     */
     public String registerSystem(System s) {
-        return toJson(() -> systemService.save(s));
+        return toJson(() -> {
+            try {
+                systemService.get(s.getName());
+                throw new IllegalArgumentException("System already exists: " + s.getName());
+            } catch (SystemNotFoundException ignored) {
+                // 名字没被占用 —— 正常路径
+            }
+            List<ProfileValidator.ValidationError> findings = profileValidator.validateSystem(s);
+            if (profileValidator.hasErrors(findings)) {
+                throw new IllegalArgumentException("System validation failed: " + joinErrors(findings));
+            }
+            systemService.save(s);
+            return systemEnvelope(s, "created");
+        });
+    }
+
+    /** 逐字段合并后同样校验，规则与 {@link #registerSystem} 一致。 */
+    public String updateSystem(String name, System patch) {
+        return toJson(() -> {
+            System s = mergeSystem(systemService.get(name), patch);
+            List<ProfileValidator.ValidationError> findings = profileValidator.validateSystem(s);
+            if (profileValidator.hasErrors(findings)) {
+                throw new IllegalArgumentException("System validation failed: " + joinErrors(findings));
+            }
+            systemService.save(s);
+            return systemEnvelope(s, "updated");
+        });
+    }
+
+    /** 注册/更新成功信封：{name, <verb>: true, file}。 */
+    private Map<String, Object> systemEnvelope(System s, String verb) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("name", s.getName());
+        envelope.put(verb, true);
+        envelope.put("file", storage.systemsDir().resolve(s.getName() + ".json").toString());
+        return envelope;
     }
 
     public String removeSystem(String name, boolean deleteCache) {
@@ -403,7 +504,7 @@ public final class HttpEngine {
 }
 ```
 
-**`updateProfile` / `updateSystem` / `updateEndpoint` 与 endpoint 三个写方法先在此留空**，等 Task 4 Step 5 补齐 —— 因为它们的"部分更新"语义需要 `ProfileTools` / `SystemTools` / `EndpointTools` 里的合并逻辑，那些类在 jar 侧（`@Tool` 壳）。core 侧需实现无注解版本，从那三个 `*Tools` 类搬 `merge` 私有方法。
+**`addEndpoint` / `updateEndpoint` / `removeEndpoint` 三个 endpoint 写方法先在此留空**，等 Task 4 Step 5 补齐 —— 因为它们的"部分更新"语义需要 `EndpointTools` 里的合并逻辑，那个类在 jar 侧（`@Tool` 壳）。core 侧需实现无注解版本，从该 `*Tools` 类搬 `merge` 私有方法。（`updateProfile` / `updateSystem` 已在 Step 3 实现，不在此列。）
 
 先只放上面这些能跑通的签名（删除 `updateProfile` 等方法），确认编译通过后再在 Step 5 补。
 
@@ -458,20 +559,19 @@ return new DomainWhitelist(global).effectiveAllowed(new DomainWhitelist(profileA
 
 - [ ] **Step 5: 补写面方法（从 *Tools 搬合并逻辑，去注解）**
 
-从 http-mcp 搬"部分更新"语义 —— 这五个方法的逻辑目前只存在于 `*Tools` 类里，而那些类带 `@Tool`，属 jar 壳：
+从 http-mcp 搬"部分更新"语义 —— 这些方法的逻辑目前只存在于 `*Tools` 类里，而那些类带 `@Tool`，属 jar 壳：
 
 ```bash
 cd "C:/developer/IdeaProjects/http-mcp/src/main/java/cn/wubo/http/mcp"
-grep -n "merge\|putIfAbsent\|null ?\|isBlank()" profile/ProfileTools.java | head -20
 grep -n "merge\|putIfAbsent\|null ?\|isBlank()" system/SystemTools.java | head -20
 grep -n "merge\|putIfAbsent\|null ?\|isBlank()" endpoint/EndpointTools.java | head -20
 ```
 
-把每个 `*Tools` 类里 `@Tool` 方法体中的合并逻辑抽成 `HttpEngine` 的私有方法（形如 `mergeProfile(Profile existing, Profile patch)` —— **逐字段：patch 字段为 null 则保留原值**），再暴露五个 public 方法：
+写一个私有合并方法（**逐字段：patch 字段为 null 则保留原值**），再暴露三个 public 方法：
 
 ```java
-public String updateProfile(String name, Profile patch);      // 逐字段合并
-public String updateSystem(String name, System patch);        // 逐字段合并
+private Endpoint mergeEndpoint(Endpoint existing, Map<String,Object> patch);
+
 public String addEndpoint(String system, String method, String path,
                           List<Map<String,Object>> parameters, Map<String,Object> requestBody,
                           Map<String,Object> responses, String summary,
@@ -480,9 +580,63 @@ public String updateEndpoint(String system, String method, String path, Map<Stri
 public String removeEndpoint(String system, String method, String path);
 ```
 
+**`updateProfile` / `updateSystem` 已在 Step 3 随各自的 create 方法写好**（共用同一套
+`ProfileValidator` 校验与信封构造，故不重复实现），Step 3 的 `mergeProfile` / `mergeSystem`
+就是这里说的私有合并方法。
+
 `addEndpoint` / `updateEndpoint` / `removeEndpoint` 委托给已搬入的 `EndpointService.add/update/remove`。
 
 新增 `HttpEngineTest` 覆盖：新增 profile → 落盘 → 重新 `new HttpEngine` 读回；部分更新只改一个字段时其余字段保持不变；未注册 system 调用返回结构化错误 JSON 而非抛异常。
+
+**另加一条校验断言**（总纲 Review Focus 第 1 条：profile 存在但 auth 块缺字段，必须在注册时
+就报错，而不是等到调用时才发现）：
+
+```java
+    @Test
+    @DisplayName("auth.type 拼错 → addProfile 拒绝，且不落盘")
+    void rejectsBadAuthType(@org.junit.jupiter.api.io.TempDir Path tmp) {
+        HttpEngine engine = new HttpEngine(tmp, new HttpConfig());
+        Profile p = new Profile();
+        p.setName("typo");
+        p.getAuth().setType("beareer");   // 笔误
+        p.getAuth().setToken("t");
+        String out = engine.addProfile(p);
+        assertThat(out).contains("validation failed");
+        assertThat(engine.listProfiles()).doesNotContain("typo");   // 校验失败不得留下半截文件
+    }
+
+    @Test
+    @DisplayName("bearer 类型缺 token → 拒绝")
+    void rejectsBearerWithoutToken(@org.junit.jupiter.api.io.TempDir Path tmp) {
+        HttpEngine engine = new HttpEngine(tmp, new HttpConfig());
+        Profile p = new Profile();
+        p.setName("notoken");
+        p.getAuth().setType("bearer");
+        assertThat(engine.addProfile(p)).contains("validation failed");
+    }
+
+    @Test
+    @DisplayName("system.baseUrl 漏 scheme → 注册时拒绝，不留半截文件")
+    void rejectsBaseUrlWithoutScheme(@org.junit.jupiter.api.io.TempDir Path tmp) {
+        HttpEngine engine = new HttpEngine(tmp, new HttpConfig());
+        cn.wubo.loom.http.core.system.System s = new cn.wubo.loom.http.core.system.System();
+        s.setName("noscheme");
+        s.setBaseUrl("api.example.com");     // 漏 https://
+        assertThat(engine.registerSystem(s)).contains("validation failed");
+        assertThat(engine.listSystems()).doesNotContain("noscheme");
+    }
+
+    @Test
+    @DisplayName("重名 system 拒绝注册")
+    void rejectsDuplicateSystem(@org.junit.jupiter.api.io.TempDir Path tmp) {
+        HttpEngine engine = new HttpEngine(tmp, new HttpConfig());
+        cn.wubo.loom.http.core.system.System s = new cn.wubo.loom.http.core.system.System();
+        s.setName("dup");
+        s.setBaseUrl("https://api.example.com");
+        engine.registerSystem(s);
+        assertThat(engine.registerSystem(s)).contains("already exists");
+    }
+```
 
 - [ ] **Step 6: 补 fail-closed 集成断言（替换 Step 1 的占位说明）**
 
@@ -528,6 +682,7 @@ public String removeEndpoint(String system, String method, String path);
 
         cn.wubo.loom.http.core.profile.Profile p = new cn.wubo.loom.http.core.profile.Profile();
         p.setName("only");
+        p.getAuth().setType("bearer");   // 必填:ProfileValidator 对 type 做枚举校验
         p.getAuth().setToken("t");
         engine.addProfile(p);
         // profile 声明了白名单 → global 空时退回它（http-mcp 原行为）
