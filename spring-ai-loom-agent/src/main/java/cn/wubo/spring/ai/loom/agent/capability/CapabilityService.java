@@ -81,6 +81,10 @@ public class CapabilityService {
         for (IEmbedTool tool : embedTools) {
             CapabilityInfo ci = toLocalCapability(tool);
             if (universalGroups.contains(ci.id())) continue;
+            // 零 @Tool 方法的「纯授权组」(如 tool_http_manage)不进聊天面板 ——
+            // 它只服务 REST 写面,LLM 没有任何可调用方法,列出来只会给用户一个空条目。
+            // admin 控制台走 listAll(),不受此过滤影响(那里恰恰要能授权)。
+            if (ci.tools().isEmpty()) continue;
             // RBAC 工具 effectiveEnabled 跟随 role
             boolean enabled = visibleToolGroups.contains(ci.id());
             // defaultEnabled 来自 role_tool.default_enabled;索引里查不到(角色未授权 /

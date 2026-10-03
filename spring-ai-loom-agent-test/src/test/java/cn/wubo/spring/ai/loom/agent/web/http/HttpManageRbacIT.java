@@ -160,4 +160,60 @@ class HttpManageRbacIT {
         assertThat(Map.of("k", "v")).containsEntry("k", "v");
         assertThat(List.of()).isEmpty();
     }
+
+    /**
+     * F1 回归锁:授权必须走得到「控制台保存」这条路,且保存不会抹掉它。
+     *
+     * <p>{@code setRoleTools} 是 {@code DELETE + INSERT} 全量替换,而
+     * {@code roles.js} 只提交 {@code /admin/capabilities} 渲染出的组 ——
+     * 在 {@code tool_http_manage} 补上 {@code @ToolGroup} 之前,它既不在渲染列表里,
+     * 也不在任何 group 校验之外,于是「用 SQL 授了权 → 控制台保存一次 → 授权消失」。
+     * 这里用真实的 {@code IRoleService.setRoleTools}(控制台 PUT 的同一实现)授权,
+     * 再模拟一次控制台保存(提交当前可见组全集),断言授权仍在、guard 仍放行。
+     */
+    @Test
+    @DisplayName("经 setRoleTools 授权(控制台同路径)+ 再次保存后授权不丢")
+    void grantViaRoleServiceSurvivesResave() {
+        ensureRoleAndUser();
+        revokeAll();
+
+        // 1) 控制台首次保存:只勾了写面这一项
+        roleService.setRoleTools(ROLE,
+                List.of(new IRoleService.RoleToolItem(HttpManageGuard.GROUP, true)));
+        jdbc.update("INSERT INTO user_role(role_code, username) VALUES (?, ?)", ROLE, USER);
+        assertThat(guard.isAllowed(USER)).isTrue();
+
+        // 2) 控制台再次保存:提交「当前可见组全集」——模拟把别的工具组也勾上后保存
+        roleService.setRoleTools(ROLE, List.of(
+                new IRoleService.RoleToolItem("tool_git", true),
+                new IRoleService.RoleToolItem(HttpManageGuard.GROUP, true),
+                new IRoleService.RoleToolItem("tool_http", true)));
+
+        // 3) 授权仍在,且 guard 仍放行
+        assertThat(roleService.getVisibleToolsForUser(USER))
+                .contains(HttpManageGuard.GROUP, "tool_git", "tool_http");
+        assertThat(guard.isAllowed(USER)).isTrue();
+
+        // 4) 反向:控制台把写面取消勾选并保存 → 立即失权(不是只增不减的粘性授权)
+        roleService.setRoleTools(ROLE,
+                List.of(new IRoleService.RoleToolItem("tool_git", true)));
+        assertThat(guard.isAllowed(USER)).isFalse();
+    }
+
+    /** 建 role + user 行(不碰 role_tool / user_role),供 setRoleTools 路径测试复用。 */
+    private void ensureRoleAndUser() {
+        Integer userExists = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM user_info WHERE username = ?", Integer.class, USER);
+        if (userExists == null || userExists == 0) {
+            jdbc.update("INSERT INTO user_info(username, nickname, password, type) VALUES (?, ?, ?, ?)",
+                    USER, "rbac", "x", "USER");
+        }
+        Integer roleExists = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM role WHERE code = ?", Integer.class, ROLE);
+        if (roleExists == null || roleExists == 0) {
+            jdbc.update("INSERT INTO role(code, name, is_system, description) VALUES (?, ?, FALSE, ?)",
+                    ROLE, "rbac-role", "test");
+        }
+        jdbc.update("DELETE FROM role_tool WHERE role_code = ?", ROLE);
+    }
 }

@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p><b>工具列表数据源与 universal 隐藏(CapabilityService.listAll L112-133 源码核实):</b>
  * openDetail 从 {@code /admin/capabilities} 拉列表,只取 type=LOCAL;服务端 listAll() 对
  * {@code universalGroups.contains(ci.id())} 直接 continue(M6 Q3「完全隐藏」)→
- * #rd-tools 只会出现 RBAC 4 组(tool_git / tool_maven / tool_compile / tool_render),
+ * #rd-tools 只会出现 RBAC 6 组(tool_git / tool_maven / tool_compile / tool_render / tool_http / tool_http_manage),
  * universal 7 组(tool_schedule / subtask / knowledge / time / skill / file / askUser)一个都不出现。
  *
  * <p>删除走 admin API(brief 裁定:API 保证清场;级联清 5 张子表是 DEFECT-Q3-1,
@@ -49,9 +49,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("P2 roles.html:创建角色/动态工具授权/保存持久化/删除级联")
 class RolesAdminBrowserIT extends BrowserTestBase {
 
-    /** RBAC 4 组(@ToolGroup 无 defaultGranted):admin 授权页应动态出现全部 4 组。 */
+    /** RBAC 6 组(@ToolGroup 无 defaultGranted):admin 授权页应动态出现全部 6 组。
+     *  tool_http = IHttpTool 调用面;tool_http_manage = REST 写面(零 @Tool 方法的纯授权组,
+     *  同样必须可勾选,否则授权只能靠手写 SQL,且控制台保存会把它抹掉)。 */
     private static final List<String> RBAC_GROUPS = List.of(
-            "tool_git", "tool_maven", "tool_compile", "tool_render");
+            "tool_git", "tool_maven", "tool_compile", "tool_render", "tool_http", "tool_http_manage");
     /** universal 7 组(defaultGranted=true):listAll() 服务端剔除,授权页完全不展示。 */
     private static final List<String> UNIVERSAL_GROUPS = List.of(
             "tool_schedule", "tool_subtask", "tool_knowledge", "tool_time",

@@ -42,6 +42,14 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- LoomHttpServiceTest 打真实假上游。与 loom-http-core / spring-ai-loom-agent-test
+             同款 wiremock-standalone(单 jar 内置 Jetty,避开 split-jar 的 jetty API 版本错配)。 -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.5.4</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

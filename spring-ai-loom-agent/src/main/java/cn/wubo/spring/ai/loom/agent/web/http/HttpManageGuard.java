@@ -17,8 +17,8 @@ import java.util.Map;
  */
 public final class HttpManageGuard {
 
-    /** RBAC 工具组名,与 admin 控制台中显示的一致。 */
-    public static final String GROUP = "tool_http_manage";
+    /** RBAC 工具组名,与 admin 控制台中显示的一致(单一真源见 {@link IHttpManageTool#GROUP})。 */
+    public static final String GROUP = cn.wubo.spring.ai.loom.agent.tool.http.IHttpManageTool.GROUP;
 
     private final IRoleService roleService;
 

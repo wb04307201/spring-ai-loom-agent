@@ -334,6 +334,11 @@ public class BatchService {
         copy.setExtract(op.getExtract());
         copy.setResponseMode(op.getResponseMode());
         copy.setTimeoutMs(effective);
+        // 路由 override 必须一起复制 —— 漏掉会让批量里的 ad-hoc 调用退回共享 system 的
+        // baseUrl(已恒为 null)→ NoBaseUrl,而单条路径正常,表现为"批量调用整批失败"。
+        // 两字段不可从 JSON 绑定(见 InvokeRequest 的 @JsonIgnore),此处是程序内复制,不受影响。
+        copy.setBaseUrlOverride(op.getBaseUrlOverride());
+        copy.setAuthProfileOverride(op.getAuthProfileOverride());
         return copy;
     }
 

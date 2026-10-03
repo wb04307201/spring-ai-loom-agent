@@ -132,11 +132,14 @@ public class InvokeService {
                 "Use registerSystem or listResources(system://list)", start);
         }
 
-        // Step 2 — Resolve profile
+        // Step 2 — Resolve profile.
+        // Per-request override wins over the system's own authProfile: ad-hoc callers pass
+        // the profile name on the request instead of writing it into the shared System.
+        String authProfileName = firstNonBlank(req.getAuthProfileOverride(), sys.getAuthProfile());
         Profile profile = null;
-        if (sys.getAuthProfile() != null && !sys.getAuthProfile().isBlank()) {
+        if (authProfileName != null) {
             try {
-                profile = profileService.get(sys.getAuthProfile());
+                profile = profileService.get(authProfileName);
             } catch (RuntimeException ex) {
                 return error(out, "ProfileNotFound", ex.getMessage(),
                     "Use addProfile to create it", start);
@@ -163,9 +166,11 @@ public class InvokeService {
         } catch (IllegalArgumentException ex) {
             return error(out, "PathParamMissing", ex.getMessage(), null, start);
         }
-        String baseUrl = sys.getBaseUrl() != null && !sys.getBaseUrl().isBlank()
-            ? sys.getBaseUrl()
-            : (profile != null ? profile.getBaseUrl() : null);
+        // Per-request override wins, then system.baseUrl, then profile.baseUrl.
+        String baseUrl = firstNonBlank(req.getBaseUrlOverride(), sys.getBaseUrl());
+        if (baseUrl == null) {
+            baseUrl = profile != null ? profile.getBaseUrl() : null;
+        }
         if (baseUrl == null || baseUrl.isBlank()) {
             return error(out, "NoBaseUrl",
                 "Neither system.baseUrl nor profile.baseUrl is set", null, start);
@@ -429,6 +434,20 @@ public class InvokeService {
      *   <li>{@code failClosed=false} → original fail-open behavior (source's "both empty → allow")</li>
      * </ol>
      */
+    /**
+     * First non-blank of the given values, or {@code null} when all are null/blank.
+     * Used to layer per-request overrides over the system's stored values without
+     * changing behaviour for callers that never set an override.
+     */
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        }
+        return null;
+    }
+
     private DomainWhitelist effectiveDomainWhitelist(Profile profile) {
         Set<String> global = globalConfig.getAllowedDomains() == null ? Set.of() : globalConfig.getAllowedDomains();
         Set<String> profileAllowed = profile == null ? null : profile.getAllowedDomains();

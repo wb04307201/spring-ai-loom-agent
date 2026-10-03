@@ -50,7 +50,7 @@ mvn test -pl spring-ai-loom-agent-test -Dtest='*BrowserIT' -Dsurefire.failIfNoSp
 # 重建截图基线(UI 有意改版后)
 mvn test -pl spring-ai-loom-agent-test -Dtest='VisualBaselineBrowserIT' -DupdateBaselines=true
 
-# 跑 http 引擎回归网(411 个测试)
+# 跑 http 引擎回归网(289 个测试)
 mvn test -pl loom-http-core
 
 # 跑 http 工具 IT(双模一致性 + 凭据隔离 + WireMock 全链路)
@@ -77,7 +77,7 @@ v1.2.0 left a tech-debt inventory (named categories `A12 / B1 / B2 / B3 / B4 / B
 | T5 | **Portability / spec drift** — Flyway source-organization split (policy A: keep V1.0 single fresh-init file, segment by SQL comment); spec drift A3/A10 422→403; portable upsert |
 | T6 | **Test cleanup** — extract `LoomAgentTestUtil.safeRoute`; cover async batched flush path |
 
-**Status (2026-09-06): complete.** All 7 phases landed (commits `85f8d66..7f43929`); T5.3 portable upsert deferred per `ADR-T05.3` (reactivates only on PG/MySQL adoption). The T7.1 gate's 3 residuals were closed 2026-09-06 (review chain `<K>` `699c1a1`, announcement String-native + a13 null-safe + CAST join `c0df007`, KB `marketKind()` fix + tags embed `cb8178b`, fix wave `376454d`) — `ADR-T07.1` now records **Pass** (AT1 + AT2 included). **Verification gotcha:** default `mvn test -pl spring-ai-loom-agent-test` runs 470 tests (as of 2026-09-19; grows every round) but **no `*IT` classes** (no failsafe plugin); the IT gate (191 tests / 3 env-guarded skips as of 2026-09-19) requires explicit `-Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false` from wiped `spring-ai-loom-agent-test/target/{test-ds,test-users,e2e-files}` + `target/surefire-reports` (**不触碰 `~/.loom`** —— `src/test/resources/application.yml` 已把 `spring.datasource.url`/`datasource-dir`/`users-base-path` 覆盖到 `./target/` 下，浏览器 IT 再由 `BrowserTestBase` 覆盖为 `./target/e2e-files/users`;`~/.loom/datasource` 那句是本行的历史误记,已订正) Post-M3+ follow-ups: spec § Follow-ups FU-1..FU-5.
+**Status (2026-09-06): complete.** All 7 phases landed (commits `85f8d66..7f43929`); T5.3 portable upsert deferred per `ADR-T05.3` (reactivates only on PG/MySQL adoption). The T7.1 gate's 3 residuals were closed 2026-09-06 (review chain `<K>` `699c1a1`, announcement String-native + a13 null-safe + CAST join `c0df007`, KB `marketKind()` fix + tags embed `cb8178b`, fix wave `376454d`) — `ADR-T07.1` now records **Pass** (AT1 + AT2 included). **Verification gotcha:** default `mvn test -pl spring-ai-loom-agent-test` runs 494 tests (as of 2026-10-03; grows every round) but **no `*IT` classes** (no failsafe plugin); the IT gate (217 tests / 3 env-guarded skips as of 2026-10-03) requires explicit `-Dtest='*IT' -Dsurefire.failIfNoSpecifiedTests=false` from wiped `spring-ai-loom-agent-test/target/{test-ds,test-users,e2e-files}` + `target/surefire-reports` (**不触碰 `~/.loom`** —— `src/test/resources/application.yml` 已把 `spring.datasource.url`/`datasource-dir`/`users-base-path` 覆盖到 `./target/` 下，浏览器 IT 再由 `BrowserTestBase` 覆盖为 `./target/e2e-files/users`;`~/.loom/datasource` 那句是本行的历史误记,已订正) Post-M3+ follow-ups: spec § Follow-ups FU-1..FU-5.
 
 ## Architecture
 

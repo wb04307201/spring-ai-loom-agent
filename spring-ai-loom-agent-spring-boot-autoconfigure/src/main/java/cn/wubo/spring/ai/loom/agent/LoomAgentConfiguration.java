@@ -1110,6 +1110,18 @@ public class LoomAgentConfiguration {
             return new cn.wubo.spring.ai.loom.agent.tool.http.DefaultHttpTool(
                     properties.getUsersBasePath(), properties.getHttp());
         }
+
+        /**
+         * HTTP 配置写面的授权标记({@code tool_http_manage},defaultGranted=false)。
+         * 零 {@code @Tool} 方法 —— 它不进 LLM tool callback,只让
+         * {@code CapabilityService.listAll()} 能枚举到该组,使 admin 控制台可以授权、
+         * 且 {@code setRoleTools} 全量替换时不会把它抹掉。见 {@code IHttpManageTool} javadoc。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.http.IHttpManageTool.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.tool.http.IHttpManageTool httpManageTool() {
+            return new cn.wubo.spring.ai.loom.agent.tool.http.DefaultHttpManageTool();
+        }
     }
 
     /**

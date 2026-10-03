@@ -25,15 +25,37 @@ public class LoomHttpService {
     static final String AD_HOC_SYSTEM_NAME = "_ad_hoc";
 
     private final HttpEngine engine;
-    /** 持久化的合成 system 记录:InvokeService.systemService.get(\"_ad_hoc\") 必须能解析。 */
-    private final System adHocSystem;
+    /**
+     * 合成 system 的**注册样板**:只在构造时注册一次,<b>此后永不再被读取或修改</b>。
+     *
+     * <p><b>历史教训 —— 不要为了路由去改这个字段</b>:它注册后会落盘,而
+     * {@link FileWatcher} 在 {@code profiles/} 或 {@code systems/} 变更时调
+     * {@link HttpEngine#reload()},reload 清缓存并从磁盘反序列化出<b>新对象</b>;
+     * 改本字段不会影响引擎读到的副本。更严重的是:它曾是<b>进程级共享可变状态</b> ——
+     * {@code InvokeService} 按 name 重新解析 {@code _ad_hoc} 并读它的 baseUrl/authProfile,
+     * 那次读取发生在写锁之外,导致两个并发 ad-hoc 调用互相覆盖目标主机与凭据。
+     * 现在路由参数随 {@link InvokeRequest} 传递(见 {@code invokeAdHoc}),
+     * 共享对象保持不可变,并发调用之间无共享状态。
+     */
+    private final System adHocSystemTemplate;
 
     public LoomHttpService(HttpEngine engine) {
         this.engine = engine;
-        this.adHocSystem = new System();
-        adHocSystem.setName(AD_HOC_SYSTEM_NAME);
-        adHocSystem.setDescription("Synthetic system for unbound ad-hoc httpXxx calls");
-        engine.registerSystem(adHocSystem);
+        this.adHocSystemTemplate = new System();
+        adHocSystemTemplate.setName(AD_HOC_SYSTEM_NAME);
+        adHocSystemTemplate.setDescription("Synthetic system for unbound ad-hoc httpXxx calls");
+        // 无条件「删掉再注册」,不是「注册失败才重试」。
+        // 两个原因:
+        //  1) registerSystem 走 HttpEngine.toJson 折叠,**从不抛异常** —— 重名只体现为
+        //     返回信封里的 {"error":"...already exists..."}。所以任何"捕获异常再重试"的写法
+        //     都是死代码,合成 system 会静默缺席。
+        //  2) 旧版本把**每次调用的 baseUrl/authProfile 写进这份记录并落盘**。不洗掉的话,
+        //     "不带 profile 的 ad-hoc 调用"会经 firstNonBlank 回退到上一位调用者的凭据,
+        //     并把它发到上一位调用者的主机上(凭据外泄)。
+        // updateSystem 的 merge 跳过 null 字段(清不掉),故走 remove + register。
+        // 只在构造期发生一次,不进入调用热路径。
+        engine.removeSystem(AD_HOC_SYSTEM_NAME, false);
+        engine.registerSystem(adHocSystemTemplate);
     }
 
     @McpTool(name = "http_get", description =
@@ -108,14 +130,13 @@ public class LoomHttpService {
         Map<String, String> headers = parseHeaders(headersJson);
         Map<String, Object> queryParams = parseQuery(uri.getRawQuery());
 
-        // 同步更新合成系统:baseUrl = origin,authProfile = profile
-        synchronized (adHocSystem) {
-            adHocSystem.setBaseUrl(origin);
-            adHocSystem.setAuthProfile(profile);
-        }
-
+        // 路由参数随请求传递,不写共享的 _ad_hoc system ——
+        // 见 adHocSystemTemplate 的 javadoc(共享可变状态会导致并发调用互相覆盖
+        // 目标主机与凭据)。引擎侧由 InvokeService 的 per-request override 优先取值。
         InvokeRequest req = new InvokeRequest();
         req.setSystem(AD_HOC_SYSTEM_NAME);
+        req.setBaseUrlOverride(origin);
+        req.setAuthProfileOverride(profile);
         req.setMethod(method);
         req.setPath(pathOnly);
         req.setParams(queryParams);
