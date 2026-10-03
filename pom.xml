@@ -44,6 +44,7 @@
         <module>spring-ai-loom-agent-spring-boot-autoconfigure</module>
         <module>spring-ai-loom-agent-spring-boot-starter</module>
         <module>loom-file-mcp</module>
+        <module>loom-http-mcp</module>
         <module>loom-git-mcp</module>
         <module>loom-maven-mcp</module>
         <module>loom-compile-mcp</module>

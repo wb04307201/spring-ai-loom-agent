@@ -269,6 +269,21 @@ public final class HttpEngine {
         });
     }
 
+    /**
+     * 刷新 profile + system 内存缓存，并把 OpenAPI 缓存置为下次按需重取。
+     *
+     * <p>由 jar 侧 {@code FileWatcher} 在 profiles/ 或 systems/ 目录文件变更后调用，
+     * 然后向已连 MCP client 推 {@code notifications/resources/list_changed}。
+     *
+     * <p><strong>Task 11 对 Task 4 契约的唯一一处微调</strong>：Task 4 在 HttpEngine
+     * 内部构造 profile / system / history 等服务，但未暴露重载入口。本任务加这一个
+     * 方法以满足 Task 12 的 FileWatcher 监听需要，不引入新依赖、不破坏既有签名。
+     */
+    public void reload() {
+        profileService.reload();
+        systemService.reload();
+    }
+
     /** 列出 profile 名(不含凭据),供 REST 读接口用。 */
     public List<String> listProfiles() {
         List<String> out = new ArrayList<>();

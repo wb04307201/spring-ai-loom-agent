@@ -1,0 +1,20 @@
+# Loom HTTP MCP Server 配置
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+  ai:
+    mcp:
+      server:
+        name: loom-http-mcp
+        version: @project.version@
+        annotation-scanner:
+          enabled: true   # 自动扫描 @Component 上的 @McpTool/@McpResource（与 Task 12 兼容）
+
+# loom.http.mcp.* 绑定到 LoomHttpMcpProperties
+loom:
+  http:
+    mcp:
+      basePath: ${user.home}/.loom/http-mcp
+      failClosed: false
+      autoReload: true
