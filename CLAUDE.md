@@ -55,9 +55,17 @@ mvn test -pl loom-http-core
 
 # 跑 http 工具 IT(双模一致性 + 凭据隔离 + WireMock 全链路)
 mvn test -pl spring-ai-loom-agent-test -Dtest='*Http*' -Dsurefire.failIfNoSpecifiedTests=false
+
+# 跑 5 个 MCP server 的 schema required 契约回归锁(注解误用 @ToolParam 会导致可选参数全被标必填)
+mvn test -pl loom-file-mcp,loom-git-mcp,loom-maven-mcp,loom-compile-mcp,loom-http-mcp
+
+# loom-http-mcp 的 FileWatcherIT —— 同样需显式 -Dtest(默认 test 阶段不跑任何 *IT,全仓无 failsafe 插件)
+mvn test -pl loom-http-mcp -Dtest='FileWatcherIT' -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 浏览器 IT 隔离约定：用户树目录用 `./target/e2e-files/users`（`users-base-path`）、数据库用 `./target/test-ds`（均相对 `spring-ai-loom-agent-test`，`mvn clean` 即清）；截图基线在 `src/test/resources/browser-baselines/`（同机更新约定——跨机器像素渲染差异由 `VisualBaselineBrowserIT` 的 0.5% diff 阈值吸收，超阈值需在本机 `-DupdateBaselines=true` 重建）。
+
+**`*McpSchemaRequiredTest` 的防空转约定**：这些用例靠反射把 schema 的 `required` 字段映射回 Java 参数，**必须按位置对齐，不能按参数名** —— 本仓编译未开 `-parameters`（`javap` 确认签名里只有裸类型，无 `MethodParameters` 属性），反射拿到的是 `arg0/arg1/...`。早期版本用 `p.getName().equals(field)` 匹配，永远匹配不上 ⇒ 变异测试（把注解回退成 `@ToolParam`）时用例**假绿**。四个用例里的 `assertThat(annotated).isGreaterThan(0)` 是防空转哨兵：它断言反射至少看到一个 `@McpToolParam` 参数，为 0 即说明匹配逻辑坏了。改动这些用例后请用变异测试自证（把 `@McpToolParam` 批量换成 `@ToolParam`，期望变红）。
 
 ## M0/M1/M2 Market Upgrade (v1.2.0)
 

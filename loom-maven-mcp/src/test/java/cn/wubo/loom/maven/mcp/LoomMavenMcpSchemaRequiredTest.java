@@ -60,22 +60,34 @@ class LoomMavenMcpSchemaRequiredTest {
         assertThat(specs).isNotEmpty();
 
         List<String> violations = new ArrayList<>();
+        int checked = 0;
+        int annotated = 0;
         for (McpServerFeatures.SyncToolSpecification spec : specs) {
             String tool = spec.tool().name();
-            for (String field : requiredFields(spec.tool().inputSchema().toString())) {
-                for (java.lang.reflect.Method method : toolMethods()) {
-                    if (!method.getName().equals(toCamel(tool))) continue;
-                    var param = Arrays.stream(method.getParameters())
-                            .filter(p -> p.getName().equals(field)).findFirst();
-                    if (param.isEmpty()) continue;
-                    var ann = param.get().getAnnotation(
-                            org.springframework.ai.mcp.annotation.McpToolParam.class);
-                    if (ann != null && !ann.required()) {
-                        violations.add(tool + "." + field);
-                    }
-                }
+            java.lang.reflect.Method method = toolMethods().stream()
+                    .filter(m -> m.getName().equals(toCamel(tool))).findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "工具 " + tool + " 在 schema 里有,但在 " + LoomMavenMcpService.class
+                                    .getSimpleName() + " 上找不到同名方法"));
+            var params = method.getParameters();
+            List<String> required = requiredFields(spec.tool().inputSchema().toString());
+            // schema 的 properties 键序 = 参数声明序
+            List<String> fieldNames = propertyNames(spec.tool().inputSchema().toString());
+
+            for (int i = 0; i < params.length; i++) {
+                var ann = params[i].getAnnotation(
+                        org.springframework.ai.mcp.annotation.McpToolParam.class);
+                if (ann == null) continue;
+                annotated++;
+                if (ann.required()) continue;   // 只校验显式可选的参数
+                checked++;
+                String field = i < fieldNames.size() ? fieldNames.get(i) : "<第" + i + "个参数>";
+                if (required.contains(field)) violations.add(tool + "." + field);
             }
         }
+        assertThat(annotated)
+                .as("反射应当至少看到 N 个 @McpToolParam 参数,实际=%d —— 若为 0 说明反射匹配空转了", annotated)
+                .isGreaterThan(0);
         assertThat(violations)
                 .as("以下参数在 Java 侧标了 required=false,却出现在 schema 的 required 数组里:%n%s", violations)
                 .isEmpty();
@@ -118,6 +130,50 @@ class LoomMavenMcpSchemaRequiredTest {
         if (body.isEmpty()) return List.of();
         return Arrays.stream(body.split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    /**
+     * 从 schema 的 toString 里抽出 properties 的键名,<b>按出现顺序</b>
+     * —— schema 生成器按方法参数声明序写入 properties,故该顺序即参数序。
+     *
+     * <p>schema 是 {@code Map<String,Object>},toString 形态为
+     * {@code {properties={path={...}, head={...}}, required=[...]}}。
+     * 只取 properties 块内、处于块顶层且位于 {@code =} 之前的键
+     * (嵌套的 type/description 等子键靠 {@code {}} 深度排除)。
+     *
+     * <p><b>为什么要按位置而非按名字对齐</b>:本仓编译未开 {@code -parameters}
+     * (javap 确认:签名里只有裸类型,无 MethodParameters 属性),反射拿到的是
+     * {@code arg0/arg1/...} 而非真实参数名。早先版本用
+     * {@code p.getName().equals(field)} 匹配 ⇒ 永远匹配不上 ⇒ 循环空转放行,
+     * 变异测试(注解回退成 @ToolParam)时本用例<b>假绿</b>。
+     */
+    static List<String> propertyNames(String schema) {
+        int start = schema.indexOf("properties={");
+        if (start < 0) return List.of();
+        int i = start + "properties=".length();
+        List<String> names = new ArrayList<>();
+        int depth = 0;
+        boolean expectKey = true;
+        for (; i < schema.length(); i++) {
+            char c = schema.charAt(i);
+            if (c == '{' || c == '[') { depth++; continue; }
+            if (c == '}' || c == ']') {
+                if (depth == 0) break;      // properties 块结束
+                depth--; continue;
+            }
+            if (depth == 0 && expectKey && c == '=') {
+                int end = i;
+                while (end > 0 && Character.isWhitespace(schema.charAt(end - 1))) end--;
+                int s = end;
+                while (s > 0 && (Character.isLetterOrDigit(schema.charAt(s - 1))
+                        || schema.charAt(s - 1) == '_')) s--;
+                if (s < end) names.add(schema.substring(s, end));
+                expectKey = false;
+                continue;
+            }
+            if (depth == 0 && c == ',') { expectKey = true; continue; }
+        }
+        return names;
     }
 
     /** snake_case 工具名转驼峰方法名;已是驼峰的返回原值。 */
