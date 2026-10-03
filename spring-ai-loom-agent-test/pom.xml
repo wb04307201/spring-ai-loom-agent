@@ -88,6 +88,17 @@
             <artifactId>spring-boot-restclient</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- HTTP 工具链确定性测试用的假上游。wiremock-standalone 是单 jar 包,
+             内置 Jetty 12 + ee10-servlet,避开了 split-jar(3.5.4)里
+             jetty-ee10-servlet:12.0.8 与 jetty-util:12.1.12 的 API 版本错配
+             (NoSuchMethodError: Environment.ensure)。loom-http-core 用同款依赖、
+             已实测可跑。 -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.5.4</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
