@@ -174,6 +174,41 @@ public class OpenApiCache {
         return loadResult(system).endpoints();
     }
 
+    /**
+     * Delete the cached OpenAPI document for {@code systemName}. Removes the
+     * {@code <root>/systems/<name>/openapi.json} file (if it exists) and
+     * cleans up the now-empty parent directory. The next call to
+     * {@link #loadResult(System)} on the same system will re-fetch the
+     * document from its source.
+     *
+     * <p>Idempotent: silently succeeds when no cache exists for the system.
+     * Used by {@code HttpEngine.removeSystem(name, true)} so removing a
+     * system fully evicts its OpenAPI state (otherwise a re-register of the
+     * same name could surface stale endpoints).
+     *
+     * @param systemName the system whose OpenAPI cache should be evicted
+     */
+    public void invalidate(String systemName) {
+        if (systemName == null || systemName.isBlank()) return;
+        Path cacheFile = storage.systemsDir().resolve(systemName).resolve("openapi.json");
+        try {
+            Files.deleteIfExists(cacheFile);
+            // Best-effort cleanup of the now-empty cache folder.
+            Path cacheDir = cacheFile.getParent();
+            if (cacheDir != null && Files.exists(cacheDir)) {
+                try (var stream = Files.list(cacheDir)) {
+                    if (stream.findAny().isEmpty()) {
+                        Files.deleteIfExists(cacheDir);
+                    }
+                } catch (IOException ignored) {
+                    // Non-fatal — the file was deleted, the dir lingers.
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to delete openapi cache for system " + systemName, e);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // HTTP fetch (304-aware)
     // ---------------------------------------------------------------------

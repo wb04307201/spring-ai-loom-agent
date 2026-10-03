@@ -241,8 +241,14 @@ public final class HttpEngine {
         return envelope;
     }
 
-    public String removeSystem(String name, boolean deleteCache) {
-        return toJson(() -> { systemService.delete(name); return name; });
+    public String removeSystem(String name, boolean deleteOpenApiCache) {
+        return toJson(() -> {
+            systemService.delete(name);
+            if (deleteOpenApiCache) {
+                openApiCache.invalidate(name);
+            }
+            return name;
+        });
     }
 
     /** 强制刷新 OpenAPI 元数据;name 为 null 表示全部刷新。 */

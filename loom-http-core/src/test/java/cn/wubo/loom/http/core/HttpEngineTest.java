@@ -148,4 +148,45 @@ class HttpEngineTest {
         assertThat(out).contains("DomainNotAllowed");
         assertThat(out).doesNotContain("Connection refused");
     }
+
+    @Test
+    @DisplayName("removeSystem(name, true) 删除 OpenAPI 缓存文件")
+    void removeSystemEvictsOpenApiCache(@TempDir Path tmp) throws Exception {
+        HttpEngine engine = new HttpEngine(tmp, new HttpConfig());
+        System s = new System();
+        s.setName("with-cache");
+        s.setBaseUrl("https://api.example.com");
+        engine.registerSystem(s);
+
+        // 模拟 OpenAPI 缓存已落盘 (生产中由 refreshSystem / invokeEndpoint 触发)
+        Path cacheFile = tmp.resolve("systems").resolve("with-cache").resolve("openapi.json");
+        java.nio.file.Files.createDirectories(cacheFile.getParent());
+        java.nio.file.Files.writeString(cacheFile, "{\"openapi\":\"3.0.0\"}");
+        assertThat(java.nio.file.Files.exists(cacheFile)).isTrue();
+
+        String out = engine.removeSystem("with-cache", true);
+        assertThat(out).contains("with-cache");
+        // 缓存文件应被清掉
+        assertThat(java.nio.file.Files.exists(cacheFile)).isFalse();
+    }
+
+    @Test
+    @DisplayName("removeSystem(name, false) 保留 OpenAPI 缓存文件")
+    void removeSystemKeepsOpenApiCache(@TempDir Path tmp) throws Exception {
+        HttpEngine engine = new HttpEngine(tmp, new HttpConfig());
+        System s = new System();
+        s.setName("keep-cache");
+        s.setBaseUrl("https://api.example.com");
+        engine.registerSystem(s);
+
+        // 模拟 OpenAPI 缓存已落盘
+        Path cacheFile = tmp.resolve("systems").resolve("keep-cache").resolve("openapi.json");
+        java.nio.file.Files.createDirectories(cacheFile.getParent());
+        java.nio.file.Files.writeString(cacheFile, "{\"openapi\":\"3.0.0\"}");
+        assertThat(java.nio.file.Files.exists(cacheFile)).isTrue();
+
+        engine.removeSystem("keep-cache", false);
+        // 缓存文件应保留 —— deleteOpenApiCache=false 不动 OpenAPI
+        assertThat(java.nio.file.Files.exists(cacheFile)).isTrue();
+    }
 }
