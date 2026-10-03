@@ -99,6 +99,13 @@
             <artifactId>loom-file-core</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+        <!-- 内部 HTTP 工具壳:DefaultHttpTool 消费 HttpEngine。HttpConfig/InvokeRequest/
+             BatchRequest 由此传递,Task 7/8 会加入 bean 装配与 REST 写面。 -->
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-http-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
         <dependency>
             <groupId>io.github.wb04307201</groupId>
             <artifactId>loom-process-core</artifactId>
