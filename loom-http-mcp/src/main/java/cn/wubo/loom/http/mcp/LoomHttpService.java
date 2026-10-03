@@ -5,7 +5,7 @@ import cn.wubo.loom.http.core.invoke.InvokeRequest;
 import cn.wubo.loom.http.core.system.System;
 import cn.wubo.loom.http.core.util.JsonMappers;
 import org.springframework.ai.mcp.annotation.McpTool;
-import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.ai.mcp.annotation.McpToolParam;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -62,47 +62,47 @@ public class LoomHttpService {
             "发送 HTTP GET。兼容旧(只传 url+headers JSON)+ 新增可选 profile/assertions/extract/responseMode。"
             + "返回 InvokeResponse JSON(statusCode/headers/body/extracted/assertionResult/error)。")
     public String httpGet(
-            @ToolParam(description = "完整 URL https://api.example.com/data") String url,
-            @ToolParam(description = "请求头 JSON 字符串,可省略", required = false) String headers,
-            @ToolParam(description = "profile 名,自动注入 auth + customHeaders", required = false) String profile,
-            @ToolParam(description = "断言列表 {type,value}", required = false) List<Map<String, Object>> assertions,
-            @ToolParam(description = "JSONPath 提取 {alias:\"$.x\"}", required = false) Map<String, String> extract,
-            @ToolParam(description = "summary / full / file", required = false) String responseMode) {
+            @McpToolParam(description = "完整 URL https://api.example.com/data") String url,
+            @McpToolParam(description = "请求头 JSON 字符串,可省略", required = false) String headers,
+            @McpToolParam(description = "profile 名,自动注入 auth + customHeaders", required = false) String profile,
+            @McpToolParam(description = "断言列表,每项形如 {type, value} 或 {type, path, value}。type 支持 7 种:statusEquals(用 value)/statusIn(用 value,逗号分隔多个状态码)/bodyContains(用 value)/bodyJsonPathEquals(用 path+value,path 是 $. 开头的 JSONPath)/bodyJsonPathExists(用 path)/responseTimeMsLt(用 value,毫秒)/headerEquals(用 header+value)。注意 type 只认这 7 个字面量,写 equals 之类会返回 Unknown assertion type", required = false) List<Map<String, Object>> assertions,
+            @McpToolParam(description = "JSONPath 提取 {alias:\"$.x\"}", required = false) Map<String, String> extract,
+            @McpToolParam(description = "summary / full / file", required = false) String responseMode) {
         return invokeAdHoc("GET", url, null, headers, profile, assertions, extract, responseMode);
     }
 
     @McpTool(name = "http_post", description = "发送 HTTP POST。body 为 JSON 字符串。")
     public String httpPost(
-            @ToolParam(description = "完整 URL") String url,
-            @ToolParam(description = "请求体 JSON 字符串 {\"key\":val}") String body,
-            @ToolParam(description = "请求头 JSON 字符串", required = false) String headers,
-            @ToolParam(description = "profile 名", required = false) String profile,
-            @ToolParam(description = "断言列表", required = false) List<Map<String, Object>> assertions,
-            @ToolParam(description = "JSONPath 提取", required = false) Map<String, String> extract,
-            @ToolParam(description = "summary / full / file", required = false) String responseMode) {
+            @McpToolParam(description = "完整 URL") String url,
+            @McpToolParam(description = "请求体 JSON 字符串 {\"key\":val}") String body,
+            @McpToolParam(description = "请求头 JSON 字符串", required = false) String headers,
+            @McpToolParam(description = "profile 名", required = false) String profile,
+            @McpToolParam(description = "断言列表,每项形如 {type, value} 或 {type, path, value}。type 支持 7 种:statusEquals(用 value)/statusIn(用 value,逗号分隔多个状态码)/bodyContains(用 value)/bodyJsonPathEquals(用 path+value,path 是 $. 开头的 JSONPath)/bodyJsonPathExists(用 path)/responseTimeMsLt(用 value,毫秒)/headerEquals(用 header+value)。注意 type 只认这 7 个字面量,写 equals 之类会返回 Unknown assertion type", required = false) List<Map<String, Object>> assertions,
+            @McpToolParam(description = "JSONPath 提取", required = false) Map<String, String> extract,
+            @McpToolParam(description = "summary / full / file", required = false) String responseMode) {
         return invokeAdHoc("POST", url, body, headers, profile, assertions, extract, responseMode);
     }
 
     @McpTool(name = "http_put", description = "发送 HTTP PUT。body 为 JSON 字符串。")
     public String httpPut(
-            @ToolParam(description = "完整 URL") String url,
-            @ToolParam(description = "请求体 JSON 字符串") String body,
-            @ToolParam(description = "请求头 JSON 字符串", required = false) String headers,
-            @ToolParam(description = "profile 名", required = false) String profile,
-            @ToolParam(description = "断言列表", required = false) List<Map<String, Object>> assertions,
-            @ToolParam(description = "JSONPath 提取", required = false) Map<String, String> extract,
-            @ToolParam(description = "summary / full / file", required = false) String responseMode) {
+            @McpToolParam(description = "完整 URL") String url,
+            @McpToolParam(description = "请求体 JSON 字符串") String body,
+            @McpToolParam(description = "请求头 JSON 字符串", required = false) String headers,
+            @McpToolParam(description = "profile 名", required = false) String profile,
+            @McpToolParam(description = "断言列表,每项形如 {type, value} 或 {type, path, value}。type 支持 7 种:statusEquals(用 value)/statusIn(用 value,逗号分隔多个状态码)/bodyContains(用 value)/bodyJsonPathEquals(用 path+value,path 是 $. 开头的 JSONPath)/bodyJsonPathExists(用 path)/responseTimeMsLt(用 value,毫秒)/headerEquals(用 header+value)。注意 type 只认这 7 个字面量,写 equals 之类会返回 Unknown assertion type", required = false) List<Map<String, Object>> assertions,
+            @McpToolParam(description = "JSONPath 提取", required = false) Map<String, String> extract,
+            @McpToolParam(description = "summary / full / file", required = false) String responseMode) {
         return invokeAdHoc("PUT", url, body, headers, profile, assertions, extract, responseMode);
     }
 
     @McpTool(name = "http_delete", description = "发送 HTTP DELETE。")
     public String httpDelete(
-            @ToolParam(description = "完整 URL") String url,
-            @ToolParam(description = "请求头 JSON 字符串", required = false) String headers,
-            @ToolParam(description = "profile 名", required = false) String profile,
-            @ToolParam(description = "断言列表", required = false) List<Map<String, Object>> assertions,
-            @ToolParam(description = "JSONPath 提取", required = false) Map<String, String> extract,
-            @ToolParam(description = "summary / full / file", required = false) String responseMode) {
+            @McpToolParam(description = "完整 URL") String url,
+            @McpToolParam(description = "请求头 JSON 字符串", required = false) String headers,
+            @McpToolParam(description = "profile 名", required = false) String profile,
+            @McpToolParam(description = "断言列表,每项形如 {type, value} 或 {type, path, value}。type 支持 7 种:statusEquals(用 value)/statusIn(用 value,逗号分隔多个状态码)/bodyContains(用 value)/bodyJsonPathEquals(用 path+value,path 是 $. 开头的 JSONPath)/bodyJsonPathExists(用 path)/responseTimeMsLt(用 value,毫秒)/headerEquals(用 header+value)。注意 type 只认这 7 个字面量,写 equals 之类会返回 Unknown assertion type", required = false) List<Map<String, Object>> assertions,
+            @McpToolParam(description = "JSONPath 提取", required = false) Map<String, String> extract,
+            @McpToolParam(description = "summary / full / file", required = false) String responseMode) {
         return invokeAdHoc("DELETE", url, null, headers, profile, assertions, extract, responseMode);
     }
 

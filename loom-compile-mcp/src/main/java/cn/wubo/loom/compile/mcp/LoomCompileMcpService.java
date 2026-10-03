@@ -5,7 +5,7 @@ import cn.wubo.loom.compile.core.CompileAndDeployResult;
 import cn.wubo.loom.compile.core.CompileConfig;
 import cn.wubo.loom.compile.core.ImageTemplate;
 import org.springframework.ai.mcp.annotation.McpTool;
-import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.ai.mcp.annotation.McpToolParam;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -45,7 +45,7 @@ public class LoomCompileMcpService {
     @McpTool(name = "compile_and_deploy", description = "端到端编译部署：git clone → 构建 → docker build → docker run → 健康检查。"
             + "一次调用完成整个部署流水线。")
     public String compileAndDeploy(
-            @ToolParam(description = "参数 Map，包含：gitUrl（必填）、port（必填）、containerPort（必填）、"
+            @McpToolParam(description = "参数 Map，包含：gitUrl（必填）、port（必填）、containerPort（必填）、"
                     + "branch、subDir、imageName、containerName、healthPath、buildTool（maven/npm/npm-frontend/pip）、"
                     + "baseImage、runCommand、gitUsername、gitPassword") Map<String, Object> params) {
         // Username doesn't exist in the MCP auth context here; fall back to

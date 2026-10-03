@@ -2,7 +2,7 @@ package cn.wubo.loom.maven.mcp;
 
 import cn.wubo.loom.maven.core.MavenOperations;
 import org.springframework.ai.mcp.annotation.McpTool;
-import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.ai.mcp.annotation.McpToolParam;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -31,11 +31,11 @@ public class LoomMavenMcpService {
 
     @McpTool(name = "maven_execute", description = "执行 Maven 命令（通用入口）。可指定任意 goals，如 clean、package、dependency:tree 等。")
     public String mavenExecute(
-            @ToolParam(description = "Maven goals 列表，如 [\"clean\", \"package\"]") List<String> goals,
-            @ToolParam(description = "pom.xml 路径（相对或绝对）", required = false) String pomPath,
-            @ToolParam(description = "工作目录（相对或绝对）", required = false) String workingDir,
-            @ToolParam(description = "Maven 属性", required = false) Map<String, String> properties,
-            @ToolParam(description = "超时毫秒数", required = false) Long timeoutMs) {
+            @McpToolParam(description = "Maven goals 列表，如 [\"clean\", \"package\"]") List<String> goals,
+            @McpToolParam(description = "pom.xml 路径（相对或绝对）", required = false) String pomPath,
+            @McpToolParam(description = "工作目录（相对或绝对）", required = false) String workingDir,
+            @McpToolParam(description = "Maven 属性", required = false) Map<String, String> properties,
+            @McpToolParam(description = "超时毫秒数", required = false) Long timeoutMs) {
         File workDir = resolveWorkingDir(workingDir);
         File pomFile = resolvePomFile(pomPath, workDir);
         return mavenOps.execute(goals, workDir, pomFile, properties, timeoutMs);
@@ -43,10 +43,10 @@ public class LoomMavenMcpService {
 
     @McpTool(name = "maven_build", description = "编译项目（mvn compile）")
     public String mavenBuild(
-            @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
-            @ToolParam(description = "工作目录", required = false) String workingDir,
-            @ToolParam(description = "Maven 属性", required = false) Map<String, String> properties,
-            @ToolParam(description = "是否跳过测试", required = false) Boolean skipTests) {
+            @McpToolParam(description = "pom.xml 路径", required = false) String pomPath,
+            @McpToolParam(description = "工作目录", required = false) String workingDir,
+            @McpToolParam(description = "Maven 属性", required = false) Map<String, String> properties,
+            @McpToolParam(description = "是否跳过测试", required = false) Boolean skipTests) {
         File workDir = resolveWorkingDir(workingDir);
         File pomFile = resolvePomFile(pomPath, workDir);
         List<String> goals = new ArrayList<>(List.of("compile"));
@@ -59,10 +59,10 @@ public class LoomMavenMcpService {
 
     @McpTool(name = "maven_package", description = "打包项目（mvn package），默认跳过测试")
     public String mavenPackage(
-            @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
-            @ToolParam(description = "工作目录", required = false) String workingDir,
-            @ToolParam(description = "Maven 属性", required = false) Map<String, String> properties,
-            @ToolParam(description = "是否跳过测试", required = false) Boolean skipTests) {
+            @McpToolParam(description = "pom.xml 路径", required = false) String pomPath,
+            @McpToolParam(description = "工作目录", required = false) String workingDir,
+            @McpToolParam(description = "Maven 属性", required = false) Map<String, String> properties,
+            @McpToolParam(description = "是否跳过测试", required = false) Boolean skipTests) {
         File workDir = resolveWorkingDir(workingDir);
         File pomFile = resolvePomFile(pomPath, workDir);
         List<String> goals = new ArrayList<>(List.of("package"));
@@ -75,10 +75,10 @@ public class LoomMavenMcpService {
 
     @McpTool(name = "maven_test", description = "运行单元测试（mvn test）")
     public String mavenTest(
-            @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
-            @ToolParam(description = "工作目录", required = false) String workingDir,
-            @ToolParam(description = "测试模式，如 *ServiceTest", required = false) String testPattern,
-            @ToolParam(description = "Maven 属性", required = false) Map<String, String> properties) {
+            @McpToolParam(description = "pom.xml 路径", required = false) String pomPath,
+            @McpToolParam(description = "工作目录", required = false) String workingDir,
+            @McpToolParam(description = "测试模式，如 *ServiceTest", required = false) String testPattern,
+            @McpToolParam(description = "Maven 属性", required = false) Map<String, String> properties) {
         File workDir = resolveWorkingDir(workingDir);
         File pomFile = resolvePomFile(pomPath, workDir);
         List<String> goals = new ArrayList<>(List.of("test"));
@@ -91,9 +91,9 @@ public class LoomMavenMcpService {
 
     @McpTool(name = "maven_dependency_tree", description = "查看依赖树（mvn dependency:tree）")
     public String mavenDependencyTree(
-            @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
-            @ToolParam(description = "工作目录", required = false) String workingDir,
-            @ToolParam(description = "依赖范围：compile/runtime/test/provided", required = false) String includeScope) {
+            @McpToolParam(description = "pom.xml 路径", required = false) String pomPath,
+            @McpToolParam(description = "工作目录", required = false) String workingDir,
+            @McpToolParam(description = "依赖范围：compile/runtime/test/provided", required = false) String includeScope) {
         File workDir = resolveWorkingDir(workingDir);
         File pomFile = resolvePomFile(pomPath, workDir);
         List<String> goals = new ArrayList<>(List.of("dependency:tree"));
@@ -107,8 +107,8 @@ public class LoomMavenMcpService {
 
     @McpTool(name = "maven_validate", description = "验证项目结构（mvn validate）")
     public String mavenValidate(
-            @ToolParam(description = "pom.xml 路径", required = false) String pomPath,
-            @ToolParam(description = "工作目录", required = false) String workingDir) {
+            @McpToolParam(description = "pom.xml 路径", required = false) String pomPath,
+            @McpToolParam(description = "工作目录", required = false) String workingDir) {
         File workDir = resolveWorkingDir(workingDir);
         File pomFile = resolvePomFile(pomPath, workDir);
         return mavenOps.execute(List.of("validate"), workDir, pomFile, null, null);
