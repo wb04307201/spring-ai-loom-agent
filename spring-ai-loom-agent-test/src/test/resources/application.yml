@@ -14,6 +14,22 @@ spring:
               type: adaptive
             reasoning_split: true
           stream-usage: true
+    loom:
+      agent:
+        http:
+          # embedded HTTP 工具在 DefaultHttpTool:43 **硬编码** failClosed=true,
+          # 且 HttpProperty.allowedDomains 默认 List.of() ⇒ 白名单空集时
+          # InvokeService 的 fail-closed 分支直接返回空白名单,拒绝一切。
+          # profile 的 allowedDomains 打不开这个闸(它只能收紧已配置的全局集),
+          # 所以这是唯一能让真实对话里 invokeEndpoint 跑通的开关。
+          #
+          # 纯 host 模式是 port-agnostic 的(DomainWhitelist.allows 的无端口分支),
+          # 故无需写 :443 —— 一次放行该域名的任意端口。
+          #
+          # 仅测试配置;主库与 HttpProperty 的默认值不变(fail-closed 是 SSRF 防护
+          # 的部署级闸门,刻意不打开)。
+          allowed-domains:
+            - jsonplaceholder.typicode.com
 loom:
   agent:
     datasource-dir: ./target/test-ds

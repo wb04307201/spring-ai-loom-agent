@@ -125,6 +125,16 @@ spring:
           servers-configuration: classpath:mcp-servers.json
     loom:
       agent:
+        # HTTP 调用工具(embedded IHttpTool)。DefaultHttpTool:43 **硬编码**
+        # failClosed=true,且 HttpProperty.allowedDomains 默认 List.of()
+        # ⇒ 白名单空集时一切 invokeEndpoint 返回 DomainNotAllowed。
+        # profile 的 allowedDomains 打不开这个闸(只能收紧已配置的全局集),
+        # 所以这是唯一开关。
+        # 纯 host 模式 port-agnostic(DomainWhitelist.allows 无端口分支),
+        # 无需写 :443。⚠️ 这是本 test app 的演示配置,生产部署须按需收紧。
+        http:
+          allowed-domains:
+            - jsonplaceholder.typicode.com
         # 单点 git / maven 工具默认 disabled —— 编译/部署请走 ICompileAndDeployTool（始终 enabled）。
         # 需要时显式开启：
         #   git: { enabled: true }   # 暴露 28 个 git 命令
