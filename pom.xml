@@ -35,6 +35,7 @@
 
     <modules>
         <module>loom-file-core</module>
+        <module>loom-http-core</module>
         <module>loom-process-core</module>
         <module>loom-git-core</module>
         <module>loom-maven-core</module>
