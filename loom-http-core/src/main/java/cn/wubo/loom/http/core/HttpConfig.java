@@ -52,13 +52,21 @@ public class HttpConfig {
         "secret", "clientSecret", "apiKey", "api_key",
         "privateKey", "private_key"));
     /**
-     * 白名单 fail-closed 开关(spec §4.4 三态表)。false = http-mcp 原语义
-     * (global 空时退回 profile 白名单,两边都空则不加限制);true = 部署级闸门
+     * 白名单 fail-closed 开关(spec §4.4 三态表)。false = http-mcp 的"退回"语义
+     * (global 空时退回 profile 白名单);true = 部署级闸门
      * (global 空即拒绝一切外网请求)。
      *
+     * <p><b>两种模式下"global 与 profile 都空"都是拒绝一切</b>,不是放行。
+     * 依据:本仓 {@code c505ec16}(从源项目搬运时)的实现有一条显式分支
+     * {@code if (gEmpty && pEmpty) return new DomainWhitelist(Set.of());}
+     * (注释原文 "Both empty — return an empty whitelist (everything denied)")。
+     * {@code 2798efe4} 引入本开关时该分支被两段 if 结构吞掉,双空组合改为落入
+     * {@code new DomainWhitelist(null)} 抛 NPE —— 即该组合自那时起一直<b>不可用</b>,
+     * 而非"不加限制"。Task 14 已把原语义接回。
+     *
      * <p>内部工具模式(嵌在 spring-ai-loom-agent 里的 HTTP tool)恒为 true;
-     * 独立 jar 默认 false 以保持 1.1.1 已发布版本的既有行为,改坏 jbang
-     * 用户是不可接受的。
+     * 独立 jar 默认 false 以保持 1.1.1 已发布版本"global 空时退回 profile 白名单"
+     * 这一既有行为。
      */
     private boolean failClosed = false;
     private AuditLog auditLog = new AuditLog();

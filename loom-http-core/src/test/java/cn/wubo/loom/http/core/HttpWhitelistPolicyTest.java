@@ -16,8 +16,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 白名单 fail-closed 策略(spec §4.4 三态表)。
  *
- * <p>与 http-mcp 的行为差异：原实现在 global 为空时"不限制"(fail-open)。
- * 内部工具模式改为 fail-closed —— 部署未配置 allowedDomains = 未授权对外访问。
+ * <p>与 http-mcp 的行为差异：引入 fail-closed 开关前，实现只有单一路径
+ * （fail-open 命名指的是"global 空时退回 profile 白名单"，
+ * <b>不是</b>"什么都不限制"）。
+ *
+ * <p><b>订正说明</b>(2026-10-03,Task 14 修复时核对 git 历史发现)：
+ * 本类原注释写"原实现在 global 为空时『不限制』(fail-open)"—— 与
+ * {@code c505ec16}(从源项目搬运时)的实际代码矛盾。该版本有一条显式分支：
+ * <pre>
+ * // Both empty — return an empty whitelist (everything denied).
+ * if (gEmpty &amp;&amp; pEmpty) return new DomainWhitelist(Set.of());
+ * </pre>
+ * 即<b>双空 ⇒ 拒绝一切</b>。{@code 2798efe4} 引入 fail-closed 开关时该分支被
+ * 两段 if 结构吞掉,双空组合改为落入 {@code new DomainWhitelist(null)} ⇒ NPE,
+ * 该配置组合自那时起一直不可用(而非"不限制")。Task 14 的修复把它接回原语义。
+ *
+ * <p>内部工具模式(嵌在 spring-ai-loom-agent 里的 HTTP tool)恒为 fail-closed
+ * —— 部署未配置 allowedDomains = 未授权对外访问。
  */
 @DisplayName("白名单 fail-closed 策略")
 class HttpWhitelistPolicyTest {

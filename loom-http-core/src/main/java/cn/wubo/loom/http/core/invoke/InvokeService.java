@@ -456,7 +456,21 @@ public class InvokeService {
 
         if (!globalConfig.isFailClosed()) {
             // http-mcp 原行为(fail-open):empty global 退回 profile 白名单。
-            if (gEmpty) return new DomainWhitelist(profileAllowed);
+            //
+            // profileAllowed 可能是 null(:453 在 profile 为 null 时就赋的 null),
+            // 直接 new DomainWhitelist(null) 会在构造器里 new LinkedHashSet<>(patterns)
+            // 抛 NPE —— 这是 loom-http-mcp 四个 http_* 工具全部不可用的根因
+            // (其余五支都被 pEmpty / gEmpty 挡住,只有这一支漏了)。
+            //
+            // **双空时拒绝一切,不是放行 —— 这是恢复原语义,不是新决定。**
+            // 证据:本方法在 c505ec16(从源项目搬运时)的原始实现里有一条被后续重构
+            // 弄丢的显式分支 —
+            //     // Both empty — return an empty whitelist (everything denied).
+            //     if (gEmpty && pEmpty) return new DomainWhitelist(Set.of());
+            // 2798efe4 引入 fail-closed 开关时,该分支被 if(!failClosed) / if(failClosed)
+            // 两段结构吞掉,双空组合落进本支的 new DomainWhitelist(null) ⇒ NPE。
+            // 所以这里补 pEmpty 判空,等于把 1.1.1 的语义原样接回来。
+            if (gEmpty) return new DomainWhitelist(pEmpty ? java.util.Set.of() : profileAllowed);
             if (pEmpty) return new DomainWhitelist(global);
             return new DomainWhitelist(global).effectiveAllowed(new DomainWhitelist(profileAllowed));
         }
