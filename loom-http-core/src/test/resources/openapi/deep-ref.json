@@ -1,0 +1,67 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Deep Ref", "version": "1.0.0" },
+  "paths": {
+    "/trees/{id}": {
+      "get": {
+        "summary": "Get tree",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Level1" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Level1": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "child": { "$ref": "#/components/schemas/Level2" }
+        }
+      },
+      "Level2": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" },
+          "child": { "$ref": "#/components/schemas/Level3" }
+        }
+      },
+      "Level3": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "integer" },
+          "child": { "$ref": "#/components/schemas/Level4" }
+        }
+      },
+      "Level4": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "child": { "$ref": "#/components/schemas/Level5" }
+        }
+      },
+      "Level5": {
+        "type": "object",
+        "properties": {
+          "deepest": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

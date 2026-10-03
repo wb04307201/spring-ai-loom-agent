@@ -1,0 +1,99 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Union Types", "version": "1.0.0" },
+  "paths": {
+    "/events": {
+      "get": {
+        "summary": "List events",
+        "description": "Returns events. Each event is either a UserEvent or a SystemEvent (discriminated by 'kind').",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EventEnvelope" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/alerts": {
+      "get": {
+        "summary": "List alerts",
+        "description": "Alert payload is the intersection (anyOf) of all known alert kinds.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AlertEnvelope" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "EventEnvelope": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "event": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/UserEvent" },
+              { "$ref": "#/components/schemas/SystemEvent" }
+            ],
+            "discriminator": {
+              "propertyName": "kind"
+            }
+          }
+        }
+      },
+      "UserEvent": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "enum": ["user"] },
+          "userId": { "type": "string" },
+          "action": { "type": "string" }
+        },
+        "required": ["kind", "userId", "action"]
+      },
+      "SystemEvent": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "enum": ["system"] },
+          "component": { "type": "string" },
+          "severity": { "type": "string", "enum": ["info", "warn", "error"] }
+        },
+        "required": ["kind", "component", "severity"]
+      },
+      "AlertEnvelope": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "payload": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "channel": { "type": "string" },
+                  "message": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "url": { "type": "string" },
+                  "timeoutMs": { "type": "integer" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
