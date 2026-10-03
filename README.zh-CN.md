@@ -77,6 +77,7 @@
 
 | MCP 服务 | 说明 | README |
 |----------|------|--------|
+| `loom-http-mcp` | HTTP 调用能力 — 注册 system/profile、管理端点、并发批量调用（19 个工具 + 4 个资源） | [EN](loom-http-mcp/README.md) · [中文](loom-http-mcp/README.zh-CN.md) |
 | `loom-file-mcp` | 文件系统操作 — 读写、编辑、搜索、目录浏览、删除（14 个工具） | [EN](loom-file-mcp/README.md) · [中文](loom-file-mcp/README.zh-CN.md) |
 | `loom-git-mcp` | 基于 JGit 的 Git 操作 — clone、commit、push、merge、rebase 等（14 个工具） | [EN](loom-git-mcp/README.md) · [中文](loom-git-mcp/README.zh-CN.md) |
 | `loom-maven-mcp` | Maven 构建操作 — 执行、编译、打包、测试、依赖树、校验（6 个工具） | [EN](loom-maven-mcp/README.md) · [中文](loom-maven-mcp/README.zh-CN.md) |

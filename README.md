@@ -77,6 +77,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 
 | MCP Server | Description | README |
 |------------|-------------|--------|
+| `loom-http-mcp` | HTTP call capability — register system/profile, manage endpoints, concurrent batch calls (19 tools + 4 resources) | [EN](loom-http-mcp/README.md) · [中文](loom-http-mcp/README.zh-CN.md) |
 | `loom-file-mcp` | File system operations — read, write, edit, search, directory browsing, delete (14 tools) | [EN](loom-file-mcp/README.md) · [中文](loom-file-mcp/README.zh-CN.md) |
 | `loom-git-mcp` | Git operations via JGit — clone, commit, push, merge, rebase, and more (14 tools) | [EN](loom-git-mcp/README.md) · [中文](loom-git-mcp/README.zh-CN.md) |
 | `loom-maven-mcp` | Maven build operations — execute, build, package, test, dependency tree, validate (6 tools) | [EN](loom-maven-mcp/README.md) · [中文](loom-maven-mcp/README.zh-CN.md) |

@@ -25,6 +25,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `spring-ai-loom-agent-spring-boot-starter` | Empty JAR that depends on autoconfigure — the one dependency users add |
 | `spring-ai-loom-agent-test` | Test application with `application.yml` — run locally to verify changes |
 | `loom-{file,git,maven,compile,process}-core` | 无 Spring 依赖的纯操作层（FileOperations / GitOperations / MavenOperations / CompileAndDeployOperations / ProcessUtils）— 主库工具是它们的薄包装；`loom-file-core` 另含 `PathSecurityUtils`（沙箱/ symlink 校验）+ `LoomPaths`（**全仓路径派生单一真源**：userRoot（内建 username 消毒）/ userFileDir / userCompileWorkspacesDir / DEFAULT_USERS_BASE） |
+| `loom-http-core` | 无 Spring 依赖的纯 HTTP 引擎 + 存储服务（`HttpEngine` + `HttpStorage` + `HttpConfig` + `ProfileService`/`SystemService`/`EndpointService`/`HistoryService`/`InvokeService` 等）|
+| `loom-http-mcp` | 独立可运行的 MCP server（19 个 `@McpTool` snake_case + 4 个 `@McpResource`）；**`basePath` 默认 `~/.loom/http-mcp/`**（不与 `~/.loom/mcp/` 共享,避免 profile 凭据混入 loom-file-mcp 可读沙箱）|
 | `loom-{file,git,maven,compile}-mcp` | 独立可运行的 MCP server（各自 `*McpProperties` + application.yml）。**路径双轨制**：主库（多租户）一切用户路径经 `LoomPaths` 从 `usersBasePath` 派生；MCP server（单租户进程）走扁平 `basePath` 参数配置，4 个 server 默认共享沙箱 `~/.loom/mcp`（git clone 的仓库 file/maven MCP 可直接互操作） |
 
 ## Key Commands
@@ -47,6 +49,12 @@ mvn test -pl spring-ai-loom-agent-test -Dtest='*BrowserIT' -Dsurefire.failIfNoSp
 
 # 重建截图基线(UI 有意改版后)
 mvn test -pl spring-ai-loom-agent-test -Dtest='VisualBaselineBrowserIT' -DupdateBaselines=true
+
+# 跑 http 引擎回归网(411 个测试)
+mvn test -pl loom-http-core
+
+# 跑 http 工具 IT(双模一致性 + 凭据隔离 + WireMock 全链路)
+mvn test -pl spring-ai-loom-agent-test -Dtest='*Http*' -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 浏览器 IT 隔离约定：用户树目录用 `./target/e2e-files/users`（`users-base-path`）、数据库用 `./target/test-ds`（均相对 `spring-ai-loom-agent-test`，`mvn clean` 即清）；截图基线在 `src/test/resources/browser-baselines/`（同机更新约定——跨机器像素渲染差异由 `VisualBaselineBrowserIT` 的 0.5% diff 阈值吸收，超阈值需在本机 `-DupdateBaselines=true` 重建）。
@@ -95,6 +103,7 @@ All components follow an **interface + default implementation** pattern. Every b
 | `IGitTool` | `DefaultGitTool` | 28 Git tools: init, clone, status, add, commit, diff, log, branch, checkout, pull, push, fetch, merge, rebase, reset, stash, tag, remote, blame, show, reflog, clean, cherry-pick, worktree, set-working-dir, clear-working-dir, changelog-analyze, wrapup-instructions（**RBAC 工具** — bean 总是创建,可见性由 `role_tool.tool_git` 控制,admin 授权后用户才可见;`git.enabled` yml 开关已废弃无效），不依赖 IFile |
 | `IMavenTool` | `DefaultMavenTool` | 6 Maven tools: mavenExecute (generic), mavenBuild (compile), mavenPackage (package), mavenTest (run tests), mavenDependencyTree (dep tree), mavenValidate (validate) — based on maven-invoker, no shell needed（**RBAC 工具** — bean 由 `@ConditionalOnClass(maven-invoker)` 门控(库默认依赖,天然满足),可见性由 `role_tool.tool_maven` 控制;`maven.enabled` yml 开关已废弃无效。编译/打包请走 `ICompileAndDeployTool`） |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 端到端部署：git clone → 按 buildTool 打包（maven / npm / npm-frontend / pip）→ Docker 镜像构建 → 容器启动 → 健康检查（**RBAC 工具** — bean 总是创建,可见性由 `role_tool.tool_compile` 控制;base 种子默认未授权,需 admin 授予）。支持 Spring Boot / Node（前后端） / Python 等多栈项目。单次 LLM tool call 完成整个部署流水线，避免 LLM 拆解成多步时出错。 |
+| **`IHttpTool`** | `DefaultHttpTool` | HTTP 调用工具：`invokeEndpoint` / `httpBatch` / `listEndpoints` / `getEndpoint` / `getRequestHistory`，共 5 个 LLM 可调工具（spec §4.1 锁定：内部模式只暴露 5 个读用面，profile/system/endpoint 写面由 REST 处理）。`body` 必须 `Map<String, Object>`（FIX-5）。username 经 `ToolContext` 取。**RBAC 工具：`tool_http`**，visibility 由 `role_tool` 控制 |
 | `IDocumentRead` | `DefaultDocumentRead` | Document reading with LLM metadata enrichment |
 | `IFileDocument` | `DefaultFileDocument` | File-to-document ID mapping |
 | `ISubTaskExecutor` | `DefaultSubTaskExecutor` | Runs a sub-task synchronously on the dedicated `loomSubTaskExecutor` pool via `ChatClient.call`; tools filtered two ways — (1) RBAC: `CapabilityService.visibleToolGroupsFor(username)` so sub-tasks inherit the user's role grants (未授权的 render/git/maven/compile 不进子任务;修复此前 universal subtask/schedule 入口绕过 role_tool 的越权面,spec 2026-09-10-subtask-rbac-filter), (2) recursion guard: exclude self-tools (no `ISubTaskTool`/`IScheduleTool`/`IAskUserTool` — 子任务不能向用户提问,疑问写进执行结果由主任务决定). Sub-task memory namespaced `{conversationId}--sub--{subTaskId}` |
@@ -209,7 +218,7 @@ Organized into 7 nested static `@Configuration` classes:
 | `IFileTool` | `tool_file` | 默认放开本地文件访问(⚠️ 含 `deleteFileOrDirectory` 递归删除,LLM 端需谨慎 prompt 约束) |
 | `IAskUserTool` | `tool_askUser` | 仅向当前流内的本人提问,答案回同一流,无越权风险;子任务/定时任务 schema 级排除 |
 
-**RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`(无头浏览器吃 ~150-300MB RAM/实例,且需 optional playwright 依赖) —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行,必须显式授权。
+**RBAC 工具(走 `role_tool` 表)**:`IGitTool` / `IMavenTool` / `ICompileAndDeployTool` / `IHtmlRenderTool`(无头浏览器吃 ~150-300MB RAM/实例,且需 optional playwright 依赖) / **`IHttpTool`**(外网 HTTP 调用 + profile 凭据注入) —— 涉及 git push / 任意 mvn 构建 / Docker 容器运行 / 外网出站调用,必须显式授权。
 
 **实现机制**:
 - 元数据单一源 = `@ToolGroup(defaultGranted=true)` 注解,**DB 端无 `loom_universal_tool` 表**
@@ -249,6 +258,7 @@ All user-local state lives under `~/.loom/` (single root, single `rm -rf` to wip
 |---|---|---|
 | `~/.loom/users/{username}/file/` | 用户上传的文件（聊天附件、文件管理 UI 列出）+ file/git/maven/render 工具沙箱根（render 输出在其下 `prototypes/`）| `usersBasePath` 默认 `${user.home}/.loom/users` |
 | `~/.loom/users/{username}/compile-workspaces/` | 编译部署工具临时 workspace（每次运行建 `compile-deploy-{user}-{ts}-{uuid8}` 子目录；成功默认清理）| `DefaultCompileAndDeployTool.getCompileDeployWorkspaceDir`；与 `file/` 平级（兄弟目录，不进沙箱、UI 不混列）|
+| `~/.loom/users/{username}/http/` | 用户 HTTP profile / system / history / OpenAPI 缓存（Task 5 新增；与 `file/` `compile-workspaces/` 平级，文件工具沙箱够不到） | `usersBasePath` 默认 `${user.home}/.loom/users` |
 | `~/.loom/datasource/` | H2 文件数据库 `db.mv.db` | `datasourceDir` 默认 `${user.home}/.loom/datasource`（yml 通过 `spring.datasource.url` 拼装）|
 | `~/.loom/mcp/` | 独立 MCP server 沙箱（扁平 `basePath` 配置，非用户树；4 个 server 默认共享）| 各 `loom-{file,git,maven,compile}-mcp` 的 `*McpProperties.basePath` |
 
