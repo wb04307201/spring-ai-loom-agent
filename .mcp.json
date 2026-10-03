@@ -4,7 +4,10 @@
       "command": "jbang",
       "args": [
         "./loom-compile-mcp/target/loom-compile-mcp-1.0-SNAPSHOT.jar"
-      ]
+      ],
+      "env": {
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-25.0.3"
+      }
     },
     "loom-file-mcp": {
       "command": "jbang",
@@ -21,13 +24,19 @@
       "command": "jbang",
       "args": [
         "./loom-git-mcp/target/loom-git-mcp-1.0-SNAPSHOT.jar"
-      ]
+      ],
+      "env": {
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-25.0.3"
+      }
     },
     "loom-maven-mcp": {
       "command": "jbang",
       "args": [
         "./loom-maven-mcp/target/loom-maven-mcp-1.0-SNAPSHOT.jar"
-      ]
+      ],
+      "env": {
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-25.0.3"
+      }
     }
   }
 }
