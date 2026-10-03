@@ -51,9 +51,22 @@ public class HttpConfig {
         "token", "accessToken", "refreshToken", "idToken",
         "secret", "clientSecret", "apiKey", "api_key",
         "privateKey", "private_key"));
+    /**
+     * 白名单 fail-closed 开关(spec §4.4 三态表)。false = http-mcp 原语义
+     * (global 空时退回 profile 白名单,两边都空则不加限制);true = 部署级闸门
+     * (global 空即拒绝一切外网请求)。
+     *
+     * <p>内部工具模式(嵌在 spring-ai-loom-agent 里的 HTTP tool)恒为 true;
+     * 独立 jar 默认 false 以保持 1.1.1 已发布版本的既有行为,改坏 jbang
+     * 用户是不可接受的。
+     */
+    private boolean failClosed = false;
     private AuditLog auditLog = new AuditLog();
 
     public static class AuditLog { private boolean enabled = true; public boolean isEnabled() { return enabled; } public void setEnabled(boolean e) { this.enabled = e; } }
+
+    public boolean isFailClosed() { return failClosed; }
+    public void setFailClosed(boolean failClosed) { this.failClosed = failClosed; }
 
     public int getVersion() { return version; }
     public void setVersion(int v) { this.version = v; }

@@ -413,24 +413,39 @@ public class InvokeService {
         return out;
     }
 
+    /**
+     * 三态白名单策略(spec §4.4)。failClosed 是模式开关:
+     * <ul>
+     *   <li>内部模式(DefaultHttpTool)恒为 true —— 部署未配置 allowedDomains = 未授权对外访问。</li>
+     *   <li>jar 模式(LoomHttpMcpService)默认 false —— 保持 http-mcp 单租户工具的既有行为,
+     *       由 {@code loom.http.mcp.fail-closed} 属性开启。直接改死会静默改坏已发布 jar 的语义。</li>
+     * </ul>
+     *
+     * <p>三种状态:
+     * <ol>
+     *   <li>{@code failClosed=true, profile.allowedDomains empty} → deny everything (RETURN EMPTY DomainWhitelist)</li>
+     *   <li>{@code failClosed=true, profile.allowedDomains non-empty} → use {@code DomainWhitelist.effectiveAllowed(global)}
+     *       (profile narrows global)</li>
+     *   <li>{@code failClosed=false} → original fail-open behavior (source's "both empty → allow")</li>
+     * </ol>
+     */
     private DomainWhitelist effectiveDomainWhitelist(Profile profile) {
         Set<String> global = globalConfig.getAllowedDomains() == null ? Set.of() : globalConfig.getAllowedDomains();
         Set<String> profileAllowed = profile == null ? null : profile.getAllowedDomains();
         boolean gEmpty = global.isEmpty();
         boolean pEmpty = profileAllowed == null || profileAllowed.isEmpty();
 
-        // Both empty — return an empty whitelist (everything denied).
-        if (gEmpty && pEmpty) return new DomainWhitelist(Set.of());
-
-        // Exactly one side populated — that side is the effective list. This
-        // makes "only profile set" and "only global set" symmetric and matches
-        // user intuition that the populated side is the source of truth.
-        // Regression: Finding #5 — previously the intersection ran even when
-        // one side was empty, which made profile-only declarations a no-op.
-        if (gEmpty) return new DomainWhitelist(profileAllowed);
+        if (!globalConfig.isFailClosed()) {
+            // http-mcp 原行为(fail-open):empty global 退回 profile 白名单。
+            if (gEmpty) return new DomainWhitelist(profileAllowed);
+            if (pEmpty) return new DomainWhitelist(global);
+            return new DomainWhitelist(global).effectiveAllowed(new DomainWhitelist(profileAllowed));
+        }
+        // fail-closed 路径:global 空 = 部署未授权对外访问 = 拒绝一切。
+        // profile 空 = 不施加额外约束(沿用 http-mcp 的 emptyProfileAllowedDomains
+        // 回归测试所锁定的语义)。
+        if (gEmpty) return new DomainWhitelist(java.util.Set.of());
         if (pEmpty) return new DomainWhitelist(global);
-
-        // Both populated — intersect (spec §7.2: "profile tightens").
         return new DomainWhitelist(global).effectiveAllowed(new DomainWhitelist(profileAllowed));
     }
 
