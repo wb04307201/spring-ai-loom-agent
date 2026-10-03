@@ -6,6 +6,7 @@ import cn.wubo.loom.http.core.HttpEngine;
 import cn.wubo.loom.http.core.profile.Profile;
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
+import org.springframework.web.servlet.function.ServerResponse;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -79,5 +80,47 @@ final class HttpRouterSupport {
 
     private static String mask(String secret) {
         return secret == null || secret.isEmpty() ? null : MASK;
+    }
+
+    /**
+     * 路径变量前置校验 —— 在 router 层挡掉会触发 core 层异常(500)的危险输入。
+     *
+     * <p>拒绝:
+     * <ul>
+     *   <li>空白 / {@code null}</li>
+     *   <li>含 {@code ..}(路径穿越)</li>
+     *   <li>含 {@code /} 或 {@code \\}(目录分隔)</li>
+     *   <li>含 NUL {@code \\0}(字符串截断攻击)</li>
+     * </ul>
+     *
+     * <p>通过校验返回 {@code null};不通过返回 {@code 400 + InvalidPathVariable}
+     * 的 {@link ServerResponse},router 可直接 return 它。
+     *
+     * <p>为什么不做更宽的字符白名单:HTTP profile/system name 是用户起的标识符,
+     * 字符集本应宽松;只挡"结构上不可能是合法标识"的输入。如果后续 admin UI 反馈
+     * 用户误用被挡,再放宽。
+     */
+    static ServerResponse validatePathVariable(String value, String varName) {
+        if (value == null || value.isBlank()) {
+            return ServerResponse.badRequest().body(invalidPathBody(varName, "blank"));
+        }
+        if (value.indexOf('\0') >= 0) {
+            return ServerResponse.badRequest().body(invalidPathBody(varName, "contains-null-byte"));
+        }
+        if (value.contains("..")) {
+            return ServerResponse.badRequest().body(invalidPathBody(varName, "contains-traversal"));
+        }
+        if (value.contains("/") || value.contains("\\")) {
+            return ServerResponse.badRequest().body(invalidPathBody(varName, "contains-separator"));
+        }
+        return null;
+    }
+
+    private static Map<String, Object> invalidPathBody(String varName, String reason) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "InvalidPathVariable");
+        body.put("variable", varName);
+        body.put("reason", reason);
+        return body;
     }
 }

@@ -54,6 +54,8 @@ public class HttpSystemRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             cn.wubo.loom.http.core.system.System patch = request.body(cn.wubo.loom.http.core.system.System.class);
             return ServerResponse.ok().body(HttpRouterSupport.engineFor(username, props).updateSystem(name, patch));
         });
@@ -62,6 +64,8 @@ public class HttpSystemRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             // REST 写面删除 system 时不主动清 OpenAPI 缓存 ——
             // 与 http-mcp ProfileTools.removeSystem 默认行为一致(false)
             return ServerResponse.ok().body(HttpRouterSupport.engineFor(username, props).removeSystem(name, false));
@@ -71,6 +75,8 @@ public class HttpSystemRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             return ServerResponse.ok().body(HttpRouterSupport.engineFor(username, props).refreshSystem(name));
         });
 
@@ -80,6 +86,8 @@ public class HttpSystemRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             return ServerResponse.ok().body(HttpRouterSupport.engineFor(username, props).listEndpoints(name, null, null));
         });
 
@@ -87,6 +95,8 @@ public class HttpSystemRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             Map<String, Object> body = request.body(Map.class);
             if (body == null) return ServerResponse.badRequest().body(Map.of("error", "body 必填"));
             Map<String, Object> args = extractEndpointArgs(name, body);
@@ -109,6 +119,12 @@ public class HttpSystemRouter {
             String name = request.pathVariable("name");
             String method = request.pathVariable("method");
             String path = request.pathVariable("path");
+            ServerResponse badN = HttpRouterSupport.validatePathVariable(name, "name");
+            if (badN != null) return badN;
+            ServerResponse badM = HttpRouterSupport.validatePathVariable(method, "method");
+            if (badM != null) return badM;
+            ServerResponse badP = HttpRouterSupport.validatePathVariable(path, "path");
+            if (badP != null) return badP;
             Map<String, Object> patch = request.body(Map.class);
             if (patch == null) patch = new LinkedHashMap<>();
             return ServerResponse.ok().body(
@@ -121,6 +137,12 @@ public class HttpSystemRouter {
             String name = request.pathVariable("name");
             String method = request.pathVariable("method");
             String path = request.pathVariable("path");
+            ServerResponse badN = HttpRouterSupport.validatePathVariable(name, "name");
+            if (badN != null) return badN;
+            ServerResponse badM = HttpRouterSupport.validatePathVariable(method, "method");
+            if (badM != null) return badM;
+            ServerResponse badP = HttpRouterSupport.validatePathVariable(path, "path");
+            if (badP != null) return badP;
             return ServerResponse.ok().body(
                     HttpRouterSupport.engineFor(username, props).removeEndpoint(name, method, path));
         });

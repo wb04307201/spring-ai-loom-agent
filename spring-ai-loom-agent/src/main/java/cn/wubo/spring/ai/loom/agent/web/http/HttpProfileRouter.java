@@ -67,6 +67,8 @@ public class HttpProfileRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             Profile patch = request.body(Profile.class);
             return ServerResponse.ok().body(HttpRouterSupport.engineFor(username, props).updateProfile(name, patch));
         });
@@ -75,6 +77,8 @@ public class HttpProfileRouter {
             String username = HttpRouterSupport.currentUsername();
             if (!guard.isAllowed(username)) return ServerResponse.status(403).body(HttpManageGuard.forbidden());
             String name = request.pathVariable("name");
+            ServerResponse bad = HttpRouterSupport.validatePathVariable(name, "name");
+            if (bad != null) return bad;
             return ServerResponse.ok().body(HttpRouterSupport.engineFor(username, props).removeProfile(name));
         });
 

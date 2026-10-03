@@ -135,4 +135,38 @@ class HttpProfileRouterIT {
         assertThat(resp).isNotNull();
         assertThat(resp.statusCode().value()).isEqualTo(400);
     }
+
+    // ===== I-2: path-variable traversal 校验 =====
+
+    @Test
+    @DisplayName("DELETE path-variable 含 '..' → 400 + InvalidPathVariable(防目录穿越)")
+    void deleteWithTraversalPathReturns400() throws Exception {
+        ServerResponse resp = LoomAgentTestUtil.safeRoute(router(), "DELETE",
+                "/spring/ai/loom/api/http/profiles/..%2F..%2Fetc%2Fpasswd", null);
+        assertThat(resp).isNotNull();
+        assertThat(resp.statusCode().value()).isEqualTo(400);
+        String body = String.valueOf(((org.springframework.web.servlet.function.EntityResponse<?>) resp).entity());
+        assertThat(body).contains("InvalidPathVariable");
+    }
+
+    @Test
+    @DisplayName("PUT path-variable 含 '/' → 400 + InvalidPathVariable")
+    void putWithSlashInNameReturns400() throws Exception {
+        ServerResponse resp = LoomAgentTestUtil.safeRoute(router(), "PUT",
+                "/spring/ai/loom/api/http/profiles/sub%2Fdir", "{\"description\":\"x\"}");
+        assertThat(resp).isNotNull();
+        assertThat(resp.statusCode().value()).isEqualTo(400);
+        String body = String.valueOf(((org.springframework.web.servlet.function.EntityResponse<?>) resp).entity());
+        assertThat(body).contains("InvalidPathVariable");
+    }
+
+    @Test
+    @DisplayName("合法 name 正常通过校验(校验不该误伤合法字符)")
+    void legitimateNamePassesValidation() throws Exception {
+        ServerResponse resp = LoomAgentTestUtil.safeRoute(router(), "DELETE",
+                "/spring/ai/loom/api/http/profiles/normal-name_123", null);
+        assertThat(resp).isNotNull();
+        // 校验通过 → 进入 engine → name 不存在 → engine 返回 error JSON,200 状态
+        assertThat(resp.statusCode().value()).isEqualTo(200);
+    }
 }
