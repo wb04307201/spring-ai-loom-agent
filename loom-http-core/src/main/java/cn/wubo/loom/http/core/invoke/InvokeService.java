@@ -190,7 +190,20 @@ public class InvokeService {
             String portHint = (uri.getPort() > 0)
                 ? " (or '" + host + ":" + uri.getPort() + "' to pin a specific port)"
                 : "";
-            err.put("suggestion", "Add '" + host + "'" + portHint + " to config.json or profile");
+            // 措辞受众是 LLM。必须指向**真正生效**的开关:
+            //  · 部署级真开关 = yml 的 spring.ai.loom.agent.http.allowed-domains
+            //    (embedded 模式 DefaultHttpTool:43 硬编码 fail-closed,只有它能打开闸);
+            //  · profile.allowedDomains 确实被读,但语义是**收紧**(只能从已配置的全局集里
+            //    再筛,不能凭空放行)—— 并列写成 "config.json or profile" 会让 LLM
+            //    误以为改 profile 就能开闸。
+            // 历史上这里写的是 "config.json or profile",而 config.json 全仓只有测试
+            // 断言过路径、生产代码零读取 ⇒ LLM 会建议用户去改一个读不到的文件。
+            // 实测(2026-10-03 Chrome 端到端)LLM 就是这么卡住的。
+            err.put("suggestion",
+                "Ask the operator to add '" + host + "'" + portHint
+                    + " to spring.ai.loom.agent.http.allowed-domains and restart"
+                    + " (a profile's allowedDomains cannot widen the deployment-level gate,"
+                    + " it only narrows an already-configured global list)");
             out.setError(err);
             out.setLatencyMs(java.lang.System.currentTimeMillis() - start);
             return out;
@@ -658,9 +671,15 @@ public class InvokeService {
     private Map<String, Object> buildUnknownEndpointSuggestion(System system, InvokeRequest req, String body) {
         Map<String, Object> suggestion = new LinkedHashMap<>();
         suggestion.put("kind", "unknownEndpoint");
+        // 措辞受众是 LLM。这条 suggestion 是在**请求已成功执行之后**才附加的
+        // (见 :338-341 → :374,此时 statusCode 已设、out 无 error),所以绝不能
+        // 写成像失败原因 —— 原文 "is not registered in system 'x'. Add it via
+        // addEndpoint?" 读起来像"你没注册所以失败了",实测 LLM 因此在成功回复里
+        // 加了一句"提示:… 当前没在 jsonplaceholder 系统里注册",把成功说成了将就。
         suggestion.put("message",
-            req.getMethod() + " " + req.getPath() + " is not registered in system '" + system.getName()
-                + "'. Add it via addEndpoint?");
+            req.getMethod() + " " + req.getPath() + " executed successfully (this path is not"
+                + " declared in system '" + system.getName() + "', so no request/response schema"
+                + " was applied). Optional: register it via addEndpoint to get schema validation");
         Map<String, Object> proposed = new LinkedHashMap<>();
         proposed.put("method", req.getMethod());
         proposed.put("path", req.getPath());
