@@ -424,4 +424,32 @@ public class LoomAgentProperties {
  private boolean networkBlocked = true;
  private long maxHtmlBytes = 2 * 1024 * 1024;
  }
+
+ /**
+ * HTTP 调用工具配置(内部工具模式)。yml 通过 {@code spring.ai.loom.agent.http.*} 配置。
+ *
+ * <p><b>部署未配置即未授权</b>(fail-closed):{@code allowedDomains} 默认空 → 拒绝一切外网请求。
+ * 部署方必须显式配置可访问域名,工具才生效 —— 这是 SSRF 防护的部署级闸门,
+ * 与 profile 级的 allowedDomains(用户自助、收紧语义)刻意不同,见 spec §4.4 三态表。
+ * 无 {@code failClosed} 开关:内部工具模式恒 fail-closed。
+ */
+ @Data
+ public static class HttpProperty {
+ /** 是否启用 HTTP 调用工具(默认 true)。 */
+ private boolean enabled = true;
+ /** 允许访问的域名白名单,支持通配符(如 {@code api.example.com} / {@code *.example.com} / {@code host:port})。空 = 拒绝一切外网。 */
+ private List<String> allowedDomains = List.of();
+ /** 单次请求超时(毫秒)。 */
+ private long timeoutMs = 10000;
+ /** 单次响应体大小上限(字节),超过截断或落盘。 */
+ private long maxResponseSizeBytes = 1024L * 1024L;
+ /** httpBatch 的最大并发 op 数。 */
+ private int maxBatchConcurrency = 10;
+ /** 请求体大小上限(字节)。 */
+ private long maxRequestBodyBytes = 10L * 1024L * 1024L;
+ /** 每系统保留的历史条目数上限。 */
+ private int historyMaxEntriesPerSystem = 1000;
+ }
+
+ private HttpProperty http = new HttpProperty();
 }
