@@ -54,7 +54,8 @@ public class LoomHttpMcpConfiguration {
     @Bean(initMethod = "start", destroyMethod = "stop")
     public FileWatcher httpFileWatcher(LoomHttpMcpProperties props,
                                        HttpEngine engine,
+                                       HttpStorage storage,
                                        ObjectProvider<McpSyncServer> mcpServerProvider) {
-        return new FileWatcher(props, engine, mcpServerProvider);
+        return new FileWatcher(props, engine, storage, mcpServerProvider);
     }
 }

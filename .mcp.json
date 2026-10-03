@@ -37,6 +37,17 @@
       "env": {
         "JAVA_HOME": "C:\\Program Files\\Java\\jdk-25.0.3"
       }
+    },
+    "loom-http-mcp": {
+      "command": "jbang",
+      "args": [
+        "--java-options=-Dfile.encoding=UTF-8",
+        "--java-options=-Dsun.jnu.encoding=UTF-8",
+        "./loom-http-mcp/target/loom-http-mcp-1.0-SNAPSHOT.jar"
+      ],
+      "env": {
+        "JAVA_HOME": "C:\\Program Files\\Java\\jdk-25.0.3"
+      }
     }
   }
 }
