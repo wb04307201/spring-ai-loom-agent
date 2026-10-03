@@ -508,6 +508,13 @@ public class LoomAgentConfiguration {
                 properties.setCompile(bound.getCompile());
                 properties.setAskuser(bound.getAskuser());
                 properties.setRender(bound.getRender());
+                // http:漏了这一行 ⇒ spring.ai.loom.agent.http.* 全部配置项失效
+                // (allowedDomains / timeoutMs / maxResponseSizeBytes / maxBatchConcurrency /
+                //  maxRequestBodyBytes / historyMaxEntriesPerSystem / enabled)。
+                // 后果:allowedDomains 恒为默认空集 + DefaultHttpTool:43 硬编码 fail-closed
+                // ⇒ 一切 invokeEndpoint 返回 DomainNotAllowed,且用户无论怎么配 yml 都无效。
+                // 2026-10-03 Chrome 端到端实测发现(见 .aqg/code-construction/task-16-*)。
+                properties.setHttp(bound.getHttp());
 
                 // loomHome 级联：@ConfigurationProperties 不会自动按 loom-home 重建
                 // 字段默认值，所以在绑定后手动推导 —— 仅当 yml 覆盖了 loom-home 且
