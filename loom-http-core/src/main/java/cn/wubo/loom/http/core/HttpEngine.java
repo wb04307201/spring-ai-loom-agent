@@ -276,11 +276,21 @@ public final class HttpEngine {
         return out;
     }
 
+    /** 读单个 profile;不存在时抛 {@link cn.wubo.loom.http.core.profile.ProfileNotFoundException}。 */
+    public Profile getProfile(String name) {
+        return profileService.get(name);
+    }
+
     /** 列出 system 名,供 REST 读接口用。 */
     public List<String> listSystems() {
         List<String> out = new ArrayList<>();
         systemService.listAll().forEach(s -> out.add(s.getName()));
         return out;
+    }
+
+    /** 读单个 system;不存在时抛 {@link SystemNotFoundException}。 */
+    public System getSystem(String name) {
+        return systemService.get(name);
     }
 
     // ==================== endpoint 写面 ====================

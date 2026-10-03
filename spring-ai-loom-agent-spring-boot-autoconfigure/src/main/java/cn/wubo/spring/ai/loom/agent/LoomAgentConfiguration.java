@@ -1098,6 +1098,18 @@ public class LoomAgentConfiguration {
             return new DefaultHtmlRenderTool(htmlRenderEngine, file,
                     properties.getUsersBasePath(), properties.getRender());
         }
+
+        /**
+         * HTTP 调用工具(RBAC 工具 tool_http,defaultGranted=false)。
+         * 凭据录入走 REST 写面(HttpProfileRouter/HttpSystemRouter via
+         * HttpManagementConfiguration),不暴露给 LLM —— 见 IHttpTool javadoc。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.http.IHttpTool.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.tool.http.IHttpTool defaultHttpTool(LoomAgentProperties properties) {
+            return new cn.wubo.spring.ai.loom.agent.tool.http.DefaultHttpTool(
+                    properties.getUsersBasePath(), properties.getHttp());
+        }
     }
 
     /**
