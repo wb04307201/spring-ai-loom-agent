@@ -33,24 +33,25 @@ def check_structure() -> None:
         ("pillars", [lid for lid, _ in G.PILLARS]),
         ("tools", [lid for lid, _, _ in G.TOOLS]),
         ("platform", list(G.PLATFORM)),
-        ("build", list(G.BUILD)),
     ):
         dup = {i for i in ids if ids.count(i) > 1}
         if dup:
             fail(f"{row_name} 行存在重复标签: {sorted(dup)}")
 
-    # 橙色高亮恰好 2 个且仅市场芯片
-    if len(G.MARKET_IDS) != 2 or not G.MARKET_IDS.issubset(set(G.PLATFORM)):
-        fail("橙色市场高亮必须恰好 2 个且属于 platform 行")
+    # 浅色编辑风(2026-10-04):平台片改为纯文字 + 分隔点,不再有橙色高亮块,
+    # 故 MARKET_IDS/TECH/BUILD 三者已从布局移除,对应的校验一并撤下。
+    # PLATFORM 本身仍需非空。
 
-    # 统计胶囊与卡片数量一致
-    line = G.stats_line()
-    expect = (f"{len(G.PILLARS):02d} PILLARS  -  {len(G.TOOLS):02d} TOOLS  -  "
-              f"{G.universal_count():02d} UNIVERSAL  -  {G.rbac_count():02d} RBAC")
-    if line != expect:
-        fail(f"统计胶囊与数据不一致: {line!r} != {expect!r}")
+    # 浅色版的统计在 hero 右侧块(54 MCP 工具 / 12 组工具 · 7 核心能力),
+    # 不再有顶部胶囊,故改为校验**推导函数与卡片集合一致**。
     if G.universal_count() + G.rbac_count() != len(G.TOOLS):
         fail("universal + RBAC 计数应等于工具卡总数")
+    # 官方技能数是独立常量(不在卡片集合里),只校验为正 —— 真实值需人工核对 SQL 种子
+    if G.OFFICIAL_SKILLS < 1:
+        fail("OFFICIAL_SKILLS 应为正数")
+    # MCP server 明细的总工具数就是 hero 上的大数字
+    if sum(n for _, n in G.MCP_SERVERS) < 1:
+        fail("MCP_SERVERS 的工具数合计应���正数")
     # 分类必须**恰好覆盖**工具卡:不重叠、不遗漏。
     # 这条替代了旧的手写常量等式校验 —— 旧式(UNIVERSAL_COUNT + RBAC_COUNT ==
     # len(TOOLS))在"7+4==11 恰好等于当时卡数"时会通过,加工具漏改常量则构造型漂移。
@@ -79,14 +80,22 @@ def check_i18n_parity() -> None:
     zh_only = set(G.LABELS["zh"]) - set(G.LABELS["en"])
     if en_only or zh_only:
         fail(f"双语文案键不对齐: en_only={sorted(en_only)} zh_only={sorted(zh_only)}")
+    # 版式文案(COPY)同样要求双语键对齐 —— 浅色版把标题/副标题等搬进了 COPY,
+    # 只校验 LABELS 会漏掉这一半
+    c_en, c_zh = set(G.COPY["en"]), set(G.COPY["zh"])
+    if c_en != c_zh:
+        fail(f"COPY 双语键不对齐: en_only={sorted(c_en - c_zh)} zh_only={sorted(c_zh - c_en)}")
 
 
 def check_section_numbering() -> None:
-    for lang, table in G.LABELS.items():
-        nums = [table[k].split()[0] for k in
-                ("sec_pillars", "sec_tools", "sec_platform", "sec_build")]
-        if nums != ["01", "02", "03", "04"]:
-            fail(f"{lang} 章节编号不连续(旧 zh 图实测跳号缺陷): {nums}")
+    """浅色编辑风(2026-10-04)不再显示 01/02/03 章节编号 —— 层级改由留白与
+    分组标签表达。旧的"编号连续"校验随之失效,改为校验**版式文案**齐全:
+    三个区块标题 + universal/RBAC 两个分组标签,双语都必须有。"""
+    for lang in G.LABELS:
+        c = G.COPY[lang]
+        for key in ("sec1", "sec2", "sec3", "g_univ", "g_rbac", "sig"):
+            if not c.get(key):
+                fail(f"{lang} 版式文案缺少 {key}")
 
 
 def png_size(path: pathlib.Path) -> tuple[int, int]:
@@ -105,8 +114,8 @@ def check_artifacts() -> None:
             fail(f"缺少产物: {png}(先跑 generate.py)")
             continue
         w, h = png_size(png)
-        if (w, h) != (G.SIZE * 2, G.SIZE * 2):
-            fail(f"{png.name} 尺寸 {w}x{h} ≠ {G.SIZE * 2}x{G.SIZE * 2}")
+        if (w, h) != (G.SIZE_W * 2, G.SIZE_H * 2):
+            fail(f"{png.name} 尺寸 {w}x{h} ≠ {G.SIZE_W * 2}x{G.SIZE_H * 2}")
 
 
 def main() -> int:

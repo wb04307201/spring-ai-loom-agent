@@ -7,8 +7,8 @@
 
 ```
 generate.py 的 DATA(结构) + LABELS(双语文案)   ← 布局单一真源
-  → 自包含 HTML/CSS(深色海报 + 霓虹青卡片 + 橙色市场高亮)
-  → 本地无头 Chromium(Playwright)截图 1280×1280 CSS px @2x → 2560×2560 PNG
+  → 自包含 HTML/CSS(**浅色编辑风**:暖白纸面 + 深墨字 + 琥珀唯一强调色)
+  → 本地无头 Chromium(Playwright)截图 1600×840 CSS px @2x → 3200×1680 PNG
   → check.py 静态校验
 ```
 
@@ -31,7 +31,7 @@ pip install playwright && playwright install chromium
 # 生成双图(覆盖 docs/project-overview-{en,zh}.png)
 python .claude/skills/project-overview-image/scripts/generate.py
 
-# 校验(结构自洽 / 双语 parity / 章节编号 / 产物尺寸)
+# 校验(结构自洽 / 分类覆盖 / 双语 parity / 版式文案 / 产物尺寸)
 python .claude/skills/project-overview-image/scripts/check.py
 ```
 
@@ -39,12 +39,16 @@ python .claude/skills/project-overview-image/scripts/check.py
 
 | 想改什么 | 改哪里 |
 |---|---|
-| 增删核心支柱卡 | `PILLARS`(统计胶囊 `07 PILLARS` 自动跟随) |
-| 增删工具卡/方法数徽章 | `TOOLS`(徽章数字 = `@Tool` 方法数)。**universal / RBAC 分类不用手改计数** —— 把工具 id 加进 `UNIVERSAL_IDS` 或 `RBAC_IDS` 即可,胶囊与小注的 `07 UNIVERSAL / 05 RBAC` 由 `universal_count()` / `rbac_count()` 从卡片集合推导;`check.py` 会校验「不重叠 + 不遗漏 + 无幽灵 id」,漏归类直接 exit 1 |
-| 平台芯片/橙色市场高亮 | `PLATFORM` / `MARKET_IDS`(橙色**恰好 2 个**,check.py 锁) |
-| 技术芯片/构建行/页脚 | `TECH` / `BUILD` / `LABELS[*].footer` |
-| 任一双语文案 | `LABELS["en"|"zh"]`(键集合双语对齐,check.py 锁) |
-| 配色/字号/留白 | `build_html()` 内 CSS(`space-between` 控制大区呼吸空白) |
+| 增删核心支柱卡 | `PILLARS`(hero 右侧的 `{np} 核心能力` 自动跟随) |
+| 增删工具卡/方法数徽章 | `TOOLS`(徽章数字 = `@Tool` 方法数)。**universal / RBAC 分类不用手改计数** —— 把工具 id 加进 `UNIVERSAL_IDS` 或 `RBAC_IDS` 即可,胶囊与小注的 `07 UNIVERSAL / 05 RBAC` 由 `universal_count()` / `rbac_count()` 从卡片集合推导;`check.py` 会校验「不重叠 + 不遗漏 + 无幽灵 id」,漏归类直接 exit 1。工具卡上的方法数徽章在浅色版**已移除**(28/16 这类数字挤在卡上会争夺注意力),需要时改回 `.badge` 样式 |
+| 平台静默带(页脚一行) | `PLATFORM` — 纯文字 + 分隔点,浅色版不再有橙色高亮块 |
+| hero 右侧统计块 | `MCP_SERVERS`(54 MCP 工具)/ `OFFICIAL_SKILLS` / `COPY[*].hr_*` |
+| hero 徽章行(替代旧技术芯片行) | `COPY[*].badges`(JDK 25 / Boot 4 / AI 2 / H2·Flyway·JVector) |
+| 视觉 token(配色/字号/间距) | `BG` `INK` `INK2` `RULE` `ACCENT` `ACC_SOFT` `CARD` `CARD_BD` |
+| 版式文案(标题/副标题/分组标签) | `COPY` — 与 `LABELS`(卡片级文案)分工,两者都需 en/zh 键对齐 |
+| 尺寸 | `SIZE_W` / `SIZE_H`(1600×840 CSS px @2x)|
+| 任一双语文案 | 卡片级用 `LABELS["en"|"zh"]`;版式级(标题/副标题/分组标签/签名)用 `COPY["en"|"zh"]`。两者键集合都需双语对齐,check.py 锁 |
+| 配色/字号/留白/版式 | `build()` 内 CSS(视觉 token 见上表);`build_html()` 已更名为 `build(lang)` |
 
 ## 视觉语言
 

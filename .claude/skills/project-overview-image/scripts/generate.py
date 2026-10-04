@@ -21,7 +21,11 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 DOCS = REPO_ROOT / "docs"
 
-SIZE = 1280  # CSS px;截图 device_scale_factor=2 → 2560x2560 物理像素
+# 2026-10-04 由 1280x1280 方图改为 1600x840 横版(浅色编辑风)。
+# 为什么改尺寸:方图在 README 里渲染成巨型方块,把下方内容全推走;横版能用上
+# 横向空间,也符合"首屏 hero"的阅读习惯。840 而非 900 是实测结果 —— 内容实占
+# ~800px,900 会留 100px 死白。
+SIZE_W, SIZE_H = 1600, 840
 
 # ---------------------------------------------------------------- 图标(24 viewBox,stroke 继承)
 ICONS = {
@@ -72,7 +76,9 @@ MARKET_IDS = {"market_skill", "market_kb"}  # 全海报唯一两个橙色芯片
 TECH = ["Spring Boot", "Spring AI", "JDK 25", "JVector", "JGit", "H2", "Flyway", "ChatMemory"]
 BUILD = ["build_core", "build_config", "build_starter", "build_test"]
 
-# ---------------------------------------------------------------- 双语文案
+# ---------------------------------------------------------------- id → 文案(能力卡/平台片)
+# 与下面的 COPY 分工:COPY 是**版式级**文案(标题/副标题/分组标签/签名),
+# LABELS 是**卡片级**文案(能力名/工具名/平台名),两者都需 en/zh 对齐。
 LABELS = {
     "en": {
         "subtitle": "Spring Boot AI Agent Out-of-the-Box Solution",
@@ -113,157 +119,232 @@ LABELS = {
 }
 
 
-def tools_note() -> str:
-    """"7 universal · 05 RBAC" 小注 —— 同样由卡片集合推导,避免与胶囊脱节。"""
-    return f"{universal_count()} universal  ·  {rbac_count():02d} RBAC"
+# ---------------------------------------------------------------- 视觉 token(浅色编辑风)
+# 2026-10-04 从"深色 + 霓虹青"改为浅色编辑风。三个理由:
+#   1. 青绿(#45e3cf)+深蓝底是当下 AI 项目最泛滥的组合,属于 generic tech;
+#   2. 本项目是给开发者用的基础设施,浅色更诚实地传达"严肃的文档"而非"炫技 Demo";
+#   3. 浅色下"颜色承载信息"才成立 —— 琥珀**只**用于 RBAC 语义与关键数字,
+#      而旧版橙色只用在那 2 个市场芯片上,90% 面积同色 ⇒ 颜色等于没说信息。
+BG       = "#FBFAF7"   # 暖白纸面
+INK      = "#1A1A18"   # 深墨(主文字)
+INK2     = "#6B6862"   # 次级文字
+RULE     = "#E4E1DA"   # 细线
+ACCENT   = "#B45309"   # 琥珀(唯一强调色)
+ACC_SOFT = "#FDF3E3"   # 琥珀浅底(RBAC 工具片)
+CARD     = "#FFFFFF"
+CARD_BD  = "#E8E5DE"
+
+# 独立 MCP server 的工具数(5 个 server)。这是**仓库结构事实**而非卡片集合,
+# 故单独列出;新增/删除 server 时需同步这里(与 TOOLS 分类不同源)。
+MCP_SERVERS = [("file", 14), ("git", 14), ("maven", 6), ("compile", 1), ("http", 19)]
+
+# 库层官方技能数(market_skill, author=system):V1.0 尾部 2 条 + V2.0 追加 1 条。
+# 改动时同步核对 V1.0__init.sql / V2.0__add_chat_memory_sequence_id.sql 的种子 INSERT。
+OFFICIAL_SKILLS = 3
+
+
+COPY = {
+    "zh": {
+        "title": "LoomAgent 灵梭",
+        "claim": "Spring Boot 4 + Spring AI 2 的 <b>对话 · 知识 · 工具</b> 一体化底座",
+        "badges": ["JDK 25", "Spring Boot 4", "Spring AI 2", "H2 · Flyway · JVector"],
+        "hr_cap": "MCP 工具<br /><span>{ns} 个独立 server</span>",
+        "hr_r1": "<b>{nt}</b> 组工具 · <b>{np}</b> 核心能力",
+        "hr_r2": "<b>{nsk}</b> 条官方技能 · 有审批流与市场",
+        "sec1": "核心能力", "sec2": "工具", "sec3": "独立 MCP server",
+        "sec2_note": "{nt} 组 · 通用 {nu} / RBAC {nr}",
+        "g_univ": "通用 —— 所有登录用户默认可用",
+        "g_rbac": "RBAC —— 需管理员授权后方可见",
+        "mcp_note": "每个 server 可独立进程运行,与主库共享同一套 core 操作层",
+        "sig": "接口 · 默认实现 · 全部可替换",
+    },
+    "en": {
+        "title": "LoomAgent",
+        "claim": "An integrated <b>chat · knowledge · tools</b> foundation on Spring Boot 4 + Spring AI 2",
+        "badges": ["JDK 25", "Spring Boot 4", "Spring AI 2", "H2 · Flyway · JVector"],
+        "hr_cap": "MCP TOOLS<br /><span>{ns} standalone servers</span>",
+        "hr_r1": "<b>{nt}</b> tool groups · <b>{np}</b> core capabilities",
+        "hr_r2": "<b>{nsk}</b> official skills · approval workflow",
+        "sec1": "Core capabilities", "sec2": "Tools", "sec3": "Standalone MCP servers",
+        "sec2_note": "{nt} groups · universal {nu} / RBAC {nr}",
+        "g_univ": "Universal — visible to every signed-in user",
+        "g_rbac": "RBAC — requires an admin grant",
+        "mcp_note": "each server runs as its own process, sharing the same core operation layer",
+        "sig": "Interface · Default · All replaceable",
+    },
+}
 
 
 def universal_count() -> int:
-    """实际落在 UNIVERSAL_IDS 里的卡片数 —— 与卡片集合同源,不会漂移。"""
+    """落在 UNIVERSAL_IDS 里的卡片数 —— 与卡片集合同源,不会漂移。"""
     return sum(1 for lid, _, _ in TOOLS if lid in UNIVERSAL_IDS)
 
 
 def rbac_count() -> int:
-    """实际落在 RBAC_IDS 里的卡片数 —— 与卡片集合同源,不会漂移。"""
+    """落在 RBAC_IDS 里的卡片数 —— 与卡片集合同源,不会漂移。"""
     return sum(1 for lid, _, _ in TOOLS if lid in RBAC_IDS)
 
 
-def stats_line() -> str:
-    """统计胶囊由 DATA 自动计算 —— 与卡片数量构造上一致,不会过时。"""
-    return (f"{len(PILLARS):02d} PILLARS  -  {len(TOOLS):02d} TOOLS  -  "
-            f"{universal_count():02d} UNIVERSAL  -  {rbac_count():02d} RBAC")
+def icon(name: str, size: int = 24, color: str = INK) -> str:
+    """图标 —— stroke 继承调用方传入的 color(浅色风里图标不再是纯白)。"""
+    return (f'<svg viewBox="0 0 24 24" width="{size}" height="{size}" fill="none" '
+            f'stroke="{color}" stroke-width="1.7" stroke-linecap="round" '
+            f'strokejoin="round">{ICONS[name]}</svg>')
 
 
-def _icon(name: str) -> str:
-    return (f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-            f'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
-            f'{ICONS[name]}</svg>')
+def build(lang: str = "zh") -> str:
+    ns = len(MCP_SERVERS)
+    # 只注入 ns/nsk;其余占位(nt/np/nu/nr)在各自使用处 format ——
+    # 若在此处统一 format,hr_r1/sec2_note 的 {nt} 会因缺参抛 KeyError。
+    c = {k: v.format(ns=ns, nsk=OFFICIAL_SKILLS) if ("{ns}" in v or "{nsk}" in v) else v
+         for k, v in COPY[lang].items()}
+    L = LABELS[lang]
+    UNIV = [(lid, ic, n) for lid, ic, n in TOOLS if lid in UNIVERSAL_IDS]
+    RBAC = [(lid, ic, n) for lid, ic, n in TOOLS if lid in RBAC_IDS]
 
-
-def build_html(lang: str) -> str:
-    t = LABELS[lang]
-    pillar_cards = "\n".join(
-        f'      <div class="card"><span class="ico">{_icon(ic)}</span>'
-        f'<span class="lbl">{t[lid]}</span></div>'
+    pillars = "\n".join(
+        f'      <div class="pcard"><span class="pi">{icon(ic, 34)}</span>'
+        f'<span class="pl">{L[lid]}</span></div>'
         for lid, ic in PILLARS)
-    tool_cards = "\n".join(
-        f'      <div class="card tool"><span class="badge">{n}</span>'
-        f'<span class="ico">{_icon(ic)}</span><span class="lbl">{t[lid]}</span></div>'
-        for lid, ic, n in TOOLS)
-    platform_chips = "\n".join(
-        f'      <div class="chip{" market" if pid in MARKET_IDS else ""}">{t[pid]}</div>'
-        for pid in PLATFORM)
-    tech_chips = "\n".join(f'      <div class="tech">{name}</div>' for name in TECH)
-    build_row = f'\n      <span class="arrow">→</span>\n      '.join(
-        f'<div class="buildbox">{t[bid]}</div>' for bid in BUILD)
+
+    def toolchip(label, ic, cls):
+        return (f'      <div class="tchip {cls}">{icon(ic, 20, INK2)}'
+                f'<span class="tl">{label}</span></div>')
+
+    univ_row = "\n".join(toolchip(L[l], ic, "") for l, ic, _ in UNIV)
+    rbac_row = "\n".join(toolchip(L[l], ic, "rbac") for l, ic, _ in RBAC)
+
+    # 平台:纯文字 + 分隔点做静默带。**不**加下划线/底色 —— 旧图用橙色块强调市场芯片,
+    # 但浅色编辑风里"一行里两个彩色块"比"全行同权重"更像模板。
+    plats = "  ·  ".join(f'<span class="pill">{L[p]}</span>' for p in PLATFORM)
+
+    badges = "\n        ".join(f'<span>{b}</span>' for b in c["badges"])
+    total_mcp = sum(n for _, n in MCP_SERVERS)
+    mcp_detail = " · ".join(f"{k} {n}" for k, n in MCP_SERVERS)
+
+    # hero 右侧统计块:填掉左对齐布局下右侧 1/3 的空白
+    hero_right = f"""<div class="hero-right">
+      <div class="hr-num">{total_mcp}</div>
+      <div class="hr-cap">{c["hr_cap"]}</div>
+      <div class="hr-sep"></div>
+      <div class="hr-row">{c["hr_r1"].format(nt=len(TOOLS), np=len(PILLARS))}</div>
+      <div class="hr-row">{c["hr_r2"]}</div>
+    </div>"""
 
     return f"""<!DOCTYPE html>
-<html lang="{lang}">
-<head>
-<meta charset="utf-8">
 <style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  html, body {{ width: {SIZE}px; height: {SIZE}px; overflow: hidden; }}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body {{ width:{SIZE_W}px; height:{SIZE_H}px; overflow:hidden; }}
   body {{
-    background: #232a3d;
-    font-family: "Inter", "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-    color: #ffffff;
-    padding: 56px 64px 40px;
-    display: flex; flex-direction: column;
-    justify-content: space-between;  /* 大区呼吸空白均匀分布,不留整块死空 */
+    background:{BG}; color:{INK};
+    font-family:"Inter","Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    padding:64px 80px 52px; display:flex; flex-direction:column;
   }}
-  .hero {{ text-align: center; }}
-  .hero h1 {{ font-size: 64px; font-weight: 800; letter-spacing: 0.5px; }}
-  .hero .sub {{ font-size: 27px; font-weight: 700; color: #45e3cf; margin-top: 10px; }}
-  .hero .stats {{
-    display: inline-block; margin-top: 26px; padding: 9px 26px;
-    border: 1.6px solid #45e3cf; border-radius: 999px;
-    font-size: 17px; font-weight: 700; letter-spacing: 1.2px; color: #ffffff;
-  }}
-  section {{ margin-bottom: 6px; }}
-  .sec-head {{ display: flex; align-items: baseline; gap: 18px; margin-bottom: 14px; }}
-  .sec-head .tag {{ font-size: 24px; font-weight: 800; color: #45e3cf; letter-spacing: 1px; }}
-  .sec-head .note {{ font-size: 17px; font-weight: 700; color: #ffffff; }}
-  .row {{ display: flex; gap: 14px; }}
-  .card {{
-    flex: 1; background: #45e3cf; color: #16202e; border-radius: 14px;
-    min-height: 96px; padding: 14px 6px 12px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-    position: relative;
-  }}
-  .card .ico svg {{ width: 34px; height: 34px; display: block; }}
-  .card .lbl {{ font-size: 17px; font-weight: 700; white-space: nowrap; }}
-  .card.tool {{ min-height: 104px; }}
-  .card .badge {{
-    position: absolute; top: -10px; left: -6px;
-    width: 26px; height: 26px; border-radius: 50%;
-    background: #eafcf9; color: #16202e; border: 1.4px solid #16202e;
-    font-size: 13px; font-weight: 800;
-    display: flex; align-items: center; justify-content: center;
-  }}
-  .chiprow {{ display: flex; gap: 14px; margin-bottom: 14px; }}
-  .chip {{
-    flex: 1; background: #45e3cf; color: #16202e; border-radius: 10px;
-    padding: 13px 4px; text-align: center; font-size: 17px; font-weight: 700; white-space: nowrap;
-  }}
-  .chip.market {{ background: #f5a020; color: #201409; }}
-  .techrow {{ display: flex; gap: 12px; }}
-  .tech {{
-    flex: 1; border: 1.5px solid #45e3cf; border-radius: 999px;
-    padding: 10px 4px; text-align: center;
-    font-size: 15.5px; font-weight: 700; color: #45e3cf; white-space: nowrap;
-  }}
-  .buildrow {{ display: flex; align-items: center; gap: 16px; }}
-  .buildbox {{
-    flex: 1; background: #45e3cf; color: #16202e; border-radius: 12px;
-    padding: 18px 4px; text-align: center; font-size: 19px; font-weight: 800; white-space: nowrap;
-  }}
-  .arrow {{ color: #45e3cf; font-size: 30px; font-weight: 800; }}
-  footer {{ text-align: center; }}
-  footer .line {{ border-top: 1.6px solid #45e3cf; margin-bottom: 16px; }}
-  footer .txt {{ font-size: 20px; font-weight: 700; letter-spacing: 2px; }}
-</style>
-</head>
-<body>
+  /* ---------- HERO:最大权重 ---------- */
+  .hero {{ display:flex; justify-content:space-between; align-items:flex-start; gap:56px; }}
+  /* hero 右侧统计块:填掉原先 1/3 空白,数字大但弱于主标题 */
+  .hero-right {{ text-align:right; padding-top:6px; flex-shrink:0; }}
+  .hero-right .hr-num {{ font-size:70px; font-weight:800; line-height:.9;
+                         letter-spacing:-0.03em; color:{INK}; }}
+  .hero-right .hr-cap {{ font-size:15px; font-weight:600; color:{INK2};
+                         margin-top:8px; line-height:1.5; }}
+  .hero-right .hr-cap span {{ color:{ACCENT}; font-weight:650; }}
+  .hero-right .hr-sep {{ height:1px; background:{RULE}; margin:16px 0 13px; }}
+  .hero-right .hr-row {{ font-size:14.5px; font-weight:550; color:{INK2};
+                         line-height:1.85; white-space:nowrap; }}
+  .hero-right .hr-row b {{ color:{INK}; font-weight:750; }}
+  .hero h1 {{ font-size:76px; font-weight:800; letter-spacing:-0.025em; line-height:1; }}
+  .hero .claim {{ font-size:23px; font-weight:600; color:{INK2}; margin-top:14px;
+                 letter-spacing:-0.005em; white-space:nowrap; }}
+  .hero .claim b {{ color:{ACCENT}; font-weight:700; }}
+  /* 徽章:小而克制,不再是巨型胶囊 */
+  .badges {{ display:flex; gap:8px; margin-top:22px; }}
+  .badges span {{ font-size:14.5px; font-weight:650; color:{INK2};
+                  border:1px solid {RULE}; border-radius:6px; padding:5px 11px;
+                  background:{CARD}; }}
+  /* ---------- 主线:7 核心卡,大而疏 ---------- */
+  .sec {{ margin-top:26px; }}
+  .sec-head {{ display:flex; align-items:baseline; gap:12px; margin-bottom:16px;
+               border-bottom:1px solid {RULE}; padding-bottom:9px; }}
+  .sec-head .t {{ font-size:15px; font-weight:750; letter-spacing:.09em;
+                  text-transform:uppercase; color:{INK}; }}
+  .sec-head .n {{ font-size:14px; font-weight:500; color:{INK2}; margin-left:auto; }}
+  .prow {{ display:grid; grid-template-columns:repeat(7,1fr); gap:12px; }}
+  .pcard {{ background:{CARD}; border:1px solid {CARD_BD}; border-radius:11px;
+            padding:27px 8px 22px; display:flex; flex-direction:column;
+            align-items:center; gap:9px; }}
+  .pcard .pi {{ height:36px; display:flex; align-items:center; }}
+  .pcard .pl {{ font-size:16.5px; font-weight:650; white-space:nowrap; }}
+  /* ---------- 次线:工具,按 universal/RBAC 分组 ---------- */
+  .trow {{ display:flex; gap:9px; flex-wrap:wrap; }}
+  .tchip {{ display:flex; align-items:center; gap:7px; background:{CARD};
+            border:1px solid {CARD_BD}; border-radius:8px; padding:10px 15px; }}
+  /* RBAC 用琥珀左边框 + 浅底 —— 分类靠形态而非色块面积传达 */
+  .tchip.rbac {{ background:{ACC_SOFT}; border-color:#EAD5B0;
+                 box-shadow:inset 3px 0 0 {ACCENT}; }}
+  .tchip .tl {{ font-size:15.5px; font-weight:600; white-space:nowrap; }}
+  .tgroup {{ display:flex; align-items:center; gap:12px; margin:13px 0 10px; }}
+  .tgroup .gl {{ font-size:13px; font-weight:700; letter-spacing:.05em; color:{INK2}; }}
+  .tgroup .gr {{ flex:1; height:1px; background:{RULE}; }}
+  /* ---------- 静默带 ---------- */
+  /* MCP server 明细行:填补工具区与 footer 之间的空白,同时把"5 server"落到实处 */
+  .mcp-strip {{ margin-top:30px; display:flex; align-items:baseline; gap:14px;
+                background:{CARD}; border:1px solid {CARD_BD}; border-radius:10px;
+                padding:15px 20px; margin-bottom:16px; }}
+  .mcp-strip .ms-k {{ font-size:14px; font-weight:700; letter-spacing:.04em;
+                      color:{INK}; white-space:nowrap; }}
+  .mcp-strip .ms-v {{ font-size:14.5px; font-weight:650; color:{ACCENT};
+                      font-variant-numeric:tabular-nums; white-space:nowrap; }}
+  .mcp-strip .ms-n {{ font-size:14px; font-weight:500; color:{INK2}; }}
+  .foot {{ margin-top:auto; display:flex; justify-content:space-between;
+           align-items:center; border-top:1px solid {RULE}; padding-top:18px; }}
+  .pills {{ display:flex; gap:7px; flex-wrap:wrap; }}
+  .pill {{ font-size:14.5px; font-weight:550; color:{INK2}; }}
+  .sig {{ font-size:14.5px; font-weight:650; color:{INK2}; }}
+</style></head><body>
   <div class="hero">
-    <h1>Spring AI LoomAgent</h1>
-    <div class="sub">{t['subtitle']}</div>
-    <div class="stats">{stats_line()}</div>
+    <div>
+      <h1>{c["title"]}</h1>
+      <div class="claim">{c["claim"]}</div>
+      <div class="badges">
+        {badges}
+      </div>
+    </div>
+{hero_right}
   </div>
-  <section>
-    <div class="sec-head"><span class="tag">{t['sec_pillars']}</span></div>
-    <div class="row">
-{pillar_cards}
+
+  <div class="sec">
+    <div class="sec-head"><span class="t">{c["sec1"]}</span><span class="n">7</span></div>
+    <div class="prow">
+{pillars}
     </div>
-  </section>
-  <section>
-    <div class="sec-head"><span class="tag">{t['sec_tools']}</span><span class="note">{tools_note()}</span></div>
-    <div class="row">
-{tool_cards}
+  </div>
+
+  <div class="sec">
+    <div class="sec-head"><span class="t">{c["sec2"]}</span><span class="n">{c["sec2_note"].format(nt=len(TOOLS), nu=len(UNIV), nr=len(RBAC))}</span></div>
+    <div class="tgroup"><span class="gl">{c["g_univ"]}</span><span class="gr"></span></div>
+    <div class="trow">
+{univ_row}
     </div>
-  </section>
-  <section>
-    <div class="sec-head"><span class="tag">{t['sec_platform']}</span></div>
-    <div class="chiprow">
-{platform_chips}
+    <div class="tgroup"><span class="gl">{c["g_rbac"]}</span><span class="gr"></span></div>
+    <div class="trow">
+{rbac_row}
     </div>
-    <div class="techrow">
-{tech_chips}
+  </div>
+
+  <div class="mcp-strip">
+    <span class="ms-k">{c["sec3"]}</span>
+    <span class="ms-v">{mcp_detail}</span>
+    <span class="ms-n">{c["mcp_note"]}</span>
+  </div>
+
+  <div class="foot">
+    <div class="pills">
+{plats}
     </div>
-  </section>
-  <section>
-    <div class="sec-head"><span class="tag">{t['sec_build']}</span></div>
-    <div class="buildrow">
-      {build_row}
-    </div>
-  </section>
-  <footer>
-    <div class="line"></div>
-    <div class="txt">{t['footer']}</div>
-  </footer>
-</body>
-</html>
-"""
+    <div class="sig">{c["sig"]}</div>
+  </div>
+</body></html>"""
 
 
 def render(lang: str, out: pathlib.Path) -> None:
@@ -271,11 +352,11 @@ def render(lang: str, out: pathlib.Path) -> None:
         from playwright.sync_api import sync_playwright
     except ImportError:
         sys.exit("缺少依赖:pip install playwright && playwright install chromium")
-    html = build_html(lang)
+    html = build(lang)
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(
-            viewport={"width": SIZE, "height": SIZE}, device_scale_factor=2)
+            viewport={"width": SIZE_W, "height": SIZE_H}, device_scale_factor=2)
         page.set_content(html, wait_until="networkidle")
         page.screenshot(path=str(out))
         browser.close()
@@ -290,3 +371,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
