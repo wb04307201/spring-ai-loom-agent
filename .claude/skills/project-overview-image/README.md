@@ -7,7 +7,7 @@
 
 ```
 generate.py 的 DATA(结构) + LABELS(双语文案)   ← 布局单一真源
-  → 自包含 HTML/CSS(**浅色编辑风**:暖白纸面 + 深墨字 + 琥珀唯一强调色)
+  → 自包含 HTML/CSS(**科技风**:近黑蓝墨底 + 浮起暗面板 + 霓虹青唯一强调色)
   → 本地无头 Chromium(Playwright)截图 1600×840 CSS px @2x → 3200×1680 PNG
   → check.py 静态校验
 ```
@@ -44,7 +44,7 @@ python .claude/skills/project-overview-image/scripts/check.py
 | 平台静默带(页脚一行) | `PLATFORM` — 纯文字 + 分隔点,浅色版不再有橙色高亮块 |
 | hero 右侧统计块 | `MCP_SERVERS`(54 MCP 工具)/ `OFFICIAL_SKILLS` / `COPY[*].hr_*` |
 | hero 徽章行(替代旧技术芯片行) | `COPY[*].badges`(JDK 25 / Boot 4 / AI 2 / H2·Flyway·JVector) |
-| 视觉 token(配色/字号/间距) | `BG` `INK` `INK2` `RULE` `ACCENT` `ACC_SOFT` `CARD` `CARD_BD` |
+| 视觉 token(配色) | `BG` `PANEL` `PANEL2` `EDGE` `INK` `INK2` `RULE` `ACCENT` `MONO`(等宽字体栈) |
 | 版式文案(标题/副标题/分组标签) | `COPY` — 与 `LABELS`(卡片级文案)分工,两者都需 en/zh 键对齐 |
 | 尺寸 | `SIZE_W` / `SIZE_H`(1600×840 CSS px @2x)|
 | 任一双语文案 | 卡片级用 `LABELS["en"|"zh"]`;版式级(标题/副标题/分组标签/签名)用 `COPY["en"|"zh"]`。两者键集合都需双语对齐,check.py 锁 |

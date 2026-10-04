@@ -11,7 +11,7 @@ description: 基于项目代码 + README + CLAUDE.md 生成中英文 2 张项目
 
 ```
 DATA/LABELS(generate.py 单一真源)
-  → 自包含 HTML/CSS(**浅色编辑风**:暖白纸面 + 深墨字 + 琥珀唯一强调色)
+  → 自包含 HTML/CSS(**科技风**:近黑蓝墨底 + 浮起暗面板 + 霓虹青唯一强调色)
   → 本地无头 Chromium(Playwright)截图 1600×840 @2x = 3200×1680 PNG
   → check.py 静态校验(结构自洽 / 工具分类不重叠不遗漏 / 双语 parity / 版式文案齐全 / 产物尺寸)
 ```

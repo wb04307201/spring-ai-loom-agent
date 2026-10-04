@@ -125,14 +125,22 @@ LABELS = {
 #   2. 本项目是给开发者用的基础设施,浅色更诚实地传达"严肃的文档"而非"炫技 Demo";
 #   3. 浅色下"颜色承载信息"才成立 —— 琥珀**只**用于 RBAC 语义与关键数字,
 #      而旧版橙色只用在那 2 个市场芯片上,90% 面积同色 ⇒ 颜色等于没说信息。
-BG       = "#FBFAF7"   # 暖白纸面
-INK      = "#1A1A18"   # 深墨(主文字)
-INK2     = "#6B6862"   # 次级文字
-RULE     = "#E4E1DA"   # 细线
-ACCENT   = "#B45309"   # 琥珀(唯一强调色)
-ACC_SOFT = "#FDF3E3"   # 琥珀浅底(RBAC 工具片)
-CARD     = "#FFFFFF"
-CARD_BD  = "#E8E5DE"
+# 科技风(2026-10-04,继浅色编辑风之后)。与前两版的差异:
+#   · 深色版(2026-09-19)是"青绿铺满 90%" —— 所有卡片同底同权重,满而无序;
+#   · 浅色版(同日)层级清晰但**没有暗色锚点**,7 张核心卡是白底浅描边,
+#     在暖白底上近乎隐没 —— 元素都在,但视线无处停留,冲击感不足;
+#   · 本版用「近黑底 + 少量霓虹 + 明确明暗层级」:核心卡做成比底色亮一档的
+#     浮起面板(亮边 + 投影 + 图标微光晕),霓虹青只在 4 处出现(核心卡图标 /
+#     54 / RBAC 片 / MCP 数字)。**冲击感来自对比,不来自颜色数量。**
+BG      = "#0E1117"   # 近黑蓝墨(终端/编辑器底,非旧版的灰蓝 #232a3d)
+PANEL   = "#161B24"   # 浮起面板
+PANEL2  = "#1C222C"   # 面板渐变上端
+EDGE    = "#2A313D"   # 亮边(卡片描边)
+INK     = "#F2F5F8"   # 主文字(近白)
+INK2    = "#8B96A5"   # 次级文字(冷灰)
+RULE    = "#232A35"   # 细线
+ACCENT  = "#5EEAD4"   # 霓虹青(唯一强调色)
+MONO    = "ui-monospace,\"Cascadia Mono\",Consolas,monospace"
 
 # 独立 MCP server 的工具数(5 个 server)。这是**仓库结构事实**而非卡片集合,
 # 故单独列出;新增/删除 server 时需同步这里(与 TOOLS 分类不同源)。
@@ -151,6 +159,7 @@ COPY = {
         "hr_cap": "MCP 工具<br /><span>{ns} 个独立 server</span>",
         "hr_r1": "<b>{nt}</b> 组工具 · <b>{np}</b> 核心能力",
         "hr_r2": "<b>{nsk}</b> 条官方技能 · 有审批流与市场",
+        "hr_r3": "核心 / 自动配置 / Starter 三段式 · 可执行 jar",
         "sec1": "核心能力", "sec2": "工具", "sec3": "独立 MCP server",
         "sec2_note": "{nt} 组 · 通用 {nu} / RBAC {nr}",
         "g_univ": "通用 —— 所有登录用户默认可用",
@@ -165,6 +174,7 @@ COPY = {
         "hr_cap": "MCP TOOLS<br /><span>{ns} standalone servers</span>",
         "hr_r1": "<b>{nt}</b> tool groups · <b>{np}</b> core capabilities",
         "hr_r2": "<b>{nsk}</b> official skills · approval workflow",
+        "hr_r3": "core / autoconfigure / starter · runnable jars",
         "sec1": "Core capabilities", "sec2": "Tools", "sec3": "Standalone MCP servers",
         "sec2_note": "{nt} groups · universal {nu} / RBAC {nr}",
         "g_univ": "Universal — visible to every signed-in user",
@@ -229,6 +239,7 @@ def build(lang: str = "zh") -> str:
       <div class="hr-sep"></div>
       <div class="hr-row">{c["hr_r1"].format(nt=len(TOOLS), np=len(PILLARS))}</div>
       <div class="hr-row">{c["hr_r2"]}</div>
+      <div class="hr-row">{c["hr_r3"]}</div>
     </div>"""
 
     return f"""<!DOCTYPE html>
@@ -238,69 +249,86 @@ def build(lang: str = "zh") -> str:
   body {{
     background:{BG}; color:{INK};
     font-family:"Inter","Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
-    padding:64px 80px 52px; display:flex; flex-direction:column;
+    padding:60px 76px 48px; display:flex; flex-direction:column;
+    /* 极轻的网格底纹 —— 精密感,不抢内容 */
+    background-image:
+      linear-gradient(rgba(94,234,212,.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(94,234,212,.028) 1px, transparent 1px);
+    background-size:48px 48px;
   }}
-  /* ---------- HERO:最大权重 ---------- */
+  /* ---------- HERO ---------- */
   .hero {{ display:flex; justify-content:space-between; align-items:flex-start; gap:56px; }}
-  /* hero 右侧统计块:填掉原先 1/3 空白,数字大但弱于主标题 */
-  .hero-right {{ text-align:right; padding-top:6px; flex-shrink:0; }}
-  .hero-right .hr-num {{ font-size:70px; font-weight:800; line-height:.9;
-                         letter-spacing:-0.03em; color:{INK}; }}
-  .hero-right .hr-cap {{ font-size:15px; font-weight:600; color:{INK2};
-                         margin-top:8px; line-height:1.5; }}
-  .hero-right .hr-cap span {{ color:{ACCENT}; font-weight:650; }}
-  .hero-right .hr-sep {{ height:1px; background:{RULE}; margin:16px 0 13px; }}
-  .hero-right .hr-row {{ font-size:14.5px; font-weight:550; color:{INK2};
-                         line-height:1.85; white-space:nowrap; }}
-  .hero-right .hr-row b {{ color:{INK}; font-weight:750; }}
-  .hero h1 {{ font-size:76px; font-weight:800; letter-spacing:-0.025em; line-height:1; }}
+  .hero h1 {{ font-size:74px; font-weight:800; letter-spacing:-0.028em; line-height:1;
+              text-shadow:0 0 42px rgba(94,234,212,.20); }}
   .hero .claim {{ font-size:23px; font-weight:600; color:{INK2}; margin-top:14px;
                  letter-spacing:-0.005em; white-space:nowrap; }}
   .hero .claim b {{ color:{ACCENT}; font-weight:700; }}
-  /* 徽章:小而克制,不再是巨型胶囊 */
-  .badges {{ display:flex; gap:8px; margin-top:22px; }}
-  .badges span {{ font-size:14.5px; font-weight:650; color:{INK2};
-                  border:1px solid {RULE}; border-radius:6px; padding:5px 11px;
-                  background:{CARD}; }}
-  /* ---------- 主线:7 核心卡,大而疏 ---------- */
+  .badges {{ display:flex; gap:8px; margin-top:20px; }}
+  .badges span {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+                  font-size:13.5px; font-weight:600; color:{INK2};
+                  border:1px solid {EDGE}; border-radius:6px; padding:5px 11px;
+                  background:{PANEL}; }}
+  .hero-right {{ text-align:right; padding-top:6px; flex-shrink:0; }}
+  /* 等宽字体 = 工程/精密语义,最省力的科技感信号 */
+  .hero-right .hr-num {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+                         font-size:66px; font-weight:700; line-height:.9;
+                         letter-spacing:-0.04em; color:{ACCENT};
+                         text-shadow:0 0 34px rgba(94,234,212,.34); }}
+  .hero-right .hr-cap {{ font-size:14.5px; font-weight:600; color:{INK2}; margin-top:9px;
+                         line-height:1.5; }}
+  .hero-right .hr-cap span {{ color:{ACCENT}; font-weight:650; }}
+  .hero-right .hr-sep {{ height:1px; background:{RULE}; margin:15px 0 12px; }}
+  .hero-right .hr-row {{ font-size:14px; font-weight:550; color:{INK2}; line-height:1.8;
+                         white-space:nowrap; }}
+  .hero-right .hr-row b {{ color:{INK}; font-weight:700; }}
+  /* ---------- 区块 ---------- */
   .sec {{ margin-top:26px; }}
-  .sec-head {{ display:flex; align-items:baseline; gap:12px; margin-bottom:16px;
-               border-bottom:1px solid {RULE}; padding-bottom:9px; }}
-  .sec-head .t {{ font-size:15px; font-weight:750; letter-spacing:.09em;
-                  text-transform:uppercase; color:{INK}; }}
-  .sec-head .n {{ font-size:14px; font-weight:500; color:{INK2}; margin-left:auto; }}
+  .sec-head {{ display:flex; align-items:baseline; gap:12px; margin-bottom:15px;
+               border-bottom:1px solid {RULE}; padding-bottom:8px; }}
+  .sec-head .t {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+                  font-size:14px; font-weight:700; letter-spacing:.10em;
+                  text-transform:uppercase; color:{ACCENT}; }}
+  .sec-head .n {{ font-size:13.5px; font-weight:500; color:{INK2}; margin-left:auto;
+                 font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; }}
+  /* ---------- 核心卡:暗底浮起面板 + 微光晕 = 科技质感的关键 ---------- */
   .prow {{ display:grid; grid-template-columns:repeat(7,1fr); gap:12px; }}
-  .pcard {{ background:{CARD}; border:1px solid {CARD_BD}; border-radius:11px;
-            padding:27px 8px 22px; display:flex; flex-direction:column;
-            align-items:center; gap:9px; }}
-  .pcard .pi {{ height:36px; display:flex; align-items:center; }}
-  .pcard .pl {{ font-size:16.5px; font-weight:650; white-space:nowrap; }}
-  /* ---------- 次线:工具,按 universal/RBAC 分组 ---------- */
+  .pcard {{ background:linear-gradient(180deg,{PANEL2},{PANEL}); border:1px solid {EDGE};
+            border-radius:11px; padding:24px 8px 19px;
+            display:flex; flex-direction:column; align-items:center; gap:10px;
+            box-shadow:0 1px 0 rgba(94,234,212,.07) inset, 0 8px 22px rgba(0,0,0,.34);
+            transition:none; }}
+  .pcard .pi {{ height:30px; display:flex; align-items:center;
+                filter:drop-shadow(0 0 6px rgba(94,234,212,.34)); }}
+  .pcard .pl {{ font-size:16px; font-weight:650; white-space:nowrap; color:{INK}; }}
+  /* ---------- 工具片 ---------- */
   .trow {{ display:flex; gap:9px; flex-wrap:wrap; }}
-  .tchip {{ display:flex; align-items:center; gap:7px; background:{CARD};
-            border:1px solid {CARD_BD}; border-radius:8px; padding:10px 15px; }}
-  /* RBAC 用琥珀左边框 + 浅底 —— 分类靠形态而非色块面积传达 */
-  .tchip.rbac {{ background:{ACC_SOFT}; border-color:#EAD5B0;
-                 box-shadow:inset 3px 0 0 {ACCENT}; }}
-  .tchip .tl {{ font-size:15.5px; font-weight:600; white-space:nowrap; }}
+  .tchip {{ display:flex; align-items:center; gap:7px; background:{PANEL};
+            border:1px solid {EDGE}; border-radius:8px; padding:10px 15px; }}
+  /* RBAC:霓虹青左边框 + 微光,分类靠形态+发光传达 */
+  .tchip.rbac {{ background:rgba(94,234,212,.09); border-color:rgba(94,234,212,.42);
+                 box-shadow:inset 3px 0 0 {ACCENT}, 0 0 12px rgba(94,234,212,.07); }}
+  .tchip .tl {{ font-size:15px; font-weight:600; white-space:nowrap; color:{INK}; }}
   .tgroup {{ display:flex; align-items:center; gap:12px; margin:13px 0 10px; }}
-  .tgroup .gl {{ font-size:13px; font-weight:700; letter-spacing:.05em; color:{INK2}; }}
-  .tgroup .gr {{ flex:1; height:1px; background:{RULE}; }}
-  /* ---------- 静默带 ---------- */
-  /* MCP server 明细行:填补工具区与 footer 之间的空白,同时把"5 server"落到实处 */
-  .mcp-strip {{ margin-top:30px; display:flex; align-items:baseline; gap:14px;
-                background:{CARD}; border:1px solid {CARD_BD}; border-radius:10px;
-                padding:15px 20px; margin-bottom:16px; }}
-  .mcp-strip .ms-k {{ font-size:14px; font-weight:700; letter-spacing:.04em;
-                      color:{INK}; white-space:nowrap; }}
-  .mcp-strip .ms-v {{ font-size:14.5px; font-weight:650; color:{ACCENT};
+  .tgroup .gl {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+                  font-size:12.5px; font-weight:700; letter-spacing:.04em; color:{INK2}; }}
+  .tgroup .gr {{ flex:1; height:1px;
+                 background:linear-gradient(90deg,{RULE},transparent); }}
+  /* ---------- MCP 明细 ---------- */
+  .mcp-strip {{ margin-top:28px; display:flex; align-items:baseline; gap:14px;
+                background:{PANEL}; border:1px solid {EDGE}; border-radius:10px;
+                padding:15px 20px; margin-bottom:14px;
+                box-shadow:0 6px 20px rgba(0,0,0,.30); }}
+  .mcp-strip .ms-k {{ font-size:14px; font-weight:700; color:{INK}; white-space:nowrap; }}
+  .mcp-strip .ms-v {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+                      font-size:14px; font-weight:700; color:{ACCENT};
                       font-variant-numeric:tabular-nums; white-space:nowrap; }}
-  .mcp-strip .ms-n {{ font-size:14px; font-weight:500; color:{INK2}; }}
+  .mcp-strip .ms-n {{ font-size:13.5px; font-weight:500; color:{INK2}; }}
   .foot {{ margin-top:auto; display:flex; justify-content:space-between;
-           align-items:center; border-top:1px solid {RULE}; padding-top:18px; }}
+           align-items:center; border-top:1px solid {RULE}; padding-top:16px; }}
   .pills {{ display:flex; gap:7px; flex-wrap:wrap; }}
-  .pill {{ font-size:14.5px; font-weight:550; color:{INK2}; }}
-  .sig {{ font-size:14.5px; font-weight:650; color:{INK2}; }}
+  .pill {{ font-size:14px; font-weight:550; color:{INK2}; }}
+  .sig {{ font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+          font-size:13.5px; font-weight:600; color:{INK2}; }}
 </style></head><body>
   <div class="hero">
     <div>
