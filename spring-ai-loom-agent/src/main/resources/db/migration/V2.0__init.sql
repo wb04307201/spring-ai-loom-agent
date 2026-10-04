@@ -1,21 +1,46 @@
 -- =============================================================
--- Issue #1 修复 (2026-09-30): 给 SPRING_AI_CHAT_MEMORY 加 sequence_id 列
+-- V2.0 库层增量:chat memory schema 兜底 + 第 3 条官方 skill 种子
 -- =============================================================
--- 版本号说明:本文件原为 V1.5,2026-10-04 升为 V2.0。
---   · 库侧 V1.0__init.sql 用的是 Spring AI 1.x 的 chat memory schema
---     (conversation_id, content, type, timestamp),Spring AI 2.0 需要
---     sequence_id —— 这是**破坏性 schema 变更**,不是增量补丁,故跳大版本号。
---   · 同批还删除了 V1.6(其内容已并入应用方 seed V1.2__init_app_data.sql),
+-- 文件名说明(2026-10-04):本文件原名 V2.0__add_chat_memory_sequence_id.sql,
+-- 但那只是**前半段**的内容 —— 后半段是「交叉评审」skill 的种子数据(约 2/3 体量)。
+-- 名字既不准确也更危险:改技能种子的人不会想到去动一个叫 add_chat_memory 的文件,
+-- 而想动 chat memory DDL 的人会误以为改它不影响别处。故按"库层增量"这一职责
+-- 改名 V2.0__init.sql,内容分两段,各自有小节标题。
+--
+-- 版本号沿革:本文件原为 V1.5,2026-10-04 升为 V2.0。
+--   · V1.5 升 V2.0 的原因是 chat memory 的破坏性 schema 变更(1.x → 2.0 需要
+--     sequence_id),不是增量补丁,故跳大版本号;
+--   · 同批删除了 V1.6(内容已并入应用方 seed V1.2__init_app_data.sql),
 --     V1.5/V1.6 两个版本号一并作废。
---   · ⚠️ 本项目只跑全新库:已有实例必须 `rm -rf ~/.loom/datasource` 重跑,
---     或 flyway baseline 后手动迁移(见 CLAUDE.md「升级注意」)。
--- Spring AI 2.0 的 JdbcChatMemoryRepository 用 sequence_id BIGINT 排序
--- (替代 1.x 的 timestamp 排序 — 跨库一致,解决 MySQL/MariaDB TIMESTAMP 秒级精度
+--
+-- ⚠️ 本项目只跑全新库:已有实例必须 `rm -rf ~/.loom/datasource` 重跑,
+--   或 flyway baseline 后手动迁移(见 CLAUDE.md「升级注意」)。
+--
+-- ── 第一段:chat memory schema 兜底 ──────────────────────────────────
+-- Issue #1 (2026-09-30):Spring AI 2.0 的 JdbcChatMemoryRepository 用
+-- sequence_id BIGINT 排序(替代 1.x 的 timestamp 排序 — 跨库一致,解决
+-- MySQL/MariaDB TIMESTAMP 秒级精度
 -- 导致同秒消息乱序的问题)。Loom 的 V1.0__init.sql 用了 1.x 旧 schema
 -- (conversation_id, content, type, timestamp),没 sequence_id 列,
 -- Spring AI 2.0 的查询 `... ORDER BY sequence_id` 直接报
 -- BadSqlGrammarException → Issue #1 现象(本质根因是 ToolCallingAdvisor
 -- 关闭内部 history,叠加 schema 不匹配才导致 LLM 收到残缺请求)。
+--
+-- ⚠️ 2026-10-04 订正:下面这三段 DDL 已**全部改为幂等**,且不再是"新装库必需" ——
+-- V1.0__init.sql 现在直接按 Spring AI 2.0 的 schema 建表(带 sequence_id 与那个
+-- 联合索引),而 Spring AI 自带的 schema-h2.sql(via initialize-schema: always)
+-- 也会建同一张表。两边都是 CREATE TABLE IF NOT EXISTS,**谁先跑谁赢**,
+-- 所以两边列集合必须一致 —— 否则"谁先跑"会决定最终 schema。
+--
+-- 订正前的裸 `ADD COLUMN sequence_id` 在全新库上会报
+-- `Duplicate column name "SEQUENCE_ID"`(实测 2026-10-04 清库启动时命中):
+-- 全新库由 Spring AI 先建 ⇒ 已含 sequence_id ⇒ V2.0 再 ADD 就撞车。
+-- 原写法只在"表已被 V1.0 建成 1.x 旧 schema"的库上有效,而那种库本项目已不再支持
+-- (只跑全新库,见 CLAUDE.md「升级注意」)。
+--
+-- 保留这三段(幂等化后)的价值:覆盖**Spring Boot 4 / Spring AI 降级或换方言**的场景
+-- —— 若某个环境里 Spring AI 的 schema 初始化被关掉(initialize-schema: never),
+-- 本文件仍是 sequence_id 的兜底来源。
 --
 -- Migration 步骤(参照 Spring AI 官方升级文档,H2 适配):
 --   1. 加 sequence_id 列(允许 NULL 临时)
@@ -23,8 +48,7 @@
 --      用相关子查询 (H2 兼容;PostgreSQL 官方文档用 WITH ... UPDATE FROM)
 --   3. 设 NOT NULL
 --   4. 加 (conversation_id, sequence_id) 联合索引
-
-ALTER TABLE SPRING_AI_CHAT_MEMORY ADD COLUMN sequence_id BIGINT;
+ALTER TABLE SPRING_AI_CHAT_MEMORY ADD COLUMN IF NOT EXISTS sequence_id BIGINT;
 
 -- 相关子查询: 同一 conversation_id 内,timestamp <= 当前行的行数减 1 = sequence_id
 -- 同 timestamp 行共享 sequence_id(原 timestamp 排序也是不确定的,语义不变)
@@ -34,13 +58,16 @@ SET sequence_id = (
   FROM SPRING_AI_CHAT_MEMORY t2
   WHERE t2.conversation_id = SPRING_AI_CHAT_MEMORY.conversation_id
     AND t2.timestamp <= SPRING_AI_CHAT_MEMORY.timestamp
-);
+)
+-- 表若由 V1.0 或 Spring AI 建成(已带 sequence_id 且 NOT NULL),不要覆写已有值
+WHERE sequence_id IS NULL;
 
 ALTER TABLE SPRING_AI_CHAT_MEMORY ALTER COLUMN sequence_id SET NOT NULL;
 
-CREATE INDEX SPRING_AI_CHAT_MEMORY_CONVERSATION_ID_SEQUENCE_ID_IDX
+CREATE INDEX IF NOT EXISTS SPRING_AI_CHAT_MEMORY_CONVERSATION_ID_SEQUENCE_ID_IDX
   ON SPRING_AI_CHAT_MEMORY(conversation_id, sequence_id);
 
+-- ── 第二段:第 3 条官方 skill 种子(交叉评审) ────────────────────────────
 -- =============================================================
 -- 第 3 条官方 skill:交叉评审(2026-10-04)
 -- =============================================================
@@ -51,14 +78,16 @@ CREATE INDEX SPRING_AI_CHAT_MEMORY_CONVERSATION_ID_SEQUENCE_ID_IDX
 -- 新增种子走增量文件,与 V2.0 的破坏性变更同批落地。
 --
 -- 技能机制依据(读源码核实,非猜测):
---   · 子任务走 loomSubTaskExecutor 线程池,corePoolSize = maxPoolSize
---     = max-concurrent(默认 4),queueCapacity=50 ⇒ **并行度上限 4**,
---     超出部分排队。该池大小来自
---     LoomAgentConfiguration:1171-1182(Java,非 SQL,故只能写进 skill 文案)。
---   · DefaultSubTaskTool.startSubTask(prompt, systemContext, …) 内部
---     executor.submit(...) 后 future.get(timeout) ⇒ **单次调用是阻塞的**,
---     但 LLM 在同一轮发出多个 tool call 时 Spring AI 并行执行它们
---     ⇒ 「一轮内发 N 个 start_sub_task」= 真并行。
+--   · 子任务走 loomSubTaskExecutor 线程池(corePoolSize = maxPoolSize =
+--     max-concurrent,默认 4;queueCapacity=50),超出部分**排队而非报错**。
+--   · ⚠️ 2026-10-04 订正:原文写「LLM 在同一轮发出多个 tool call 时 Spring AI 并行
+--     执行它们 ⇒ 一轮内发 N 个 start_sub_task = 真并行」—— **这是错的**。
+--     Spring AI 2.0.1 的 DefaultToolCallingManager 用普通 Iterator 串行遍历同轮
+--     tool calls(反编译确认:无 parallelStream / ExecutorService / invokeAll),
+--     且 DefaultToolCallingManager 是 final、executeToolCall 是 private,无法从外部
+--     干预。端到端实测证实串行:两个子任务耗时 55s 与 21s 且陆续出现。
+--     故新增 startSubTasks 工具:把扇出收进**单次工具调用内部**,由线程池真正并行,
+--     并发上限与排队交给配置,skill 不再需要知道任何数字。
 --   · systemContext 参数正是给每个子 agent 注入不同视角的入口。
 --   · ⚠️ DefaultSubTaskExecutor 递归守卫排除 IAskUserTool
 --     ⇒ **子任务不能向用户提问**,只能基于主对话已给出的信息推理。
@@ -69,7 +98,7 @@ INSERT INTO market_skill (name, description, content, author, status,
                           reviewed_at, reviewed_by,
                           is_official, created_by_kind, category)
 SELECT '交叉评审',
-       '用户说「交叉评审 / 多角度评审 / 全面评估 / 从几个维度看看 / 挑毛病」时触发：主对话先按需补齐信息，再动态规划评审维度，把超出并行上限的维度分批并行派发给子 agent，最后汇总成一份合并评审报告',
+       '用户说「交叉评审 / 多角度评审 / 全面评估 / 从几个维度看看 / 挑毛病」时触发：主对话先按需补齐信息，再动态规划若干互补的评审维度，用 startSubTasks 一次性并行派发给子 agent，全部完成后汇总成一份合并评审报告',
        '用户想「交叉评审 / 多角度评审 / 全面评估某个方案或问题」时触发本技能。
 
 你的任务：把同一个复杂问题拆成若干个**互不重叠的评审维度**，每个维度派一个子 agent
@@ -126,11 +155,14 @@ SELECT '交叉评审',
 维度数量守则：
 - 简单问题（2-3 个维度就够）→ 别硬凑 5 个
 - 常规问题 → 3-5 个
-- **并行度上限是 4**（子任务线程池大小），因此：
-  · 维度 ≤ 4 个 → 在**同一轮**里同时发出全部 start_sub_task，真并行
-  · 维度 > 4 个 → **必须分批**：第一批 4 个并行，等它们全部返回后再发第二批
-- **超上限时不要在同轮发超过 4 个**——多出的会排队等待，看起来像并行实则串行，
-  而你不会察觉。分批是你必须主动做的编排。
+
+**怎么派发**：把全部维度放进**一次** `startSubTasks` 调用（工具名为 `startSubTasks`，
+与主库其它工具同样按方法名注册）。它会在内部并行跑完所有维度后一次性返回合并结果。
+
+- **不要自己发多个 start_sub_task 去"模拟并行"**——那样是串行的（框架逐个执行同轮
+  工具调用，且每个都会把主对话阻塞在自己的等待上），你只会得到 N 段等待。
+- 并发上限由部署配置决定、超出部分自动排队，**与你无关**：有多少维度就传多少，
+  不要为了"塞得下"而删维度，也不需要分批。
 
 给每个子 agent 的任务描述要包含：
 (a) 这个维度**只看这一面**，不要越界去评别的维度；

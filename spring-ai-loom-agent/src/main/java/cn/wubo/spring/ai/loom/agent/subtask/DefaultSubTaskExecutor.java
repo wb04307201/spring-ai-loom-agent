@@ -381,4 +381,110 @@ public class DefaultSubTaskExecutor implements ISubTaskExecutor {
             throw new RuntimeException(e);
         }
     }
+
+    /**
+     * 批量并行:先把全部请求提交进池,<b>再</b>依次收集结果。
+     *
+     * <p>与 {@link #execute} 的区别只在时序 —— 单个任务的生命周期(register → publish
+     * RUNNING → submit → 等待 → publish 终态 → markFinished)完全复用同一套代码路径,
+     * 因此历史记录、SSE 事件、取消钩子、activeFutures 全部与单任务版一致,不会出现
+     * "批量版不写 history"这类分叉。
+     *
+     * <p><b>并发度由池决定</b>({@code subtask.max-concurrent},默认 4),超出部分在
+     * {@code queueCapacity=50} 的队列里排队 —— <b>排队而非报错</b>。刻意不学 Claude Code
+     * 的"到上限即报错让 LLM 稍后重试":那要求 LLM 记得重试,而这里的调用方是一个
+     * skill,一次传 N 个维度是它的正常用法,报错会让整份评审中断。
+     */
+    @Override
+    public java.util.List<SubTaskResult> executeBatch(java.util.List<SubTaskRequest> requests) {
+        java.util.List<java.util.concurrent.Future<SubTaskResult>> futures = new java.util.ArrayList<>(requests.size());
+        for (SubTaskRequest req : requests) {
+            futures.add(submitOnly(req));
+        }
+        long timeoutSec = (subTaskProperty != null) ? subTaskProperty.getTimeoutSeconds() : 600L;
+        java.util.List<SubTaskResult> out = new java.util.ArrayList<>(requests.size());
+        for (int i = 0; i < futures.size(); i++) {
+            out.add(awaitOne(requests.get(i), futures.get(i), timeoutSec));
+        }
+        return out;
+    }
+
+    /**
+     * 提交到池并立即返回 future(不等待)。把 {@link #execute} 的前半段抽出来复用,
+     * 保证 register / publishEvent / activeFutures / 拒绝处理四件事只有一处实现。
+     */
+    private java.util.concurrent.Future<SubTaskResult> submitOnly(SubTaskRequest req) {
+        long startedAt = System.currentTimeMillis();
+        log.info("Sub-task start: id={}, parentConv={}, user={}, fromScheduler={}",
+                req.subTaskId(), req.parentConversationId(), req.username(), req.fromScheduler());
+        publishEvent(req, req.subTaskId() == null ? "" : req.subTaskId(), "RUNNING",
+                startedAt, startedAt, null);
+
+        String subTaskId = safeSubId(req.subTaskId());
+        try {
+            subTaskRegistry.registerWithId(subTaskId, req.username(),
+                    req.parentConversationId(), req.prompt());
+        } catch (IllegalStateException dup) {
+            log.warn("Sub-task id {} already registered; re-executing without re-register", subTaskId);
+        } catch (IllegalArgumentException bad) {
+            log.error("Sub-task id missing/invalid — cannot record history: id={}", subTaskId);
+        }
+
+        try {
+            java.util.concurrent.Future<SubTaskResult> future = executor.submit(() -> {
+                try {
+                    return doExecute(req, startedAt);
+                } finally {
+                    activeFutures.remove(subTaskId);
+                }
+            });
+            activeFutures.put(subTaskId, future);
+            return future;
+        } catch (java.util.concurrent.RejectedExecutionException ree) {
+            log.error("Sub-task rejected (pool shut down): id={}", subTaskId, ree);
+            // 池已关闭:无法返回 future,用一个已完成的失败 future 顶替,让
+            // awaitOne 走正常路径把 FAILED 落到 registry/history,不留 RUNNING 悬挂。
+            SubTaskResult r = SubTaskResult.failed(req, startedAt, System.currentTimeMillis(),
+                    "Executor 已关闭: " + ree.getMessage());
+            subTaskRegistry.markFinished(subTaskId, r.status(), r.text(), r.errorMessage());
+            return java.util.concurrent.CompletableFuture.completedFuture(r);
+        }
+    }
+
+    /**
+     * 等待单个任务完成并收尾(发布终态事件 + markFinished)。{@link #execute} 与
+     * {@link #executeBatch} 共用,保证两条路径的终态处理逐字一致。
+     */
+    private SubTaskResult awaitOne(SubTaskRequest req,
+                                   java.util.concurrent.Future<SubTaskResult> future,
+                                   long timeoutSec) {
+        String subTaskId = safeSubId(req.subTaskId());
+        long startedAt = System.currentTimeMillis();
+        try {
+            SubTaskResult result = future.get(timeoutSec, TimeUnit.SECONDS);
+            publishEvent(req, subTaskId,
+                    result.status() == SubTaskStatus.COMPLETED ? "COMPLETED" : result.status().name(),
+                    startedAt, System.currentTimeMillis(), result.errorMessage());
+            subTaskRegistry.markFinished(subTaskId, result.status(), result.text(), result.errorMessage());
+            return result;
+        } catch (TimeoutException te) {
+            boolean cancelled = future.cancel(true);
+            log.warn("Sub-task timed out after {}s, id={}, cancel={}", timeoutSec, subTaskId, cancelled);
+            publishEvent(req, subTaskId, "FAILED", startedAt, System.currentTimeMillis(), "timeout");
+            String diagnostic = String.format(
+                    "[子任务超时 %d 秒,已自动取消。请基于已有结果继续,或拆分更小的子任务重试。]",
+                    timeoutSec);
+            SubTaskResult r = SubTaskResult.failed(req, startedAt, System.currentTimeMillis(), diagnostic);
+            subTaskRegistry.markFinished(subTaskId, r.status(), r.text(), r.errorMessage());
+            return r;
+        } catch (Exception e) {
+            future.cancel(true);
+            log.warn("Sub-task failed: id={}, err={}", subTaskId, e.toString());
+            publishEvent(req, subTaskId, "FAILED", startedAt, System.currentTimeMillis(), e.getMessage());
+            SubTaskResult r = SubTaskResult.failed(req, startedAt, System.currentTimeMillis(),
+                    rootCauseMessage(e));
+            subTaskRegistry.markFinished(subTaskId, r.status(), r.text(), r.errorMessage());
+            return r;
+        }
+    }
 }
