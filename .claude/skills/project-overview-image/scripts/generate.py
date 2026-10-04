@@ -142,9 +142,37 @@ RULE    = "#232A35"   # 细线
 ACCENT  = "#5EEAD4"   # 霓虹青(唯一强调色)
 MONO    = "ui-monospace,\"Cascadia Mono\",Consolas,monospace"
 
-# 独立 MCP server 的工具数(5 个 server)。这是**仓库结构事实**而非卡片集合,
-# 故单独列出;新增/删除 server 时需同步这里(与 TOOLS 分类不同源)。
-MCP_SERVERS = [("file", 14), ("git", 14), ("maven", 6), ("compile", 1), ("http", 19)]
+# 独立 MCP server 的工具数 —— **从源码扫描得出**,不手写。
+# 为什么必须扫:54 是全图最大的数字(hero 右侧霓虹青),一旦加/删 MCP server 工具
+# 而忘了改这里,漂移的影响比其他任何数字都大。扫描口径:模块 src/main/java 下
+# 所有 Loom*Service.java 里 `@McpTool(name = ...)` 的出现次数。
+# 与 TOOLS 分类(UNIVERSAL_IDS / RBAC_IDS)不同源:那些统计**主库**工具组,
+# 这里统计**独立 MCP server** 的工具,两者相加才是全部工具面。
+MCP_MODULES = ["loom-file-mcp", "loom-git-mcp", "loom-maven-mcp",
+               "loom-compile-mcp", "loom-http-mcp"]
+
+
+def _count_mcp_tools(module: str) -> int:
+    """扫描一个 MCP server 模块的 @McpTool 数量。找不到目录时返回 0 而非抛错 ——
+    图不该因为某模块改名/移动而渲染失败,但 check.py 会校验总数不为 0。"""
+    import re as _re
+    root = REPO_ROOT / module / "src" / "main" / "java"
+    if not root.is_dir():
+        return 0
+    n = 0
+    for f in root.rglob("Loom*Service.java"):
+        n += len(_re.findall(r"@McpTool\s*\(\s*name\s*=",
+                             f.read_text(encoding="utf-8")))
+    return n
+
+
+def mcp_tool_counts() -> list[tuple[str, int]]:
+    """[(短名, 工具数), ...] —— 短名去掉 loom- 前缀与 -mcp 后缀。"""
+    out = []
+    for m in MCP_MODULES:
+        short = m.removeprefix("loom-").removesuffix("-mcp")
+        out.append((short, _count_mcp_tools(m)))
+    return out
 
 # 库层官方技能数(market_skill, author=system):V1.0 尾部 2 条 + V2.0 追加 1 条。
 # 改动时同步核对 V1.0__init.sql / V2.0__add_chat_memory_sequence_id.sql 的种子 INSERT。
@@ -203,7 +231,8 @@ def icon(name: str, size: int = 24, color: str = INK) -> str:
 
 
 def build(lang: str = "zh") -> str:
-    ns = len(MCP_SERVERS)
+    servers = mcp_tool_counts()
+    ns = len(servers)
     # 只注入 ns/nsk;其余占位(nt/np/nu/nr)在各自使用处 format ——
     # 若在此处统一 format,hr_r1/sec2_note 的 {nt} 会因缺参抛 KeyError。
     c = {k: v.format(ns=ns, nsk=OFFICIAL_SKILLS) if ("{ns}" in v or "{nsk}" in v) else v
@@ -229,8 +258,8 @@ def build(lang: str = "zh") -> str:
     plats = "  ·  ".join(f'<span class="pill">{L[p]}</span>' for p in PLATFORM)
 
     badges = "\n        ".join(f'<span>{b}</span>' for b in c["badges"])
-    total_mcp = sum(n for _, n in MCP_SERVERS)
-    mcp_detail = " · ".join(f"{k} {n}" for k, n in MCP_SERVERS)
+    total_mcp = sum(n for _, n in servers)
+    mcp_detail = " · ".join(f"{k} {n}" for k, n in servers)
 
     # hero 右侧统计块:填掉左对齐布局下右侧 1/3 的空白
     hero_right = f"""<div class="hero-right">

@@ -42,7 +42,7 @@ python .claude/skills/project-overview-image/scripts/check.py
 | 增删核心支柱卡 | `PILLARS`(hero 右侧的 `{np} 核心能力` 自动跟随) |
 | 增删工具卡/方法数徽章 | `TOOLS`(徽章数字 = `@Tool` 方法数)。**universal / RBAC 分类不用手改计数** —— 把工具 id 加进 `UNIVERSAL_IDS` 或 `RBAC_IDS` 即可,胶囊与小注的 `07 UNIVERSAL / 05 RBAC` 由 `universal_count()` / `rbac_count()` 从卡片集合推导;`check.py` 会校验「不重叠 + 不遗漏 + 无幽灵 id」,漏归类直接 exit 1。工具卡上的方法数徽章在浅色版**已移除**(28/16 这类数字挤在卡上会争夺注意力),需要时改回 `.badge` 样式 |
 | 平台静默带(页脚一行) | `PLATFORM` — 纯文字 + 分隔点,浅色版不再有橙色高亮块 |
-| hero 右侧统计块 | `MCP_SERVERS`(54 MCP 工具)/ `OFFICIAL_SKILLS` / `COPY[*].hr_*` |
+| hero 右侧统计块 | 54 = `mcp_tool_counts()` **扫描源码**得出的 MCP server 工具总数(改 `MCP_MODULES` 增删 server;各 server 的数字自动数 `@McpTool(name=)`,不手写);`OFFICIAL_SKILLS` / `COPY[*].hr_*` |
 | hero 徽章行(替代旧技术芯片行) | `COPY[*].badges`(JDK 25 / Boot 4 / AI 2 / H2·Flyway·JVector) |
 | 视觉 token(配色) | `BG` `PANEL` `PANEL2` `EDGE` `INK` `INK2` `RULE` `ACCENT` `MONO`(等宽字体栈) |
 | 版式文案(标题/副标题/分组标签) | `COPY` — 与 `LABELS`(卡片级文案)分工,两者都需 en/zh 键对齐 |

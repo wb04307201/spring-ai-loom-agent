@@ -49,9 +49,15 @@ def check_structure() -> None:
     # 官方技能数是独立常量(不在卡片集合里),只校验为正 —— 真实值需人工核对 SQL 种子
     if G.OFFICIAL_SKILLS < 1:
         fail("OFFICIAL_SKILLS 应为正数")
-    # MCP server 明细的总工具数就是 hero 上的大数字
-    if sum(n for _, n in G.MCP_SERVERS) < 1:
-        fail("MCP_SERVERS 的工具数合计应���正数")
+    # MCP server 工具数由 generate.py **扫描源码**得出(不手写)。扫描的失效模式
+    # 是"静默返回 0" —— 模块改名/移动路径时找不到目录即返回 0,图上会显示
+    # "5 个 server" 但其中一个是 0,看起来仍像合理数字。故显式校验非零。
+    counts = G.mcp_tool_counts()
+    if len(counts) != len(G.MCP_MODULES):
+        fail(f"MCP server 数量不符: {len(counts)} != {len(G.MCP_MODULES)}")
+    zero = [name for name, n in counts if n == 0]
+    if zero:
+        fail(f"这些 MCP server 扫描到 0 个 @McpTool(模块改名或路径变了?): {zero}")
     # 分类必须**恰好覆盖**工具卡:不重叠、不遗漏。
     # 这条替代了旧的手写常量等式校验 —— 旧式(UNIVERSAL_COUNT + RBAC_COUNT ==
     # len(TOOLS))在"7+4==11 恰好等于当时卡数"时会通过,加工具漏改常量则构造型漂移。
