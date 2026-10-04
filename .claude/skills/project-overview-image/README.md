@@ -40,7 +40,7 @@ python .claude/skills/project-overview-image/scripts/check.py
 | 想改什么 | 改哪里 |
 |---|---|
 | 增删核心支柱卡 | `PILLARS`(统计胶囊 `07 PILLARS` 自动跟随) |
-| 增删工具卡/方法数徽章 | `TOOLS`(徽章数字 = `@Tool` 方法数;`UNIVERSAL_COUNT`/`RBAC_COUNT` 同步) |
+| 增删工具卡/方法数徽章 | `TOOLS`(徽章数字 = `@Tool` 方法数)。**universal / RBAC 分类不用手改计数** —— 把工具 id 加进 `UNIVERSAL_IDS` 或 `RBAC_IDS` 即可,胶囊与小注的 `07 UNIVERSAL / 05 RBAC` 由 `universal_count()` / `rbac_count()` 从卡片集合推导;`check.py` 会校验「不重叠 + 不遗漏 + 无幽灵 id」,漏归类直接 exit 1 |
 | 平台芯片/橙色市场高亮 | `PLATFORM` / `MARKET_IDS`(橙色**恰好 2 个**,check.py 锁) |
 | 技术芯片/构建行/页脚 | `TECH` / `BUILD` / `LABELS[*].footer` |
 | 任一双语文案 | `LABELS["en"|"zh"]`(键集合双语对齐,check.py 锁) |

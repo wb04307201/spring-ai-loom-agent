@@ -42,6 +42,9 @@ ICONS = {
     "ask": '<path d="M4 5h16v10H9l-5 4z"/><circle cx="12" cy="10" r="1.7"/>',
     "layers": '<rect x="8.5" y="3" width="11" height="12" rx="1.5"/><path d="M5 8v11.5h10.5"/>',
     "monitor": '<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/>',
+    "globe": '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/>'
+             '<path d="M12 3.5c2.2 2.3 3.4 5.3 3.4 8.5S14.2 18.2 12 20.5'
+             'C9.8 18.2 8.6 15.2 8.6 12S9.8 5.8 12 3.5z"/>',
 }
 
 # ---------------------------------------------------------------- 结构(语言无关)
@@ -53,13 +56,20 @@ TOOLS = [  # 工具区卡片:(label_id, icon, 方法数徽章)
     ("tool_file", "doc", 16), ("tool_knowledge", "ribbon", 1), ("tool_git", "branch", 28),
     ("tool_maven", "grid", 6), ("tool_deploy", "deploy", 1), ("tool_time", "clock", 2),
     ("tool_skill", "spark", 2), ("tool_subtask", "layers", 4), ("tool_schedule", "cal", 4),
-    ("tool_askuser", "ask", 1), ("tool_render", "monitor", 1),
+    ("tool_askuser", "ask", 1), ("tool_render", "monitor", 1), ("tool_http", "globe", 5),
 ]
-UNIVERSAL_COUNT = 7   # file/knowledge/time/skill/subtask/schedule/askUser
-RBAC_COUNT = 4        # git/maven/compile/render
+# 分类**由卡片 id 集合推导**,不再手写计数 —— 过去 UNIVERSAL_COUNT/RBAC_COUNT 是
+# 手写常量,而 stats_line() 只从它们自身读,于是"加了卡片忘了改常量"这类漂移
+# 构造上就查不出来(7+4==11 恰好掩盖了 HTTP 卡缺失)。现在改��集合后,
+# 加工具只需动 TOOLS,胶囊数字自动跟随。
+UNIVERSAL_IDS = frozenset({
+    "tool_file", "tool_knowledge", "tool_time", "tool_skill",
+    "tool_subtask", "tool_schedule", "tool_askuser",
+})
+RBAC_IDS = frozenset({"tool_git", "tool_maven", "tool_deploy", "tool_render", "tool_http"})
 PLATFORM = ["user", "role", "session", "market_skill", "market_kb", "console"]
 MARKET_IDS = {"market_skill", "market_kb"}  # 全海报唯一两个橙色芯片
-TECH = ["Spring Boot", "Spring AI", "JDK 17", "JVector", "JGit", "H2", "Flyway", "ChatMemory"]
+TECH = ["Spring Boot", "Spring AI", "JDK 25", "JVector", "JGit", "H2", "Flyway", "ChatMemory"]
 BUILD = ["build_core", "build_config", "build_starter", "build_test"]
 
 # ---------------------------------------------------------------- 双语文案
@@ -68,13 +78,14 @@ LABELS = {
         "subtitle": "Spring Boot AI Agent Out-of-the-Box Solution",
         "sec_pillars": "01 PILLARS", "sec_tools": "02 TOOLS",
         "sec_platform": "03 PLATFORM", "sec_build": "04 BUILD",
-        "tools_note": "7 universal  ·  04 RBAC",
+        "tools_note": "-",   # 占位:实际文案由 tools_note() 按卡片集合生成
         "chat": "Chat", "knowledge": "Knowledge", "files": "Files", "mcp": "MCP",
         "skill": "Skill", "canvas": "Canvas", "rbac": "RBAC",
         "tool_file": "Files", "tool_knowledge": "Knowledge", "tool_git": "Git",
         "tool_maven": "Maven", "tool_deploy": "Deploy", "tool_time": "Time",
         "tool_skill": "Skill", "tool_subtask": "Sub-task", "tool_schedule": "Schedule",
         "tool_askuser": "Ask-user", "tool_render": "Html render",
+        "tool_http": "HTTP",
         "user": "Users", "role": "Roles", "session": "Sessions",
         "market_skill": "Skill Market", "market_kb": "KB Market", "console": "Admin Console",
         "build_core": "core", "build_config": "autoconfigure",
@@ -85,13 +96,14 @@ LABELS = {
         "subtitle": "Spring Boot AI Agent 开箱即用方案",
         "sec_pillars": "01 核心", "sec_tools": "02 工具",
         "sec_platform": "03 平台", "sec_build": "04 构建",
-        "tools_note": "7 通用  ·  4 RBAC",
+        "tools_note": "-",   # 同上
         "chat": "对话", "knowledge": "知识库", "files": "文件", "mcp": "MCP",
         "skill": "技能", "canvas": "画板", "rbac": "权限",
         "tool_file": "文件", "tool_knowledge": "知识库", "tool_git": "Git",
         "tool_maven": "Maven", "tool_deploy": "部署", "tool_time": "时间",
         "tool_skill": "技能", "tool_subtask": "子任务", "tool_schedule": "定时",
         "tool_askuser": "问答", "tool_render": "HTML渲染",
+        "tool_http": "外网HTTP",
         "user": "用户", "role": "角色", "session": "会话",
         "market_skill": "技能市场", "market_kb": "知识市场", "console": "管理控制台",
         "build_core": "核心", "build_config": "自动配置",
@@ -101,10 +113,25 @@ LABELS = {
 }
 
 
+def tools_note() -> str:
+    """"7 universal · 05 RBAC" 小注 —— 同样由卡片集合推导,避免与胶囊脱节。"""
+    return f"{universal_count()} universal  ·  {rbac_count():02d} RBAC"
+
+
+def universal_count() -> int:
+    """实际落在 UNIVERSAL_IDS 里的卡片数 —— 与卡片集合同源,不会漂移。"""
+    return sum(1 for lid, _, _ in TOOLS if lid in UNIVERSAL_IDS)
+
+
+def rbac_count() -> int:
+    """实际落在 RBAC_IDS 里的卡片数 —— 与卡片集合同源,不会漂移。"""
+    return sum(1 for lid, _, _ in TOOLS if lid in RBAC_IDS)
+
+
 def stats_line() -> str:
     """统计胶囊由 DATA 自动计算 —— 与卡片数量构造上一致,不会过时。"""
     return (f"{len(PILLARS):02d} PILLARS  -  {len(TOOLS):02d} TOOLS  -  "
-            f"{UNIVERSAL_COUNT:02d} UNIVERSAL  -  {RBAC_COUNT:02d} RBAC")
+            f"{universal_count():02d} UNIVERSAL  -  {rbac_count():02d} RBAC")
 
 
 def _icon(name: str) -> str:
@@ -210,7 +237,7 @@ def build_html(lang: str) -> str:
     </div>
   </section>
   <section>
-    <div class="sec-head"><span class="tag">{t['sec_tools']}</span><span class="note">{t['tools_note']}</span></div>
+    <div class="sec-head"><span class="tag">{t['sec_tools']}</span><span class="note">{tools_note()}</span></div>
     <div class="row">
 {tool_cards}
     </div>

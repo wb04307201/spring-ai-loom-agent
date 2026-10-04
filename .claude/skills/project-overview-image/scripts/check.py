@@ -46,11 +46,24 @@ def check_structure() -> None:
     # 统计胶囊与卡片数量一致
     line = G.stats_line()
     expect = (f"{len(G.PILLARS):02d} PILLARS  -  {len(G.TOOLS):02d} TOOLS  -  "
-              f"{G.UNIVERSAL_COUNT:02d} UNIVERSAL  -  {G.RBAC_COUNT:02d} RBAC")
+              f"{G.universal_count():02d} UNIVERSAL  -  {G.rbac_count():02d} RBAC")
     if line != expect:
         fail(f"统计胶囊与数据不一致: {line!r} != {expect!r}")
-    if G.UNIVERSAL_COUNT + G.RBAC_COUNT != len(G.TOOLS):
+    if G.universal_count() + G.rbac_count() != len(G.TOOLS):
         fail("universal + RBAC 计数应等于工具卡总数")
+    # 分类必须**恰好覆盖**工具卡:不重叠、不遗漏。
+    # 这条替代了旧的手写常量等式校验 —— 旧式(UNIVERSAL_COUNT + RBAC_COUNT ==
+    # len(TOOLS))在"7+4==11 恰好等于当时卡数"时会通过,加工具漏改常量则构造型漂移。
+    ids = [lid for lid, _, _ in G.TOOLS]
+    both = G.UNIVERSAL_IDS & G.RBAC_IDS
+    if both:
+        fail(f"同一工具不能同时算 universal 与 RBAC: {sorted(both)}")
+    uncategorized = [i for i in ids if i not in G.UNIVERSAL_IDS and i not in G.RBAC_IDS]
+    if uncategorized:
+        fail(f"工具未归类(universal 或 RBAC): {uncategorized}")
+    unknown = (G.UNIVERSAL_IDS | G.RBAC_IDS) - set(ids)
+    if unknown:
+        fail(f"分类集合里有不存在的工具 id: {sorted(unknown)}")
 
 
 def check_i18n_parity() -> None:
