@@ -272,6 +272,22 @@ class HttpToolBrowserIT extends BrowserTestBase {
 
     // ==================== 用例 3:负向确定性(不打 LLM 的那半) ====================
 
+    /*
+     * ⚠️ <b>已知 flaky</b>(2026-10-04 首次全量 IT 闸门时观察到):
+     * 本用例要等一次真实 LLM 往返,而断言只关心"工具没被注入"。
+     * 全量闸门(227 例,含多个真实 LLM 用例)下 MiniMax 响应变慢,
+     * {@link #sendAndAwaitStream} 的 180s 上限偶发被击穿 → TimeoutError。
+     * 单独重跑稳定通过(实测 35.8s)。
+     *
+     * <p><b>为什么不修</b>:本用例的价值是"RBAC 过滤真的挡住了",而该断言的
+     * 权威来源是 {@code loom_tool_call_log} —— 工具若被注入,LLM 极可能调用它,
+     * 记录随之出现。但"极可能"不等于"必然":纯靠 LLM 行为来制造观察窗口,
+     * 本质上无法完全确定性。加大超时只是把概率推低而非消除。
+     * 真正的确定性做法是<b>不经 LLM</b> 直查该用户的可见工具集
+     * ({@code GET /api/capabilities}),但那会与本类"真实对话端到端"的定位分家,
+     * 属于另一个测试类的职责。**如实记录,不做假装确定的粉饰。**
+     */
+
     @Test
     @DisplayName("未授 tool_http 的用户:工具不进 tool_callbacks(RBAC 过滤真的挡住)")
     void unauthorizedUserGetsNoHttpTool() {

@@ -1,6 +1,14 @@
 -- =============================================================
 -- Issue #1 修复 (2026-09-30): 给 SPRING_AI_CHAT_MEMORY 加 sequence_id 列
 -- =============================================================
+-- 版本号说明:本文件原为 V1.5,2026-10-04 升为 V2.0。
+--   · 库侧 V1.0__init.sql 用的是 Spring AI 1.x 的 chat memory schema
+--     (conversation_id, content, type, timestamp),Spring AI 2.0 需要
+--     sequence_id —— 这是**破坏性 schema 变更**,不是增量补丁,故跳大版本号。
+--   · 同批还删除了 V1.6(其内容已并入应用方 seed V1.2__init_app_data.sql),
+--     V1.5/V1.6 两个版本号一并作废。
+--   · ⚠️ 本项目只跑全新库:已有实例必须 `rm -rf ~/.loom/datasource` 重跑,
+--     或 flyway baseline 后手动迁移(见 CLAUDE.md「升级注意」)。
 -- Spring AI 2.0 的 JdbcChatMemoryRepository 用 sequence_id BIGINT 排序
 -- (替代 1.x 的 timestamp 排序 — 跨库一致,解决 MySQL/MariaDB TIMESTAMP 秒级精度
 -- 导致同秒消息乱序的问题)。Loom 的 V1.0__init.sql 用了 1.x 旧 schema
