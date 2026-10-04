@@ -105,7 +105,7 @@ Part of the [Spring AI LoomAgent](https://github.com/wb04307201/spring-ai-loom-a
 | MCP Server | Description |
 |------------|-------------|
 | [loom-file-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-file-mcp) | File operations (14) |
-| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | Git via JGit (28) |
+| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | Git via JGit (14) |
 | [loom-maven-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-maven-mcp) | Maven build (6) |
 | [loom-compile-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-compile-mcp) | End-to-end deploy (1) |
 

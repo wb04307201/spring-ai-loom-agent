@@ -40,7 +40,7 @@ mvn clean install -Dgpg.skip=true -pl loom-http-core
 
 ## 测试
 
-411 个 JUnit 测试，包含 ProfileValidatorTest / InvokeScaleTest / InvokeFailureTest /
+299 个 JUnit 测试(28 个测试类)，包含 ProfileValidatorTest / InvokeScaleTest / InvokeFailureTest /
 HeaderResolverTest 等。fail-closed 行为由 `HttpConfig.failClosed` 控制（默认 false）。
 
 ## 许可

@@ -24,7 +24,8 @@
 - [11. `IScheduleTool` — 定时任务](#11-ischeduletool--定时任务)
 - [12. `IAskUserTool` — 用户提问（askUser）](#12-iaskusertool--用户提问askuser)
 - [13. `IHtmlRenderTool` — HTML 渲染截图](#13-ihtmlrendertool--html-渲染截图)
-- [14. 替换子工具](#14-替换子工具)
+- [14. `IHttpTool` — 外网 HTTP 调用](#14-ihttptool--外网-http-调用)
+- [15. 替换子工具](#15-替换子工具)
 
 ---
 
@@ -33,7 +34,7 @@
 自 M3 起,10 个常开 `I*Tool` bean **总是被创建**(外加 `IHtmlRenderTool` — 仅当 classpath 上有 `com.microsoft.playwright:playwright` 时创建),任何 `*.enabled` yml 开关都不再参与 bean 创建。自 M6 起,可见性改由两种机制决定:
 
 1. **Universal 工具**(注解 `@ToolGroup(defaultGranted=true)`)— 对每个登录用户可见。7 个 universal 工具列于下方。
-2. **RBAC 工具**(注解 `@ToolGroup(defaultGranted=false)`)— 仅当管理员通过 `/admin/roles/{code}/tools` 端点把工具组授予某角色(持久化在 `role_tool` 表)后,分配到该角色的用户才可见。4 个 RBAC 工具列于下方。
+2. **RBAC 工具**(注解 `@ToolGroup(defaultGranted=false)`)— 仅当管理员通过 `/admin/roles/{code}/tools` 端点把工具组授予某角色(持久化在 `role_tool` 表)后,分配到该角色的用户才可见。5 个 RBAC 工具列于下方。
 
 ### Universal 工具(总是可见)
 
@@ -54,6 +55,7 @@
 | `IGitTool` | `tool_git` | `git push` 写远端仓库;端到端部署场景由 `ICompileAndDeployTool` 覆盖 |
 | `IMavenTool` | `tool_maven` | 任意 `mvn` 构建;编译/打包走 `ICompileAndDeployTool` |
 | `ICompileAndDeployTool` | `tool_compile` | 创建 Docker 容器;运行构建流水线;消耗网络与磁盘资源 |
+| `IHttpTool` | `tool_http` | 对任意主机发起外网 HTTP 调用**并注入 profile 凭据**；部署级 `spring.ai.loom.agent.http.allowed-domains` 闸门 fail-closed（空集 ⇒ 一切调用被拒）|
 | `IHtmlRenderTool` | `tool_render` | 创建无头 Chromium 进程(每实例约 150-300MB 内存);需要 optional 依赖 `com.microsoft.playwright:playwright` 在 classpath 上 — 缺失时 bean 根本不创建 |
 
 ### 为什么 yml `*.enabled` 开关不再控制工具
@@ -82,7 +84,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | 子接口 | 默认实现 | 方法数 | 可见性 | 备注 |
 |--------------------------|-----------------------------------|------|-----------|---------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | 只读当前时间 / 时区转换 |
-| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | 从 `user_skill`（数据库）读取；演示应用由 `V1.1` 迁移把 6 个系统技能 seed 进默认 admin 用户的 `user_skill` —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
+| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | 从 `user_skill`（数据库）读取；演示应用由 `V1.2` 迁移把 6 个演示技能 seed 进默认 admin 用户的 `user_skill` —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
 | `IFileTool` | `DefaultFileTool` | 16 | **universal** | 基于路径；根目录 = `{usersBasePath}/{username}/file/` |
 | `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
@@ -91,6 +93,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | `IGitTool` | `DefaultGitTool`（JGit 7.6） | 28 | **RBAC** | 需 `role_tool.tool_git` 授权;bean 总是创建（`git.enabled` 已废弃无效），可经 `@Bean IGitTool` 替换 |
 | `IMavenTool` | `DefaultMavenTool`（maven-invoker 3.3.0） | 6 | **RBAC** | 需 `role_tool.tool_maven`;classpath 需有 `maven-invoker`（`maven.enabled` 已废弃无效） |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | **RBAC** | 端到端 `git clone → build → docker run → health check`;需 `role_tool.tool_compile` 授权 |
+| `IHttpTool` | `DefaultHttpTool` | 5 | **RBAC** | 调用已注册的上游系统；需 `role_tool.tool_http`；域名白名单 fail-closed（见 §14） |
 | `IHtmlRenderTool` | `DefaultHtmlRenderTool`(Playwright 1.50.0) | 1 | **RBAC + classpath 门控** | `renderHtmlFile` — HTML→PNG 截图;需 playwright optional 依赖(bean 才创建) + `role_tool.tool_render` 授权 |
 
 ---
@@ -582,7 +585,92 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 
 ---
 
-## 14. 替换子工具
+## 14. `IHttpTool` — 外网 HTTP 调用
+
+五个 RBAC 工具，用于调用已注册的上游系统。可见性需 `role_tool.tool_http` 授权
+（管理员经 `/admin/roles/{code}/tools` 授予角色）。
+
+### 两个 HTTP 面
+
+LoomAgent 提供**两个彼此独立的 HTTP 面**，这个区分是安全边界：
+
+| 面 | Bean | 工具组 | 是否暴露给 LLM | 职责 |
+|----|------|--------|----------------|------|
+| **调用面** | `IHttpTool` | `tool_http` | 是 —— 5 个 `@Tool` | 调用已注册系统；可能注入 profile 凭据 |
+| **写面** | `IHttpManageTool` | `tool_http_manage` | **否 —— 零 `@Tool` 方法** | profile / system / endpoint 的 REST CRUD（会写入含 API 凭据的文件） |
+
+`IHttpManageTool` **不提供任何工具**，它存在只是让 `tool_http_manage` 能在 admin 控制台被枚举，
+它所守卫的 REST 路由由 `HttpManageGuard` 把关。授 `tool_http` **不会**授 `tool_http_manage`，反之亦然。
+
+### 工具清单
+
+| 工具 | 参数 |
+|------|------|
+| `invokeEndpoint` | `system`、`method`、`path`、`params?`、`body?`、`bodyRaw?`、`headers?`、`assertions?`、`extract?`、`responseMode?` |
+| `httpBatch` | `operations?`、`concurrency?`、`failPolicy?`、`responseMode?`、`firstN?` |
+| `listEndpoints` | `system`、`tag?`、`source?` |
+| `getEndpoint` | `system`、`method`、`path` |
+| `getRequestHistory` | `system?`、`limit?`、`statusFilter?`、`since?` |
+
+- `assertions` —— 如 `{"type":"statusEquals","value":200}`；支持的类型为
+  `statusEquals` / `statusIn` / `bodyContains` / `bodyJsonPathEquals` /
+  `bodyJsonPathExists` / `responseTimeMsLt` / `headerEquals`
+- `extract` —— JSONPath 映射，如 `{"userId":"$.id"}`
+- `responseMode` —— `summary` / `full` / `file`
+- 失败以**字符串**返回而非抛异常，保证模型能拿到可读诊断
+
+### Fail-closed 域名白名单
+
+`DefaultHttpTool` **硬编码** `failClosed = true`（内部工具模式没有开关）。生效的白名单是
+`spring.ai.loom.agent.http.allowed-domains`，**默认为空集**：
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        http:
+          allowed-domains:
+            - api.example.com
+            - "localhost:6040"   # host:port 锁定单个端口
+            - ".example.com"      # 前导点后缀匹配
+```
+
+**空集 = 拒绝一切** —— 开箱状态下每次 `invokeEndpoint` 都返回 `DomainNotAllowed`。
+profile 自己的 `allowedDomains` 只能**收紧**已配置的全局白名单，**打不开**这道闸。
+
+不带端口的纯 host 模式是 port-agnostic 的；带 `host:PORT` 的模式必须**同时**匹配主机与端口，
+且刻意不回落为纯主机匹配。`*.example.com`（星号形式）不支持 —— 请用前导点的 `.example.com`。
+
+> **注**：独立 jar `loom-http-mcp` 的 `failClosed` 默认为 `false`（见其 README），
+> 以保持 1.1.1 的既有行为；内嵌工具恒为 fail-closed。
+
+### 配置项
+
+七个 `spring.ai.loom.agent.http.*` 属性全部经 `LoomAgentProperties` 绑定：
+
+| 属性 | 默认值 | 含义 |
+|------|--------|------|
+| `enabled` | `true` | 只控制 REST 写面（`HttpManagementConfiguration`）；LLM 工具 bean 无论如何都注册 |
+| `allowed-domains` | `[]` | 部署级白名单（见上） |
+| `timeoutMs` | `10000` | 单次请求超时 |
+| `maxResponseSizeBytes` | `1 MiB` | 超过则截断或落盘 |
+| `maxBatchConcurrency` | `10` | `httpBatch` 并发上限 |
+| `maxRequestBodyBytes` | `10 MiB` | 请求体上限 |
+| `historyMaxEntriesPerSystem` | `1000` | 每系统历史保留条数 |
+
+存储按用户隔离在 `{usersBasePath}/{username}/http/`（`profiles/`、`systems/`、`history/`、`responses/`）。
+
+### 已知局限
+
+- `httpBatch` 对每个操作**静默丢弃** `assertions` / `extract` / `responseMode` / `timeoutMs`
+  —— 只映射 `system` / `method` / `path` / `params` / `body` / `bodyRaw` / `headers`
+- `getEndpoint` 返回整个 `System` 对象，而非单个端点的 schema
+- `listEndpoints` 只返回手工注册的端点；OpenAPI 合并段未实现
+
+---
+
+## 15. 替换子工具
 
 每个子工具接口都通过 `@ConditionalOnMissingBean` 注册，自定义实现自动优先生效：
 

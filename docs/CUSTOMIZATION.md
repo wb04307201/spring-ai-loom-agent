@@ -212,7 +212,7 @@ Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
 | `maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; `IMavenTool` bean is created when `maven-invoker` is on the classpath (a default lib dependency), visibility RBAC-gated via `role_tool.tool_maven` |
 | `compile.enabled` | boolean | `true` | **Deprecated since M3** — RBAC tool, the `*.enabled` flag has no effect; grant via `role_tool.tool_compile` |
 
-> Pre-existing databases: Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` already cleared any historical RBAC rows for the 6 universal tool groups. New databases start clean. See TOOLS.md §1 for details.
+> Pre-existing databases: a one-time cleanup already cleared any historical RBAC rows for the 6 universal tool groups (it lives in the `V2.4` section at the end of `V1.0__init.sql`; there is no standalone `V2.4__*.sql` file). New databases start clean. See TOOLS.md §1 for details.
 
 ---
 

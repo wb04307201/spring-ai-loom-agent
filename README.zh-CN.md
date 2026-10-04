@@ -62,6 +62,7 @@
 | Maven | `IMavenTool` | 6 | 🔐 RBAC（`tool_maven`） | `maven.mavenHome` 等 |
 | 编译部署 | `ICompileAndDeployTool` | 1 | 🔐 RBAC（`tool_compile`） | `compile.*` |
 | HTML 渲染截图 | `IHtmlRenderTool` | 1 | 🔐 RBAC（`tool_render`）+ classpath 门控 | 引入 playwright 依赖 + 控制台授权 |
+| 外网 HTTP 调用 | `IHttpTool` | 5 | 🔐 RBAC（`tool_http`） | `http.allowed-domains`（fail-closed，空集即全禁） |
 
 > **universal** = 对所有登录用户可见（`@ToolGroup(defaultGranted=true)`）。**RBAC** = 仅当管理员给角色授权该工具组后可见（`role_tool` 表）。旧的 `*.enabled` yml 开关自 M3 起不再控制任何工具 —— 见 [TOOLS.zh-CN.md §1](docs/TOOLS.zh-CN.md)。
 
@@ -188,7 +189,7 @@ spring:
 - **三种来源** — 自建（完全可编辑）/ 市场拉取（重拉刷新内容；已有同名自建时拒绝拉取，需先「复制为我的技能」）/ 角色授权（admin 授权给角色后自动同步，锁定不可改删）
 - **审批流** — 自建技能经 **共享** Tab 提交到市场 → `PENDING` → admin 审批通过 / 拒绝（拒绝必须填评论）；被拒后重新提交会归档旧行并新建审核；同名重新提交仅更新内容，`APPROVED` 永不降级；**我的发布** Tab 查看状态与撤回
 - **角色下发** — admin 把 `APPROVED` 市场技能授权给角色，角色成员的技能列表自动同步；下架级联清理拉取与授权记录，无孤儿
-- **开箱即用** — 库自带 2 个官方技能（STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事）；演示应用首启另种子 6 个演示技能（网络月度事件报告、HTTP 测试等）
+- **开箱即用** — 库自带 3 个官方技能（STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事 / 交叉评审 多维度并行评审）；演示应用首启另种子 6 个演示技能（网络月度事件报告、HTTP 测试等）
 - **使用** — 聊天输入 `/` 唤起 picker 精准选择技能（覆盖输入框应用）；技能 `content` 内以 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定
 
 完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。

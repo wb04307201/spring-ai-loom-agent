@@ -107,7 +107,7 @@ java -jar target/loom-http-mcp-1.0-SNAPSHOT.jar
 | MCP 服务 | 说明 |
 |----------|------|
 | [loom-file-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-file-mcp) | 文件操作（14 个工具） |
-| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | 基于 JGit 的 Git 操作（28 个工具） |
+| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | 基于 JGit 的 Git 操作（14 个工具） |
 | [loom-maven-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-maven-mcp) | Maven 构建（6 个工具） |
 | [loom-compile-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-compile-mcp) | 端到端部署（1 个工具） |
 

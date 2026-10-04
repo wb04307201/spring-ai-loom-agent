@@ -42,7 +42,7 @@
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
 - **🎨 Canvas Board** — full-screen drawing modal: 6 drawing tools + 18 web-UI stencils (CRUD prototype skeleton pieces) with a select tool for move / resize / label editing; exports a white-background PNG as a chat attachment, forming a prototype workflow with multimodal models or the HTML render tool
-- **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render; see [TOOLS.md](docs/TOOLS.md)
+- **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render / outbound HTTP; see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
@@ -62,6 +62,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | Maven | `IMavenTool` | 6 | 🔐 RBAC (`tool_maven`) | `maven.mavenHome` etc. |
 | Compile & Deploy | `ICompileAndDeployTool` | 1 | 🔐 RBAC (`tool_compile`) | `compile.*` |
 | Html Render | `IHtmlRenderTool` | 1 | 🔐 RBAC (`tool_render`) + classpath-gated | add `playwright` dep + grant in admin console |
+| Outbound HTTP | `IHttpTool` | 5 | 🔐 RBAC (`tool_http`) | `http.allowed-domains` (fail-closed; empty list denies everything) |
 
 > **universal** = visible to every logged-in user (`@ToolGroup(defaultGranted=true)`). **RBAC** = visible only after an admin grants the tool group to a role (`role_tool` table). The legacy `*.enabled` yml switches no longer gate any tool since M3 — see [TOOLS.md §1](docs/TOOLS.md).
 
@@ -196,7 +197,7 @@ Skills are prompt templates for the LLM describing reusable workflows. The data 
 - **Three sources** — self-built (fully editable) / market-pulled (re-pull refreshes content; pull is rejected when a same-name self-built skill exists — use "copy as my skill" first) / role-granted (auto-synced after an admin grants it to a role; locked, cannot be edited or deleted)
 - **Approval flow** — submit a self-built skill via the **Share** tab → `PENDING` → admin approves / rejects (a reject requires a comment); re-submitting after rejection archives the old row and opens a fresh review; same-name re-submits update content in place and `APPROVED` never demotes; the **My Publishes** tab shows status and supports withdraw
 - **Role distribution** — admins grant `APPROVED` market skills to roles; they auto-sync into role members' skill lists; unpublishing cascades to pulls and grants — no orphans
-- **Out of the box** — the library ships 2 official skills (STAR-IJ explain-one-thing clearly / bullseye formula tell-a-good-story); the demo app seeds 6 demo skills on first launch (Monthly Event Report, HTTP Test, etc.)
+- **Out of the box** — the library ships 3 official skills (STAR-IJ explain-one-thing clearly / bullseye formula tell-a-good-story / cross-review multi-dimension review); the demo app seeds 6 demo skills on first launch (Monthly Event Report, HTTP Test, etc.)
 - **Usage** — type `/` in the chat input to open the picker for precise skill selection (applies into the input box); inside a skill's `content`, reference MCP tools by `@tool_name` — available MCPs follow role authorization
 
 For the full REST API, see [docs/API.md → §6 Skill Management](docs/API.md#6-skill-management).
