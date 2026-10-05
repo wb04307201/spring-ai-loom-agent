@@ -96,6 +96,8 @@ public class LoomAgentProperties {
 
  private AskUserProperty askuser = new AskUserProperty();
 
+ private ChatProperty chat = new ChatProperty();
+
  private RenderProperty render = new RenderProperty();
 
  @Data
@@ -374,6 +376,37 @@ public class LoomAgentProperties {
  }
 
  /**
+ * 聊天链路（LLM provider 连接）配置。yml 通过 {@code spring.ai.loom.agent.chat.*} 配置。
+ *
+ * <p><b>2026-10-05 新增</b>（修 Spring AI 对 OpenAI provider硬编码 60s 超时导致的流式截断）：
+ * Spring AI 2.0.1 的 {@code AbstractOpenAiProperties.DEFAULT_TIMEOUT} 固定为
+ * {@code Duration.ofSeconds(60)}，并经 {@code OpenAiChatAutoConfiguration} 施加到
+ * okhttp {@code callTimeout}（<b>整体</b>超时，非 readTimeout）。长思考 + tool_use 的
+ * 流式请求会稳定在 60s 处被整体掐断，底层是
+ * {@code StreamResetException: stream was reset: CANCEL} —— 且流式帧仍活跃
+ * （Chrome 实测：60.095s、1174 帧、每秒有帧），并非 token 上限正常收尾
+ * （{@code finish_reason} 从未出现）。
+ *
+ * <p>库侧补的缺省值只在消费方<b>未</b>显式配置 {@code spring.ai.openai.timeout} 时生效；
+ * 显式配置一律优先，库绝不覆盖。
+ *
+ * <ul>
+ * <li>{@code timeoutSeconds} — provider 连接整体超时秒数（默认 600 = 10 分钟）。
+ * 取值与本仓 2026-09-30 给 anthropic 段打的补丁一致（见 test app application.yml 注释）。</li>
+ * </ul>
+ */
+ @Data
+ public static class ChatProperty {
+/**
+ * provider 连接整体超时秒数。
+ *
+ * <p>不设成"无超时"是刻意的：卡死的连接会永久占用线程，而本仓子任务池仅
+ * {@link SubTaskProperty#getMaxConcurrent()} 个线程（本库默认 4），故障时无法自愈。
+ */
+ private long timeoutSeconds = 600;
+ }
+
+/**
  * 定时任务功能配置。yml 通过 {@code spring.ai.loom.agent.schedule.*} 配置。
  * <ul>
  * <li>{@code enabled} — 是否注册定时任务相关 bean（默认 true）</li>

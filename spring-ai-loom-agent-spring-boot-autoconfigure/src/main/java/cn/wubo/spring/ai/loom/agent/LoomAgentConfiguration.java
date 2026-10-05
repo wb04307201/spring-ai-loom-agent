@@ -402,6 +402,29 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * 2026-10-05：补齐 provider 连接的缺省超时（Spring AI 对 OpenAI 硬编码 60s，
+         * 会把长思考 + tool_use 的流式请求整体掐断）。仅在消费方未显式配置
+         * {@code spring.ai.openai.timeout} 时生效，显式配置一律优先。
+         *
+         * <p>刻意注册为 {@code static} {@link BeanFactoryPostProcessor}（与
+         * {@link #fileViewDefaultsBeanFactoryPostProcessor} 同理）：BFPP 必须在
+         * {@code @Configuration} 类自身的 {@code @Bean}（含 binder bean）之前完成属性注入，
+         * 否则读到的库配置还没绑定上来。
+         */
+        @Bean
+        public static BeanFactoryPostProcessor chatProviderTimeoutDefaultsBeanFactoryPostProcessor(
+                org.springframework.core.env.ConfigurableEnvironment environment) {
+            // 刻意直接读 Environment 而非注入 LoomAgentProperties：BFPP 运行在 binder bean
+            // 之前，后者此时尚未绑定，拿到的永远是内置默认值（会忽略消费方 yml 的调整）。
+            // application.yml 在 BFPP 之前已载入 Environment，直接读键才拿得到真实配置。
+            long fallback = new LoomAgentProperties().getChat().getTimeoutSeconds();
+            Long configured = environment.getProperty(
+                    ChatProviderTimeoutDefaultsBeanFactoryPostProcessor.LOOM_CHAT_TIMEOUT_SECONDS_KEY, Long.class);
+            long seconds = (configured != null) ? configured : fallback;
+            return new ChatProviderTimeoutDefaultsBeanFactoryPostProcessor(environment, seconds);
+        }
+
+        /**
          * M3+ T4.1 — Micrometer-backed metrics for the market subsystem.
          * Wired as a top-level bean so any service can autowire
          * {@link cn.wubo.spring.ai.loom.agent.market.MarketMetrics} and
@@ -507,6 +530,7 @@ public class LoomAgentConfiguration {
                 properties.setMaven(bound.getMaven());
                 properties.setCompile(bound.getCompile());
                 properties.setAskuser(bound.getAskuser());
+                properties.setChat(bound.getChat());
                 properties.setRender(bound.getRender());
                 // http:漏了这一行 ⇒ spring.ai.loom.agent.http.* 全部配置项失效
                 // (allowedDomains / timeoutMs / maxResponseSizeBytes / maxBatchConcurrency /
