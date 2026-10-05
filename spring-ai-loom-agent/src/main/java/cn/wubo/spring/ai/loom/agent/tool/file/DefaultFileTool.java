@@ -321,12 +321,17 @@ public class DefaultFileTool implements IFileTool {
     @Override
     public String deleteFileOrDirectory(
             @ToolParam(description = "相对于用户文件目录的路径，可以是文件或或者目录") String path,
-            @ToolParam(description = "确认字符串：必须与配置的 deleteConfirmToken 一致（默认 I_CONFIRM_DELETE）", required = false) String confirm,
+            @ToolParam(description = "确认字符串：必须与配置的 deleteConfirmToken 完全一致。**该值不会告知你**——若未知，请向用户询问，不要猜测或尝试其他删除方式。", required = false) String confirm,
             ToolContext toolContext) {
         // 校验顺序与原始代码保持一致：confirm -> path -> username
-        String expected = cfg.getDeleteConfirmToken();
-        if (confirm == null || !confirm.equals(expected)) {
-            return "错误：需要确认。请传入 confirm=\"" + expected + "\" 才能执行删除。";
+        // 2026-10-05 安全修复（trust boundary）：失败文案**绝不**回显期望令牌。
+        // @Tool 的 String 返回值即 ToolResponseMessage 内容，会原样进入 LLM 上下文；
+        // 旧实现回显 "请传入 confirm=\"<token>\""，等于把钥匙交给 LLM——两次调用内
+        // 闸门必然失效（第 1 次失败拿到令牌，第 2 次删除成功）。
+        // 回归锁：DeleteConfirmTokenLeakTest（R1/R2/R3）。
+        if (confirm == null || !confirm.equals(cfg.getDeleteConfirmToken())) {
+            return "错误：删除需要显式确认。请在 confirm 参数中传入配置的 deleteConfirmToken 后重试；"
+                    + "若你不确定该值，请向用户询问，不要猜测或尝试其他删除方式。";
         }
         if (path == null || path.isBlank()) {
             return "错误：path 不能为空";
@@ -350,8 +355,9 @@ public class DefaultFileTool implements IFileTool {
             }
         }
 
-        // 执行删除（使用固定 token 通过 FileOperations 的检查）
-        String result = fileOps.delete(basePath, path, expected);
+        // 执行删除。上面的守卫已证明 confirm == cfg.getDeleteConfirmToken()，
+        // 故直接透传 confirm（不再重新读取期望值，避免把令牌值当作局部变量流转）。
+        String result = fileOps.delete(basePath, path, confirm);
 
         // 清理元数据
         if (result.startsWith("已删除")) {
