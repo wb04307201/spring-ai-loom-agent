@@ -2495,6 +2495,7 @@ public class LoomAgentConfiguration {
                 JdbcChatMemoryRepository chatMemoryRepository,
                 IUserConversation userConversation,
                 cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory chatReasoningHistory,
+                cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
                 ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository,
@@ -2554,8 +2555,20 @@ public class LoomAgentConfiguration {
                 }
                 // 每轮思考按时间戳就近配对注入 AssistantMessage metadata.thinking,
                 // 前端历史视图填充思考折叠区(无 reasoning 时原样返回,零契约破坏)
-                return ServerResponse.ok().body(chatReasoningHistory.attachThinking(
-                        conversationId, chatMemoryRepository.findByConversationId(conversationId)));
+                var withThinking = chatReasoningHistory.attachThinking(
+                        conversationId, chatMemoryRepository.findByConversationId(conversationId));
+                // 工具调用注入:SPRING_AI_CHAT_MEMORY 无 metadata 列,工具调用不在其中,
+                // 故从 loom_tool_call_log 读出后作为**独立条目**(messageType=TOOL_CALL)
+                // 追加到列表末尾。前端按 createdAt 与消息合并排序渲染,
+                // 使 askUser 卡片 / 子任务 chip 在历史回看时不再消失。
+                //
+                // 用 List<Object> 承载两种形态:Message(既有消息) 与 Map(工具调用条目)。
+                // Jackson 按各自实际类型序列化,Message 仍是 {media,messageType,metadata,text},
+                // 工具条目是 {messageType:TOOL_CALL,toolName,arguments,result,...}。
+                var out = new java.util.ArrayList<Object>(withThinking);
+                out.addAll(cn.wubo.spring.ai.loom.agent.chat.ToolCallHistory.inject(
+                        conversationId, toolCallLogRepository));
+                return ServerResponse.ok().body(out);
             });
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");

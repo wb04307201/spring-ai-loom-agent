@@ -39,7 +39,35 @@ class ConversationRouterTest {
                 memory,
                 conversations,
                 reasoningHistory,
+                emptyToolCallLogRepository(),
                 emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider());
+    }
+
+    /**
+     * 空工具调用仓库：本单测聚焦路由 wiring，工具调用注入逻辑由
+     * {@code AttachToolCallsTest} / {@code ConversationToolCallInjectionIT} 覆盖。
+     * 返回空列表使注入为 no-op，不干扰既有断言。
+     */
+    private static cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository emptyToolCallLogRepository() {
+        return new cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository() {
+            @Override
+            public cn.wubo.spring.ai.loom.agent.model.ToolCallLog save(
+                    cn.wubo.spring.ai.loom.agent.model.ToolCallLog log) {
+                return log;
+            }
+
+            @Override
+            public java.util.List<cn.wubo.spring.ai.loom.agent.model.ToolCallLog> findByConversationId(
+                    String conversationId) {
+                return java.util.List.of();
+            }
+
+            @Override
+            public java.util.Optional<cn.wubo.spring.ai.loom.agent.model.ToolCallLog> findByCallId(
+                    String conversationId, String toolCallId) {
+                return java.util.Optional.empty();
+            }
+        };
     }
 
     /** attachThinking 恒等透传：单测聚焦路由 wiring，配对逻辑由 ChatReasoningHistoryTest 覆盖。 */
