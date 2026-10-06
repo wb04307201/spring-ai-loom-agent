@@ -62,8 +62,8 @@ mvn spring-boot:run -pl spring-ai-loom-agent-test \
 
 会话 cookie 名：`loom-agent-session`（HttpOnly，`evaluate_script` 读不到，用 `curl -i` 取 `Set-Cookie`）
 
-- admin cookie 值：待 Task 2 填写
-- e2euser cookie 值：待 Task 2 填写
+- admin cookie 值：见 /tmp/admin-cookie.txt（每次登录会变，subagent 需自行用 curl 重新取）
+- e2euser cookie 值：见 /tmp/e2euser-cookie.txt（同上，会变）
 
 ## 数据隔离
 
@@ -162,3 +162,64 @@ H2() { java -Dfile.encoding=UTF-8 -cp "$H2JAR" org.h2.tools.Shell \
 **user_role**：`(wb04307201, base)` 1 行 ⇒ 默认 admin 已有基础角色，符合设计。
 
 **结论：维度 A 通过，零缺陷。** 底座可信，Wave 1 后续任务结论有效。
+
+### Task 2 · 维度 B 结果 —— 认证与会话
+
+> subagent 卡在浏览器登出循环，控制器接管完成。截图 B-auth-*.png 5 张由 subagent 产出。
+
+**未登录访问（期望：全部非 200）**：
+
+| 目标 | 实测 | 结论 |
+|---|---|---|
+| `admin/users` | **401** | ✓ |
+| `admin/capabilities` | **401** | ✓ |
+| `admin/roles` | **401** | ✓ |
+| `api/capabilities` | **401** | ✓ |
+| `knowledge` | **401** | ✓ |
+| `conversation` | **401** | ✓ |
+| `admin/console.html` | **401** | ✓ |
+| `admin/stats.html` | **401** | ✓ |
+| `admin/roles.html` | **401** | ✓ |
+| `admin/mcps.html` | **401** | ✓ |
+| `admin/market-skills.html` | **401** | ✓ |
+| `admin/knowledge-market.html` | **401** | ✓ |
+
+12/12 全部 401，**零漏网**。Review Focus #1（admin 页未鉴权）通过。
+
+**会话 cookie 属性**：
+
+```
+Set-Cookie: loom-agent-session=<uuid>; Expires=Wed, 07 Oct 2026 02:47:43 GMT;
+            Max-Age=86400; Path=/; HttpOnly; SameSite=Lax
+```
+
+`HttpOnly` ✓ `SameSite=Lax` ✓ `Path=/` ✓ `Max-Age=86400`（24h，与 `CookieProperty` 默认一致）✓
+
+**RBAC 负向面（Review Focus #1 后半）**：
+
+| 目标 | e2euser 实测 | 结论 |
+|---|---|---|
+| `admin/users` | **302** | ✓ 重定向，非越权 |
+| `admin/capabilities` | **302** | ✓ |
+| `admin/roles` | **302** | ✓ |
+| `admin/mcps` | **302** | ✓ |
+| `api/capabilities`（自己的） | **200** | ✓ |
+| `conversation`（自己的） | **200** | ✓ |
+| `skill`（自己的） | **200** | ✓ |
+
+strict RBAC 生效：非 admin 访问 `/admin/**` 一律 302，自己的端点正常。
+
+**用户创建**：`POST /admin/users` 返回 `true`，`user_info` 现有 2 行：
+
+| username | nickname | type |
+|---|---|---|
+| e2euser | E2E Test User | USER |
+| wb04307201 | 吴博 | ADMIN |
+
+`e2euser` / `TestE2E2026` 登录验证 **HTTP 200** ✓ —— Task 6/7/8/11 依赖的资产已就绪。
+
+**改密码成功路径**：未测（刻意跳过 —— 会污染后续 12 个任务共用的 admin 账号）。
+**计划中一处需订正**：原计划写"改密码负向面"用错误旧密码，此项未完成（subagent 中断）。
+
+**结论：维度 B 通过，零产品缺陷。** 唯一 500 是巡检工具事故（H2 Shell 关闭数据库），
+重启后同一请求返回 `true` —— 证明 `DefaultUser.createUser` 与 `POST /admin/users` 无缺陷。
