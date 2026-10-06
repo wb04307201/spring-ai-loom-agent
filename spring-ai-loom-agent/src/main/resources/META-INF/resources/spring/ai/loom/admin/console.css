@@ -269,6 +269,26 @@ table.user-table {
   background: #f8fafc;
 }
 
+/* 用户管理页：用户名可点 → 进用户详情页（会话列表 → 对话流水）。
+   修复前用户名列是纯文本，admin 无法从控制台进入详情页 ——
+   「用户列表 → 会话 → 对话日志」这条链路的第一环是断的。 */
+.user-detail-link {
+  color: var(--primary, #4f46e5);
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.15s ease;
+}
+
+.user-detail-link:hover {
+  border-bottom-color: currentColor;
+}
+
+.user-detail-link:focus-visible {
+  outline: 2px solid var(--primary, #4f46e5);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* 已分配角色列:多 badge 横向排列,空状态用 muted 文字 */
 .role-badge-list {
   display: flex;
@@ -950,6 +970,22 @@ table.user-table {
   background: #fef2f2;
   color: #b91c1c;
   border: 1px solid #fecaca;
+}
+
+/* 2026-10-06: 待审核 chip 由纯展示改为可点跳转（console 页跨市场待办）。
+   <a> 需抹掉默认下划线/颜色，hover 时加深底色提示可点。 */
+.pending-chip-link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pending-chip-link:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+.pending-chip-link:focus-visible {
+  outline: 2px solid #b91c1c;
+  outline-offset: 2px;
 }
 
 /* M0 T11/T12: 审批状态徽章（admin market 表「状态」列渲染） */
