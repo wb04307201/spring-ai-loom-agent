@@ -683,3 +683,111 @@ UI 层**零缺陷**。截图见 `E-kb-detail.png`。
 知识库返回 400 —— 这是正确的越权防护（不是缺陷）。
 
 **维度 H 结论：9/9 全部通过，零缺陷。**
+
+---
+
+### Task 8 · 维度 I admin 控制台 + RBAC
+
+**API 层全端点检查**（admin cookie）：
+
+| 端点 | 期望 | 实测 | 结论 |
+|---|---|---|---|
+| `admin/users` | 200 + 2 用户 | **200**，`wb04307201`(ADMIN,roles=[base]) + `e2euser`(USER) | ✓ |
+| `admin/roles` | 200 | **200**，base + probe_role | ✓ |
+| `admin/capabilities` | 200 | **200**（8080 字节，5 个 RBAC 工具） | ✓ |
+| `admin/mcp-system` | 200 | **200**（4511 字节，4 个 MCP 合并视图） | ✓ |
+| `admin/mcps` | 200 | **200**（520 字节） | ✓ |
+| `admin/market-skills` | 200 | **200**（7532 字节，含 3 官方 + 提交的） | ✓ |
+| `admin/market-knowledge` | 200 | **200**（479 字节） | ✓ |
+| `api/knowledge/accessible` | 200 | **200**（144 字节） | ✓ |
+| **`admin/stats/tokens/monthly`** | 有数据 | **200 但 `[]` 空数组** | ❌ **P1-1** |
+
+**角色授权页 UI 核验**（浏览器，`roles.html` → `.edit-role-btn[data-code="base"]`）：
+
+| 区块 | 内容 | 结论 |
+|---|---|---|
+| `#rd-tools` ①已授权 | 1 个：`tool_render` | ✓ |
+| `#rd-tools` ②可选 | **5 个**：`tool_compile` / `tool_git` / `tool_http` / `tool_http_manage` / `tool_maven` | ✓ |
+| `#rd-tools` **universal 工具** | **完全不出现**（time/file/skill/knowledge/subtask/schedule/askUser） | ✓ 与 CLAUDE.md 一致 |
+| `#rd-mcps` | 4 个全授权（顺序思维/必应搜索/网页抓取/图表生成） | ✓ |
+| `#rd-skills` | 3 官方（均「默认加载」）+ 可选 `e2e-submitted-skill` | ✓ |
+| `#rd-knowledge` | 0 已授权 + 可选 `e2euser-kb` | ✓ |
+
+截图：`screenshots/I-admin-roles-tools.png`
+
+**RBAC 负向面**（撤 `tool_render` 授权 → 查 `api/capabilities`）：
+撤权后 `tool_render.effectiveEnabled` 立即变 **false** ✓（已恢复授权）
+
+#### DEFECT-Q3-1 回归验证 —— 通过 ✓
+
+**方法**：建 `e2e-cascade-role`，灌满 5 类授权，通过 `DELETE /admin/roles/{code}` 删除
+（走 `DefaultRoleService.delete`）。
+
+| 表 | 删前 | 删后 |
+|---|---|---|
+| `role_tool` | 1 | **0** |
+| `role_mcp` | 1 | **0** |
+| `role_skill` | 1 | **0** |
+| `loom_role_knowledge` | 1 | **0** |
+| `user_role` | 1 | **0** |
+| `role`（角色行本身） | 1 | **0** |
+
+**5 表全部级联清除 + 角色行删除** ✓ —— DEFECT-Q3-1 的修复（应用层显式 DELETE +
+V1.0 的 FK CASCADE 双保险）**实测有效**。
+
+---
+
+#### P1-1 根因确认（token 用量未落库）—— 与 P0-1 同源
+
+**证据链**：
+```
+SPRING_AI_CHAT_MEMORY: 7 个会话 / 39 条消息（大量真实对话）
+loom_chat_usage:       0 行
+chat_token_usage:      0 行
+stream COMPLETE:       15 次
+Aggregation Error:     18 次
+```
+
+**根因**（读 `SseController` L783-789 + `ChatUsageService.record`）：
+
+```java
+var chatMeta = chatResponse.getMetadata();
+if (chatMeta != null && chatMeta.getUsage() != null) {   // ← 这里恒为 null
+    chatUsageService.record(...);
+}
+```
+
+OpenAI 兼容 API 的 usage **只在流的最后一帧**返回（`stream_options.include_usage=true`），
+而 Spring AI 的 `MessageAggregator` 正是**在最后一帧**抛 `OpenAIIoException`
+（P0-1，18 次实证）。**聚合失败 → 最后一帧的 usage 丢失 → `getUsage()` 恒为 null
+→ 一行都不写**。
+
+即使流成功完成（15 次 COMPLETE），`getUsage()` 依然为 null —— 说明 Spring AI 的
+OpenAI SDK 路径**根本没把 usage 挂到 `ChatResponse.getMetadata()`** 上
+（日志里能看到 usage 数据存在，但没进 metadata）。
+
+**影响面**：
+- 前端「本月用量」弹窗五项数值全 0（Task 3 已记）
+- `admin/stats.html` 月度柱图无数据
+- `admin/stats/tokens/monthly` 返回 `[]`
+- `ChatUsageService` 的 `monthlyByUser` / `recent6MonthsForUser` / `currentMonthForUser`
+  三个查询全部返回空
+
+**P0-1 与 P1-1 的关系**：**同一个上游流问题的两个症状**。
+P0-1 是流末尾被掐断的**用户可见症状**（错误文案混入回复），
+P1-1 是同一掐断导致 **usage 帧丢失**的下游后果。
+
+---
+
+### Wave 2 汇总（Task 4-8）
+
+| Task | 维度 | 结论 |
+|---|---|---|
+| 4 | D 工具层 | 9 工具：**7 通过**，2 有缺陷（P1-2 向量维度、P1-3 格式解析） |
+| 5 | E 知识空间 | UI **零缺陷**；检索受 P1-2 限制不可验证 |
+| 6 | G 技能市场 | **11/11 通过，零缺陷** |
+| 7 | H 知识库市场 | **9/9 通过，零缺陷** |
+| 8 | I 控制台+RBAC | 9 端点通过；**DEFECT-Q3-1 回归验证通过**；P1-1 根因确认 |
+
+**Wave 2 新增缺陷**：P1-2、P1-3，并确认 P1-1 与 P0-1 同源。
+**累计缺陷**：1 P0 + 3 P1 + 1 P2。
