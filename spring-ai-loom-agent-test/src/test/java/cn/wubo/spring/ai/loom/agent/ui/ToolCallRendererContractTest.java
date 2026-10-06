@@ -94,6 +94,21 @@ class ToolCallRendererContractTest {
     }
 
     @Test
+    @DisplayName("result 外层引号必须剥离 —— 否则选中项不高亮")
+    void outerQuotesAreStrippedForAnswerMatching() throws IOException {
+        String src = rendererSource();
+        assertThat(src)
+                .as("必须有 stripOuterQuotes 处理 —— loom_tool_call_log.result_text 可能带外层引号")
+                .contains("stripOuterQuotes");
+        assertThat(src)
+                .as("answer 抽取后必须再剥一次残留引号")
+                .contains(".replace(/^[\"']|[\"']$/g, \"\")");
+        assertThat(src)
+                .as("选中项必须加 askuser-opt-chosen 类才能高亮")
+                .contains("askuser-opt-chosen");
+    }
+
+    @Test
     @DisplayName("截断必须提示 —— 否则用户以为工具只返回了这么多")
     void truncationIsSurfaced() throws IOException {
         assertThat(rendererSource())

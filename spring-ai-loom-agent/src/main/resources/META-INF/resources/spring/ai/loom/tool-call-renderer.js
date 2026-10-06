@@ -36,6 +36,22 @@
   }
 
   /**
+   * 剥离字符串外层引号。
+   *
+   * <p>{@code loom_tool_call_log.result_text} 存的是工具返回值的**字面量**，
+   * 可能带外层引号（如 {@code "[用户已回答] 喝茶"}）。不剥离会让
+   * 「用户答案 vs 选项 label」的比对失败，选中项不高亮。
+   */
+  function stripOuterQuotes(s) {
+    if (!s) return s;
+    const t = s.trim();
+    if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t[t.length - 1] === t[0]) {
+      return t.slice(1, -1);
+    }
+    return s;
+  }
+
+  /**
    * 解析 askUser 的 optionsJson（它是一层 JSON 字符串嵌套在 arguments 里）。
    * 解析失败返回空数组 —— 卡片会退化成只显示问题文本，不崩。
    */
@@ -54,10 +70,12 @@
   function renderAskUserCard(entry) {
     const args = entry.arguments || {};
     const options = parseOptions(args);
-    const result = String(entry.result || "");
-    // result 形如 "[用户已回答] 面条" —— 抽出答案部分用于高亮
+    const result = stripOuterQuotes(String(entry.result || ""));
+    // result 形如 "[用户已回答] 面条" —— 抽出答案部分用于高亮。
+    // 注意：loom_tool_call_log.result_text 可能带外层 JSON 引号（"[用户已回答] x"），
+    // 不剥离会导致答案比对失败、选中项不高亮（实测踩过）。
     const answered = /\[用户已回答\]\s*(.*)/.exec(result);
-    const answer = answered ? answered[1].trim() : null;
+    const answer = answered ? answered[1].trim().replace(/^["']|["']$/g, "") : null;
 
     const optionsHtml = options
       .map((opt) => {
