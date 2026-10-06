@@ -265,7 +265,21 @@
       flowPager.style.display = "none";
       return;
     }
+    // 子任务索引：SUBTASK 事件按 id 建索引，供 TOOL_CALL（startSubTask）合并
+    // 出带状态/耗时/结果的完整 chip —— 否则 chip 只能从 tool_call_log 的
+    // result 文本里拿信息，丢失 status 与 durationMs。
+    window.__flowSubtaskIndex = {};
+    allEvents.forEach((ev) => {
+      if (ev.type === "SUBTASK" && ev.data && ev.data.id) {
+        window.__flowSubtaskIndex[ev.data.id] = ev.data;
+      }
+    });
+
     flowContainer.innerHTML = filtered.map(renderEvent).join("");
+    // 工具调用富渲染的折叠交互（askUser 卡片只读，无交互；chip / 通用行可展开）
+    if (window.ToolCallRenderer) {
+      window.ToolCallRenderer.bindInteractions(flowContainer);
+    }
     // 在每轮 USER 之前插一个分隔标记（"─── 第 N 轮 ───"）。
     // 多轮对话清晰，LLM 思考阶段（USER → TOOL → ASSISTANT）以"轮"为单位呈现。
     let userCount = 0;
@@ -406,6 +420,35 @@
       }
       case "TOOL_CALL": {
         icon = "🔧";
+        // 富渲染：askUser → 卡片、子任务 → chip、其余 → 折叠行。
+        // 复用与主聊天界面同一个渲染器（tool-call-renderer.js），避免两处实现漂移。
+        // 流水页的 data 形态与 /conversation 注入的 entry 略有差异（args 是字符串），
+        // 故在此适配成渲染器期望的 { toolName, arguments, result, ... }。
+        if (window.ToolCallRenderer) {
+          let parsedArgs = {};
+          if (d.args) {
+            try {
+              parsedArgs =
+                typeof d.args === "string" ? JSON.parse(d.args) : d.args;
+            } catch (e) {
+              parsedArgs = { _raw: d.args };
+            }
+          }
+          const entry = {
+            messageType: "TOOL_CALL",
+            toolName: d.name,
+            toolCallId: d.id,
+            arguments: parsedArgs,
+            result: d.result || "",
+            isError: !!d.isError,
+            durationMs: d.durationMs,
+            truncated: !!d.truncated,
+          };
+          // 子任务：若同 id 有 SUBTASK 事件则合并（含状态/耗时/结果）
+          const st = (window.__flowSubtaskIndex || {})[d.id];
+          body = window.ToolCallRenderer.render(entry, st);
+          break;
+        }
         let argsHtml = "";
         if (d.args) {
           // ：尝试 JSON 美化 args，失败回退到原始字符串

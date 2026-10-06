@@ -1265,6 +1265,21 @@ const ui = {
         // Show actions for historical messages
         const actions = document.getElementById("actions-" + id);
         if (actions) actions.style.display = "";
+      } else if (role === "TOOL_CALL") {
+        // 工具调用条目（后端从 loom_tool_call_log 注入）。
+        // 渲染成富 UI：askUser → 只读卡片、子任务 → chip、其余 → 折叠行。
+        // 渲染器是只读的（不绑提交事件）—— 历史回看不应能重新作答。
+        if (window.ToolCallRenderer) {
+          const item = document.createElement("div");
+          item.className = "chat-item chat-item-left tool-call-item";
+          item.innerHTML =
+            '<div class="avatar"><img src="/static/ai.png" alt="AI"/></div>' +
+            '<div class="bubble tool-call-bubble">' +
+            window.ToolCallRenderer.render(msg) +
+            "</div>";
+          if (this.mainContent) this.mainContent.appendChild(item);
+          window.ToolCallRenderer.bindInteractions(item);
+        }
       }
     }
   },
