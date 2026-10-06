@@ -616,3 +616,49 @@ UI 层**零缺陷**。截图见 `E-kb-detail.png`。
 
 **维度 E 结论：UI 层零缺陷；核心能力（检索）受 test app 的 fake EmbeddingModel
 限制不可验证（P1-2）。**
+
+---
+
+### Task 6 · 维度 G 技能市场
+
+**全流程实测**（API 层，含 DB 核对）：
+
+| # | 检查项 | 期望 | 实测 | 结论 |
+|---|---|---|---|---|
+| 1 | 市场官方技能数 | 3 | **3**（STAR-IJ / 靶心人公式 / 交叉评审） | ✓ |
+| 2 | e2euser 提交 | PENDING | **PENDING**，id=33，author=e2euser | ✓ |
+| 3 | admin 审批通过 | APPROVED | **APPROVED**，reviewedAt 已填 | ✓ |
+| 4 | e2euser pull | user_skill +1 | **+1**，`source=MARKET_PULLED`，`marketSkillId=33` | ✓ |
+| 5 | 空评论驳回 | 拦截 | **400** `"reject 需要评论(comment 不能为空)"` | ✓ |
+| 6 | 带评论驳回 | REJECTED | **REJECTED** + 评论入库 | ✓ |
+| 7 | 重投触发归档 | archive +1 | **archive id=34**（REJECTED + 评论保留） | ✓ |
+| 8 | 重投后新行 | PENDING | **id=35 PENDING**（id 递增，旧行归档） | ✓ |
+| 9 | 5 星评价 | 写入 | **200**，rating=5，editCount=0 | ✓ |
+| 10 | PUT 首次修改 | 成功 | **200**，rating 5→4，**editCount 0→1** | ✓ |
+| 11 | PUT 二次修改 | 403 | **403** | ✓ |
+
+**关键机制核验**：
+
+- **归档语义正确**（id-preserving）：驳回时**不**归档；**重投**时才把旧的 REJECTED 行
+  移入 `market_skill_archive`，**保留原 id=34**，新行 id=35 进 `market_skill`。
+  与 `ISkillStorage` javadoc「REJECTED re-submit archives old row (id-preserving)」一致。
+- **`edit_count` 闸门位置正确**：`AbstractMarketReviewService` 的
+  `submit`（POST）用 upsert **不校验** edit_count（首次提交允许，重复 POST 即覆盖）；
+  `update`（PUT `/reviews/me`）才校验 `edit_count < 1`。实测 POST 两次均 200
+  （设计行为，非缺陷），PUT 第二次 403 ✓
+- **`created_by_kind`**：用户提交为 `USER` ✓
+
+**维度 G 结论：11/11 全部通过，零缺陷。**
+
+---
+
+### 已测资产汇总（供 Task 7/8/11 复用）
+
+| 资产 | 值 |
+|---|---|
+| 知识库 | `e2e-knowledge` id=`dbee7b15-755c-440e-8acd-a7816c1204ee` |
+| 知识库文件 | `e2e-doc.txt`（151B）、`中文测试.txt`（3 个副本，2 个乱码 1 个正确） |
+| 技能（已审批） | `e2e-submitted-skill` market id=**33**（APPROVED） |
+| 技能（驳回中） | `e2e-reject-skill` market id=**35**（PENDING），archive id=**34** |
+| 用户技能 | `e2e-test-skill`（admin 的）、`e2e-submitted-skill`（e2euser pull 的） |
+| 可复用会话 | `9988fe61-dc5f-4b95-a11b-a2b59f793d71` 等 3 个 |
