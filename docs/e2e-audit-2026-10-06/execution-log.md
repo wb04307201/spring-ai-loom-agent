@@ -560,3 +560,59 @@ return Long.parseLong("pt15m");   // NumberFormatException → return -1L
 需额外授权且价值低于风险，列入未测项。
 
 **维度 D 结论：9 个工具中 7 个完全通过，2 个链路通但有缺陷（P1-2 向量维度、P1-3 格式解析）。**
+
+---
+
+### Task 5 · 维度 E 知识空间 UI
+
+**UI 层验证**（浏览器）：
+
+| 检查项 | 实测 | 结论 |
+|---|---|---|
+| `#ks-button` 打开面板 | 面板正常展开 | ✓ |
+| `#ks-sidebar` 列出知识库 | 显示 `e2e-knowledge` + 「自建」标签 + 描述 | ✓ |
+| 点击条目 | 详情区加载 | ✓ |
+| `#ks-detail` 文件列表 | `e2e-doc.txt` / 151 Bytes / 上传时间 / 预览·下载·删除 | ✓ |
+| 截图 | `screenshots/E-kb-detail.png` | ✓ |
+
+UI 层**零缺陷**。截图见 `E-kb-detail.png`。
+
+---
+
+#### Review Focus #5 · 中文文件名往返 —— 通过（客户端工具陷阱，非产品缺陷）
+
+**三种上传方式对比**（codepoint 级证据）：
+
+| 上传方式 | 存储的文件名 codepoints | 判定 |
+|---|---|---|
+| `e2e-doc.txt`（纯 ASCII，curl -F） | `U+0065 U+0032 U+0065 U+002D ...` 全正确 | ✓ |
+| `中文测试.txt`（**curl -F**，Git Bash） | `U+FFFD U+FFFD U+FFFD U+0132 U+FFFD U+FFFD U+FFFD U+002E...` | ❌ 乱码 |
+| `中文测试.txt`（**Python 显式 UTF-8**） | `U+4E2D U+6587 U+6D4B U+8BD5 U+002E U+0074 U+0078 U+0074` | ✓ **正确** |
+
+`U+4E2D U+6587 U+6D4B U+8BD5` = 「中文测试」—— **完全正确**。
+
+**结论**：**服务端 UTF-8 处理正确，无缺陷**。curl 那次的乱码是
+**Git Bash 的 curl 在 Windows 上以 GBK 编码 multipart 的 filename 字段**所致 ——
+属客户端工具问题，与产品代码无关。
+
+**这是本次巡检的第 2 个同类陷阱**（第 1 个是 curl 中文 JSON body 被 GBK 解码 →
+`Invalid UTF-8 start byte` → 400）。凡在 Windows Git Bash 下用 curl 发**任何含中文的
+请求体或文件名**，都会踩这个坑。**规避方式**：用 `--data-binary @file`（body）
+或 Python/Java 显式 UTF-8 构造 multipart（文件名）。
+
+---
+
+### Task 5 · 维度 E 汇总
+
+| 检查项 | 结论 |
+|---|---|
+| 知识空间面板打开 | ✓ |
+| 知识库列表渲染 | ✓ |
+| 文件列表 + 操作按钮 | ✓ |
+| 中文文件名往返 | ✓（服务端正确；curl 乱码是客户端工具问题） |
+| 上传链路 | ✓ 200（Task 4 已验） |
+| **向量维度** | ❌ **P1-2**（dim=4，Task 4 已记） |
+| 检索语义相关性 | **未测** —— 受 P1-2 影响，dim=4 的向量检索结果无意义，断言无价值 |
+
+**维度 E 结论：UI 层零缺陷；核心能力（检索）受 test app 的 fake EmbeddingModel
+限制不可验证（P1-2）。**
