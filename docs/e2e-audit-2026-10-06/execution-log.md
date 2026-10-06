@@ -300,3 +300,83 @@ SELECT COUNT(*) FROM loom_chat_usage;  →  0 行
 
 **结论：维度 C 发现 1 个 P0 + 1 个 P1 + 1 个 P2。** 聊天主干功能可用
 （流式/thinking/记忆/stop/CRUD/消毒 全通过），但长回答末尾必被错误文案污染。
+
+### Task 4 · 维度 D 工具层（控制器接管执行）
+
+> subagent a5a48698e194f8bd0 被上游网关 `400 Model is unavailable` 打断
+> （第 3 次 subagent 失败：2× 502 + 1× 400）。它留下 Step 1 的 RBAC 授权快照，
+> 其余由控制器接管。
+
+**Step 1 · RBAC 授权快照**（subagent 产出，已核实）：
+
+| type | id | effectiveEnabled | 工具数 |
+|---|---|---|---|
+| LOCAL | tool_compile | false | 1 |
+| LOCAL | tool_git | false | 28 |
+| LOCAL | tool_http | false | 5 |
+| LOCAL | tool_maven | false | 6 |
+| LOCAL | tool_render | false | 1 |
+| MCP | @tokenizin-agency/mcp-npx-fetch | true | 4 |
+| MCP | bing-search | true | 2 |
+| MCP | mcp-server-chart | true | 27 |
+| MCP | sequential-thinking | true | 1 |
+
+7 个 universal 工具（time/file/skill/knowledge/subtask/schedule/askUser）**不出现在**
+`/api/capabilities` 里 —— 符合设计（走 `defaultGranted=true` 放行，不经 `role_tool`）。
+5 个 RBAC 工具全部未授权，与 CLAUDE.md 记载一致。
+
+**工具核对结果**：
+
+| 工具 | 判定 | 证据 |
+|---|---|---|
+| **file** | ✓ 调用成功 | LLM 调 `readTextFile`，读回 `"E2E 测试内容 2026-10-06"` 与文件系统**逐字一致** |
+| **time** | ✓ 调用成功 | LLM 调 `getCurrentTime`，返回 `2026-10-06（周一）18:41:52 Asia/Shanghai`，与后端日志时间戳吻合到秒级 |
+| **knowledge** | ⚠ 链路通/结果无意义 | 上传 **200**（非 500），向量落库，但 **dim=4**（见 P1-2） |
+
+**file 工具实证** —— 思考链原文：
+> 用户想读取 e2e/sample.txt 文件并原样输出内容。我直接调用 readTextFile 工具即可。
+> 读取成功，内容是 `"E2E 测试内容 2026-10-06"`，原样返回给用户即可。
+
+**time 工具实证** —— 思考链原文：
+> The user is asking for the current date and time. Let me call the getCurrentTime tool.
+> ... The tool gave me the current time.
+
+---
+
+#### P1-2 知识库向量维度为 4（test app 配置缺陷）
+
+**D2 重新定级**：spec §2 原判 P0（预期上传 500）。**读源码后修正为 P1**。
+
+**修正依据**：`H2JVectorStore` 只调 `embeddingModel.embed(...)`（L208 写入 / L309 查询），
+**从不调 `call()`**；全库 grep 无任何 `.call(embed...)` 调用点。而 fake `EmbeddingModel`
+的 `embed()` **有实现**（4 维随机向量），只有 `call(EmbeddingRequest)` 抛
+`UnsupportedOperationException`。
+
+**实测**：
+```
+PUT  /knowledge {"name":"e2e-knowledge",...}  → 200 {"id":"dbee7b15-..."}
+POST /knowledge/dbee7b15.../upload            → 200 {"status":"success","fileId":"dde514b0-..."}
+
+SELECT document_id, dim, LENGTH(embedding) FROM loom_vector_store;
+→ c41501f4-...  |  dim=4  |  15 bytes
+```
+
+| 检查项 | 期望 | 实测 | 结论 |
+|---|---|---|---|
+| 上传返回 | 200 或 503 | **200** | ✓ 链路通 |
+| 向量落库 | 有行 | **1 行** | ✓ |
+| 文档内容 | 正确 | ✓ 中文完整 | ✓ |
+| **向量维度** | 真实模型维度（1024+） | **dim=4** | **P1** |
+
+**定级理由**：上传与检索链路**都能跑通**，但向量是
+`new Random(text.hashCode())` 生成的 4 维随机数 —— 检索排序**语义上无意义**
+（问 A 返回随机相似文档，不是真正相关内容）。知识库作为 RAG 核心能力，
+在本 test app 配置下**不可用于验证**。
+
+**影响**：这是 test app 配置问题（`TestAnthropicOptionsConfig` 位于 `src/main/java`），
+**不是库代码缺陷**。但它使 Task 5（维度 E）的检索断言失去意义 ——
+Task 5 只能断言"链路不崩"，不能断言"检索到相关内容"。
+
+**执行备注**：`evaluate_script` 跑 >120s 的长 async 轮询会撞 Chrome DevTools 的
+`protocolTimeout`（`Runtime.callFunctionOn timed out`）。改用短轮询（每次只读状态，
+非阻塞）+ Bash `sleep` 控制间隔。
