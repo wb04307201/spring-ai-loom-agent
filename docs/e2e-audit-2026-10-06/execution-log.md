@@ -939,3 +939,39 @@ e2euser 无 3 条官方技能，因为它**未被分配 `base` 角色** —— �
 **判定依据必须是响应体内容，不能只看状态码。**
 
 **维度 K 结论：三项隔离 + 八项越权尝试全部正确，零缺陷。**
+
+---
+
+### Task 12 · 维度 L 降级与门控
+
+**方法**：停服 → 以 `--spring.ai.loom.agent.rag.enabled=false` 重启 → 验证 → 恢复。
+
+| # | 检查项 | RAG 开 | RAG 关 | 结论 |
+|---|---|---|---|---|
+| 1 | `api/features` | `{"knowledge":true}` | **`{"knowledge":false}`** | ✓ |
+| 2 | `checkKnowledgeUpload` | `true` | **`false`** | ✓ |
+| 3 | 知识上传端点 | 200 | **503** `"知识库文件上传未启用(知识空间未启用/embedding 未启用)"` | ✓ 业务错误非 500 |
+| 4 | 启动日志 VectorStore 提及 | 有 | **0 次**（RagConfiguration 未激活） | ✓ |
+| 5 | `#ks-button` 知识空间按钮 | 可见 | **`display:none` / 高度 0px** | ✓ 正确隐藏 |
+| 6 | `#image-add-btn` 附件 `+` | 可见 | **`display:flex` / 36px** | ✓ **恒可见** |
+| 7 | 画板 `✎` | 可见 | **`display:flex` / 36px** | ✓ **恒可见** |
+
+**关键验证**（#5-#7）：CLAUDE.md 记载「`+` / 画板按钮**不与任何门控联动，恒可见**」
+（2026-09-19 解耦：聊天附件/画板不依赖 RAG）。实测**精确吻合**：
+
+```
+#ks-button      display:none   offsetH:0px    ← 被 features 门控隐藏
+#image-add-btn  display:flex   offsetH:36px   ← 恒可见
+画板 ✎          display:flex   offsetH:36px   ← 恒可见
+```
+
+DOM 元素仍存在（`getElementById` 可获取）但 `style="display: none"` ——
+这是前端按 `features.knowledge` 做显隐的标准做法，**不是缺陷**。
+
+**503 而非 500**（#3）：与 CLAUDE.md 设计一致 ——
+「降级部署 provider 空 → 上传抛 503 业务错误（依赖门前置不落孤儿存储）」。
+实测错误文案清晰指明了两个可能原因（知识空间未启用 / embedding 未启用）。
+
+截图：`screenshots/L-feature-gate.png`
+
+**维度 L 结论：7/7 全部通过，零缺陷。**
