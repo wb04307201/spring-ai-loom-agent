@@ -645,9 +645,11 @@ public class LoomAgentConfiguration {
                           ISkillStorage skillStorage, IKnowledge knowledge,
                           LoomAgentProperties properties,
                           cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
-                          cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
+                          cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
+                          cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
-                    skillStorage, knowledge, properties, toolCallLogRepository, capabilityService);
+                    skillStorage, knowledge, properties, toolCallLogRepository, capabilityService,
+                    chatUsageService);
         }
 
         // ============== ：loom_tool_call_log 仓储 ==============

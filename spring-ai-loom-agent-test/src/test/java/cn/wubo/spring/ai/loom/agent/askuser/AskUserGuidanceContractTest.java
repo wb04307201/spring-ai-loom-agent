@@ -75,7 +75,8 @@ class AskUserGuidanceContractTest {
         DefaultChat chat = new DefaultChat(
                 null, null, List.of(), null, null,
                 skillStorage, null,
-                new LoomAgentProperties(), null, capabilityService);
+                new LoomAgentProperties(), null, capabilityService,
+                null);
         return chat.buildDynamicSystemPrompt("tester", List.of());
     }
 

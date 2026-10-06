@@ -50,13 +50,16 @@ public class DefaultChat implements IChat {
  private final IKnowledge knowledge;
  private final LoomAgentProperties properties;
  private final CapabilityService capabilityService;
+ /** token 用量落库服务 —— 由 ChatUsageRecordingAdvisor 在流终止时调用。 */
+ private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
 
  public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
                     IUserConversation userConversation, IFile file,
                     ISkillStorage skillStorage, IKnowledge knowledge,
                     LoomAgentProperties properties,
                     cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
-                    CapabilityService capabilityService) {
+                    CapabilityService capabilityService,
+                    cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService) {
   this.chatClient = chatClient;
   this.mcp = mcp;
   this.embedTools = embedTools;
@@ -67,6 +70,7 @@ public class DefaultChat implements IChat {
   this.properties = properties;
   this.toolCallLogRepository = toolCallLogRepository;
   this.capabilityService = capabilityService;
+  this.chatUsageService = chatUsageService;
  }
 
  private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
@@ -208,6 +212,12 @@ public class DefaultChat implements IChat {
   requestSpec.toolContext(props);
 
   requestSpec.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId));
+
+  // token 用量落库:必须在 advisor 链里捕获 —— SseController 订阅的原始 chunk 流
+  // 每帧 usage 都是 DefaultUsage(0,0,0)(实测探针证实),真正的 usage 只在流终止后的
+  // 聚合响应里。ChatUsageRecordingAdvisor 用 ChatClientMessageAggregator 拿到它。
+  requestSpec.advisors(new cn.wubo.spring.ai.loom.agent.token.ChatUsageRecordingAdvisor(
+          chatUsageService, conversationId, username, 100));
 
   ToolCallbackProvider toolCallbackProvider = mcp.getVisibleToolCallbackProvider(username, chatRequestRecord.mcps());
 
