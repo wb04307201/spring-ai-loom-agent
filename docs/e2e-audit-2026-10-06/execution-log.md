@@ -850,3 +850,55 @@ if (!resolved.startsWith(baseDir) ...) return null;   // ← false ⇒ 404
 
 **定级 P1**：核心 UI 功能（预览/下载）完全不可用，但有明确触发条件
 （相对路径配置）且生产默认路径不触发。
+
+---
+
+### Task 10 · 维度 J MCP
+
+| # | 检查项 | 期望 | 实测 | 结论 |
+|---|---|---|---|---|
+| 1 | MCP server 在线数 | 4 | **4/4**（sequential-thinking / bing-search / mcp-npx-fetch / mcp-server-chart） | ✓ |
+| 2 | 工具总数 | 34 | **34**（1 + 2 + 4 + 27） | ✓ |
+| 3 | 中文标题 | 完整 | 顺序思维 / 必应搜索 / 网页内容抓取 / 图表生成 | ✓ |
+| 4 | 工具描述完整性 | 34 条有描述 | **34/34 有描述，34/34 含中文** | ✓ |
+| 5 | 编码坑（GBK） | 无 JsonParseException | **0 次**（JDK 25 默认 UTF-8 免疫） | ✓ |
+| 6 | MCP 工具实际调用 | 调用成功 | `sequentialthinking` 被调用，多轮思考可见 | ✓ |
+| 7 | **流截断** | 正常完成 | ❌ 见下 | ❌ **P0-1 新变种** |
+
+**描述内容抽样**（JDBC 读，绕开控制台编码）：
+```
+bing_search    | 含中文=true | 使用本应用Bing搜索服务，执行中英文网页搜索…
+crawl_webpage  | 含中文=true | 从搜索结果中的 UUID 抓取对应网页内容…
+fetch_html     | 含中文=true | 获取网页内容，返回 HTML 格式数据
+fetch_json     | 含中文=true | 从指定 URL 获取 JSON 文件
+```
+
+**编码坑确认**：`Error processing inbound message` / `JsonParseException` 计数 = **0**。
+CLAUDE.md 记载的 MCP Java SDK 0.18.x `StdioClientTransport` 入站 GBK 坑
+在本机 JDK 25（默认 UTF-8）下**不触发**，与 Task 0 的预判一致。
+
+---
+
+#### P0-1 新变种：tool_use JSON 不完整导致的流截断
+
+**现象**（AI 回复原文）：
+> 模型响应流被中途截断(Spring AI 流聚合器在 **tool_use JSON 未完整到达**时尝试解析触发)。
+> 建议:1) 直接重发该对话(单次偶发可恢复);2) 联系管理员调大 max_completion_tokens…
+
+**文案来源**：`DefaultChat.java:270` —— **项目自己写的诊断消息**，说明开发者已知此问题
+并做了友好化处理，但**根因未修**。
+
+**与 Task 3 的 P0-1 关系**：同一根因（`MessageAggregator` 聚合失败）的**第二个表现面**：
+
+| 场景 | 表现 |
+|---|---|
+| 长文本回答（Task 3） | 正文渲染完后追加 `聊天服务异常（OpenAIIoException）` |
+| **tool_use 调用（本任务）** | 流截断，工具调用中断，返回诊断文案 |
+
+这次**错误信息质量明显更好**（指明了 `tool_use JSON` 和 `max_completion_tokens` 两个方向），
+比 Task 3 那句无信息量的 `OpenAIIoException` 有用得多 —— 说明有两条不同的错误处理路径。
+
+**判定**：并入 P0-1，作为该缺陷的第二个症状面记录。
+
+**维度 J 结论：MCP 连接/描述/编码全部通过（4/4 在线、34/34 描述、0 编码错误）；
+工具调用本身成功，但受 P0-1 影响可能中途截断。**
