@@ -93,8 +93,24 @@ public class ConversationFlowService {
   // 合并 SUBTASK + SCHEDULE 为 1 个 SCHEDULE_FIRE 事件
   // 每次 schedule 触发 = 1 sub-task 启动 + 1 execution 记录，1:1 配对 (ts 几乎一致)。
   // 前端只看到 1 个事件，含 prompt/result/status/taskName 等完整信息。
+  Set<String> consumedBySchedule = new HashSet<>();
   if (types.contains("SUBTASK") || types.contains("SCHEDULE") || types.contains("SCHEDULE_FIRE")) {
-   all.addAll(loadScheduleFires(username, conversationId));
+   List<Event> fires = loadScheduleFires(username, conversationId);
+   // 记录被 schedule 消费掉的 subtaskId —— 同一个子任务不能既显示为 SCHEDULE_FIRE
+   // 又显示为独立 SUBTASK，否则定时触发的子任务会重复渲染。
+   for (Event e : fires) {
+    Object sid = e.data().get("subtaskId");
+    if (sid != null) consumedBySchedule.add(String.valueOf(sid));
+   }
+   all.addAll(fires);
+  }
+
+  // 独立子任务（用户主动 start_sub_task，非 schedule 触发）。
+  // 历史缺陷：loadSubtasks 曾是死代码 —— 定义了完整事件构造但从未被调用，
+  // 导致 loom_subtask_history 有记录却产生 0 个 SUBTASK 事件，
+  // 子任务的状态/耗时/结果在流水视图里完全丢失。
+  if (types.contains("SUBTASK")) {
+   all.addAll(loadSubtasks(username, conversationId, consumedBySchedule));
   }
 
   // B2：USER/ASSISTANT 的 ts 改用 user_conversation.createdAt / updatedAt。
@@ -278,11 +294,22 @@ public class ConversationFlowService {
   }
  }
 
- private List<Event> loadSubtasks(String username, String conversationId) {
-  // 保留为底层方法（被 loadScheduleFires 调用），不直接生成 SUBTASK 事件。
+ /**
+  * 独立子任务 → SUBTASK 事件。
+  *
+  * <p>2026-10-06 修复：本方法曾是**死代码**（定义完整但从未被调用），
+  * 导致子任务在流水视图里只剩一行 {@code TOOL_CALL name=startSubTask}，
+  * 丢失 {@code status / durationMs / result / error}。现已接线。
+  *
+  * @param consumedBySchedule 已被 SCHEDULE_FIRE 事件消费掉的 subtaskId 集合，
+  *                           这些不再重复产出 SUBTASK 事件（schedule 触发的子任务
+  *                           由 SCHEDULE_FIRE 统一承载，含 taskName 等上下文）
+  */
+ private List<Event> loadSubtasks(String username, String conversationId, Set<String> consumedBySchedule) {
   List<SubtaskRow> rows = jdbcTemplate.query("select subtask_id, prompt, status, started_at, finished_at, error_message, result_text " + "from loom_subtask_history where username = ? and conversation_id = ? order by started_at", (rs, n) -> new SubtaskRow(rs.getString("subtask_id"), rs.getString("prompt"), rs.getString("status"), rs.getLong("started_at"), rs.getLong("finished_at"), rs.getString("error_message"), rs.getString("result_text")), username, conversationId);
   List<Event> out = new ArrayList<>();
   for (SubtaskRow r : rows) {
+   if (consumedBySchedule != null && consumedBySchedule.contains(r.subtaskId())) continue;
    Map<String, Object> data = new HashMap<>();
    data.put("id", r.subtaskId());
    data.put("prompt", r.prompt());
