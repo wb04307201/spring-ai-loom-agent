@@ -78,11 +78,29 @@ mvn spring-boot:run -pl spring-ai-loom-agent-test \
 
 ## H2 查询用命令模板
 
+> ⚠️ **计划缺陷已修正（原模板三处错误）**：
+> ① `-cp ~/.m2/.../h2-*.jar` 通配符在 Git Bash 展开成多个 jar，`-cp` 只取到 `-sources.jar`（无主类）→ 须用**显式路径**
+> ② 未加 `-Dfile.encoding=UTF-8` 时中文输出乱码
+> ③ `flyway_schema_history` 与 `role_skill` 的列名/大小写需按实际 schema 核对（见下）
+
+**正确模板**：
+
 ```bash
-java -cp ~/.m2/repository/com/h2database/h2/*/h2-*.jar org.h2.tools.Shell \
+H2JAR="$HOME/.m2/repository/com/h2database/h2/2.4.240/h2-2.4.240.jar"
+H2() { java -Dfile.encoding=UTF-8 -cp "$H2JAR" org.h2.tools.Shell \
   -url "jdbc:h2:file:./spring-ai-loom-agent-test/target/test-ds/db;AUTO_SERVER=TRUE" \
-  -user sa -password 123456 -sql "<SQL>"
+  -user sa -password 123456 -sql "$1" 2>&1 | grep -v "^$"; }
 ```
+
+**表名/列名的三个坑**：
+
+| 对象 | 坑 | 正确写法 |
+|---|---|---|
+| `flyway_schema_history` | 表名与列名均为**小写**，非 H2 默认大写 | 列名加双引号：`SELECT "version","description","success" FROM "flyway_schema_history"` |
+| `INFORMATION_SCHEMA` 查询 | 需限定 `TABLE_SCHEMA='PUBLIC'` | `WHERE TABLE_SCHEMA='PUBLIC' AND TABLE_NAME='flyway_schema_history'` |
+| `role_skill` | **没有 `skill_id` 列** | 列名是 `market_skill_id`；另有 `default_loaded` / `sort_order` |
+
+**PUBLIC schema 表总数：39**
 
 ## 实际执行记录
 
@@ -102,3 +120,45 @@ java -cp ~/.m2/repository/com/h2database/h2/*/h2-*.jar org.h2.tools.Shell \
   计数 = **0** ⇒ JDK 25 默认 UTF-8 免疫 CLAUDE.md 记载的 MCP GBK 坑 ✓
 - 服务就绪：`http://localhost:8080/spring/ai/loom/login.html` HTTP 200
 - 停服方式：`taskkill /PID <mvnPid> /T /F`（`TaskStop` 杀不掉 fork 出的应用 java 进程）
+
+### Task 1 · 维度 A 结果 —— 数据底座（控制器独立核对）
+
+> 说明：Task 1 subagent 执行中卡在 H2 命令（计划模板缺陷，见上）。控制器用修正后的
+> 命令独立完成了全部核对，结论已确定；subagent 回来后只做交叉印证。
+
+**Flyway 版本序列**（`<< Empty Schema >>` → v2.0，与启动日志一致）：
+
+| version | description | success |
+|---|---|---|
+| null | << Flyway Schema History table created >> | TRUE |
+| 1.0 | init | TRUE |
+| 1.1 | mcp data | TRUE |
+| 1.2 | init app data | TRUE |
+| 2.0 | init | TRUE |
+
+5 行全 `success=TRUE`，**零缺陷**。
+
+**种子数据计数**（对照 spec 预期基线）：
+
+| 列 | 预期 | 实测 | 结论 |
+|---|---|---|---|
+| users | 1 | **1** | ✓ |
+| roles | 1 | **1** | ✓ |
+| skills | 3 | **3** | ✓ V2.0 第 3 条种子生效 |
+| kb | 0 | **0** | ✓ |
+| mcps | 4 | **4** | ✓ |
+| role_kb | 0 | **0** | ✓ |
+
+**base 角色 skill 授权**（V2.0 第 3 条是关键验证点）：
+
+| role_code | name | default_loaded |
+|---|---|---|
+| base | STAR-IJ 讲清一件事 | TRUE |
+| base | 靶心人公式 讲好一个故事 | TRUE |
+| base | 交叉评审 | TRUE |
+
+**3 行** ⇒ 第 3 条官方技能「交叉评审」已授权给 base 角色，**普通用户登录可见 3 条官方技能**。
+
+**user_role**：`(wb04307201, base)` 1 行 ⇒ 默认 admin 已有基础角色，符合设计。
+
+**结论：维度 A 通过，零缺陷。** 底座可信，Wave 1 后续任务结论有效。
