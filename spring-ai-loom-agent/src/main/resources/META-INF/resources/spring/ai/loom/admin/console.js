@@ -106,7 +106,7 @@
           ? '<span class="role-empty">— 未分配</span>'
           : roles.map((r) => `<span class="role-badge">${escapeHtml(r)}</span>`).join("");
         return `<tr data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">
- <td><a class="user-detail-link" href="user.html?username=${encodeURIComponent(u.username)}" title="查看该用户的会话与对话流水"><strong>${escapeHtml(u.username)}</strong></a></td>
+ <td><strong>${escapeHtml(u.username)}</strong></td>
  <td>${escapeHtml(u.nickname || "")}</td>
  <td><span class="type-badge ${u.type}">${typeLabel}</span></td>
  <td><div class="role-badge-list">${roleBadges}</div></td>

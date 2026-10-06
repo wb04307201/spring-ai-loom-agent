@@ -354,6 +354,42 @@ table.user-table {
   text-decoration: underline;
 }
 
+/* 2026-10-07: 日志页 tab 切换（Token 用量 / 对话日志）。
+   下划线式 tab，与 admin 整体风格一致；active 项用主色 + 加粗边框。 */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  margin-bottom: 20px;
+}
+.admin-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.admin-tab:hover {
+  color: var(--primary-color, #4f46e5);
+}
+.admin-tab.active {
+  color: var(--primary-color, #4f46e5);
+  border-bottom-color: var(--primary-color, #4f46e5);
+  font-weight: 600;
+}
+.admin-tab:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: -2px;
+}
+.tab-hint {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--text-muted, #64748b);
+}
+
 .usage-cell {
   font-variant-numeric: tabular-nums;
   font-weight: 500;

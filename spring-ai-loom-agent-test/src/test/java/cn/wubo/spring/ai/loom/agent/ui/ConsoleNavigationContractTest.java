@@ -33,25 +33,46 @@ class ConsoleNavigationContractTest {
     private static final String ADMIN = "/META-INF/resources/spring/ai/loom/admin/";
 
     @Test
-    @DisplayName("用户列表的用户名必须是可点链接（打通到 user.html）")
-    void usernameLinksToUserDetail() throws IOException {
-        String js = source(ADMIN + "console.js");
+    @DisplayName("日志页有「对话日志」tab，用户列表可点进详情页")
+    void logPageHasConversationTabWithUserLinks() throws IOException {
+        // 2026-10-07 归位：用户列表 → 会话 → 对话流水 这条审计链路
+        // 属于「日志」页（审计视角），不该放在「用户管理」页（用户 CRUD 视角）。
+        String html = source(ADMIN + "stats.html");
+        assertThat(html)
+                .as("日志页必须有 tab 结构")
+                .contains("admin-tabs")
+                .contains("data-tab=\"usage\"")
+                .contains("data-tab=\"conversations\"");
+        assertThat(html)
+                .as("对话日志 tab 必须有用户表容器")
+                .contains("id=\"conv-user-table\"");
+
+        String js = source(ADMIN + "stats.js");
         assertThat(js)
-                .as("用户名必须包在 <a> 里指向 user.html —— 否则 admin 进不去详情页")
-                .contains("user-detail-link")
-                .contains("href=\"user.html?username=");
-        assertThat(js)
-                .as("username 必须 URL 编码（防注入/特殊字符）")
+                .as("用户名必须是可点链接 —— 这是进入 user.html 的唯一入口")
+                .contains("user.html?username=")
                 .contains("encodeURIComponent(u.username)");
-        // 旧形态：纯文本单元格
         assertThat(js)
-                .as("不应再保留纯文本用户名单元格")
-                .doesNotContain("<td><strong>${escapeHtml(u.username)}</strong></td>");
+                .as("必须支持 tab 切换")
+                .contains("function switchTab")
+                .contains("loadConvUsers");
+        assertThat(js)
+                .as("对话日志 tab 应懒加载（首次激活才拉用户列表）")
+                .contains("convTabLoaded");
 
         String css = source(ADMIN + "console.css");
         assertThat(css)
-                .as("链接样式必须存在（去掉下划线、hover 提示）")
-                .contains(".user-detail-link");
+                .as("tab 样式必须存在")
+                .contains(".admin-tab");
+    }
+
+    @Test
+    @DisplayName("用户管理页不应再有用户名链接（已归位到日志页）")
+    void consolePageNoLongerLinksUsername() throws IOException {
+        String js = source(ADMIN + "console.js");
+        assertThat(js)
+                .as("用户管理页的用户名应回归纯文本 —— 审计链路已挪到日志页")
+                .doesNotContain("user-detail-link");
     }
 
     @Test

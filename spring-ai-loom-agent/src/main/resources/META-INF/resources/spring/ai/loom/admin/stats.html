@@ -49,7 +49,7 @@
         <header class="admin-header">
           <div class="admin-header-left">
             <h1>日志</h1>
-            <span class="admin-subtitle">所有用户月度 Token 用量</span>
+            <span class="admin-subtitle">Token 用量统计 · 用户对话日志</span>
           </div>
           <div class="admin-header-right">
             <span id="admin-username" class="admin-username"></span>
@@ -57,6 +57,18 @@
         </header>
 
         <main class="admin-main">
+          <!-- 2026-10-07: 拆成两个 tab。
+               原「日志」页只有 token 统计，而「用户列表 → 会话 → 对话流水」
+               这条审计链路藏在用户管理页里 —— 归位到这里。 -->
+          <div class="admin-tabs" role="tablist">
+            <button class="admin-tab active" data-tab="usage" role="tab"
+                    aria-selected="true">Token 用量</button>
+            <button class="admin-tab" data-tab="conversations" role="tab"
+                    aria-selected="false">对话日志</button>
+          </div>
+
+          <!-- Tab 1: Token 用量 -->
+          <section id="tab-usage" class="admin-tab-panel">
           <div class="admin-toolbar">
             <label
               style="
@@ -120,6 +132,20 @@
           <div id="stats-table" class="table-container">
             <div class="loading-indicator">加载中...</div>
           </div>
+          </section>
+
+          <!-- Tab 2: 对话日志（用户列表 → 会话 → 对话流水） -->
+          <section id="tab-conversations" class="admin-tab-panel" style="display: none">
+            <p class="tab-hint">
+              点击用户名查看该用户的会话列表，再点会话进入对话流水（含工具调用与思考过程）。
+            </p>
+            <div class="admin-toolbar">
+              <button id="conv-refresh-btn" class="secondary-btn">刷新</button>
+            </div>
+            <div id="conv-user-table" class="table-container">
+              <div class="loading-indicator">加载中...</div>
+            </div>
+          </section>
         </main>
       </div>
     </div>
