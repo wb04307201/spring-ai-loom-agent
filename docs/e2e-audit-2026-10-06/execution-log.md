@@ -429,3 +429,134 @@ spring-ai-loom-agent-test/target/test-users/wb04307201/file/prototypes/
 
 **判定：调用成功** ✓ —— 无头 Chromium 真实渲染，route abort + CSP 屏蔽外联生效
 （页面无外部资源请求），输出落 `prototypes/` 并经 FileIdBridge 桥接。
+
+---
+
+**subtask 工具** —— ✓ 调用成功（附 1 处待查）
+
+**问法**：`请用 start_sub_task 起一个子任务，让它用一句话说明什么是 REST 架构。`
+
+**实测**：
+```
+SELECT COUNT(*) FROM loom_subtask_history;  →  1 行
+日志：loomSubTask 线程池痕迹出现
+```
+
+AI 回复（含子任务返回值）：
+> 子任务返回的一句话：REST 是一种基于 HTTP、利用 URI 标识资源并通过 GET、POST
+> 等标准方法操作资源的无状态客户端-服务器架构风格。
+
+**判定：调用成功** ✓ —— LLM 调 `start_sub_task`，子任务在 `loomSubTaskExecutor`
+池执行并返回结果，主对话正确收口。思考链还正确解释了子任务适用场景
+（"主要价值在于处理需要大量 reasoning、多步工具调用或大文件"），
+与 `@Tool` 描述的正向引导措辞一致。
+
+**待查（P2 候选）**：`#subtask-panel-body` 显示「0 运行中 / 0 已完成 / 0 失败」，
+而 DB 有 1 行历史。可能是面板只统计当前会话的活跃子任务、历史需另开视图 ——
+本次未展开核实，列入未测项。
+
+---
+
+**schedule 工具** —— ✓ 调用成功
+
+**问法**：`请用 createSchedule 创建一个定时任务，名字叫 e2e-sched，每隔 15 分钟执行一次，内容是"记录一行日志"。`
+
+**实测**：
+```json
+GET /schedule/list →
+[{"taskName":"loom-sched-wb04307201-98044738-9bda-49f7-bd5e-1dcd10fc2420-e2e-sched",
+  "taskType":"FIXED_DELAY","schedule":"PT15M/PT0S"}]
+```
+DB `loom_scheduled_task` 同步落库 1 行。
+
+**判定：调用成功** ✓ —— LLM 调 `createSchedule`。命名空间
+`loom-sched-{user}-{conv}-{name}` 与设计**完全一致**；间隔 `PT15M` 与请求的
+15 分钟一致（≥ `flex.schedule.limits.min-interval=10m`，未越界）。
+测毕已 `POST /schedule/cancel` 清理，列表回到 `[]`。
+
+---
+
+**askUser 工具** —— ✓ 调用成功（完整闭环）
+
+**问法**：`请用 askUser 工具问我一个二选一的问题：午餐吃面条还是米饭？`
+
+**实测**（卡片 DOM）：
+```
+.askuser-card
+  标题：午餐选择          ⏳ 3:23（倒计时）
+  问题：午餐你想吃面条还是米饭？
+  背景：今天中午不知道吃什么,快速二选一。
+  ○ 面条  汤面/拌面/炒面,各种面食
+  ○ 米饭  盖饭/炒饭/套餐,配菜下饭
+  [提交答案]
+```
+点选「面条」并提交后：
+- 卡片状态变为「**已答 ✓**」
+- 答案以 tool_result 回流：`✓ 午餐你想吃面条还是米饭？ → 面条`
+- AI 继续对话：「用户选了 面条 🍜 那就来碗热腾腾的面吧!...」
+
+**判定：调用成功** ✓ —— 阻塞式提问 → 用户作答 → tool_result 回流 → LLM 续答，
+完整闭环。卡片倒计时（`askuser.timeoutSeconds=300`）、多选项渲染、提交后状态
+更新全部正常。
+
+---
+
+#### P1-3 schedule 工具的 expression 解析不支持 ISO-8601，且静默返回 -1
+
+**现象**（LLM 思考链原文，非推测）：
+> 成功了!格式是 "15m" 而不是 ISO-8601 的 "PT15M"。
+> 💡 **踩坑提示**：这个平台 `fixed_delay`/`fixed_rate` 的 `expression` 用的是
+> **简写字符串**（如 `15m`、`30s`、`2h`），不是标准 ISO-8601 Duration（`PT15M`）。
+> 我第一次用了 `PT15M` 被平台解析成了 `PT-1S` 直接报错。
+
+**根因**（读 `DefaultScheduleTool.parseSeconds` 源码确认）：
+```java
+String s = expression.trim().toLowerCase()   // "PT15M" → "pt15m"
+        .replace("秒钟","s").replace("秒","s")
+        .replace("secs","s").replace("sec","s")
+        .replace("分钟","m").replace("分","m")
+        .replace("minutes","m").replace("minute","m").replace("mins","m").replace("min","m");
+// "pt15m" 不含以上任何模式 → 保持 "pt15m"
+if (s.endsWith("m")) { ... parseLong("pt15") 失败 → 落到下面 }
+if (s.endsWith("s")) s = s.substring(0, s.length()-1);   // 不以 s 结尾，不裁剪
+return Long.parseLong("pt15m");   // NumberFormatException → return -1L
+```
+`-1` 被当作秒数使用 ⇒ 表现为「PT-1S」。
+
+**问题有二**：
+1. **不支持 ISO-8601** —— `PT15M` 是最符合直觉/最标准的写法（Java `Duration`
+   的标准格式），却完全不被识别
+2. **静默失败** —— 无法解析时返回 `-1L` 而非抛错或提示格式。调用方（LLM）
+   只看到「PT-1S」这种无意义报错，无法反推真实原因
+3. **`@Tool` 描述未说明格式** —— 描述只写了「类型 cron / fixed_delay / fixed_rate /
+   one_shot」和限制，**完全没提 expression 的格式要求**
+
+**定级 P1 理由**：功能最终可用（LLM 自行试错找到了 `15m`），但**首次调用必然失败**，
+且错误信息误导（`PT-1S` 与真实原因无关）。对不熟悉该库的用户/模型，这是必然的
+一次挫败。`@Tool` 描述补一句格式说明即可大幅缓解。
+
+**建议修复方向**：
+- `parseSeconds` 增加 ISO-8601 分支（`Duration.parse()` 回退）
+- 无法解析时返回明确的错误信息而非 `-1`
+- `@Tool` 描述补：`expression 格式：简写字符串，如 "15m"/"30s"/"2h"，或中文"15分钟"`
+
+---
+
+### Task 4 · 维度 D 汇总
+
+| 工具 | 判定 | 证据要点 |
+|---|---|---|
+| file | ✓ | `readTextFile` 读回内容与文件系统逐字一致 |
+| time | ✓ | `getCurrentTime` 返回值与后端日志吻合到秒级 |
+| skill | ✓ | `createOrUpdateSkill` → `user_skill` 新增行，字段一致 |
+| http | ✓ | `invokeEndpoint` 真实外网，title 与 jsonplaceholder 逐字一致 |
+| render | ✓ | 无头 Chromium 渲染 PNG，图片与源逐字一致，@2x 尺寸正确 |
+| subtask | ✓ | `loom_subtask_history` 1 行，主对话正确收口 |
+| schedule | ⚠ | 创建成功（`loom-sched-*` 命名空间正确），但 **P1-3 格式解析坑** |
+| askUser | ✓ | 卡片渲染 + 倒计时 + 作答回流 + LLM 续答，完整闭环 |
+| knowledge | ⚠ | 上传 200 链路通，但 **P1-2 向量 dim=4** |
+
+**未测（安全边界）**：git（本地 init）/ maven（validate）/ compile&deploy —— 
+需额外授权且价值低于风险，列入未测项。
+
+**维度 D 结论：9 个工具中 7 个完全通过，2 个链路通但有缺陷（P1-2 向量维度、P1-3 格式解析）。**
