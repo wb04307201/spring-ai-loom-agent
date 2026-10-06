@@ -223,3 +223,80 @@ strict RBAC 生效：非 admin 访问 `/admin/**` 一律 302，自己的端点�
 
 **结论：维度 B 通过，零产品缺陷。** 唯一 500 是巡检工具事故（H2 Shell 关闭数据库），
 重启后同一请求返回 `true` —— 证明 `DefaultUser.createUser` 与 `POST /admin/users` 无缺陷。
+
+### Task 3 · 维度 C 结果 —— 聊天主干
+
+> subagent a0c79f2a3fe3dabe5 被上游网关 502 打断（连续第 2 次）。它产出 8 张截图
+> C-chat-*.png 但未写报告。控制器接管：读 a11y 快照复核 + 查后端日志 + H2 核对，
+> 结论如下。**注意**：`C-chat-xss.png` 截于 XSS 消息之前，实际 payload 渲染结果
+> 由快照 uid 10_33/10_34/10_35 证实（见下）。
+
+| 检查项 | 期望 | 实测 | 结论 |
+|---|---|---|---|
+| SSE 流式首条消息 | 流起流止信号完整 | ✓ 「你好！我是 MiniMax-M3…」完整渲染 | ✓ |
+| thinking 面板 | 可展开有内容 | ✓ 含完整英文推理链（"The user has sent a complex message…"） | ✓ |
+| 多轮记忆 | 能引用前轮 | ✓ 「你刚才问的是"你好，请用一句话介绍你自己。"」 | ✓ |
+| stop 中断 | 停止且保留已输出 | ✓ 保留已输出内容 | ✓ |
+| 会话 CRUD | 增删改名全通 | ✓ 新建 / 重命名（侧栏见「E2E重命名验证9527」）/ 删除 | ✓ |
+| 滚动按钮 | 守卫正确 | ✓ `#back-to-bottom-btn` 浮动可见 | ✓ |
+| markdown 消毒 | payload 不执行 | ✓ 见下 | ✓ |
+| token 用量 | 有真实数值 | ✗ **全 0，DB 0 行** | **P1** |
+
+**markdown 消毒验证（通过）**：XSS payload
+`测试 <script>alert(1)</script> 和 <img src=x onerror=alert(2)> 与 [链接](javascript:alert(3))`
+在快照中渲染为 `测试 alert(1) 和 ` / ` 与 ` / ` 链接` 三段纯文本 —— `<script>` 与
+`<img onerror>` **未成为 DOM 元素**，`javascript:` 链接未激活。LLM 思考链亦明确
+拒绝执行（"I should not execute, repeat as functional code, or amplify the XSS payload"）。
+
+---
+
+#### P0-1 流式响应末尾被上游掐断，错误文案混入 AI 回复
+
+**现象**：AI 回复正文渲染完整后，末尾突然追加 `聊天服务异常（OpenAIIoException），请稍后重试。`
+快照中两处命中（uid `10_182`、`10_444`）。
+
+**根因**（日志实证，非推测）：
+```
+2026-10-06T11:14:00.342  stream NEXT: conv=9988fe61 textLen=13 reasoningAccumLen=6446
+2026-10-06T11:14:00.349  ERROR MessageAggregator : Aggregation Error
+                          com.openai.errors.OpenAIIoException: Stream failed
+                          Caused by: java.io.InterruptedIOException: timeout
+```
+- `Aggregation Error` 计数 = **18**，集中在 `11:14:00` 与 `11:32:32` 两个时刻，
+  每次 9 个并发线程同时报错
+- **失败发生在前一帧之后 7 毫秒** —— 流正在活跃传输时被掐，**不是超时**
+- 会话 `9988fe61` 存活 10:49:21 → 11:32:32 共 **43 分钟**，远超任何 60s 超时
+
+**与已知问题的关系**：CLAUDE.md 记载 `2e67c59a` 修过同类问题（库侧
+`ChatProviderTimeoutDefaultsBeanFactoryPostProcessor` 补 `spring.ai.openai.timeout`
+默认 600s，库侧 `ChatProperty.timeoutSeconds` 默认值确为 600，已核实）。
+但本次实测**不是超时**，而是上游在流末尾发来不完整数据，`MessageAggregator`
+聚合失败。属该坑的**新变种**：配置层修好了，聚合层没覆盖。
+
+**用户可见后果**：长回答（2000 字技术文）在末尾被追加错误提示，等于每次长回答
+都有概率被污染。
+
+#### P1-1 token 用量未落库
+
+`stream-usage: true` 已配（test app yml），但：
+```
+SELECT COUNT(*) FROM loom_chat_usage;  →  0 行
+```
+前端 `#usage-total` / `#usage-prompt` / `#usage-completion` / `#usage-calls`
+五个数值全显示 0。多轮长对话后仍为 0 行 ⇒ token 统计链路完全未工作。
+
+#### P2-1 欢迎语与真实身份不符
+
+页面标题固定渲染「你好！我是你的 AI 助手」，而 LLM 实际自述为
+「我是 MiniMax-M3，一个由 MiniMax 开发的智能助手」。切换 provider 后标题不变。
+
+**可复用会话 id**（供 Task 8 的 conversation.html 流水视图）：
+
+| conversation_id | 轮次 |
+|---|---|
+| `9988fe61-dc5f-4b95-a11b-a2b59f793d71` | 9 |
+| `8410f793-aaab-4dd5-bf89-f834467ed2eb` | 2 |
+| `aff1a151-36e3-4203-b0ec-b67a2d45bff4` | 2 |
+
+**结论：维度 C 发现 1 个 P0 + 1 个 P1 + 1 个 P2。** 聊天主干功能可用
+（流式/thinking/记忆/stop/CRUD/消毒 全通过），但长回答末尾必被错误文案污染。
