@@ -791,3 +791,62 @@ P1-1 是同一掐断导致 **usage 帧丢失**的下游后果。
 
 **Wave 2 新增缺陷**：P1-2、P1-3，并确认 P1-1 与 P0-1 同源。
 **累计缺陷**：1 P0 + 3 P1 + 1 P2。
+
+---
+
+### Task 9 · 维度 F 文件管理
+
+| # | 检查项 | 期望 | 实测 | 结论 |
+|---|---|---|---|---|
+| 1 | `/file/tree` 目录树 | 层级正确 | **200**，`e2e/{proto.html 243B, sample.txt 28B}` + `prototypes/{png 36774B}` | ✓ |
+| 2 | 文件大小准确 | 与实际一致 | **243 / 28 / 36774** 全部吻合 | ✓ |
+| 3 | 系统目录不外泄 | 无 compile-workspaces | 树中**不含** `compile-workspaces/`、`datasource/`、`http/` | ✓ |
+| 4 | **`by-path/view` 预览** | 200 或 302 | **404**（所有 path 形式） | ❌ **P1-4** |
+| 5 | **`by-path/download` 下载** | 200 或 302 | **404** | ❌ **P1-4** |
+
+---
+
+#### P1-4 `by-path` 预览/下载在 `usersBasePath` 以 `./` 开头时全部 404
+
+**现象**：`GET /file/by-path/view?path=e2e/sample.txt` 与 `by-path/download` 对
+**所有路径形式**（`e2e/sample.txt` / `./e2e/sample.txt` / `sample.txt` / `e2e`）
+一律返回 **404**，而同一时刻 `/file/tree` 能正确列出同一目录的文件。
+
+**根因**（用真实 `LoomPaths` 编译复现，非推测）：
+
+```java
+Path baseDir = LoomPaths.userFileDir("./target/test-users", "wb04307201");
+//   → .\target\test-users\wb04307201\file        ← 保留 "./" 前缀，未 normalize
+Path resolved = baseDir.resolve("e2e/sample.txt").normalize();
+//   → target\test-users\wb04307201\file\e2e\sample.txt   ← normalize() 抹掉了 "."
+if (!resolved.startsWith(baseDir) ...) return null;   // ← false ⇒ 404
+```
+
+实测三种 base：
+
+| `usersBasePath` | `resolved.startsWith(baseDir)` | 后果 |
+|---|---|---|
+| `./target/test-users` | **false** | ❌ 404 |
+| `target/test-users` | true | ✓ |
+| `C:\Users\...\.loom\users`（绝对） | true | ✓ |
+
+`baseDir` 未 normalize 而 `resolved` 已 normalize，两者**字面前缀不一致** ⇒
+沙箱校验误判为"越界" ⇒ 静默 404。
+
+**放大问题的两点**：
+1. `getOrCreateFileId` 用 `catch (Exception e) { return null; }` **静默吞异常**，
+   无任何日志 —— 排查时只能靠复现，无法从日志定位
+2. `/file/tree` 走另一条路径（`buildChildren` 只用 `Files.exists`），
+   所以**树能列、点预览却 404**，症状自相矛盾，极易被误判为前端 bug
+
+**影响面**：
+- 文件管理模态框的「预览」「下载」按钮全部失效
+- `@Tool downloadFileUrl` / `viewFileUrl`（IFileTool 的 16 个工具中的 2 个）失效
+- **生产默认不受影响** —— 默认 `usersBasePath` 是绝对路径
+  `${user.home}/.loom/users`。**任何把 `usersBasePath` 配成 `./xxx` 相对路径的部署会踩到**
+
+**建议修复**：`Path baseDir = LoomPaths.userFileDir(...).normalize();`
+（一行；同时建议 `catch` 里补 `log.warn`，避免静默失败）
+
+**定级 P1**：核心 UI 功能（预览/下载）完全不可用，但有明确触发条件
+（相对路径配置）且生产默认路径不触发。
