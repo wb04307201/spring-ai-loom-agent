@@ -902,3 +902,40 @@ CLAUDE.md 记载的 MCP Java SDK 0.18.x `StdioClientTransport` 入站 GBK 坑
 
 **维度 J 结论：MCP 连接/描述/编码全部通过（4/4 在线、34/34 描述、0 编码错误）；
 工具调用本身成功，但受 P0-1 影响可能中途截断。**
+
+---
+
+### Task 11 · 维度 K 多租户隔离
+
+| # | 检查项 | admin | e2euser | 结论 |
+|---|---|---|---|---|
+| 1 | 文件树 | `['e2e','prototypes']` | **`[]`** | ✓ 互不可见 |
+| 2 | 会话列表 | **5 个** | **0 个** | ✓ 互不可见 |
+| 3 | 技能列表 | 10 个（含 `e2e-test-skill`） | 仅 `e2e-submitted-skill`（自己 pull 的） | ✓ 互不可见 |
+
+**关键点**：e2euser **看不到** admin 的 `e2e-test-skill`（Task 4 用 admin 身份创建），
+只看到自己 pull 的 `e2e-submitted-skill` ✓ —— 技能隔离正确。
+
+e2euser 无 3 条官方技能，因为它**未被分配 `base` 角色** —— 符合 strict RBAC 设计
+（新用户 0 capability，需 admin 授权）。
+
+#### 跨租户越权尝试 —— 全部正确拦截 ✓
+
+| 尝试 | 结果 | 结论 |
+|---|---|---|
+| `GET /admin/users` | **302 → 登录页** | ✓ 拦截 |
+| `GET /admin/roles` | **302 → 登录页** | ✓ |
+| `GET /admin/capabilities` | **302 → 登录页** | ✓ |
+| `GET /admin/market-skills` | **302 → 登录页** | ✓ |
+| `GET /admin/stats/tokens/monthly` | **302 → 登录页** | ✓ |
+| `GET /admin/conversations/{admin会话}/flow` | **302 → 登录页** | ✓ |
+| `DELETE /admin/users/wb04307201` | **302** | ✓ 未删除 |
+| `GET /file/tree`（自己） | **200**，返回 `{"name":"e2euser","children":[]}` | ✓ 只见自己 |
+
+**排查注记（重要，避免误判）**：用 Python `urllib` 测这些端点时会**自动跟随 302**，
+最终拿到登录页 HTML 且 **HTTP 200** —— 表面看像"越权成功"。实测响应体为
+`Content-Type: text/html` + `<title>登录</title>` + **不含任何真实用户名**，
+证明是登录页而非 admin 数据。用 `curl`（不跟随重定向）则直接看到 **302**。
+**判定依据必须是响应体内容，不能只看状态码。**
+
+**维度 K 结论：三项隔离 + 八项越权尝试全部正确，零缺陷。**
