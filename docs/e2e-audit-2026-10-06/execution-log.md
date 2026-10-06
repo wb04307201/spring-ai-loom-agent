@@ -662,3 +662,24 @@ UI 层**零缺陷**。截图见 `E-kb-detail.png`。
 | 技能（驳回中） | `e2e-reject-skill` market id=**35**（PENDING），archive id=**34** |
 | 用户技能 | `e2e-test-skill`（admin 的）、`e2e-submitted-skill`（e2euser pull 的） |
 | 可复用会话 | `9988fe61-dc5f-4b95-a11b-a2b59f793d71` 等 3 个 |
+
+---
+
+### Task 7 · 维度 H 知识库市场
+
+| # | 检查项 | 期望 | 实测 | 结论 |
+|---|---|---|---|---|
+| 1 | 市场初始态 | 空或友好空态 | `loom_market_knowledge` **0 行** | ✓ |
+| 2 | 提交他人知识库 | 拒绝 | **400** `"知识库不存在或不属于当前用户"` | ✓ 权限校验正确 |
+| 3 | 提交自己的知识库 | PENDING | **PENDING**，id=`77f39295-...` | ✓ |
+| 4 | admin 审批通过 | APPROVED | **APPROVED** | ✓ |
+| 5 | 打标签 | 生效 | **200** `{"tags":["E2E","测试"]}` | ✓ |
+| 6 | 写公告 | 生效 | **200** `marketKind=KNOWLEDGE` | ✓ |
+| 7 | e2euser pull | 入我的 | **200** `{"success":true}`，`loom_user_knowledge` **+1 行** | ✓ |
+| 8 | 标签读取 | 返回标签 | **200** `{"tags":["E2E","测试"]}` | ✓ |
+| 9 | 市场列表 | 含已审批项 | **200**，返回 `e2euser-kb` APPROVED | ✓ |
+
+**额外验证到的权限边界**（#2）：`POST /api/knowledge/{id}/submit` 对**非本人**的
+知识库返回 400 —— 这是正确的越权防护（不是缺陷）。
+
+**维度 H 结论：9/9 全部通过，零缺陷。**
