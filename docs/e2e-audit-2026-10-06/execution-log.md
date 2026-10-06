@@ -380,3 +380,52 @@ Task 5 只能断言"链路不崩"，不能断言"检索到相关内容"。
 **执行备注**：`evaluate_script` 跑 >120s 的长 async 轮询会撞 Chrome DevTools 的
 `protocolTimeout`（`Runtime.callFunctionOn timed out`）。改用短轮询（每次只读状态，
 非阻塞）+ Bash `sleep` 控制间隔。
+
+---
+
+**skill 工具** —— ✓ 调用成功
+
+**问法**：`请用技能工具帮我创建一个名为 e2e-test-skill 的技能，描述是"E2E 测试技能"，内容是"这是 E2E 测试技能的内容"。`
+
+**实测**（DB 核对）：
+```sql
+SELECT name, description FROM user_skill WHERE name='e2e-test-skill';
+→ e2e-test-skill | E2E 测试技能
+```
+**判定：调用成功** ✓ —— LLM 调用 `createOrUpdateSkill`，`user_skill` 表新增行，
+name/description 与请求**完全一致**。该技能供 Task 11（多租户隔离）验证 e2euser 不可见。
+
+---
+
+**http 工具** —— ✓ 调用成功
+
+**问法**：`请调用 http 工具请求 https://jsonplaceholder.typicode.com/posts/1 这个接口，把返回的 JSON 里的 title 字段告诉我。`
+
+**实测**：
+> 该请求返回的 title 字段是：
+> sunt aut facere repellat provident occaecati excepturi optio reprehenderit
+
+**判定：调用成功** ✓ —— LLM 调 `invokeEndpoint` 真实请求外网，
+返回的 title 与 jsonplaceholder **真实数据逐字一致**（`posts/1` 的 title 确为此串）。
+白名单（`allowed-domains: [jsonplaceholder.typicode.com]`）放行生效。
+
+---
+
+**render 工具** —— ✓ 调用成功（真实 Chromium 渲染）
+
+**前置**：`INSERT INTO role_tool` 授 `base` 角色 `tool_render`（原未授权，符合设计）。
+
+**问法**：`请调用 render 工具，把 e2e/proto.html 这个文件渲染成 PNG 图片。`
+
+**实测**：
+```
+spring-ai-loom-agent-test/target/test-users/wb04307201/file/prototypes/
+  proto-20261006185053.png   36774 bytes
+```
+
+**图片内容核验**（人工读图）：紫色标题「E2E 渲染测试」、正文「中文渲染检查 ✓」，
+与 `proto.html` 源文件**逐字一致**；`#4f46e5` 主色正确渲染；中文与 ✓ 符号无乱码；
+2880×1800 像素 = 1440×900 CSS @2x，与 `render.deviceScaleFactor=2` 配置吻合。
+
+**判定：调用成功** ✓ —— 无头 Chromium 真实渲染，route abort + CSP 屏蔽外联生效
+（页面无外部资源请求），输出落 `prototypes/` 并经 FileIdBridge 桥接。
