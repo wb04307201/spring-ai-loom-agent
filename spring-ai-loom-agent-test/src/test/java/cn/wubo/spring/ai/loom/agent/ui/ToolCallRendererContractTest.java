@@ -153,6 +153,20 @@ class ToolCallRendererContractTest {
     }
 
     @Test
+    @DisplayName("renderMessages 必须重置 _lastBotBubble —— 否则工具调用挂到游离节点")
+    void resetsLastBotBubbleOnRender() throws IOException {
+        String appJs = source("/META-INF/resources/spring/ai/loom/app.js");
+        int start = appJs.indexOf("renderMessages(messages) {");
+        assertThat(start).as("应能定位 renderMessages").isGreaterThan(-1);
+        String body = appJs.substring(start, Math.min(start + 900, appJs.length()));
+
+        assertThat(body)
+                .as("clearChat() 后必须重置 _lastBotBubble —— 它仍指向已被移除的旧气泡，"
+                        + "后续 TOOL_CALL 会 append 到看不见的游离节点上（静默丢失，无 console 报错）")
+                .contains("this._lastBotBubble = null");
+    }
+
+    @Test
     @DisplayName("截断必须提示 —— 否则用户以为工具只返回了这么多")
     void truncationIsSurfaced() throws IOException {
         assertThat(rendererSource())

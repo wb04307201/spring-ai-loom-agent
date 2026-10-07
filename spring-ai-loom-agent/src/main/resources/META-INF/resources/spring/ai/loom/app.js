@@ -1361,6 +1361,9 @@ const ui = {
     this._currentOriginEl = null;
     this._currentActionsEl = null;
     this._currentBubbleId = null;
+    // 必须一并重置 —— clearChat() 已把 DOM 清空，若仍指向旧气泡（游离节点），
+    // 后续 TOOL_CALL 会 append 到看不见的元素上（静默丢失）。
+    this._lastBotBubble = null;
     if (!messages || messages.length === 0) return;
     for (const msg of messages) {
       const role = msg.messageType || msg.role || msg.getMessage?.();
