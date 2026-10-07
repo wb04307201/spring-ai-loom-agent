@@ -67,12 +67,26 @@ class ConsoleNavigationContractTest {
     }
 
     @Test
-    @DisplayName("用户管理页不应再有用户名链接（已归位到日志页）")
-    void consolePageNoLongerLinksUsername() throws IOException {
-        String js = source(ADMIN + "console.js");
+    @DisplayName("用户对话入口唯一 —— 只在「对话日志」tab，Token 用量 tab 纯统计")
+    void userConversationEntryIsUnique() throws IOException {
+        String js = source(ADMIN + "stats.js");
+        // 2026-10-07: 此前有三个入口指向 user.html —— Token tab 的柱状图整行、
+        // Token tab 的表格用户名、对话日志 tab 的用户表。前两个依赖"当月有 token
+        // 数据",新部署时是空的,进不去;故统一收敛到不依赖数据的「对话日志」tab。
+        long linkCount = js.lines()
+                .filter(l -> l.contains("user.html?username="))
+                .count();
+        assertThat(linkCount)
+                .as("stats.js 里指向 user.html 的链接必须只有 1 处（对话日志 tab）—— "
+                        + "多入口会让用户困惑于该点哪个")
+                .isEqualTo(1);
         assertThat(js)
-                .as("用户管理页的用户名应回归纯文本 —— 审计链路已挪到日志页")
-                .doesNotContain("user-detail-link");
+                .as("唯一入口必须在 renderConvUsers（对话日志 tab）里")
+                .contains("renderConvUsers");
+        assertThat(js)
+                .as("Token 用量 tab 的柱状图不应是 <a> —— 它是纯统计视图")
+                .contains("<div class=\"bar-row\">")
+                .doesNotContain("<a class=\"bar-row\"");
     }
 
     @Test

@@ -475,7 +475,10 @@ table.user-table {
   align-items: center;
   gap: 12px;
   font-size: 12px;
-  text-decoration: none; /* V5.4：bar-row 包了 <a>，去掉下划线 */
+  /* 2026-10-07: 原为 <a>(整行可点跳 user.html),V5.4 曾为此去掉下划线。
+     现改回纯 <div> —— 本 tab 是纯统计视图,用户入口统一在「对话日志」tab。
+     保留 text-decoration/color 是为了兼容将来可能的链接化。 */
+  text-decoration: none;
   color: inherit;
 }
 
