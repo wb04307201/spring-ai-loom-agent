@@ -4198,6 +4198,13 @@ textarea::placeholder {
 
 /* ===== 2026-09-21 chat-ui-ux-fixes ===== */
 
+/* 2026-10-07: 历史回看的工具调用容器 —— 挂在 AI 气泡**内部**
+   （.bot-content 之后、.bubble-actions 之前），而非独立气泡。
+   此前渲染成独立 chat-item，视觉上把一次 AI 回复拆成了两段。 */
+.tool-call-inline {
+  margin: 8px 16px;
+}
+
 /* #1: Sub-task chip */
 .subtask-chip {
   display: inline-flex;

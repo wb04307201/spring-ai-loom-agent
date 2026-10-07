@@ -31,6 +31,14 @@ class ToolCallRendererContractTest {
         }
     }
 
+    /** 读任意 classpath 资源（供跨文件断言用）。 */
+    private String source(String path) throws IOException {
+        try (var in = getClass().getResourceAsStream(path)) {
+            assertThat(in).as("%s 必须存在", path).isNotNull();
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
     @Test
     @DisplayName("按 toolName 分派到三种渲染器")
     void dispatchesByToolName() throws IOException {
@@ -114,6 +122,56 @@ class ToolCallRendererContractTest {
         assertThat(rendererSource())
                 .contains("tool-call-truncated")
                 .contains("已截断");
+    }
+
+    @Test
+    @DisplayName("历史工具调用挂在 AI 气泡内部，不是独立气泡")
+    void toolCallsRenderInsideBotBubble() throws IOException {
+        String appJs = source("/META-INF/resources/spring/ai/loom/app.js");
+        int start = appJs.indexOf("} else if (role === \"TOOL_CALL\") {");
+        assertThat(start).as("应能定位 TOOL_CALL 分支").isGreaterThan(-1);
+        String branch = appJs.substring(start, Math.min(start + 1200, appJs.length()));
+
+        assertThat(branch)
+                .as("必须挂进上一个 AI 气泡（_lastBotBubble），而非新建 chat-item —— "
+                        + "独立气泡会把一次 AI 回复拆成两段")
+                .contains("this._lastBotBubble");
+        assertThat(branch)
+                .as("应插在 .bubble-actions 之前（即正文之后、操作按钮之前）")
+                .contains("insertBefore(node, actions)");
+        assertThat(branch)
+                .as("不应再新建 chat-item（旧实现）")
+                .doesNotContain("chat-item chat-item-left tool-call-item");
+        assertThat(branch)
+                .as("不应再 append 到 mainContent（那会变成独立气泡）")
+                .doesNotContain("this.mainContent.appendChild(item)");
+
+        assertThat(appJs)
+                .as("renderBotMessage 必须记录最近的气泡供 TOOL_CALL 挂载")
+                .contains("this._lastBotBubble = item.querySelector(\".bubble\")");
+
+        String css = source("/META-INF/resources/spring/ai/loom/style.css");
+        assertThat(css)
+                .as("内联容器样式必须存在")
+                .contains(".tool-call-inline");
+    }
+
+    @Test
+    @DisplayName("子任务状态在主界面无 SUBTASK 事件时从 result 前缀推断")
+    void subtaskStatusInferredWhenNoEvent() throws IOException {
+        String js = source("/META-INF/resources/spring/ai/loom/tool-call-renderer.js");
+        assertThat(js)
+                .as("必须有状态推断函数 —— 主聊天界面的历史接口不返回 SUBTASK 事件，"
+                        + "只认 st.status 会把已完成的子任务标成 ⚠️ 失败")
+                .contains("function resolveSubtaskStatus");
+        // 前缀由 DefaultSubTaskTool 定义，逐字核对
+        assertThat(js)
+                .as("必须识别 [子任务已完成")
+                .contains("/\\[子任务已完成/");
+        assertThat(js)
+                .as("必须识别失败与取消")
+                .contains("[子任务失败")
+                .contains("[子任务已取消");
     }
 
     @Test

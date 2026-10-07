@@ -110,16 +110,41 @@
       </div>`;
   }
 
+  /**
+   * 解析子任务状态。
+   *
+   * <p>优先用 SUBTASK 事件的 status（admin 流水页有）；主聊天界面的历史接口
+   * 拿不到该事件，此时从 tool_call 的 result 文本前缀推断（前缀由
+   * {@code DefaultSubTaskTool} 定义）：
+   * <ul>
+   *   <li>{@code [子任务已完成 …]} → COMPLETED</li>
+   *   <li>{@code [子任务失败 …]} / {@code [子任务已取消 …]} / {@code [子任务状态异常]} → FAILED</li>
+   * </ul>
+   * 都识别不出时返回 UNKNOWN（渲染成 ⚠️，但至少不是静默误判成功）。
+   */
+  function resolveSubtaskStatus(statusFromEvent, resultText) {
+    if (statusFromEvent) return String(statusFromEvent);
+    const r = String(resultText || "");
+    if (/\[子任务已完成/.test(r)) return "COMPLETED";
+    if (/\[子任务失败|\[子任务已取消|\[子任务状态异常/.test(r)) return "FAILED";
+    return "UNKNOWN";
+  }
+
   /** 子任务历史 chip：复用实时 chip 的样式，附耗时与结果。 */
   function renderSubtaskChip(entry, subtaskEvent) {
     const st = subtaskEvent || {};
     const prompt = String(st.prompt || (entry.arguments && entry.arguments.prompt) || "");
-    const status = String(st.status || "UNKNOWN");
-    const ok = status === "COMPLETED";
-    const id = String(st.id || entry.toolCallId || "");
-    const dur = fmtDuration(st.durationMs != null ? st.durationMs : entry.durationMs);
     const result = String(st.result || entry.result || "");
     const error = st.error;
+
+    // 状态来源：优先 SUBTASK 事件（admin 流水页有），否则从 tool_call 的 result 文本推断。
+    // 主聊天界面的历史接口**不返回 SUBTASK 事件**（只有 /admin/conversations/{id}/flow 有），
+    // 若只认 st.status 会得到 UNKNOWN —— 表现是已完成的子任务被标成 ⚠️ 失败。
+    const status = resolveSubtaskStatus(st.status, result);
+    const ok = status === "COMPLETED";
+
+    const id = String(st.id || entry.toolCallId || "");
+    const dur = fmtDuration(st.durationMs != null ? st.durationMs : entry.durationMs);
 
     return `
       <div class="subtask-chip subtask-chip-history ${ok ? "subtask-chip-ok" : "subtask-chip-failed"}"

@@ -1348,6 +1348,9 @@ const ui = {
  </div>
  </div>`;
     this.mainContent.appendChild(item);
+    // 记录最近一个 AI 气泡的 .bubble —— 历史渲染时 TOOL_CALL 条目要挂进它内部
+    // （而非新建独立气泡），见 renderMessages 的 TOOL_CALL 分支。
+    this._lastBotBubble = item.querySelector(".bubble");
     this.scrollToBottom();
   },
 
@@ -1391,18 +1394,20 @@ const ui = {
         if (actions) actions.style.display = "";
       } else if (role === "TOOL_CALL") {
         // 工具调用条目（后端从 loom_tool_call_log 注入）。
-        // 渲染成富 UI：askUser → 只读卡片、子任务 → chip、其余 → 折叠行。
-        // 渲染器是只读的（不绑提交事件）—— 历史回看不应能重新作答。
+        //
+        // 挂载位置：**上一个 AI 气泡内部**（.bot-content 之后、.bubble-actions 之前），
+        // 而非新建独立气泡 —— 与实时渲染一致（实时也是 bubble.appendChild），
+        // 也符合「一次 AI 回复 = 一个气泡」的心智模型。
+        // 此前渲染成独立 chat-item，视觉上把一次回复拆成了两段。
         if (window.ToolCallRenderer) {
-          const item = document.createElement("div");
-          item.className = "chat-item chat-item-left tool-call-item";
-          item.innerHTML =
-            '<div class="avatar"><img src="/static/ai.png" alt="AI"/></div>' +
-            '<div class="bubble tool-call-bubble">' +
-            window.ToolCallRenderer.render(msg) +
-            "</div>";
-          if (this.mainContent) this.mainContent.appendChild(item);
-          window.ToolCallRenderer.bindInteractions(item);
+          const host = this._lastBotBubble || this.mainContent;
+          const node = document.createElement("div");
+          node.className = "tool-call-inline";
+          node.innerHTML = window.ToolCallRenderer.render(msg);
+          const actions = host.querySelector(".bubble-actions");
+          if (actions) host.insertBefore(node, actions);
+          else host.appendChild(node);
+          window.ToolCallRenderer.bindInteractions(node);
         }
       }
     }
