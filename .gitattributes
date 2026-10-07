@@ -1,5 +1,56 @@
+# ============================================================
+# 行尾规范化策略：文本文件一律 LF
+# ============================================================
+# 统一用 LF 的理由：
+#   · 与 .gitattributes 既有 *.java 规则一致（2026-09-30 起）
+#   · 与 core.autocrlf=input 的全局行为一致（add 时 CRLF→LF）
+#   · 跨平台 diff / blame 干净，不产生"整文件 modified"噪声
+# 编辑器侧：Windows 上用 IDE 的 .editorconfig 或 IDE 设置保持 LF 即可。
+
+# --- 可执行 / 脚本 ---
 /mvnw text eol=lf
+# Windows 批处理必须 CRLF（cmd.exe 对 LF 敏感）
 *.cmd text eol=crlf
+
+# --- 源码 ---
 # 2026-09-30 增:锁 *.java 行尾 LF,显式化 f93d7f01 的隐式副作用 —— 该 commit 把 4 个 MCP server
 # 服务从 CRLF 改为 LF,但未文档化;本规则确保未来 checkout/add 始终规范化到 LF。
 *.java text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.py   text eol=lf
+*.sql  text eol=lf
+*.sh   text eol=lf
+
+# --- 配置 ---
+*.xml  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.properties text eol=lf
+
+# --- 文档 ---
+*.md   text eol=lf
+*.txt  text eol=lf
+LICENSE text eol=lf
+
+# --- 第三方 vendored 资源：不施加本项目规则 ---
+# marked@17.0.1 是上游原样引入的前端库(含其 LICENSE/README/man page)。
+# 按我们的规则改写其行尾会制造与上游的虚假差异,将来升级时难以比对。
+spring-ai-loom-agent/src/main/resources/META-INF/resources/marked@17.0.1/** -text
+
+# --- 二进制：显式声明,防止 git 误判为文本而做行尾转换 ---
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.jar  binary
+*.gz   binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
