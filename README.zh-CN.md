@@ -55,7 +55,7 @@
 | 文件 | `IFileTool` | 16 | ✅ universal | `file.*` 限额（`file.enabled` 已废弃） |
 | 技能 | `ISkillTool` | 2 | ✅ universal | —（`skill.enabled` 已废弃） |
 | 知识库 | `IKnowledgeTool` | 1 | ✅ universal | 由 `rag.enabled`（VectorStore）门控 |
-| 子任务 | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| 子任务 | `ISubTaskTool` | 5 | ✅ universal | `subtask.max-concurrent` / `max-history` |
 | 定时 | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
 | 用户提问 | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
 | Git | `IGitTool` | 28 | 🔐 RBAC（`tool_git`） | `git.username` / `git.token` |
@@ -245,13 +245,13 @@ spring:
 
 | 区块 | 路径 | 用途 |
 |--------------|-----------------------------------|---------------------------------|
-| 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 批量清理会话内容 |
+| 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 重置密码 + 批量清理会话内容 |
 | 角色管理 | `admin/roles.html` | 业务角色 + 给角色授权 MCP / Skill / 知识库 |
 | 技能市场 | `admin/market-skills.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架 Skill |
 | 知识库市场 | `admin/knowledge-market.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架知识库 |
 | MCP 描述维护 | `admin/mcps.html` | 给 SDK MCP 工具维护中文描述 |
-| 日志 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
-| 用户详情 | `admin/user.html?username=X` | 单用户视图：6 个月用量 + 角色 + 提问卡片日志 + 会话列表 |
+| 日志 | `admin/stats.html` | Token 用量统计 + 用户对话日志（双 tab） |
+| 用户详情 | `admin/user.html?username=X` | 单用户视图：6 个月用量 + 角色 + 会话列表 |
 | 返回主页 | `/` | 回到聊天首页 |
 
 - **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护——未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401。

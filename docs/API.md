@@ -141,7 +141,38 @@ GET /spring/ai/loom/conversation/{conversationId}
 |------------------|--------|-----------------|
 | `conversationId` | string | Conversation ID |
 
-**Response**: `Message[]` — Spring AI chat memory message list.
+**Response**: `Object[]` — Spring AI chat memory messages **plus injected tool-call entries**.
+
+The array contains two shapes:
+
+**(a) Chat memory messages** (unchanged shape — `USER` / `ASSISTANT`):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `messageType` | string | `USER` or `ASSISTANT` |
+| `text` | string | Message content |
+| `metadata` | object | For `ASSISTANT`, may carry `thinking` (per-turn reasoning, injected by `ChatReasoningHistory.attachThinking`) |
+| `media` | array | Attached media (usually empty) |
+
+**(b) Tool-call entries** (`messageType = "TOOL_CALL"`, injected by `ToolCallHistory` from `loom_tool_call_log`):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `messageType` | string | Always `TOOL_CALL` |
+| `toolName` | string | e.g. `askUser`, `startSubTask`, `getCurrentTime` |
+| `toolCallId` | string | Spring AI tool-call id |
+| `arguments` | object | Parsed tool arguments. Parse failure degrades to `{"_raw": "...", "_parseError": true}` |
+| `result` | string | Tool return value, **truncated to 2 KB** |
+| `isError` | boolean | Whether the tool returned an error |
+| `durationMs` | number | Tool execution time |
+| `truncated` | boolean | `true` when `result` was truncated |
+| `createdAt` | string | ISO-8601 timestamp |
+
+**Why tool calls are injected separately**: `SPRING_AI_CHAT_MEMORY` has **no metadata column** (only `conversation_id` / `content` / `type` / `timestamp` / `sequence_id`), so tool invocations are not stored there. Without injection, historical replay would lose the askUser cards and sub-task chips entirely.
+
+**Truncation thresholds** (two layers, deliberately distinct): the whole `arguments` JSON triggers truncation above 1024 chars, then each non-exempt field is capped at 256 chars; `result` is capped at 2048 chars. **`askUser.optionsJson` is exempt** — it is the sole source of the card's options.
+
+**Cross-user read**: returns **403 with an empty array** (same shape as success, so client code does not break).
 
 ---
 
@@ -178,8 +209,10 @@ Accept: text/event-stream
 | `message` | string | Yes | User message content |
 | `conversationId` | string | No | Conversation ID. A new session is created if omitted. |
 | `mcps` | string[] | No | List of MCP tool names to enable |
-| `knowledgeId` | string | No | Knowledge base ID for RAG retrieval |
+| `enabledKnowledgeIds` | string[] | No | Knowledge base IDs for RAG retrieval (multiple) |
 | `fileIds` | string[] | No | List of associated file IDs (supports multiple files) |
+| `selectedSkillName` | string | No | Skill name picked via the `/` picker; injected as a strong directive into the system prompt, bypassing LLM tool-selection bias |
+| `enabledToolGroups` | string[] | No | Tool groups the user ticked in the panel. `null`/empty falls back to the role-granted full set; non-empty is intersected with role grants |
 
 **Example**:
 
@@ -202,6 +235,7 @@ Each event returns a `ChatResponseRecord`:
 | `content` | string | AI response text fragment |
 | `reasoningContent` | string | Reasoning/thinking trace (optional) |
 | `askUser` | object \| null | 3rd component. `null` = normal content frame; non-null = an askUser question-card event (`AskUserEvent`, fields below). The frontend renders an inline choice card and the `askUser` tool blocks until answered |
+| `subTaskEvent` | object \| null | 4th component. `null` = normal frame; non-null = a sub-task lifecycle event (`SubTaskEvent`) driving the compact chip shown live in the chat stream |
 
 **`askUser` (`AskUserEvent`) fields**:
 
@@ -1250,6 +1284,7 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | GET | `/admin/users/{username}/conversations` | List a user's conversations (admin view) |
 | GET | `/admin/users/{username}/roles` | Get user's roles |
 | PUT | `/admin/users/{username}/roles` | Replace user's roles (body: `SetUserRolesRequest` — `{"roleCodes": ["dev", "ops"]}`). Returns 400 `{"error":"用户不存在: xxx"}` or `{"error":"角色不存在: xxx"}` |
+| PUT | `/admin/users/{username}/password` | **Reset a user's password** (body: `ResetPasswordRequest` — `{"newPassword": "..."}`, min 6 chars). **No old password required** — an admin cannot know the user's chosen password. Returns 400 if the target is an `ADMIN` (resetting another admin would allow silent account takeover), if the user does not exist, or if the password is too short/long. The UI disables the button on ADMIN rows. Note: since the admin types the new password, the admin knows it — the modal tells the admin to relay it to the user. |
 
 ### 10.2 Conversation Management (admin)
 
@@ -1298,8 +1333,10 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
  "message": "string",
  "conversationId": "string",
  "mcps": ["string"],
- "knowledgeId": "string",
- "fileIds": ["string"]
+ "enabledKnowledgeIds": ["string"],
+ "fileIds": ["string"],
+ "selectedSkillName": "string",
+ "enabledToolGroups": ["string"]
 }
 ```
 
@@ -1309,11 +1346,14 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 {
  "content": "string",
  "reasoningContent": "string",
- "askUser": null
+ "askUser": null,
+ "subTaskEvent": null
 }
 ```
 
 `askUser` is `null` for normal frames; when non-null it carries an `AskUserEvent` question card (see § 3.1/3.2).
+
+`subTaskEvent` is `null` for normal frames; when non-null it carries a `SubTaskEvent` describing a sub-task's lifecycle (started / completed / failed), which the frontend renders as a compact chip in the chat stream. Note the chip is a **transient stream event** — it is not persisted, so historical replay reconstructs it from `messageType=TOOL_CALL` entries instead (see § 2.2).
 
 ### ConversationRecord
 

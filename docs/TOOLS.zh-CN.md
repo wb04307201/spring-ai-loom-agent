@@ -64,7 +64,7 @@
 
 ### 迁移说明:V2.4 清理
 
-Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` 做过一次性 `DELETE FROM role_tool WHERE group_name IN ('tool_schedule', 'tool_subtask', 'tool_knowledge', 'tool_time', 'tool_skill', 'tool_file')`,清掉 universal 组的历史 RBAC 行。既有数据库现已符合 M6 语义:`role` 无需被授予 universal 工具,用户即可见。(该迁移已并入 `V1.0__init.sql` 末尾 DELETE 段,新装库天然干净。)
+`V1.0__init.sql` 末尾的 DELETE 段做过一次性 `DELETE FROM role_tool WHERE group_name IN ('tool_schedule', 'tool_subtask', 'tool_knowledge', 'tool_time', 'tool_skill', 'tool_file')`,清掉 universal 组的历史 RBAC 行。既有数据库现已符合 M6 语义:`role` 无需被授予 universal 工具,用户即可见。(该迁移已并入 `V1.0__init.sql` 末尾 DELETE 段,新装库天然干净。)
 
 ### 重新启用示例(替换为自定义实现)
 
@@ -86,7 +86,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | 只读当前时间 / 时区转换 |
 | `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | 从 `user_skill`（数据库）读取；演示应用由 `V1.2` 迁移把 6 个演示技能 seed 进默认 admin 用户的 `user_skill` —— yml `skills[]` 不再读取；技能全量列表自动注入到 system prompt（无 `listSkills` 工具） |
 | `IFileTool` | `DefaultFileTool` | 16 | **universal** | 基于路径；根目录 = `{usersBasePath}/{username}/file/` |
-| `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
+| `ISubTaskTool` | `DefaultSubTaskTool` | 5 | **universal** | `start_sub_task` + **`start_sub_tasks`(并行批量)** + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — 委派/查询/取消/历史，按 `(username, conversationId)` 严格隔离 |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | 创建/取消/列出/查历史；触发时以子任务方式运行；持久化到 H2（`loom_scheduled_task`）+ 重启恢复 |
 | `IAskUserTool` | `DefaultAskUserTool` | 1 | **universal** | `askUser` — 聊天流内嵌选择卡片阻塞提问；子任务/定时任务 schema 级排除 |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG:`searchKnowledge(knowledgeId, query, topK?)`;知识库列表自动注入 system prompt（无 `listKnowledgeBases` 工具） |
@@ -231,11 +231,11 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 
 | 项目 | 内容 |
 |----------|------------------------------------------------------------------------|
-| **接口** | `cn.wubo.spring.ai.loom.agent.tool.subtask.ISubTaskTool` |
+| **接口** | `cn.wubo.spring.ai.loom.agent.subtask.ISubTaskTool` |
 | **默认实现** | `DefaultSubTaskTool` |
 | **覆盖方式** | 自定义 `@Bean ISubTaskTool` |
 | **状态** | **universal** — `@ToolGroup(defaultGranted=true)`,对每个登录用户可见（`subtask.enabled` 已废弃无效）。子任务运行继承用户身份,无提权面 |
-| **方法(4)** | `start_sub_task(prompt, systemContext?)`（在 `loomSubTaskExecutor` 上启动子任务）；`list_sub_tasks()`（列出当前会话的活跃子任务）；`cancel_sub_task(subTaskId)`（取消运行中的子任务）；`get_sub_task_history(limit?)`（最近已完成/已取消的子任务） |
+| **方法(5)** | `start_sub_task(prompt, systemContext?)`（在 `loomSubTaskExecutor` 上启动子任务）；**`start_sub_tasks(dimensions, systemContext?)`（并行启动多个独立子任务，一次性返回合并结果 —— 适用于交叉评审这类多维度并行的场景）**；`list_sub_tasks()`（列出当前会话的活跃子任务）；`cancel_sub_task(subTaskId)`（取消运行中的子任务）；`get_sub_task_history(limit?)`（最近已完成/已取消的子任务） |
 | **隔离** | 严格按 `(username, conversationId)` 隔离；子任务 memory 用 `{conversationId}--sub--{subTaskId}` 命名空间，避免污染父会话历史 |
 | **工具过滤** | 子任务运行时 self-tools（`ISubTaskTool` / `IScheduleTool` / `IAskUserTool` —— 子任务不能向用户提问）被过滤掉，防止递归 |
 | **并发** | 通过 `spring.ai.loom.agent.subtask.max-concurrent`（默认 4）控制；历史通过 `max-history`（默认 200）控制 |

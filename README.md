@@ -55,7 +55,7 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | File | `IFileTool` | 16 | ✅ universal | `file.*` limits (`file.enabled` deprecated) |
 | Skill | `ISkillTool` | 2 | ✅ universal | — (`skill.enabled` deprecated) |
 | Knowledge | `IKnowledgeTool` | 1 | ✅ universal | gated by `rag.enabled` (VectorStore) |
-| Sub-task | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| Sub-task | `ISubTaskTool` | 5 | ✅ universal | `subtask.max-concurrent` / `max-history` |
 | Schedule | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
 | AskUser | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
 | Git | `IGitTool` | 28 | 🔐 RBAC (`tool_git`) | `git.username` / `git.token` |
@@ -257,13 +257,13 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 
 | Section | Path | Purpose |
 |-----------------|-------------------------------|--------------------------------------|
-| 用户管理 | `admin/console.html` | User list + role assignment + batch content cleanup |
+| 用户管理 | `admin/console.html` | User list + role assignment + password reset + batch content cleanup |
 | 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
 | 技能市场 | `admin/market-skills.html` | Approve / reject / directly create / edit / delete Skill |
 | 知识库市场 | `admin/knowledge-market.html` | Approve / reject / directly create / edit / delete Knowledge |
 | MCP 描述维护 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
-| 日志 | `admin/stats.html` | Monthly Token usage (year + month filter) |
-| 用户详情 | `admin/user.html?username=X` | 单用户视图:6 个月用量 + 角色 + 提问卡片日志 + 会话列表 |
+| 日志 | `admin/stats.html` | Token usage stats + user conversation log (two tabs) |
+| 用户详情 | `admin/user.html?username=X` | 单用户视图:6 个月用量 + 角色 + 会话列表 |
 | 返回主页 | `/` | Back to chat home page |
 
 - **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.

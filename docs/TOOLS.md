@@ -31,7 +31,7 @@
 
 ## 1. Tool Visibility & RBAC
 
-Since M3, all 10 always-on `I*Tool` beans are **always created** (plus `IHtmlRenderTool`, which is created only when `com.microsoft.playwright:playwright` is on the classpath) regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
+Since M3, all 11 always-on `I*Tool` beans are **always created** (plus `IHtmlRenderTool`, which is created only when `com.microsoft.playwright:playwright` is on the classpath) regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
 
 1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 7 universal tools are listed below.
 2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 5 RBAC tools are listed below.
@@ -79,7 +79,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. 12 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. 13 sub-interfaces each contribute independent `@Tool` methods to the LLM (one of them, `IHttpManageTool`, deliberately declares zero `@Tool` — it is a pure RBAC grant marker). `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
 | Sub-Interface | Default Impl | Methods | Visibility | Notes |
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
@@ -87,7 +87,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); the demo app seeds 6 demo skills into the default admin user's `user_skill` (`V1.2` migration; the 3 official library skills come from `V1.0` + `V2.0`) — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
 | `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{usersBasePath}/{username}/file/` |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
-| `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
+| `ISubTaskTool` | `DefaultSubTaskTool` | 5 | **universal** | `start_sub_task` + **`start_sub_tasks`(parallel batch)** + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
 | `IAskUserTool` | `DefaultAskUserTool` | 1 | **universal** | `askUser` — blocking same-stream question card; excluded from sub-task/scheduled-task tool schema |
 | `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **RBAC** | Requires `role_tool.tool_git` authorization; opt-in via `@Bean IGitTool` replacement |
@@ -457,7 +457,7 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 | **Default** | `DefaultSubTaskTool` |
 | **Override** | Custom `@Bean ISubTaskTool` |
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Sub-task runs inherit user identity — no privilege escalation surface. |
-| **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
+| **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>**`start_sub_tasks(dimensions, systemContext)` — launch multiple independent sub-tasks in parallel and return one merged result (for multi-dimension scenarios like cross-review)**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
 
 The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool` / `IAskUserTool` — a sub-task cannot ask the user questions; anything needing user decision must be written into the sub-task's returned result and the main conversation decides whether to ask) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
 
