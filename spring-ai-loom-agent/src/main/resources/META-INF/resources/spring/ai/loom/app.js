@@ -10,6 +10,34 @@ import { sanitizeHtml } from "./markdown-renderer.js";
 
 // ===================== §1 Constants & Configuration =====================
 const API_PREFIX = "";
+
+/**
+ * 「关于」弹窗的内容 —— 单一真源，改这里即可（不必动 showAboutModal）。
+ *
+ * - `version` 与 `docs/API.md` 顶部的 `> **Version**:` 保持一致。
+ *   注意：`pom.xml` 里是开发版本号（1.0-SNAPSHOT），**不是**发布版本 ——
+ *   发布版本以 README 依赖示例 / docs/API.md 标注为准。
+ * - `description` / `links` / `tagline` 目前是占位内容，按需替换。
+ * - 空字符串 / 空数组的字段会自动跳过渲染（不会留空白块）。
+ */
+const ABOUT_INFO = {
+  name: "灵梭 · Spring AI LoomAgent",
+  tagline: "开箱即用的 Spring AI 对话应用",
+  version: "1.2.0",
+  stack: "Spring Boot 4.x · Spring AI 2.x · JDK 25 · H2",
+  // ↓↓↓ 以下为占位内容，请替换为你自己的信息 ↓↓↓
+  description:
+    "在这里写产品介绍。\n\n" +
+    "可以放：这个系统解决什么问题、核心能力、适用场景等。\n" +
+    "支持换行（\\n），会自动保留。",
+  links: [
+    // 示例（换成你的真实链接；留空数组则不显示任何链接）：
+    // { label: "项目主页", url: "https://github.com/your-org/your-repo" },
+    // { label: "使用文档", url: "https://your-docs.example.com" },
+    // { label: "反馈问题", url: "https://github.com/your-org/your-repo/issues" },
+  ],
+};
+
 const API = {
   autoLogin: "/spring/ai/loom/user/isAutoLogin",
   login: "/spring/ai/loom/user/login",
@@ -885,6 +913,7 @@ const auth = {
  ${isAdmin ? '<a class="user-menu-item" href="/spring/ai/loom/admin/console.html">控制台</a>' : ""}
  <a class="user-menu-item" id="user-menu-usage">我的用量</a>
  <a class="user-menu-item" id="user-menu-change-password">修改密码</a>
+ <a class="user-menu-item" id="user-menu-about">关于</a>
  <a class="user-menu-item user-menu-item-danger" id="user-menu-logout">登出</a>
  </div>
  </div>
@@ -913,6 +942,14 @@ const auth = {
         e.preventDefault();
         dropdown.style.display = "none";
         this.showUsageModal();
+      });
+    }
+    const about = document.getElementById("user-menu-about");
+    if (about) {
+      about.addEventListener("click", (e) => {
+        e.preventDefault();
+        dropdown.style.display = "none";
+        this.showAboutModal();
       });
     }
     const logout = document.getElementById("user-menu-logout");
@@ -1022,6 +1059,86 @@ const auth = {
   },
 
   /** 显示"我的用量"模态框（本月 token 用量） */
+  /**
+   * 「关于」模态框。
+   *
+   * <p>内容分两层：
+   * <ul>
+   *   <li><b>自动读取</b>：版本 / 技术栈 / 当前登录用户（后者取自 state，无需额外请求）</li>
+   *   <li><b>自定义文案</b>：见 {@link ABOUT_INFO}，改那里即可，不必动本方法</li>
+   * </ul>
+   */
+  showAboutModal() {
+    let modal = document.getElementById("about-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "about-modal";
+      modal.className = "modal-overlay";
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 520px;">
+          <div class="modal-header">
+            <h3>关于</h3>
+            <div class="close-button" id="about-modal-close">&times;</div>
+          </div>
+          <div class="modal-body" style="padding: 24px 32px;">
+            <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 18px;">
+              <img src="/static/logo.png" alt="logo" style="width: 48px; height: 48px;" />
+              <div>
+                <div style="font-size: 18px; font-weight: 600;">${escapeHtml(ABOUT_INFO.name)}</div>
+                <div style="font-size: 12px; color: var(--text-muted);">${escapeHtml(ABOUT_INFO.tagline)}</div>
+              </div>
+            </div>
+
+            <div id="about-custom-block"></div>
+
+            <div style="margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted); line-height: 1.9;">
+              <div><strong>版本</strong>：${escapeHtml(ABOUT_INFO.version)}</div>
+              <div><strong>技术栈</strong>：${escapeHtml(ABOUT_INFO.stack)}</div>
+              <div><strong>当前用户</strong>：${escapeHtml(state.nickname || state.username || "-")}${state.userType === "ADMIN" ? "（管理员）" : ""}</div>
+            </div>
+
+            <div id="about-links" style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-btn" id="about-modal-ok">关闭</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      // 自定义文案块（有内容才渲染）
+      const custom = document.getElementById("about-custom-block");
+      if (ABOUT_INFO.description) {
+        custom.innerHTML =
+          '<div style="font-size: 13px; line-height: 1.8; color: var(--text-secondary, #475569); white-space: pre-wrap;">' +
+          escapeHtml(ABOUT_INFO.description) +
+          "</div>";
+      }
+
+      // 链接（有才渲染）
+      const links = document.getElementById("about-links");
+      links.innerHTML = (ABOUT_INFO.links || [])
+        .filter((l) => l && l.url && l.label)
+        .map(
+          (l) =>
+            '<a class="user-link" href="' +
+            escapeHtml(l.url) +
+            '" target="_blank" rel="noopener noreferrer">' +
+            escapeHtml(l.label) +
+            "</a>",
+        )
+        .join("");
+
+      const close = () => (modal.style.display = "none");
+      document.getElementById("about-modal-close").addEventListener("click", close);
+      document.getElementById("about-modal-ok").addEventListener("click", close);
+      // 点遮罩关闭（点内容区不关）
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) close();
+      });
+    }
+    modal.style.display = "flex";
+  },
+
   async showUsageModal() {
     let modal = document.getElementById("usage-modal");
     if (!modal) {
