@@ -117,6 +117,42 @@ class ToolCallRendererContractTest {
     }
 
     @Test
+    @DisplayName("spinner 旋转只在运行中 —— 结束后不得继续转")
+    void spinnerAnimationOnlyWhileRunning() throws IOException {
+        String css = source("/META-INF/resources/spring/ai/loom/style.css");
+
+        // 动画必须限定在 .subtask-chip-running 后代上。
+        // 此前是无条件的 —— renderEnd 把 ⏳ 换成 ✓ 后动画仍在跑，
+        // 表现是「执行完了还一直转」；历史 chip 的静态 ✅ 同样在转。
+        assertThat(css)
+                .as("旋转动画必须限定在 running 状态")
+                .contains(".subtask-chip-running .subtask-chip-spinner { animation: spin");
+        // 不得有**行首**就是 .subtask-chip-spinner 的动画规则（无条件的）
+        // —— 注意不能用 doesNotContain(".subtask-chip-spinner { animation")，
+        // 那会误伤上面那条带 .subtask-chip-running 前缀的正确规则。
+        boolean hasUnconditional = css.lines()
+                .map(String::trim)
+                .anyMatch(l -> l.startsWith(".subtask-chip-spinner {") && l.contains("animation"));
+        assertThat(hasUnconditional)
+                .as("不得存在无条件的 spinner 动画规则（那会让结束态也一直转）")
+                .isFalse();
+
+        // 实时渲染结束时必须移除 running 类，动画才会停
+        String appJs = source("/META-INF/resources/spring/ai/loom/app.js");
+        int end = appJs.indexOf("function renderEnd(ev)");
+        assertThat(end).as("应能定位 renderEnd").isGreaterThan(-1);
+        String body = appJs.substring(end, Math.min(end + 500, appJs.length()));
+        assertThat(body)
+                .as("renderEnd 必须移除 subtask-chip-running —— 否则 CSS 动画不停")
+                .contains("classList.remove(\"subtask-chip-running\")");
+
+        // 历史 chip 不带 running 类（静态图标）
+        assertThat(rendererSource())
+                .as("历史 chip 不应带 running 类")
+                .doesNotContain("subtask-chip-running");
+    }
+
+    @Test
     @DisplayName("截断必须提示 —— 否则用户以为工具只返回了这么多")
     void truncationIsSurfaced() throws IOException {
         assertThat(rendererSource())
