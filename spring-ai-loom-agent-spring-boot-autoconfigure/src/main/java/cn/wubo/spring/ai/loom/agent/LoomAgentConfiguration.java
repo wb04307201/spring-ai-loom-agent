@@ -2292,6 +2292,22 @@ public class LoomAgentConfiguration {
                 }
             });
 
+            // 管理员：重置用户密码（不校验旧密码 —— admin 无从得知）。
+            // 目标为 ADMIN 时一律拒绝（DefaultUser.resetPassword 内校验）：
+            // 重置后可登录成对方账号 = 静默接管，比 deleteUser 的"最后一个管理员
+            // 保护"更严格。路由鉴权由 AuthenticationFilter 的 adminPathPatterns 承担。
+            builder.PUT("spring/ai/loom/admin/users/{username}/password", request -> {
+                String username = request.pathVariable("username");
+                cn.wubo.spring.ai.loom.agent.model.ResetPasswordRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.ResetPasswordRequest.class);
+                try {
+                    user.resetPassword(username, body == null ? null : body.newPassword());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    return runtimeErrorResponse(e, 400);
+                }
+            });
+
             // 管理员：列出某用户全部会话（含已软删 + content_cleaned 标记）
             builder.GET("spring/ai/loom/admin/users/{username}/conversations", request -> {
                 String username = request.pathVariable("username");

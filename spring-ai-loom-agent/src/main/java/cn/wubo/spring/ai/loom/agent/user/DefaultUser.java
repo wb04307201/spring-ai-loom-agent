@@ -24,6 +24,9 @@ public class DefaultUser implements IUser {
     private static final int MAX_NICKNAME = 64;
     private static final int MAX_PASSWORD = 128;
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(DefaultUser.class);
+
     private final JdbcTemplate jdbcTemplate;
     private final BCryptPasswordEncoder passwordEncoder;
     private final Cache sessionCache;
@@ -149,6 +152,43 @@ public class DefaultUser implements IUser {
     }
 
     // ---- admin ops ----
+
+    @Override
+    public void resetPassword(String username, String newPassword) {
+        if (username == null || username.isBlank()) {
+            throw new LoomAgentRuntimeException("参数不能为空");
+        }
+        // 与 changePassword 同标准：至少 6 位；并沿用 createUser 的长度上限，
+        // 防止超长明文把 CPU 消耗推给 BCrypt。
+        if (newPassword == null || newPassword.length() < 6) {
+            throw new LoomAgentRuntimeException("新密码至少 6 位");
+        }
+        if (newPassword.length() > MAX_PASSWORD) {
+            throw new LoomAgentRuntimeException("新密码过长：≤ " + MAX_PASSWORD);
+        }
+
+        String targetType;
+        try {
+            targetType = jdbcTemplate.queryForObject(
+                    "SELECT type FROM user_info WHERE username = ?", String.class, username);
+        } catch (EmptyResultDataAccessException e) {
+            throw new LoomAgentRuntimeException("用户不存在");
+        }
+
+        // 权限边界：不得重置管理员密码。重置后可登录成对方账号 = 静默接管，
+        // 故比 deleteUser 的"最后一个管理员保护"更严格 —— 一个都不许。
+        if (TYPE_ADMIN.equals(targetType)) {
+            throw new LoomAgentRuntimeException("不能重置管理员的密码");
+        }
+
+        String newHash = passwordEncoder.encode(newPassword);
+        int updated = jdbcTemplate.update(
+                "UPDATE user_info SET password = ? WHERE username = ?", newHash, username);
+        if (updated == 0) {
+            throw new LoomAgentRuntimeException("重置失败");
+        }
+        log.info("管理员重置用户密码: target={}", username);
+    }
 
     @Override
     public List<UserInfo> listAllUsers() {

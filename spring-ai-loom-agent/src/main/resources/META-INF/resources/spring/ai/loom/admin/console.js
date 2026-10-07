@@ -112,6 +112,7 @@
  <td><div class="role-badge-list">${roleBadges}</div></td>
  <td>
  <button class="secondary-btn assign-role-btn" data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">分配角色</button>
+ <button class="secondary-btn reset-pwd-btn" data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}"${u.type === "ADMIN" ? ' disabled title="不能重置管理员的密码"' : ""}>重置密码</button>
  <button class="delete-btn" data-username="${escapeHtml(u.username)}">删除</button>
  </td>
  </tr>`;
@@ -145,6 +146,13 @@
           btn.getAttribute("data-username"),
           btn.getAttribute("data-type"),
         ),
+      );
+    });
+    // 绑定"重置密码"按钮（admin 行已 disabled，不会被点到）
+    tableContainer.querySelectorAll(".reset-pwd-btn").forEach((btn) => {
+      if (btn.disabled) return;
+      btn.addEventListener("click", () =>
+        openResetPassword(btn.getAttribute("data-username")),
       );
     });
   }
@@ -318,6 +326,76 @@
   }
 
   // 通用确认弹窗
+  // ===== 重置密码（2026-10-07 新增）=====
+  const resetPwdModal = document.getElementById("reset-pwd-modal");
+  const resetPwdTarget = document.getElementById("reset-pwd-target");
+  const resetPwdNew = document.getElementById("reset-pwd-new");
+  const resetPwdError = document.getElementById("reset-pwd-error");
+  let resetPwdUsername = null;
+
+  function openResetPassword(username) {
+    resetPwdUsername = username;
+    resetPwdTarget.textContent = username;
+    resetPwdNew.value = "";
+    resetPwdError.style.display = "none";
+    resetPwdModal.style.display = "flex";
+    setTimeout(() => resetPwdNew.focus(), 0);
+  }
+
+  function closeResetPassword() {
+    resetPwdModal.style.display = "none";
+    resetPwdUsername = null;
+  }
+
+  async function submitResetPassword() {
+    const pwd = resetPwdNew.value;
+    if (!pwd || pwd.length < 6) {
+      resetPwdError.textContent = "新密码至少 6 位";
+      resetPwdError.style.display = "block";
+      return;
+    }
+    if (!resetPwdUsername) return;
+    try {
+      const resp = await fetch(
+        `/spring/ai/loom/admin/users/${encodeURIComponent(resetPwdUsername)}/password`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({ newPassword: pwd }),
+        },
+      );
+      const text = await resp.text();
+      if (!resp.ok) {
+        let msg = `重置失败：HTTP ${resp.status}`;
+        try {
+          msg = JSON.parse(text).message || msg;
+        } catch (_) {}
+        resetPwdError.textContent = msg;
+        resetPwdError.style.display = "block";
+        return;
+      }
+      closeResetPassword();
+      showToast("密码已重置，请转告用户新密码", "success");
+    } catch (e) {
+      resetPwdError.textContent = "重置失败：" + e.message;
+      resetPwdError.style.display = "block";
+    }
+  }
+
+  document
+    .getElementById("reset-pwd-close")
+    ?.addEventListener("click", closeResetPassword);
+  document
+    .getElementById("reset-pwd-cancel-btn")
+    ?.addEventListener("click", closeResetPassword);
+  document
+    .getElementById("reset-pwd-submit-btn")
+    ?.addEventListener("click", submitResetPassword);
+  resetPwdNew?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitResetPassword();
+  });
+
   function confirmDialog({
     title,
     message,
