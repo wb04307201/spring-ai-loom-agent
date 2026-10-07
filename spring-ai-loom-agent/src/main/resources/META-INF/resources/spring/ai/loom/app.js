@@ -25,16 +25,18 @@ const ABOUT_INFO = {
   tagline: "开箱即用的 Spring AI 对话应用",
   version: "1.2.0",
   stack: "Spring Boot 4.x · Spring AI 2.x · JDK 25 · H2",
-  // ↓↓↓ 以下为占位内容，请替换为你自己的信息 ↓↓↓
   description:
-    "在这里写产品介绍。\n\n" +
-    "可以放：这个系统解决什么问题、核心能力、适用场景等。\n" +
-    "支持换行（\\n），会自动保留。",
+    "一个 Spring Boot 自动配置库 —— 引一个依赖，即可为你的 Spring AI 应用获得" +
+    "完整的对话界面与平台能力：\n\n" +
+    "· 流式对话（推理过程折叠、多模态图文混合输入）\n" +
+    "· RAG 知识库（Tika 解析 + 内置 H2 向量库）\n" +
+    "· MCP 工具集成 + 技能市场（Prompt 模板，含审批流）\n" +
+    "· 子任务 / 定时任务 / 交互式提问\n" +
+    "· RBAC 权限与可视化管理控制台\n\n" +
+    "所有组件均以「接口 + 默认实现」提供，可整体替换。",
   links: [
-    // 示例（换成你的真实链接；留空数组则不显示任何链接）：
-    // { label: "项目主页", url: "https://github.com/your-org/your-repo" },
-    // { label: "使用文档", url: "https://your-docs.example.com" },
-    // { label: "反馈问题", url: "https://github.com/your-org/your-repo/issues" },
+    { label: "Gitee", url: "https://gitee.com/wb04307201/spring-ai-loom-agent" },
+    { label: "GitHub", url: "https://github.com/wb04307201/spring-ai-loom-agent" },
   ],
 };
 
@@ -1094,7 +1096,6 @@ const auth = {
             <div style="margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted); line-height: 1.9;">
               <div><strong>版本</strong>：${escapeHtml(ABOUT_INFO.version)}</div>
               <div><strong>技术栈</strong>：${escapeHtml(ABOUT_INFO.stack)}</div>
-              <div><strong>当前用户</strong>：${escapeHtml(state.nickname || state.username || "-")}${state.userType === "ADMIN" ? "（管理员）" : ""}</div>
             </div>
 
             <div id="about-links" style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px;"></div>

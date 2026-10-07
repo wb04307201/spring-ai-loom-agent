@@ -63,19 +63,44 @@ class AboutModalContractTest {
     }
 
     @Test
-    @DisplayName("当前用户渲染用 state.userType 而非不存在的 state.isAdmin")
-    void usesExistingStateField() throws IOException {
+    @DisplayName("弹窗不含「当前用户」行（用户已确认不需要）")
+    void noCurrentUserLine() throws IOException {
+        String js = source("/META-INF/resources/spring/ai/loom/app.js");
+        int start = js.indexOf("showAboutModal() {");
+        int end = js.indexOf("async showUsageModal()", start);
+        String body = js.substring(start, end);
+        assertThat(body)
+                .as("按用户要求移除「当前用户」行 —— 保留会在弹窗里显得冗余")
+                .doesNotContain("当前用户");
+    }
+
+    @Test
+    @DisplayName("含 Gitee 与 GitHub 两个仓库链接")
+    void hasRepositoryLinks() throws IOException {
         String js = source("/META-INF/resources/spring/ai/loom/app.js");
         assertThat(js)
-                .as("state 里是 userType，没有 isAdmin —— 用错会静默显示为空")
-                .contains("state.userType === \"ADMIN\"");
-        // state 定义里不得出现 isAdmin 字段
-        int stateStart = js.indexOf("const state = {");
-        assertThat(stateStart).isGreaterThan(-1);
-        String stateBlock = js.substring(stateStart, Math.min(stateStart + 900, js.length()));
-        assertThat(stateBlock)
-                .as("state 定义中不应有 isAdmin 字段（实际是 userType）")
-                .doesNotContain("isAdmin:");
+                .as("Gitee 仓库链接必须存在")
+                .contains("https://gitee.com/wb04307201/spring-ai-loom-agent");
+        assertThat(js)
+                .as("GitHub 仓库链接必须存在")
+                .contains("https://github.com/wb04307201/spring-ai-loom-agent");
+        assertThat(js)
+                .as("两个链接都要有可读 label")
+                .contains("label: \"Gitee\"")
+                .contains("label: \"GitHub\"");
+    }
+
+    @Test
+    @DisplayName("产品介绍已写入（不再是占位符）")
+    void descriptionIsRealContent() throws IOException {
+        String js = source("/META-INF/resources/spring/ai/loom/app.js");
+        assertThat(js)
+                .as("占位文案必须已被真实产品介绍替换")
+                .doesNotContain("在这里写产品介绍")
+                .doesNotContain("请替换为你自己的信息");
+        assertThat(js)
+                .as("产品介绍应说明这是什么（Spring Boot 自动配置库）")
+                .contains("Spring Boot 自动配置库");
     }
 
     @Test
