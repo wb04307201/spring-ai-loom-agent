@@ -11,7 +11,7 @@
 [![fork](https://gitee.com/wb04307201/spring-ai-loom-agent/badge/fork.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-loom-agent)
 [![star](https://img.shields.io/github/stars/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent)
 [![fork](https://img.shields.io/github/forks/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent) 
-![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-17+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-3+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-1+-green.svg)
+![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-25+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-4+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-2+-green.svg)
 
 <table>
   <tr>
@@ -42,7 +42,7 @@
 - **🎛 Admin Console** — Sidebar SPA: users / roles / skill market / knowledge market / MCP descriptions / logs (formerly usage stats); admin-gated
 - **📁 File Management** — Disk storage + H2 metadata, upload / preview / download, chat-attachment bridging
 - **🎨 Canvas Board** — full-screen drawing modal: 6 drawing tools + 18 web-UI stencils (CRUD prototype skeleton pieces) with a select tool for move / resize / label editing; exports a white-background PNG as a chat attachment, forming a prototype workflow with multimodal models or the HTML render tool
-- **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render; see [TOOLS.md](docs/TOOLS.md)
+- **🧰 Built-in Tools** — universal (visible to every logged-in user): time / file / skill / knowledge / sub-task / schedule / askUser; RBAC-gated (admin grants per role): git / maven / end-to-end deploy / html-render / outbound HTTP; see [TOOLS.md](docs/TOOLS.md)
 - **⚙️ Batteries-included Engineering** — Spring Boot auto-config, every bean replaceable via `@ConditionalOnMissingBean`, Flyway migrations, broad chat / embedding / vector-store support
 
 ## Built-in Tools
@@ -55,13 +55,14 @@ All tools follow the **interface + default implementation** pattern. Every compo
 | File | `IFileTool` | 16 | ✅ universal | `file.*` limits (`file.enabled` deprecated) |
 | Skill | `ISkillTool` | 2 | ✅ universal | — (`skill.enabled` deprecated) |
 | Knowledge | `IKnowledgeTool` | 1 | ✅ universal | gated by `rag.enabled` (VectorStore) |
-| Sub-task | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| Sub-task | `ISubTaskTool` | 5 | ✅ universal | `subtask.max-concurrent` / `max-history` |
 | Schedule | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
 | AskUser | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
 | Git | `IGitTool` | 28 | 🔐 RBAC (`tool_git`) | `git.username` / `git.token` |
 | Maven | `IMavenTool` | 6 | 🔐 RBAC (`tool_maven`) | `maven.mavenHome` etc. |
 | Compile & Deploy | `ICompileAndDeployTool` | 1 | 🔐 RBAC (`tool_compile`) | `compile.*` |
 | Html Render | `IHtmlRenderTool` | 1 | 🔐 RBAC (`tool_render`) + classpath-gated | add `playwright` dep + grant in admin console |
+| Outbound HTTP | `IHttpTool` | 5 | 🔐 RBAC (`tool_http`) | `http.allowed-domains` (fail-closed; empty list denies everything) |
 
 > **universal** = visible to every logged-in user (`@ToolGroup(defaultGranted=true)`). **RBAC** = visible only after an admin grants the tool group to a role (`role_tool` table). The legacy `*.enabled` yml switches no longer gate any tool since M3 — see [TOOLS.md §1](docs/TOOLS.md).
 
@@ -77,6 +78,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 
 | MCP Server | Description | README |
 |------------|-------------|--------|
+| `loom-http-mcp` | HTTP call capability — register system/profile, manage endpoints, concurrent batch calls (19 tools + 4 resources) | [EN](loom-http-mcp/README.md) · [中文](loom-http-mcp/README.zh-CN.md) |
 | `loom-file-mcp` | File system operations — read, write, edit, search, directory browsing, delete (14 tools) | [EN](loom-file-mcp/README.md) · [中文](loom-file-mcp/README.zh-CN.md) |
 | `loom-git-mcp` | Git operations via JGit — clone, commit, push, merge, rebase, and more (14 tools) | [EN](loom-git-mcp/README.md) · [中文](loom-git-mcp/README.zh-CN.md) |
 | `loom-maven-mcp` | Maven build operations — execute, build, package, test, dependency tree, validate (6 tools) | [EN](loom-maven-mcp/README.md) · [中文](loom-maven-mcp/README.zh-CN.md) |
@@ -89,7 +91,7 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.48</version>
+ <version>1.2.0</version>
 </dependency>
 ```
 
@@ -195,7 +197,7 @@ Skills are prompt templates for the LLM describing reusable workflows. The data 
 - **Three sources** — self-built (fully editable) / market-pulled (re-pull refreshes content; pull is rejected when a same-name self-built skill exists — use "copy as my skill" first) / role-granted (auto-synced after an admin grants it to a role; locked, cannot be edited or deleted)
 - **Approval flow** — submit a self-built skill via the **Share** tab → `PENDING` → admin approves / rejects (a reject requires a comment); re-submitting after rejection archives the old row and opens a fresh review; same-name re-submits update content in place and `APPROVED` never demotes; the **My Publishes** tab shows status and supports withdraw
 - **Role distribution** — admins grant `APPROVED` market skills to roles; they auto-sync into role members' skill lists; unpublishing cascades to pulls and grants — no orphans
-- **Out of the box** — the library ships 2 official skills (STAR-IJ explain-one-thing clearly / bullseye formula tell-a-good-story); the demo app seeds 6 demo skills on first launch (Monthly Event Report, HTTP Test, etc.)
+- **Out of the box** — the library ships 3 official skills (STAR-IJ explain-one-thing clearly / bullseye formula tell-a-good-story / cross-review multi-dimension review); the demo app seeds 6 demo skills on first launch (Monthly Event Report, HTTP Test, etc.)
 - **Usage** — type `/` in the chat input to open the picker for precise skill selection (applies into the input box); inside a skill's `content`, reference MCP tools by `@tool_name` — available MCPs follow role authorization
 
 For the full REST API, see [docs/API.md → §6 Skill Management](docs/API.md#6-skill-management).
@@ -255,13 +257,13 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 
 | Section | Path | Purpose |
 |-----------------|-------------------------------|--------------------------------------|
-| 用户管理 | `admin/console.html` | User list + role assignment + batch content cleanup |
+| 用户管理 | `admin/console.html` | User list + role assignment + password reset + batch content cleanup |
 | 角色管理 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
 | 技能市场 | `admin/market-skills.html` | Approve / reject / directly create / edit / delete Skill |
 | 知识库市场 | `admin/knowledge-market.html` | Approve / reject / directly create / edit / delete Knowledge |
 | MCP 描述维护 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
-| 日志 | `admin/stats.html` | Monthly Token usage (year + month filter) |
-| 用户详情 | `admin/user.html?username=X` | 单用户视图:6 个月用量 + 角色 + 提问卡片日志 + 会话列表 |
+| 日志 | `admin/stats.html` | Token usage stats + user conversation log (two tabs) |
+| 用户详情 | `admin/user.html?username=X` | 单用户视图:6 个月用量 + 角色 + 会话列表 |
 | 返回主页 | `/` | Back to chat home page |
 
 - **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.

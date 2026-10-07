@@ -25,19 +25,38 @@ class SeedSkillIT {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void twoOfficialSeedSkillsExist() {
+    void officialSeedSkillsExist() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "select name, status, is_official, created_by_kind, category, author "
                         + "from market_skill where author = 'system' order by name");
-        assertThat(rows).hasSize(2);
+        // 不断言"恰好 N 条" —— 官方技能会随版本增补(2026-10-04 加了「交叉评审」),
+        // 硬编码条数会让每加一条技能就得改测试。改为断言**每条都合法** + 关键几条在列。
+        assertThat(rows).isNotEmpty();
         for (Map<String, Object> row : rows) {
-            assertThat(String.valueOf(row.get("status"))).isEqualTo("APPROVED");
-            assertThat(row.get("is_official")).isEqualTo(Boolean.TRUE);
-            assertThat(String.valueOf(row.get("created_by_kind"))).isEqualTo("ADMIN");
-            assertThat(String.valueOf(row.get("category"))).isEqualTo("表达沟通");
+            assertThat(String.valueOf(row.get("status"))).as("status of %s", row.get("name")).isEqualTo("APPROVED");
+            assertThat(row.get("is_official")).as("is_official of %s", row.get("name")).isEqualTo(Boolean.TRUE);
+            assertThat(String.valueOf(row.get("created_by_kind"))).as("created_by_kind of %s", row.get("name")).isEqualTo("ADMIN");
+            assertThat(String.valueOf(row.get("category"))).as("category of %s", row.get("name")).isNotBlank();
         }
         assertThat(rows).extracting(r -> String.valueOf(r.get("name")))
-                .containsExactly("STAR-IJ 讲清一件事", "靶心人公式 讲好一个故事");
+                .contains("STAR-IJ 讲清一件事", "靶心人公式 讲好一个故事", "交叉评审");
+        // 分类归属:两条表达沟通类 + 交叉评审属分析决策
+        assertThat(rows).filteredOn(r -> "交叉评审".equals(r.get("name")))
+                .extracting(r -> String.valueOf(r.get("category")))
+                .containsExactly("分析决策");
+    }
+
+    @Test
+    @DisplayName("全部官方 skill 都授权给了 base 角色(default_loaded)")
+    void allOfficialSkillsGrantedToBaseRole() {
+        Integer n = jdbcTemplate.queryForObject(
+                "select count(*) from role_skill rs join market_skill ms on ms.id = rs.market_skill_id "
+                        + "where rs.role_code = 'base' and ms.author = 'system' and rs.default_loaded = true",
+                Integer.class);
+        Integer total = jdbcTemplate.queryForObject(
+                "select count(*) from market_skill where author = 'system'", Integer.class);
+        assertThat(n).as("每条官方 skill 都应授权给 base 角色").isEqualTo(total);
+        assertThat(total).isGreaterThanOrEqualTo(3);
     }
 
     @Test

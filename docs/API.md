@@ -1,7 +1,7 @@
 # Spring AI LoomAgent API Documentation
 
 > **Base URL**: `http://localhost:8080` (default port for the test environment)
-> **Version**: 1.1.48
+> **Version**: 1.2.0
 > **Authentication**: The project uses a **BFF (Backend-For-Frontend) + HttpOnly Cookie** auth model. After login, the server sets a `loom-agent-session` cookie via `Set-Cookie` header. The browser automatically includes this cookie in subsequent requests. No token storage or manual header management is required.
 
 ---
@@ -15,11 +15,14 @@
 - [5. Knowledge Base Management](#5-knowledge-base-management)
 - [6. Skill Management](#6-skill-management)
 - [7. MCP Tools](#7-mcp-tools)
-- [8. Terminal Management](#8-terminal-management)
-- [9. Sub-task & Schedule APIs](#9-sub-task--schedule-apis)
-- [10. Admin APIs](#10-admin-apis)
-- [11. Data Models](#11-data-models)
-- [12. Configuration Properties](#12-configuration-properties)
+- [8. Skill Tools (LLM-callable)](#8-skill-tools-llm-callable)
+- [9. Knowledge Tools (LLM-callable)](#9-knowledge-tools-llm-callable)
+- [10. Terminal Management](#10-terminal-management)
+- [11. Sub-task & Schedule APIs](#11-sub-task--schedule-apis)
+- [12. Admin APIs](#12-admin-apis)
+- [13. Data Models](#13-data-models)
+- [14. Configuration Properties](#14-configuration-properties)
+- [Appendix: Endpoint Summary](#appendix-endpoint-summary)
 
 ---
 
@@ -141,7 +144,38 @@ GET /spring/ai/loom/conversation/{conversationId}
 |------------------|--------|-----------------|
 | `conversationId` | string | Conversation ID |
 
-**Response**: `Message[]` — Spring AI chat memory message list.
+**Response**: `Object[]` — Spring AI chat memory messages **plus injected tool-call entries**.
+
+The array contains two shapes:
+
+**(a) Chat memory messages** (unchanged shape — `USER` / `ASSISTANT`):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `messageType` | string | `USER` or `ASSISTANT` |
+| `text` | string | Message content |
+| `metadata` | object | For `ASSISTANT`, may carry `thinking` (per-turn reasoning, injected by `ChatReasoningHistory.attachThinking`) |
+| `media` | array | Attached media (usually empty) |
+
+**(b) Tool-call entries** (`messageType = "TOOL_CALL"`, injected by `ToolCallHistory` from `loom_tool_call_log`):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `messageType` | string | Always `TOOL_CALL` |
+| `toolName` | string | e.g. `askUser`, `startSubTask`, `getCurrentTime` |
+| `toolCallId` | string | Spring AI tool-call id |
+| `arguments` | object | Parsed tool arguments. Parse failure degrades to `{"_raw": "...", "_parseError": true}` |
+| `result` | string | Tool return value, **truncated to 2 KB** |
+| `isError` | boolean | Whether the tool returned an error |
+| `durationMs` | number | Tool execution time |
+| `truncated` | boolean | `true` when `result` was truncated |
+| `createdAt` | string | ISO-8601 timestamp |
+
+**Why tool calls are injected separately**: `SPRING_AI_CHAT_MEMORY` has **no metadata column** (only `conversation_id` / `content` / `type` / `timestamp` / `sequence_id`), so tool invocations are not stored there. Without injection, historical replay would lose the askUser cards and sub-task chips entirely.
+
+**Truncation thresholds** (two layers, deliberately distinct): the whole `arguments` JSON triggers truncation above 1024 chars, then each non-exempt field is capped at 256 chars; `result` is capped at 2048 chars. **`askUser.optionsJson` is exempt** — it is the sole source of the card's options.
+
+**Cross-user read**: returns **403 with an empty array** (same shape as success, so client code does not break).
 
 ---
 
@@ -178,8 +212,10 @@ Accept: text/event-stream
 | `message` | string | Yes | User message content |
 | `conversationId` | string | No | Conversation ID. A new session is created if omitted. |
 | `mcps` | string[] | No | List of MCP tool names to enable |
-| `knowledgeId` | string | No | Knowledge base ID for RAG retrieval |
+| `enabledKnowledgeIds` | string[] | No | Knowledge base IDs for RAG retrieval (multiple) |
 | `fileIds` | string[] | No | List of associated file IDs (supports multiple files) |
+| `selectedSkillName` | string | No | Skill name picked via the `/` picker; injected as a strong directive into the system prompt, bypassing LLM tool-selection bias |
+| `enabledToolGroups` | string[] | No | Tool groups the user ticked in the panel. `null`/empty falls back to the role-granted full set; non-empty is intersected with role grants |
 
 **Example**:
 
@@ -202,6 +238,7 @@ Each event returns a `ChatResponseRecord`:
 | `content` | string | AI response text fragment |
 | `reasoningContent` | string | Reasoning/thinking trace (optional) |
 | `askUser` | object \| null | 3rd component. `null` = normal content frame; non-null = an askUser question-card event (`AskUserEvent`, fields below). The frontend renders an inline choice card and the `askUser` tool blocks until answered |
+| `subTaskEvent` | object \| null | 4th component. `null` = normal frame; non-null = a sub-task lifecycle event (`SubTaskEvent`) driving the compact chip shown live in the chat stream |
 
 **`askUser` (`AskUserEvent`) fields**:
 
@@ -940,7 +977,7 @@ GET /spring/ai/chat/loom/mcp
  {
  "name": "weather-mcp",
  "title": "Weather",
- "version": "1.1.48",
+ "version": "1.2.0",
  "description": "Provides real-time weather query service",
  "defaultSelected": true,
  "tools": [
@@ -1240,7 +1277,7 @@ GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
 
 All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-admin access returns 403 (`{"message": "无权限"}`). The admin pages under `admin/*.html` are the canonical UI for these endpoints.
 
-### 10.1 User Management
+### 12.1 User Management
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -1250,8 +1287,9 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | GET | `/admin/users/{username}/conversations` | List a user's conversations (admin view) |
 | GET | `/admin/users/{username}/roles` | Get user's roles |
 | PUT | `/admin/users/{username}/roles` | Replace user's roles (body: `SetUserRolesRequest` — `{"roleCodes": ["dev", "ops"]}`). Returns 400 `{"error":"用户不存在: xxx"}` or `{"error":"角色不存在: xxx"}` |
+| PUT | `/admin/users/{username}/password` | **Reset a user's password** (body: `ResetPasswordRequest` — `{"newPassword": "..."}`, min 6 chars). **No old password required** — an admin cannot know the user's chosen password. Returns 400 if the target is an `ADMIN` (resetting another admin would allow silent account takeover), if the user does not exist, or if the password is too short/long. The UI disables the button on ADMIN rows. Note: since the admin types the new password, the admin knows it — the modal tells the admin to relay it to the user. |
 
-### 10.2 Conversation Management (admin)
+### 12.2 Conversation Management (admin)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -1259,13 +1297,13 @@ All admin endpoints require the caller to have `user_info.type = 'ADMIN'`; non-a
 | GET | `/admin/conversations/{conversationId}/messages` | List raw `ChatMessage`s |
 | POST | `/admin/conversations/clean-batch` | Hard-delete soft-deleted conversations in batch |
 
-### 10.3 Token Usage Statistics & Logs
+### 12.3 Token Usage Statistics & Logs
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/admin/stats/tokens/monthly?year=2026&month=7` | Per-user aggregation for the month (defaults to current month if omitted) |
 
-### 10.4 Role / MCP / Skill / Knowledge Management
+### 12.4 Role / MCP / Skill / Knowledge Management
 
 All under `/admin/...` and already documented in:
 
@@ -1273,17 +1311,20 @@ All under `/admin/...` and already documented in:
 - [§ 6 Skill Management](#6-skill-management) — `admin/market-skills*`, `/admin/roles/{code}/skills`
 - [§ 7 MCP Tools](#7-mcp-tools) — `admin/mcps*`, `admin/mcp-tools*`
 
-### 10.5 Admin UI Pages (`admin/*.html`)
+### 12.5 Admin UI Pages (`admin/*.html`)
 
 | Page | Purpose |
 | --- | --- |
-| `admin/console.html` (→ user.html) | User list + role assignment + batch content cleanup |
+| `admin/console.html` | User list + role assignment + password reset + batch content cleanup. **No longer links to `user.html`** — the user-conversation entry point was consolidated into the Log page's second tab |
 | `admin/roles.html` | RBAC roles + grant MCP / Skill / Knowledge |
 | `admin/market-skills.html` | Approve / reject / directly CRUD Skill |
 | `admin/knowledge-market.html` | Approve / reject / directly CRUD Knowledge |
 | `admin/mcps.html` | Maintain Chinese descriptions for SDK MCP tools |
 | `admin/conversation.html` | Drill into any user's conversation turns (admin only) |
-| `admin/stats.html` | Monthly Token usage (year + month filter) |
+| `admin/user.html?username=X` | Single-user view: 6-month usage + roles + conversation list; each row drills into `conversation.html` |
+| `admin/stats.html` | **Two tabs**: (1) Token usage stats (chart + table, usernames not clickable); (2) Conversation log — user list → `user.html` → `conversation.html` |
+
+The Log page's two tabs deliberately separate concerns: the Token tab is a pure statistics view and requires data for the current month, whereas the Conversation-log tab lists **all** users and works on a fresh deployment with no usage data.
 
 All admin pages share a fixed left sidebar (see README "Admin Console" section).
 
@@ -1298,8 +1339,10 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
  "message": "string",
  "conversationId": "string",
  "mcps": ["string"],
- "knowledgeId": "string",
- "fileIds": ["string"]
+ "enabledKnowledgeIds": ["string"],
+ "fileIds": ["string"],
+ "selectedSkillName": "string",
+ "enabledToolGroups": ["string"]
 }
 ```
 
@@ -1309,11 +1352,14 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 {
  "content": "string",
  "reasoningContent": "string",
- "askUser": null
+ "askUser": null,
+ "subTaskEvent": null
 }
 ```
 
 `askUser` is `null` for normal frames; when non-null it carries an `AskUserEvent` question card (see § 3.1/3.2).
+
+`subTaskEvent` is `null` for normal frames; when non-null it carries a `SubTaskEvent` describing a sub-task's lifecycle (started / completed / failed), which the frontend renders as a compact chip in the chat stream. Note the chip is a **transient stream event** — it is not persisted, so historical replay reconstructs it from `messageType=TOOL_CALL` entries instead (see § 2.2).
 
 ### ConversationRecord
 
@@ -1407,21 +1453,21 @@ All admin pages share a fixed left sidebar (see README "Admin Console" section).
 
 All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 
-### 10.1 Basic Configuration
+### 14.1 Basic Configuration
 
 | Property | Type | Default | Description |
 |-------------------------------------------|---------|-------------------------|------------------------------------|
 | `spring.ai.loom.agent.defaultSystem` | string | Skill discovery prompt | Default system prompt |
 | `spring.ai.loom.agent.init` | boolean | `true` | Whether to initialize the ChatClient |
 
-### 10.2 RAG Configuration
+### 14.2 RAG Configuration
 
 | Property | Type | Default | Description |
 |-----------------------------------------------------------|---------|---------|------------------------------------------------|
 | `spring.ai.loom.agent.rag.similarityThreshold` | double | `0.0` | Vector retrieval similarity threshold |
 | `spring.ai.loom.agent.rag.topK` | int | `4` | Number of top results to retrieve |
 
-### 10.3 MCP Configuration
+### 14.3 MCP Configuration
 
 `spring.ai.loom.agent.mcps` is an array. Each entry contains:
 
@@ -1434,11 +1480,11 @@ All properties are prefixed with `spring.ai.loom.agent` in `application.yml`.
 | `tools[].name` | string | Tool name |
 | `tools[].description` | string | Tool description |
 
-### 10.4 Skill Configuration (no longer read from yml)
+### 14.4 Skill Configuration (no longer read from yml)
 
 The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Skill Management](#6-skill-management) for the database-driven flow. 6 system skills are seeded on first launch.
 
-### 10.5 Vector Store Configuration (H2-backed JVector)
+### 14.5 Vector Store Configuration (H2-backed JVector)
 
 | Property | Type | Default | Description |
 |-------------------------------------------------|--------|------------------------|------------------------------|
@@ -1448,7 +1494,7 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 > Persistence: vectors live in the H2 table `loom_vector_store` (embedding BLOB, little-endian float32) and are hydrated into the in-memory JVector HNSW graph on `ApplicationReadyEvent` — no boot-time re-embedding. The legacy `~/.loom/jvector-index/` json files are retired. Changing the embedding model invalidates stored vectors (dim-guarded rows are skipped with a WARN); wipe the table and re-upload knowledge documents.
 
-### 10.6 Authentication Configuration
+### 14.6 Authentication Configuration
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
@@ -1458,7 +1504,7 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 | `spring.ai.loom.agent.auth.cookie.name` | string | `loom-agent-session` | Session cookie name |
 | `spring.ai.loom.agent.auth.cookie.maxAge` | int | `86400` | Cookie max age in seconds (24 hours) |
 
-### 10.7 File Storage Configuration
+### 14.7 File Storage Configuration
 
 | Property | Type | Default | Description |
 |---------------------------------------|---------|------------------------|------------------------------------------------------|
@@ -1466,7 +1512,7 @@ The `spring.ai.loom.agent.skills[]` yml block is **no longer read**. See [§6 Sk
 
 > Files uploaded to the same directory with duplicate names are automatically renamed with a suffix: `file.txt` → `file(1).txt` → `file(2).txt`.
 
-### 10.7.1 File Tool Configuration (`IFileTool`)
+### 14.7.1 File Tool Configuration (`IFileTool`)
 
 The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with a set of default safety/resource limits tailored for LLM tool-call scenarios.
 
@@ -1490,7 +1536,7 @@ The file tool (`IFileTool`) is configured via `spring.ai.loom.agent.file.*` with
 - Atomic writes: `writeFile` / `editFile` write to a `.tmp` file and then `Files.move(ATOMIC_MOVE)` it into place, so a mid-write power loss won't corrupt the target. Falls back to non-atomic replacement across volumes.
 - `editFile` uniqueness check: if `oldText` matches more than once in the file the call is rejected, forcing the LLM to provide more precise surrounding context.
 
-### 10.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
+### 14.8 End-to-End Deployment Configuration (`ICompileAndDeployTool`)
 
 `ICompileAndDeployTool` performs the full deployment pipeline in a single LLM tool call: `git clone → buildTool build (maven / npm / pip) → docker build → docker run → health check`. Supports Maven, Node.js (backend and static-frontend → nginx), and Python projects. All settings live under `spring.ai.loom.agent.compile.*`.
 
@@ -1557,7 +1603,7 @@ Example tool invocation:
 }
 ```
 
-### 10.9 Git Configuration (`IGitTool`)
+### 14.9 Git Configuration (`IGitTool`)
 
 `IGitTool` provides Git operations (init, clone, status, commit, branch, etc.) via Eclipse JGit. The bean is **always created**; visibility is RBAC-gated — an admin must grant `tool_git` to a role (`/admin/roles/{code}/tools`, persisted in `role_tool`). The `git.enabled` yml flag is **deprecated (no effect)**.
 
@@ -1580,7 +1626,7 @@ spring:
 # Note: no 'enabled' flag — grant tool_git to a role in the admin console instead
 ```
 
-### 10.10 Maven Build Configuration
+### 14.10 Maven Build Configuration
 
 | Property | Type | Default | Description |
 |---------------------------------------------------|----------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1596,7 +1642,7 @@ spring:
 >
 > **Troubleshooting tip — "file is locked" errors when deleting the project directory on Windows**: in older versions this was caused by `maven-invoker 3.3.0` / `plexus-utils 3.3.0` because (a) the JVM shutdown hook they register on the exception/cancel path never releases the held `Process` reference, and (b) `Invoker.execute` does not expose the child-process handle, so it cannot propagate cancel/timeout down to the mvn child process. The result: a cancelled or timed-out Maven call would leave the mvn child running and continuing to hold mmap handles on `target/classes` and `~/.m2/repository/*.jar`, locking those files on Windows. **The new version no longer uses `Invoker.execute` to run the process** — it forks mvn directly with `ProcessBuilder`, does a clean timeout via `Process.waitFor(timeout, unit)`, then calls `Process.destroyForcibly` and explicitly closes the streams on timeout. **No JVM shutdown hook is registered any more, so the mvn child is always killed on timeout/cancel.** If you still see locks after upgrading, it is most likely an orphan mvn process left behind by a previous JVM — find it with `tasklist /FI "IMAGENAME eq cmd.exe"` and `taskkill /F /PID <pid>` it.
 
-### 10.11 Tool Group Switches (deprecated)
+### 14.11 Tool Group Switches (deprecated)
 
 > **Since M3, the `*.enabled` switches below no longer gate tool beans.** All always-on `I*Tool` beans are created unconditionally (plus `IHtmlRenderTool`, gated only by `playwright` on the classpath). Visibility is governed by **universal tools** (`@ToolGroup(defaultGranted=true)` — visible to every logged-in user) vs **RBAC tools** (`tool_git` / `tool_maven` / `tool_compile` / `tool_render`, granted per role via `/admin/roles/{code}/tools`, persisted in `role_tool`). See [TOOLS.md §1](./TOOLS.md) for the full model. The properties remain for backward compatibility only.
 

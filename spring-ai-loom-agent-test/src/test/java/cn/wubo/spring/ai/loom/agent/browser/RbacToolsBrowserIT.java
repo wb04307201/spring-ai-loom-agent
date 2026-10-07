@@ -46,7 +46,7 @@ class RbacToolsBrowserIT extends BrowserTestBase {
             "tool_schedule", "tool_subtask", "tool_knowledge", "tool_time",
             "tool_skill", "tool_file", "tool_askUser");
     private static final List<String> RBAC_GROUPS = List.of(
-            "tool_git", "tool_maven", "tool_compile", "tool_render");
+            "tool_git", "tool_maven", "tool_compile", "tool_render", "tool_http");
     /** universal 组的 raw name(@ToolGroup value;弹窗按 title/name 渲染,须按名称断言不存在)。 */
     private static final List<String> UNIVERSAL_RAW = List.of(
             "schedule", "subtask", "knowledge", "time", "skill", "file", "askUser");
@@ -117,7 +117,7 @@ class RbacToolsBrowserIT extends BrowserTestBase {
             for (String u : UNIVERSAL) {
                 assertThat(byId(caps, u)).as("universal 不进 capabilities 列表 " + u).isNull();
             }
-            // RBAC 4 组:出现但 effectiveEnabled=false(未授权 → 前端 disabled + 服务端过滤)
+            // RBAC 5 组:出现但 effectiveEnabled=false(未授权 → 前端 disabled + 服务端过滤)
             for (String r : RBAC_GROUPS) {
                 JsonNode n = byId(caps, r);
                 assertThat(n).as("RBAC 组在列表 " + r).isNotNull();

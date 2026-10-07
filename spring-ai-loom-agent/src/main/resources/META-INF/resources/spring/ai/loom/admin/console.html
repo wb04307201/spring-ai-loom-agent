@@ -135,6 +135,45 @@
       </div>
     </div>
 
+    <!-- 重置密码模态框（2026-10-07 新增）
+         admin 手输新密码 —— 不校验旧密码（admin 无从得知用户自选密码）。
+         目标为 ADMIN 时后端一律拒绝，前端也据此禁用按钮。 -->
+    <div id="reset-pwd-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content" style="max-width: 480px">
+        <div class="modal-header">
+          <h3>重置密码</h3>
+          <div class="close-button" id="reset-pwd-close">&times;</div>
+        </div>
+        <div class="modal-body" style="padding: 24px 32px">
+          <div
+            style="
+              color: var(--text-muted);
+              font-size: 12px;
+              margin-bottom: 16px;
+              line-height: 1.6;
+            "
+          >
+            为「<strong id="reset-pwd-target"></strong>」设置新密码。<br />
+            该用户原密码将立即失效，请将新密码转告用户。
+          </div>
+          <div class="form-group">
+            <label>新密码 <span style="color: var(--error-color)">*</span></label>
+            <input
+              type="password"
+              id="reset-pwd-new"
+              class="form-input"
+              placeholder="至少 6 位"
+            />
+          </div>
+          <div id="reset-pwd-error" class="error-msg" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary-btn" id="reset-pwd-cancel-btn">取消</button>
+          <button class="primary-btn" id="reset-pwd-submit-btn">重置</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 分配角色模态框 -->
     <div id="assign-role-modal" class="modal-overlay" style="display: none">
       <div class="modal-content" style="max-width: 520px">

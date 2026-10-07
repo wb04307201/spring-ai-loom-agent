@@ -112,6 +112,7 @@
  <td><div class="role-badge-list">${roleBadges}</div></td>
  <td>
  <button class="secondary-btn assign-role-btn" data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}">分配角色</button>
+ <button class="secondary-btn reset-pwd-btn" data-username="${escapeHtml(u.username)}" data-type="${escapeHtml(u.type)}"${u.type === "ADMIN" ? ' disabled title="不能重置管理员的密码"' : ""}>重置密码</button>
  <button class="delete-btn" data-username="${escapeHtml(u.username)}">删除</button>
  </td>
  </tr>`;
@@ -147,6 +148,13 @@
         ),
       );
     });
+    // 绑定"重置密码"按钮（admin 行已 disabled，不会被点到）
+    tableContainer.querySelectorAll(".reset-pwd-btn").forEach((btn) => {
+      if (btn.disabled) return;
+      btn.addEventListener("click", () =>
+        openResetPassword(btn.getAttribute("data-username")),
+      );
+    });
   }
 
   async function deleteUser(username) {
@@ -178,31 +186,44 @@
    * M0 T14: 跨市场 PENDING 待审核汇总。
    * 分别请求 Skill 市场 + Knowledge 市场 admin 列表，客户端按 status==='PENDING'
    * 过滤求和。任一端点失败 (401/403/5xx) 视为 0,不阻塞另一端计数。
+   *
+   * <p>2026-10-06 改造：原实现把两个市场的待审数**求和**成一个数字（如「待审核 (1)」），
+   * admin 看不出是哪一个市场有待办，且 chip 不可点 —— 提示了却去不了。
+   * 现改为**分别计数 + 各自可点跳转**：
+   * <ul>
+   *   <li>数字拆分，各自标注市场名，消除歧义</li>
+   *   <li>点击跳到对应市场页（带 status=PENDING 过滤）</li>
+   *   <li>某市场为 0 时不显示该项，避免噪声</li>
+   * </ul>
    */
   async function loadPendingChip() {
-    const endpoints = [
-      "/spring/ai/loom/admin/market-skills",
-      "/spring/ai/loom/admin/market-knowledge",
+    const markets = [
+      { url: "/spring/ai/loom/admin/market-skills", label: "技能市场", page: "market-skills.html" },
+      { url: "/spring/ai/loom/admin/market-knowledge", label: "知识库市场", page: "knowledge-market.html" },
     ];
     const counts = await Promise.all(
-      endpoints.map(async (url) => {
+      markets.map(async (m) => {
         try {
           // M4 (FU-4 follow-on): v2 admin list 默认 size=20，客户端过滤会漏数。
           // 改为服务端 status=PENDING + size=1，直接读 Page.total（精确，>100 也对）；
           // 兼容 v1 裸 ARRAY 形态（退化为客户端计数）。
-          const r = await fetch(`${url}?status=PENDING&page=0&size=1`, {
+          const r = await fetch(`${m.url}?status=PENDING&page=0&size=1`, {
             credentials: "include",
             headers: { "Content-Type": "application/json; charset=UTF-8" },
           });
-          if (!r.ok) return 0;
+          if (!r.ok) return { ...m, n: 0 };
           const data = await r.json();
           // 兼容 v1 (List<...>) 与 v2 (Page<...>) 两种返回结构
           if (Array.isArray(data)) {
-            return data.filter(
-              (m) => String((m && m.status) || "").toUpperCase() === "PENDING",
-            ).length;
+            return {
+              ...m,
+              n: data.filter(
+                (x) => String((x && x.status) || "").toUpperCase() === "PENDING",
+              ).length,
+            };
           }
-          if (data && typeof data.total === "number") return data.total;
+          if (data && typeof data.total === "number") return { ...m, n: data.total };
+
           const rows =
             data && Array.isArray(data.items)
               ? data.items
@@ -213,28 +234,37 @@
             (m) => String((m && m.status) || "").toUpperCase() === "PENDING",
           ).length;
         } catch (_) {
-          return 0;
+          return { ...m, n: 0 };
         }
       }),
     );
-    const total = counts.reduce((a, b) => a + b, 0);
-    renderPendingChip(total);
+    renderPendingChip(counts);
   }
 
   /**
-   * 渲染顶部"待审核 (N)"红色 chip。N=0 时隐藏容器,与 market-skills.html 内
-   * 同款 chip 共用样式类名。
+   * 渲染待审核 chip —— 每个市场一项，各自可点跳转。
+   *
+   * <p>无待办时不显示容器（与改造前一致）。任一市场为 0 时只显示另一项，
+   * 避免「知识库市场 (0)」这类噪声。
    */
-  function renderPendingChip(n) {
+  function renderPendingChip(counts) {
     if (!pendingChipContainer) return;
-    if (n > 0) {
-      pendingChipContainer.innerHTML =
-        '<div class="pending-chip pending-chip-red">待审核 (' + n + ")</div>";
-      pendingChipContainer.style.display = "";
-    } else {
+    const pending = (counts || []).filter((c) => c && c.n > 0);
+    if (pending.length === 0) {
       pendingChipContainer.innerHTML = "";
       pendingChipContainer.style.display = "none";
+      return;
     }
+    pendingChipContainer.innerHTML = pending
+      .map(
+        (c) =>
+          '<a class="pending-chip pending-chip-red pending-chip-link" ' +
+          'href="' + escapeHtml(c.page) + '?status=PENDING" ' +
+          'title="跳转到' + escapeHtml(c.label) + '处理待审核条目">' +
+          escapeHtml(c.label) + " (" + c.n + ")</a>",
+      )
+      .join(" ");
+    pendingChipContainer.style.display = "";
   }
 
   function openCreate() {
@@ -296,6 +326,76 @@
   }
 
   // 通用确认弹窗
+  // ===== 重置密码（2026-10-07 新增）=====
+  const resetPwdModal = document.getElementById("reset-pwd-modal");
+  const resetPwdTarget = document.getElementById("reset-pwd-target");
+  const resetPwdNew = document.getElementById("reset-pwd-new");
+  const resetPwdError = document.getElementById("reset-pwd-error");
+  let resetPwdUsername = null;
+
+  function openResetPassword(username) {
+    resetPwdUsername = username;
+    resetPwdTarget.textContent = username;
+    resetPwdNew.value = "";
+    resetPwdError.style.display = "none";
+    resetPwdModal.style.display = "flex";
+    setTimeout(() => resetPwdNew.focus(), 0);
+  }
+
+  function closeResetPassword() {
+    resetPwdModal.style.display = "none";
+    resetPwdUsername = null;
+  }
+
+  async function submitResetPassword() {
+    const pwd = resetPwdNew.value;
+    if (!pwd || pwd.length < 6) {
+      resetPwdError.textContent = "新密码至少 6 位";
+      resetPwdError.style.display = "block";
+      return;
+    }
+    if (!resetPwdUsername) return;
+    try {
+      const resp = await fetch(
+        `/spring/ai/loom/admin/users/${encodeURIComponent(resetPwdUsername)}/password`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({ newPassword: pwd }),
+        },
+      );
+      const text = await resp.text();
+      if (!resp.ok) {
+        let msg = `重置失败：HTTP ${resp.status}`;
+        try {
+          msg = JSON.parse(text).message || msg;
+        } catch (_) {}
+        resetPwdError.textContent = msg;
+        resetPwdError.style.display = "block";
+        return;
+      }
+      closeResetPassword();
+      showToast("密码已重置，请转告用户新密码", "success");
+    } catch (e) {
+      resetPwdError.textContent = "重置失败：" + e.message;
+      resetPwdError.style.display = "block";
+    }
+  }
+
+  document
+    .getElementById("reset-pwd-close")
+    ?.addEventListener("click", closeResetPassword);
+  document
+    .getElementById("reset-pwd-cancel-btn")
+    ?.addEventListener("click", closeResetPassword);
+  document
+    .getElementById("reset-pwd-submit-btn")
+    ?.addEventListener("click", submitResetPassword);
+  resetPwdNew?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitResetPassword();
+  });
+
   function confirmDialog({
     title,
     message,

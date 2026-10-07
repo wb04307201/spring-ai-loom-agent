@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -191,6 +192,80 @@ public class DefaultSubTaskTool implements ISubTaskTool {
             sb.append('\n');
         }
         return sb.toString();
+    }
+
+
+    /**
+     * 一次性并行启动多个子任务,全部完成后返回合并结果。
+     *
+     * <p><b>用途</b>:需要"同一件事的多个互不依赖的切面各派一个子 agent"时用 ——
+     * 例如交叉评审的多个评审维度、并行调研的多个模块。<b>一次调用即可,
+     * 调用方不需要知道并发上限是多少</b>:上限由部署配置
+     * {@code spring.ai.loom.agent.subtask.max-concurrent} 决定,超出的自动排队。
+     *
+     * <p><b>为什么不用"发多个 start_sub_task"</b>:Spring AI 2.0.1 的
+     * {@code DefaultToolCallingManager} 用普通 {@code Iterator} 串行遍历同一轮的
+     * tool calls(无 parallelStream / ExecutorService),所以同轮发 N 个
+     * {@code start_sub_task} 实际会一个接一个地跑,每个都把主线程阻塞在自己的
+     * future 上 —— 并行度实际是 1。把扇出收进<b>单次工具调用内部</b>才真正并行,
+     * 且绕开了框架层的串行限制。
+     *
+     * <p>每个维度是一个独立 prompt 字符串:子 agent 会拿到
+     * "只从这一面评审,不要越界"的约束由调用方写进字符串里。
+     *
+     * @param dimensions    各维度的任务描述,互不重叠;不能为空、不能全为空白
+     * @param systemContext 所有子任务共享的系统上下文(可空)
+     * @return 按维度分段的结果文本,含失败维度的原因
+     */
+    @Tool(description = "并行启动多个独立子任务(如评审的多个维度、调研的多个模块),"
+            + "全部完成后一次性返回合并结果。适合'同一件事的多个互不依赖的切面各派一个'。"
+            + "每个任务描述应写明:只看这一面、不要越界评其他维度、需要回答哪些具体问题、"
+            + "信息不足时以'假设前提是 X'代替编造。全部返回后由你汇总成一份报告。")
+    public String startSubTasks(
+            @ToolParam(description = "各维度的任务描述列表,彼此独立、互不重叠。"
+                    + "例:['你是技术架构评审员,只评估可行性与集成复杂度,重点回答 X/Y', "
+                    + "'你是成本评审员,只评估投入与运维负担,重点回答 Z']") List<String> dimensions,
+            @ToolParam(description = "所有子任务共享的系统上下文(可空)", required = false) String systemContext,
+            ToolContext toolContext) {
+        List<String> valid = dimensions == null ? List.of()
+                : dimensions.stream().filter(d -> d != null && !d.isBlank())
+                        .map(String::strip).toList();
+        if (valid.isEmpty()) {
+            return "[子任务失败] dimensions 不能为空 —— 请传入至少一个非空白的维度描述。";
+        }
+
+        String username = readContextString(toolContext, "username");
+        String parentConvId = readContextString(toolContext, "parentConversationId");
+        log.info("批量子任务启动: count={}, user={}, conv={}", valid.size(), username, parentConvId);
+
+        List<SubTaskRequest> requests = new java.util.ArrayList<>(valid.size());
+        for (String d : valid) {
+            requests.add(new SubTaskRequest(
+                    java.util.UUID.randomUUID().toString(), parentConvId, null,
+                    username, d, systemContext, false));
+        }
+
+        List<SubTaskResult> results = executor.executeBatch(requests);
+
+        StringBuilder sb = new StringBuilder();
+        if (systemContext != null && !systemContext.isBlank()) {
+            sb.append("[共享上下文提示] ").append(systemContext.strip()).append("\n\n");
+        }
+        for (int i = 0; i < valid.size(); i++) {
+            sb.append("=== 维度 ").append(i + 1).append(" / ").append(valid.size()).append(" ===\n");
+            sb.append(preview(valid.get(i))).append("\n");
+            sb.append(formatForMainConversation(results.get(i))).append("\n\n");
+        }
+        sb.append("[共 ").append(valid.size())
+          .append(" 个维度,全部完成。请基于以上结果汇总成一份报告;"
+                  + "维度之间结论冲突时如实呈现冲突,不要抹平。]");
+        return sb.toString();
+    }
+
+    /** 维度描述的短预览(前 60 字),让 LLM 在结果里能对上号。 */
+    private static String preview(String dimension) {
+        String flat = dimension.replace('\n', ' ').strip();
+        return flat.length() > 60 ? flat.substring(0, 60) + "…" : flat;
     }
 
     private String formatForMainConversation(SubTaskResult r) {

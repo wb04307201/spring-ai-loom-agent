@@ -402,6 +402,29 @@ public class LoomAgentConfiguration {
         }
 
         /**
+         * 2026-10-05：补齐 provider 连接的缺省超时（Spring AI 对 OpenAI 硬编码 60s，
+         * 会把长思考 + tool_use 的流式请求整体掐断）。仅在消费方未显式配置
+         * {@code spring.ai.openai.timeout} 时生效，显式配置一律优先。
+         *
+         * <p>刻意注册为 {@code static} {@link BeanFactoryPostProcessor}（与
+         * {@link #fileViewDefaultsBeanFactoryPostProcessor} 同理）：BFPP 必须在
+         * {@code @Configuration} 类自身的 {@code @Bean}（含 binder bean）之前完成属性注入，
+         * 否则读到的库配置还没绑定上来。
+         */
+        @Bean
+        public static BeanFactoryPostProcessor chatProviderTimeoutDefaultsBeanFactoryPostProcessor(
+                org.springframework.core.env.ConfigurableEnvironment environment) {
+            // 刻意直接读 Environment 而非注入 LoomAgentProperties：BFPP 运行在 binder bean
+            // 之前，后者此时尚未绑定，拿到的永远是内置默认值（会忽略消费方 yml 的调整）。
+            // application.yml 在 BFPP 之前已载入 Environment，直接读键才拿得到真实配置。
+            long fallback = new LoomAgentProperties().getChat().getTimeoutSeconds();
+            Long configured = environment.getProperty(
+                    ChatProviderTimeoutDefaultsBeanFactoryPostProcessor.LOOM_CHAT_TIMEOUT_SECONDS_KEY, Long.class);
+            long seconds = (configured != null) ? configured : fallback;
+            return new ChatProviderTimeoutDefaultsBeanFactoryPostProcessor(environment, seconds);
+        }
+
+        /**
          * M3+ T4.1 — Micrometer-backed metrics for the market subsystem.
          * Wired as a top-level bean so any service can autowire
          * {@link cn.wubo.spring.ai.loom.agent.market.MarketMetrics} and
@@ -425,18 +448,63 @@ public class LoomAgentConfiguration {
         @Bean
         public org.springframework.beans.factory.SmartInitializingSingleton springAiJsonParserConfig() {
             return () -> {
-                try {
-                    com.fasterxml.jackson.databind.ObjectMapper om =
-                            org.springframework.ai.util.json.JsonParser.getObjectMapper();
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_YAML_COMMENTS, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
-                    om.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
-                } catch (Throwable t) {
-                    // 静默失败 —— Spring AI 内部 API 可能在新版本里被替换
-                    LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
-                }
+                // Spring AI 2.0 ships Jackson 3 (tools.jackson.databind.json.JsonMapper).
+                // The old Jackson 2 com.fasterxml.jackson.databind.ObjectMapper + JsonParser.Feature
+                // enum was removed. Reflectively enable the StreamReadFeature equivalents so this
+                // config stays compatible across Jackson 2 (Spring AI 1.x) and Jackson 3 (2.x+).
+                enableAllowCommentsViaReflection();
             };
+        }
+
+        private static void enableAllowCommentsViaReflection() {
+            try {
+                Object mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getObjectMapper").invoke(null);
+                if (mapper == null) {
+                    // Spring AI 2.0 renamed the accessor — fall back to Jackson 3's getJsonMapper().
+                    try {
+                        mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getJsonMapper").invoke(null);
+                    } catch (NoSuchMethodException ignored) {
+                        LOG.warn("Spring AI JsonParser exposes neither getObjectMapper nor getJsonMapper; "
+                                + "skipping lenient-JSON configuration");
+                        return;
+                    }
+                }
+                invokeConfigure(mapper, "ALLOW_COMMENTS");
+                invokeConfigure(mapper, "ALLOW_YAML_COMMENTS");
+                invokeConfigure(mapper, "ALLOW_SINGLE_QUOTES");
+                invokeConfigure(mapper, "ALLOW_UNQUOTED_FIELD_NAMES");
+            } catch (Throwable t) {
+                LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
+            }
+        }
+
+        /**
+         * Jackson 2 used {@code om.configure(JsonParser.Feature.X, true)}; Jackson 3 uses
+         * {@code om.enable(StreamReadFeature.X)}. The Jackson 2 class may not even be on the
+         * classpath under Spring AI 2.0. We look up both feature enums via reflection and call
+         * whichever one we find.
+         */
+        private static void invokeConfigure(Object mapper, String featureName) {
+            // Try Jackson 2 first
+            try {
+                Class<?> jackson2Feature = Class.forName("com.fasterxml.jackson.core.JsonParser$Feature");
+                Object feature = Enum.valueOf((Class<Enum>) jackson2Feature, featureName);
+                mapper.getClass().getMethod("configure", jackson2Feature, boolean.class)
+                        .invoke(mapper, feature, true);
+                return;
+            } catch (ClassNotFoundException | NoSuchMethodException ignored) {
+                // fall through to Jackson 3 path
+            } catch (ReflectiveOperationException e) {
+                LOG.debug("Jackson 2 configure({}) failed, will try Jackson 3: {}", featureName, e.getMessage());
+            }
+            // Jackson 3 path: mapper.enable(StreamReadFeature.X)
+            try {
+                Class<?> jackson3Feature = Class.forName("tools.jackson.core.StreamReadFeature");
+                Object feature = Enum.valueOf((Class<Enum>) jackson3Feature, featureName);
+                mapper.getClass().getMethod("enable", jackson3Feature).invoke(mapper, feature);
+            } catch (ReflectiveOperationException e) {
+                LOG.debug("Jackson 3 enable({}) not available: {}", featureName, e.getMessage());
+            }
         }
 
         @Bean
@@ -462,7 +530,15 @@ public class LoomAgentConfiguration {
                 properties.setMaven(bound.getMaven());
                 properties.setCompile(bound.getCompile());
                 properties.setAskuser(bound.getAskuser());
+                properties.setChat(bound.getChat());
                 properties.setRender(bound.getRender());
+                // http:漏了这一行 ⇒ spring.ai.loom.agent.http.* 全部配置项失效
+                // (allowedDomains / timeoutMs / maxResponseSizeBytes / maxBatchConcurrency /
+                //  maxRequestBodyBytes / historyMaxEntriesPerSystem / enabled)。
+                // 后果:allowedDomains 恒为默认空集 + DefaultHttpTool:43 硬编码 fail-closed
+                // ⇒ 一切 invokeEndpoint 返回 DomainNotAllowed,且用户无论怎么配 yml 都无效。
+                // 2026-10-03 Chrome 端到端实测发现(见 .aqg/code-construction/task-16-*)。
+                properties.setHttp(bound.getHttp());
 
                 // loomHome 级联：@ConfigurationProperties 不会自动按 loom-home 重建
                 // 字段默认值，所以在绑定后手动推导 —— 仅当 yml 覆盖了 loom-home 且
@@ -492,7 +568,7 @@ public class LoomAgentConfiguration {
          * 版本号字典序：< ，库 SQL 先建表 + admin，业务的 后 seed mcp / skill。
          */
         @Bean
-        public org.springframework.boot.autoconfigure.flyway.FlywayConfigurationCustomizer libraryFlywayCustomizer() {
+        public org.springframework.boot.flyway.autoconfigure.FlywayConfigurationCustomizer libraryFlywayCustomizer() {
             return configuration -> {
                 // baseline-on-migrate 让空 schema 也能跑（库 + 业务都能跑）
                 configuration.baselineOnMigrate(true);
@@ -514,11 +590,11 @@ public class LoomAgentConfiguration {
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
         public ChatClient chatClient(ChatModel chatModel,
-                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor,
+                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor messageChatMemoryAdvisor,
                                      LoomAgentProperties properties) {
             ChatClient.Builder builder = ChatClient.builder(chatModel);
             if (properties.getDefaultSystem() != null) builder.defaultSystem(properties.getDefaultSystem());
-            builder.defaultAdvisors((org.springframework.ai.chat.client.advisor.api.Advisor) messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
+            builder.defaultAdvisors(messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
                     new SimpleLoggerAdvisor() // logger advisor
             );
             return builder.build();
@@ -533,13 +609,25 @@ public class LoomAgentConfiguration {
          * {@code spec.advisors(memoryAdvisor)} 抛出
          * {@code IllegalArgumentException: advisors cannot contain null elements},
          * 子任务每次都被 fail,history 永远为空。
+         *
+         * <p>2026-09-30 (Issue #1 修复): 改用 Spring AI 2.0 自带的
+         * {@link MessageChatMemoryAdvisor}(默认 order = HIGHEST_PRECEDENCE + 200,
+         * < ToolCallingAdvisor 默认的 +300)。Spring AI 2.0 的 auto-register 逻辑
+         * 会判定"上游有 MemoryAdvisor" → hasDownstreamMemoryAdvisor=false →
+         * ToolCallingAdvisor 的 conversationHistoryEnabled=true,多轮 tool_use
+         * 时 LLM 能拿到完整 history。之前用 Loom 自定义
+         * {@code LastChunkMessageChatMemoryAdvisor}(order=0, > +300),导致
+         * hasDownstreamMemoryAdvisor=true → ToolCallingAdvisor 关闭内部 history,
+         * 中间轮次的 user 问句和 assistant tool_use 被丢,LLM hallucinated。
+         *
+         * <p>Spring AI 1.x 时代 {@code MessageChatMemoryAdvisor.adviseStream()}
+         * 每个 chunk 都触发 after() 写 chat_memory(已修复,2.0 不再有此 bug)。
+         * 保留 {@code LastChunkMessageChatMemoryAdvisor.java} 文件但不再装配,
+         * 仅作回滚保险 — 如 2.0 默认实现仍写库重复,可即时切回。
          */
         @Bean
-        // 返回自定义 LastChunkMessageChatMemoryAdvisor（只在流式最后一个 chunk
-        // 触发 chatMemory.add），替代 Spring AI 默认 MessageChatMemoryAdvisor（每个 chunk 都写
-        // → chat_memory TOOL 消息多次重复）。
-        public org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor messageChatMemoryAdvisor(JdbcTemplate jdbcTemplate) {
-            return new cn.wubo.spring.ai.loom.agent.memory.LastChunkMessageChatMemoryAdvisor(jdbcTemplate, 0);
+        public org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor messageChatMemoryAdvisor(org.springframework.ai.chat.memory.ChatMemory chatMemory) {
+            return org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor.builder(chatMemory).build();
         }
 
         @ConditionalOnMissingBean(IChat.class)
@@ -557,9 +645,11 @@ public class LoomAgentConfiguration {
                           ISkillStorage skillStorage, IKnowledge knowledge,
                           LoomAgentProperties properties,
                           cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
-                          cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService) {
+                          cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
+                          cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
-                    skillStorage, knowledge, properties, toolCallLogRepository, capabilityService);
+                    skillStorage, knowledge, properties, toolCallLogRepository, capabilityService,
+                    chatUsageService);
         }
 
         // ============== ：loom_tool_call_log 仓储 ==============
@@ -643,21 +733,52 @@ public class LoomAgentConfiguration {
                     try {
                         Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
 
-                        // ：累积 DashScope enable_thinking 模式下的 reasoningContent
-                        // Spring AI DashScope 实测是 incremental（每条 chunk 是当前为止的
-                        // 增量片段），所以得 append 不是覆盖。content 文本也是增量同理。
+                        // 2026-10-01 (thinking-stream A 方案 fix):Spring AI OpenAI SDK 把 reasoningContent
+                        // 累加成「全量文本」emit per chunk(每帧 metadata.reasoningContent 是「截至目前
+                        // 的全部 thinking」,而非增量)。前端 APPEND 模式按 cumulative 输入会重复 N 次。
+                        // 这里 SseController 端算 delta(只发「新增的部分」),与 Anthropic 路径兼容 —
+                        // Anthropic SDK 大多数帧 metadata.reasoningContent=null(delta=null → 不发帧),
+                        // 最后一帧一次性给全量 → delta = 全量 → 前端一次性 append 显示正确。
+                        //
+                        // content 文本同 cumulative(chatResponse.getResult().getOutput().getText() 也是累加),
+                        // 但 **content 必须保持原样发** — 同一会话多消息的 chat 历史/前端渲染状态机依赖
+                        // "text 是全量"语义,改成 delta 会破坏 ChatMemory 持久化与未来历史回放。
                         final StringBuilder reasoningAccum = new StringBuilder();
+                        final java.util.concurrent.atomic.AtomicInteger lastReasoningLen = new java.util.concurrent.atomic.AtomicInteger(0);
 
                         reactor.core.Disposable subscription = chatResponseFlux
                                 .filter(chatResponse -> chatResponse.getResult() != null)
                                 .subscribe(chatResponse -> {
-                                    log.info(" stream NEXT: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
                                     try {
-                                        String reasoningContent = (String) chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
-                                        if (reasoningContent != null && !reasoningContent.isBlank()) {
-                                            reasoningAccum.append(reasoningContent);
+                                        String text = chatResponse.getResult().getOutput().getText();
+                                        Object rcObj = chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
+                                        String fullReasoning = rcObj instanceof String s ? s : null;
+                                        // 算 delta:cumulative 减上次长度,得到本帧新增片段。
+                                        // 不常见边界:length 倒退(理论上不该发生,容错按 "" 处理)
+                                        String reasoningDelta = null;
+                                        if (fullReasoning != null && !fullReasoning.isEmpty()) {
+                                            int last = lastReasoningLen.get();
+                                            if (fullReasoning.length() > last) {
+                                                reasoningDelta = fullReasoning.substring(last);
+                                                lastReasoningLen.set(fullReasoning.length());
+                                            } else if (fullReasoning.length() < last) {
+                                                // Provider 重启 / 流跨回合复用 → 整体重发,不 delta,前端会再次 append
+                                                // (虽然不完美但不该发生,记录日志便于排查)
+                                                log.warn(" stream reasoning length shrunk: {} -> {}", last, fullReasoning.length());
+                                                reasoningDelta = fullReasoning;
+                                                lastReasoningLen.set(fullReasoning.length());
+                                            } else {
+                                                // 长度未变(thinking 已完成,provider 仍发同长度帧)→ 空 delta
+                                                reasoningDelta = "";
+                                            }
+                                            reasoningAccum.append(reasoningDelta);
                                         }
-                                        emitter.send(new ChatResponseRecord(chatResponse.getResult().getOutput().getText(), reasoningContent), MediaType.APPLICATION_JSON);
+                                        log.info(" stream NEXT: conv={} textLen={} reasoningAccumLen={} reasoningDeltaLen={}",
+                                                conversationId,
+                                                text == null ? 0 : text.length(),
+                                                reasoningAccum.length(),
+                                                reasoningDelta == null ? -1 : reasoningDelta.length());
+                                        emitter.send(new ChatResponseRecord(text, reasoningDelta), MediaType.APPLICATION_JSON);
                                         // ：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_usage
                                         // (假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
                                         var chatMeta = chatResponse.getMetadata();
@@ -849,10 +970,13 @@ public class LoomAgentConfiguration {
         public ConditionOutcome getMatchOutcome(org.springframework.context.annotation.ConditionContext context,
                                                 org.springframework.core.type.AnnotatedTypeMetadata metadata) {
             ConditionMessage.Builder message = ConditionMessage.forCondition("EmbeddingModelAvailable");
-            // 1) bean 定义已在场 → 确定性通过(allowEagerInit=false,不触发 FactoryBean 初始化)
+            // 1) bean 定义已在场 → 确定性通过(allowEagerInit=true 在 Spring AI 2.x + Spring Boot 4
+            //   下能识别 @TestConfiguration + main-src @Bean 注入的 EmbeddingModel;1.x 时代的
+            //   allowEagerInit=false 在某些场景下会把 FactoryBean 排除掉,导致即使 EmbeddingModel
+            //   已经在测试 app 注册了也无法触发本分支 → h2VectorStore 静默跳过)
             org.springframework.beans.factory.ListableBeanFactory beanFactory = context.getBeanFactory();
             if (beanFactory != null
-                    && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, false).length > 0) {
+                    && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, true).length > 0) {
                 return ConditionOutcome.match(message.because("EmbeddingModel bean definition present"));
             }
             // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)
@@ -1007,6 +1131,30 @@ public class LoomAgentConfiguration {
             return new DefaultHtmlRenderTool(htmlRenderEngine, file,
                     properties.getUsersBasePath(), properties.getRender());
         }
+
+        /**
+         * HTTP 调用工具(RBAC 工具 tool_http,defaultGranted=false)。
+         * 凭据录入走 REST 写面(HttpProfileRouter/HttpSystemRouter via
+         * HttpManagementConfiguration),不暴露给 LLM —— 见 IHttpTool javadoc。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.http.IHttpTool.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.tool.http.IHttpTool defaultHttpTool(LoomAgentProperties properties) {
+            return new cn.wubo.spring.ai.loom.agent.tool.http.DefaultHttpTool(
+                    properties.getUsersBasePath(), properties.getHttp());
+        }
+
+        /**
+         * HTTP 配置写面的授权标记({@code tool_http_manage},defaultGranted=false)。
+         * 零 {@code @Tool} 方法 —— 它不进 LLM tool callback,只让
+         * {@code CapabilityService.listAll()} 能枚举到该组,使 admin 控制台可以授权、
+         * 且 {@code setRoleTools} 全量替换时不会把它抹掉。见 {@code IHttpManageTool} javadoc。
+         */
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.http.IHttpManageTool.class)
+        @Bean
+        public cn.wubo.spring.ai.loom.agent.tool.http.IHttpManageTool httpManageTool() {
+            return new cn.wubo.spring.ai.loom.agent.tool.http.DefaultHttpManageTool();
+        }
     }
 
     /**
@@ -1107,7 +1255,7 @@ public class LoomAgentConfiguration {
         @Bean
         public cn.wubo.spring.ai.loom.agent.subtask.ISubTaskExecutor defaultSubTaskExecutor(
                 @Qualifier("chatClient") ChatClient chatClient,
-                @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor memoryAdvisor,
+                @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.MemoryAdvisor memoryAdvisor,
                 @Qualifier("loomSubTaskExecutor") java.util.concurrent.ExecutorService loomSubTaskExecutor,
                 cn.wubo.spring.ai.loom.agent.mcp.IMcp mcp,
                 // Lazy lookup: the executor ALSO passes a cancel hook back to
@@ -2144,6 +2292,22 @@ public class LoomAgentConfiguration {
                 }
             });
 
+            // 管理员：重置用户密码（不校验旧密码 —— admin 无从得知）。
+            // 目标为 ADMIN 时一律拒绝（DefaultUser.resetPassword 内校验）：
+            // 重置后可登录成对方账号 = 静默接管，比 deleteUser 的"最后一个管理员
+            // 保护"更严格。路由鉴权由 AuthenticationFilter 的 adminPathPatterns 承担。
+            builder.PUT("spring/ai/loom/admin/users/{username}/password", request -> {
+                String username = request.pathVariable("username");
+                cn.wubo.spring.ai.loom.agent.model.ResetPasswordRequest body =
+                        request.body(cn.wubo.spring.ai.loom.agent.model.ResetPasswordRequest.class);
+                try {
+                    user.resetPassword(username, body == null ? null : body.newPassword());
+                    return ServerResponse.ok().body(true);
+                } catch (cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException e) {
+                    return runtimeErrorResponse(e, 400);
+                }
+            });
+
             // 管理员：列出某用户全部会话（含已软删 + content_cleaned 标记）
             builder.GET("spring/ai/loom/admin/users/{username}/conversations", request -> {
                 String username = request.pathVariable("username");
@@ -2349,6 +2513,7 @@ public class LoomAgentConfiguration {
                 JdbcChatMemoryRepository chatMemoryRepository,
                 IUserConversation userConversation,
                 cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory chatReasoningHistory,
+                cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
                 ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository,
@@ -2408,8 +2573,20 @@ public class LoomAgentConfiguration {
                 }
                 // 每轮思考按时间戳就近配对注入 AssistantMessage metadata.thinking,
                 // 前端历史视图填充思考折叠区(无 reasoning 时原样返回,零契约破坏)
-                return ServerResponse.ok().body(chatReasoningHistory.attachThinking(
-                        conversationId, chatMemoryRepository.findByConversationId(conversationId)));
+                var withThinking = chatReasoningHistory.attachThinking(
+                        conversationId, chatMemoryRepository.findByConversationId(conversationId));
+                // 工具调用注入:SPRING_AI_CHAT_MEMORY 无 metadata 列,工具调用不在其中,
+                // 故从 loom_tool_call_log 读出后作为**独立条目**(messageType=TOOL_CALL)
+                // 追加到列表末尾。前端按 createdAt 与消息合并排序渲染,
+                // 使 askUser 卡片 / 子任务 chip 在历史回看时不再消失。
+                //
+                // 用 List<Object> 承载两种形态:Message(既有消息) 与 Map(工具调用条目)。
+                // Jackson 按各自实际类型序列化,Message 仍是 {media,messageType,metadata,text},
+                // 工具条目是 {messageType:TOOL_CALL,toolName,arguments,result,...}。
+                var out = new java.util.ArrayList<Object>(withThinking);
+                out.addAll(cn.wubo.spring.ai.loom.agent.chat.ToolCallHistory.inject(
+                        conversationId, toolCallLogRepository));
+                return ServerResponse.ok().body(out);
             });
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
@@ -4599,8 +4776,13 @@ public class LoomAgentConfiguration {
                     log.warn("/api/features degraded, knowledge=false: {}", e.getMessage());
                     knowledge = false;
                 }
+                // version 从构建产物读（Maven 默认生成的 pom.properties），
+                // 使 pom 成为版本单一真源 —— 前端「关于」弹窗据此显示，
+                // 不再硬编码。读不到时返回 "unknown"。
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
-                        .body(java.util.Map.of("knowledge", knowledge));
+                        .body(java.util.Map.of(
+                                "knowledge", knowledge,
+                                "version", cn.wubo.spring.ai.loom.agent.config.AppVersion.get()));
             });
             return builder.build();
         }

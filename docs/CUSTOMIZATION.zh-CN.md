@@ -222,15 +222,21 @@ spring:
 | **控制内容** | 自动登录判断、用户登录验证、Session Token 管理 |
 
 **接口方法**：
-- `isAutoLogin` — 是否支持自动登录（默认：`true`）
 - `login(UserRequestRecord)` — 验证凭据并返回响应
 - `createToken(username)` — 生成 Session Token 并存入缓存
 - `validateToken(token)` — 从缓存中校验 Session Token
 - `invalidateToken(token)` — 删除 Session Token（登出）
 - `getUsernameByToken(token)` — 从 Session Token 解析用户名
 - `getUsernameByAuthentication(authentication)` — 旧版方法（向后兼容）
+- `getNicknameByUsername(username)` — 解析显示名
+- `isAdmin(username)` — 判断用户类型是否为 `ADMIN`
+- `changePassword(username, oldPassword, newPassword)` — 本人改密；**校验旧密码**
+- `resetPassword(username, newPassword)` — 管理员重置；**不校验旧密码**（管理员无从得知用户的自选密码）。目标为 `ADMIN` 时拒绝。2026-10-07 新增
+- `listAllUsers()` / `createUser(...)` / `deleteUser(username)` — 管理员 CRUD
 
-**默认行为**: `isAutoLogin` 读取 Session Cookie；`login` 在数据库中校验用户并用 BCrypt 哈希密码；Session Token 存储在 Spring Cache（默认 Caffeine）中。
+> **关于自动登录**：`IUser` **没有 `isAutoLogin` 方法**。自动登录是前端职责 —— `app.js` 调用 `POST /spring/ai/loom/user/isAutoLogin` 端点（列在 `auth.excludePathPatterns` 中）来探测是否已存在有效 Session Cookie。
+
+**默认行为**: 自动登录由 Session Cookie 驱动（经上述端点探测）；`login` 在数据库中校验用户并用 BCrypt 哈希密码；Session Token 存储在 Spring Cache（默认 Caffeine）中。
 
 **自定义示例**（实现接口所有方法；下方为最小骨架，演示如何对接外部 IdP 并用内存 `ConcurrentMap` 替代 Spring Cache）：
 
@@ -387,7 +393,7 @@ public IChat customChat(
 | **接口** | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage` |
 | **默认实现** | `DefaultSkillStorage` |
 | **覆盖方式** | 自定义 `@Bean ISkillStorage` |
-| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。审批流：提交 → PENDING，admin 审批通过/拒绝（拒绝必须填评论）；REJECTED 重新提交时旧行归档到 `market_skill_archive` 并新建 PENDING 行；拉取仅允许 APPROVED（否则 403），且拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
+| **控制内容** | 单用户技能列表（`user_skill`）、保存 / 修改 / 按名查询 / 删除 / **`duplicate(sourceName, newName, username)`**（把已有技能复制为新名字）；每次 list/get 时自动把 `role_skill` 同步进 `user_skill`（`ROLE_GRANTED` 条目被锁定）。审批流：提交 → PENDING，admin 审批通过/拒绝（拒绝必须填评论）；REJECTED 重新提交时旧行归档到 `market_skill_archive` 并新建 PENDING 行；拉取仅允许 APPROVED（否则 403），且拒绝覆盖同名 USER_CREATED；已共享的自建不允许删；admin 只看自己 user_skill（无 union view）；与 `ISkillMarketService`、`ISkillRoleAdmin` 配合使用 |
 
 **默认行为**: JDBC 后端存储，使用三张表 —— `user_skill`（用户已装技能）、`role_skill`（绑定到角色的技能，对所有持有该角色的用户自动同步到 `user_skill`）、`market_skill`（技能市场目录，三种状态 —— PENDING / APPROVED / REJECTED —— 走审批流；作者重投的 REJECTED 行归档到 `market_skill_archive`）。`DefaultSkillStorage` 不再读取 yml 配置——`spring.ai.loom.agent.skills.*` 配置项已移除，改由 `V1.0`/`V1.1` Flyway 迁移脚本种子数据，并由管理员在**控制台 → Skill 市场**页面统一管理。
 

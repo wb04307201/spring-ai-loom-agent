@@ -1,0 +1,17 @@
+# git blame 忽略列表
+#
+# 本文件列出「纯格式/纯行尾」类提交 —— 它们不改变代码语义，但会让
+# `git blame` 把所有行都归到这些提交上，掩盖真正的作者信息。
+#
+# 用法（二选一）：
+#   临时：git blame --ignore-revs-file .git-blame-ignore-revs <file>
+#   永久：git config blame.ignoreRevsFile .git-blame-ignore-revs
+#         （GitHub 会自动识别本文件名，网页版 blame 也生效）
+#
+# 只追加，不删改历史条目。
+
+# 规范化 176 个 .java 文件的行尾 CRLF → LF
+# 背景：.gitattributes 的 *.java text eol=lf 规则不重写历史 blob，
+# 规则生效前提交的文件索引里仍是 CRLF，永久显示 modified。
+# 内容零变化（git diff --ignore-cr-at-eol 输出为空）。
+85212f8adaa178a9015b179d1458780622b87635

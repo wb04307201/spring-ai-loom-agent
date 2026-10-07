@@ -588,7 +588,8 @@ class DefaultFileToolTest {
         // 重新创建 tool 以确保新 token 生效
         tool = new DefaultFileTool(fileService, cleanupRoot.getParent().toString(), cfg);
         String result = tool.deleteFileOrDirectory("readme.md", "I_CONFIRM_DELETE", ctx(username));
-        assertTrue(result.contains("需要确认"), "应要求新 token: " + result);
+        assertTrue(result.contains("需要显式确认"), "应要求新 token: " + result);
+        assertFalse(result.contains("PLEASE_DELETE"), "失败消息不得回显期望令牌: " + result);
         String result2 = tool.deleteFileOrDirectory("readme.md", "PLEASE_DELETE", ctx(username));
         assertTrue(result2.contains("已删除"), "新 token 应通过: " + result2);
     }
@@ -598,7 +599,7 @@ class DefaultFileToolTest {
     void deleteFileOrDirectory_requiresConfirmation() {
         assertTrue(Files.exists(tmpRoot.resolve("readme.md")));
         String result = tool.deleteFileOrDirectory("readme.md", null, ctx(username));
-        assertTrue(result.contains("需要确认"), "缺少确认应被拒绝: " + result);
+        assertTrue(result.contains("需要显式确认"), "缺少确认应被拒绝: " + result);
         assertTrue(Files.exists(tmpRoot.resolve("readme.md")), "文件应未被删除");
     }
 
@@ -607,7 +608,7 @@ class DefaultFileToolTest {
     void deleteFileOrDirectory_invalidToken() {
         assertTrue(Files.exists(tmpRoot.resolve("readme.md")));
         String result = tool.deleteFileOrDirectory("readme.md", "Y", ctx(username));
-        assertTrue(result.contains("需要确认"), "Y 已不再接受: " + result);
+        assertTrue(result.contains("需要显式确认"), "Y 已不再接受: " + result);
         assertTrue(Files.exists(tmpRoot.resolve("readme.md")), "文件应未被删除");
     }
 

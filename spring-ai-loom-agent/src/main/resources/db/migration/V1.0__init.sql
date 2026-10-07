@@ -383,13 +383,36 @@ CREATE INDEX idx_user_conv_created ON user_conversation(username, deleted_at, cr
 -- PostProcessor 加了 @DependsOn),所以这里看到的表已是 VARCHAR(36)。全新空库若
 -- 还没发过 chat 请求,该表尚不存在 —— 先防御性建表(Spring AI 同款 schema),再 ALTER。
 
+-- SPRING_AI_CHAT_MEMORY 按 **Spring AI 2.0 的 schema** 建（2026-10-04 订正）。
+--
+-- 背景:本表有两处建表来源 —— 本文件与 Spring AI 自带的
+-- `spring-ai-model-chat-memory-repository-jdbc` 的 schema-h2.sql,后者由
+-- `spring.ai.chat.memory.repository.jdbc.initialize-schema: always` 触发。
+-- **两边都是 CREATE TABLE IF NOT EXISTS,谁先跑谁赢**,所以两边必须给出
+-- 相同的列集合,否则"谁先跑"会决定最终 schema。
+--
+-- 2.0 自带的定义(从 jar 读出):
+--     conversation_id VARCHAR(36) / content / type VARCHAR(10) CHECK(...)
+--     / timestamp / sequence_id BIGINT NOT NULL
+--     + INDEX (conversation_id, sequence_id)
+-- 本仓在此基础上有两处**故意的差异**,V1.0 是二者的超集:
+--   ① conversation_id 加宽到 255(历史 V14:项目用 UUID 串作会话 id,36 不够);
+--   ② CHECK 约束省略 —— H2 上 JdbcChatMemoryRepository 写入的类型集合本就受控,
+--      而历史上曾因 CHECK 与旧数据冲突导致迁移失败,不值得为它冒风险。
+-- ③ sequence_id 与那个联合索引**必须在这里建**:Spring AI 2.0 的
+--    JdbcChatMemoryRepository 用 `ORDER BY sequence_id` 排序,缺列会直接
+--    BadSqlGrammarException(这正是 V2.0 原本要修的问题,但 V2.0 的裸
+--    `ADD COLUMN` 在全新库上会撞上"2.0 已建过带列的表" ⇒ Duplicate column)。
 CREATE TABLE IF NOT EXISTS SPRING_AI_CHAT_MEMORY (
  conversation_id VARCHAR(36) NOT NULL,
  content LONGVARCHAR NOT NULL,
  type VARCHAR(10) NOT NULL,
- timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+ timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ sequence_id BIGINT NOT NULL DEFAULT 0
 );
 ALTER TABLE SPRING_AI_CHAT_MEMORY ALTER COLUMN conversation_id VARCHAR(255);
+CREATE INDEX IF NOT EXISTS SPRING_AI_CHAT_MEMORY_CONVERSATION_ID_SEQUENCE_ID_IDX
+  ON SPRING_AI_CHAT_MEMORY(conversation_id, sequence_id);
 
 
 -- 知识库增加描述字段

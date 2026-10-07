@@ -4,7 +4,7 @@ import cn.wubo.spring.ai.loom.agent.model.AskUserEvent;
 import cn.wubo.spring.ai.loom.agent.model.AskUserOption;
 import cn.wubo.spring.ai.loom.agent.model.ChatResponseRecord;
 import cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -23,7 +23,7 @@ import java.util.concurrent.TimeoutException;
  * 默认实现:推卡片 → future.get(timeout) 阻塞 → 返回答案文本(spec §4 数据流)。
  * <p>
  * 所有失败路径都 return 文本、不抛异常 —— 保住 Flux ON_COMPLETE 让
- * LastChunkMessageChatMemoryAdvisor 落库(ChatMemory 硬约束,spec §0 目标 3)。
+ * MessageChatMemoryAdvisor 落库(ChatMemory 硬约束,spec §0 目标 3)。
  * 阻塞发生在 Spring AI 同步 tool 执行线程(subtask 的 future.get() 同模式先例);
  * D9 应急预案(复验卡顿才启用)见 plan Global Constraints。
  */
@@ -64,7 +64,7 @@ public class DefaultAskUserTool implements IAskUserTool {
         if (optionsJson == null || optionsJson.isBlank()) return List.of();
         // Spring AI 的共享 ObjectMapper:InfrastructureConfiguration 已开
         // ALLOW_COMMENTS / ALLOW_SINGLE_QUOTES(qwen tool-args 容错先例)
-        ObjectMapper om = org.springframework.ai.util.json.JsonParser.getObjectMapper();
+        JsonMapper om = org.springframework.ai.util.json.JsonParser.getJsonMapper();
         try {
             return om.readValue(optionsJson,
                     om.getTypeFactory().constructCollectionType(List.class, AskUserOption.class));

@@ -21,7 +21,11 @@ class SidebarFrontendContractTest {
         assertThat(source).contains("createConversation: \"/spring/ai/loom/user-conversations\"");
         assertThat(source).contains("renameConversation: (id) => `/spring/ai/loom/user-conversations/${id}`");
         assertThat(source).contains("sidebar-item-rename");
-        assertThat(source).contains("if (!state.conversationId) {\r\n      await conversation.createNew();\r\n      if (!state.conversationId) return;");
+        // 2026-10-01:此处原为 \r\n,断言从写下那天就永远不成立 —— app.js 自引入起
+        // (c51d8caf,2026-07-20)一直是纯 LF(实测当时 CRLF=0 / LF=3315,今天同样 CRLF=0)。
+        // 同一断言里的兄弟项(下方 doesNotContain 三条)用的都是 \n,只有这条混进了 \r\n,
+        // 属孤立笔误。改为 \n 后本用例才真正开始守护它想守护的那段逻辑。
+        assertThat(source).contains("if (!state.conversationId) {\n      await conversation.createNew();\n      if (!state.conversationId) return;");
         assertThat(source).contains("if (deleted)");
         assertThat(source).contains("reason === \"forbidden\"");
         assertThat(source).contains("无权重命名该对话");

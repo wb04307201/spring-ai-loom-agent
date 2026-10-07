@@ -212,7 +212,7 @@ Yml switches (kept for backward compatibility — see `LoomAgentProperties`):
 | `maven.enabled` | boolean | `false` | **Deprecated since M3** — no functional effect; `IMavenTool` bean is created when `maven-invoker` is on the classpath (a default lib dependency), visibility RBAC-gated via `role_tool.tool_maven` |
 | `compile.enabled` | boolean | `true` | **Deprecated since M3** — RBAC tool, the `*.enabled` flag has no effect; grant via `role_tool.tool_compile` |
 
-> Pre-existing databases: Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` already cleared any historical RBAC rows for the 6 universal tool groups. New databases start clean. See TOOLS.md §1 for details.
+> Pre-existing databases: a one-time cleanup already cleared any historical RBAC rows for the 6 universal tool groups (it lives in the `V2.4` section at the end of `V1.0__init.sql`; there is no standalone `V2.4__*.sql` file). New databases start clean. See TOOLS.md §1 for details.
 
 ---
 
@@ -231,15 +231,21 @@ The project uses the `@ConditionalOnMissingBean` pattern. All interfaces support
 | **Controls** | Auto-login check, user login validation, session token management |
 
 **Interface methods**:
-- `isAutoLogin` — whether auto-login is supported (default: `true`)
 - `login(UserRequestRecord)` — validate credentials and return response
 - `createToken(username)` — generate session token and store in cache
 - `validateToken(token)` — validate session token against cache
 - `invalidateToken(token)` — remove session token (logout)
 - `getUsernameByToken(token)` — resolve username from session token
 - `getUsernameByAuthentication(authentication)` — legacy method (backward compatibility)
+- `getNicknameByUsername(username)` — resolve display name
+- `isAdmin(username)` — whether the user has type `ADMIN`
+- `changePassword(username, oldPassword, newPassword)` — self-service change; **validates the old password**
+- `resetPassword(username, newPassword)` — admin reset; **no old password required** (an admin cannot know the user's chosen password). Refuses to reset an `ADMIN` target. Added 2026-10-07
+- `listAllUsers()` / `createUser(...)` / `deleteUser(username)` — admin CRUD
 
-**Default behavior**: `isAutoLogin` reads the session cookie; `login` validates the user against the database and BCrypt-hashes passwords; session tokens are stored in Spring Cache (default Caffeine).
+> **Note on auto-login**: there is **no `isAutoLogin` method on `IUser`**. Auto-login is a frontend concern — `app.js` calls the `POST /spring/ai/loom/user/isAutoLogin` endpoint (listed in `auth.excludePathPatterns`) to probe whether a valid session cookie already exists.
+
+**Default behavior**: auto-login is driven by the session cookie (probed via the endpoint above); `login` validates the user against the database and BCrypt-hashes passwords; session tokens are stored in Spring Cache (default Caffeine).
 
 **Customization Example** (override every method; the sample below is a minimal shell that delegates to an upstream IdP and uses an in-memory `ConcurrentMap` instead of Spring Cache):
 
@@ -396,7 +402,7 @@ public IChat customChat(
 | **Interface** | `cn.wubo.spring.ai.loom.agent.skill.ISkillStorage` |
 | **Default** | `DefaultSkillStorage` |
 | **Override** | Custom `@Bean ISkillStorage` |
-| **Controls** | Per-user skill list (`user_skill`), save / patch / get / remove; auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow: submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submits archive the old row to `market_skill_archive` and create a NEW PENDING row; pull requires APPROVED (else 403) and rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` set; admin only sees own `user_skill` (no union view); pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
+| **Controls** | Per-user skill list (`user_skill`), save / patch / get / remove / **`duplicate(sourceName, newName, username)`** (copy an existing skill under a new name); auto-syncs `role_skill` → `user_skill` (locked ROLE_GRANTED entries) on every list/get. Approval flow: submit → PENDING, admin approve/reject (reject comment required); REJECTED re-submits archive the old row to `market_skill_archive` and create a NEW PENDING row; pull requires APPROVED (else 403) and rejects overwriting same-name USER_CREATED; remove blocked when `market_skill_id` set; admin only sees own `user_skill` (no union view); pairs with `ISkillMarketService` and `ISkillRoleAdmin`. |
 
 **Default behavior**: JDBC-backed storage using three tables — `user_skill` (per-user installed skills), `role_skill` (skills granted to a role, automatically locked in `user_skill` for every user holding that role), and `market_skill` (the Skill Market catalog: three statuses — PENDING / APPROVED / REJECTED — under the approval flow; REJECTED rows re-submitted by their author are archived to `market_skill_archive`). `DefaultSkillStorage` does not load any yml fallback anymore; the `spring.ai.loom.agent.skills.*` properties were removed in favor of seeding via the `V1.0`/`V1.1` Flyway migrations and managing through the admin console → Skill Market page.
 

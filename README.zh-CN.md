@@ -11,7 +11,7 @@
 [![fork](https://gitee.com/wb04307201/spring-ai-loom-agent/badge/fork.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-loom-agent)
 [![star](https://img.shields.io/github/stars/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent)
 [![fork](https://img.shields.io/github/forks/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent) 
-![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-17+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-3+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-1+-green.svg)
+![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-25+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-4+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-2+-green.svg)
 
 <table>
   <tr>
@@ -55,13 +55,14 @@
 | 文件 | `IFileTool` | 16 | ✅ universal | `file.*` 限额（`file.enabled` 已废弃） |
 | 技能 | `ISkillTool` | 2 | ✅ universal | —（`skill.enabled` 已废弃） |
 | 知识库 | `IKnowledgeTool` | 1 | ✅ universal | 由 `rag.enabled`（VectorStore）门控 |
-| 子任务 | `ISubTaskTool` | 4 | ✅ universal | `subtask.max-concurrent` / `max-history` |
+| 子任务 | `ISubTaskTool` | 5 | ✅ universal | `subtask.max-concurrent` / `max-history` |
 | 定时 | `IScheduleTool` | 4 | ✅ universal | `flex.schedule.limits.*` |
 | 用户提问 | `IAskUserTool` | 1 | ✅ universal | `askuser.timeoutSeconds` |
 | Git | `IGitTool` | 28 | 🔐 RBAC（`tool_git`） | `git.username` / `git.token` |
 | Maven | `IMavenTool` | 6 | 🔐 RBAC（`tool_maven`） | `maven.mavenHome` 等 |
 | 编译部署 | `ICompileAndDeployTool` | 1 | 🔐 RBAC（`tool_compile`） | `compile.*` |
 | HTML 渲染截图 | `IHtmlRenderTool` | 1 | 🔐 RBAC（`tool_render`）+ classpath 门控 | 引入 playwright 依赖 + 控制台授权 |
+| 外网 HTTP 调用 | `IHttpTool` | 5 | 🔐 RBAC（`tool_http`） | `http.allowed-domains`（fail-closed，空集即全禁） |
 
 > **universal** = 对所有登录用户可见（`@ToolGroup(defaultGranted=true)`）。**RBAC** = 仅当管理员给角色授权该工具组后可见（`role_tool` 表）。旧的 `*.enabled` yml 开关自 M3 起不再控制任何工具 —— 见 [TOOLS.zh-CN.md §1](docs/TOOLS.zh-CN.md)。
 
@@ -77,6 +78,7 @@
 
 | MCP 服务 | 说明 | README |
 |----------|------|--------|
+| `loom-http-mcp` | HTTP 调用能力 — 注册 system/profile、管理端点、并发批量调用（19 个工具 + 4 个资源） | [EN](loom-http-mcp/README.md) · [中文](loom-http-mcp/README.zh-CN.md) |
 | `loom-file-mcp` | 文件系统操作 — 读写、编辑、搜索、目录浏览、删除（14 个工具） | [EN](loom-file-mcp/README.md) · [中文](loom-file-mcp/README.zh-CN.md) |
 | `loom-git-mcp` | 基于 JGit 的 Git 操作 — clone、commit、push、merge、rebase 等（14 个工具） | [EN](loom-git-mcp/README.md) · [中文](loom-git-mcp/README.zh-CN.md) |
 | `loom-maven-mcp` | Maven 构建操作 — 执行、编译、打包、测试、依赖树、校验（6 个工具） | [EN](loom-maven-mcp/README.md) · [中文](loom-maven-mcp/README.zh-CN.md) |
@@ -88,7 +90,7 @@
 <dependency>
  <groupId>io.github.wb04307201</groupId>
  <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.1.48</version>
+ <version>1.2.0</version>
 </dependency>
 ```
 
@@ -187,7 +189,7 @@ spring:
 - **三种来源** — 自建（完全可编辑）/ 市场拉取（重拉刷新内容；已有同名自建时拒绝拉取，需先「复制为我的技能」）/ 角色授权（admin 授权给角色后自动同步，锁定不可改删）
 - **审批流** — 自建技能经 **共享** Tab 提交到市场 → `PENDING` → admin 审批通过 / 拒绝（拒绝必须填评论）；被拒后重新提交会归档旧行并新建审核；同名重新提交仅更新内容，`APPROVED` 永不降级；**我的发布** Tab 查看状态与撤回
 - **角色下发** — admin 把 `APPROVED` 市场技能授权给角色，角色成员的技能列表自动同步；下架级联清理拉取与授权记录，无孤儿
-- **开箱即用** — 库自带 2 个官方技能（STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事）；演示应用首启另种子 6 个演示技能（网络月度事件报告、HTTP 测试等）
+- **开箱即用** — 库自带 3 个官方技能（STAR-IJ 讲清一件事 / 靶心人公式 讲好一个故事 / 交叉评审 多维度并行评审）；演示应用首启另种子 6 个演示技能（网络月度事件报告、HTTP 测试等）
 - **使用** — 聊天输入 `/` 唤起 picker 精准选择技能（覆盖输入框应用）；技能 `content` 内以 `@工具名` 引用 MCP 工具，可用 MCP 由角色授权决定
 
 完整 REST API 见 [docs/API.zh-CN.md → §6 技能管理](docs/API.zh-CN.md#6-技能管理)。
@@ -243,13 +245,13 @@ spring:
 
 | 区块 | 路径 | 用途 |
 |--------------|-----------------------------------|---------------------------------|
-| 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 批量清理会话内容 |
+| 用户管理 | `admin/console.html` | 用户列表 + 分配角色 + 重置密码 + 批量清理会话内容 |
 | 角色管理 | `admin/roles.html` | 业务角色 + 给角色授权 MCP / Skill / 知识库 |
 | 技能市场 | `admin/market-skills.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架 Skill |
 | 知识库市场 | `admin/knowledge-market.html` | 审批通过 / 拒绝 / 直接新建 / 编辑 / 下架知识库 |
 | MCP 描述维护 | `admin/mcps.html` | 给 SDK MCP 工具维护中文描述 |
-| 日志 | `admin/stats.html` | 月度 Token 用量（年 + 月筛选） |
-| 用户详情 | `admin/user.html?username=X` | 单用户视图：6 个月用量 + 角色 + 提问卡片日志 + 会话列表 |
+| 日志 | `admin/stats.html` | Token 用量统计 + 用户对话日志（双 tab） |
+| 用户详情 | `admin/user.html?username=X` | 单用户视图：6 个月用量 + 角色 + 会话列表 |
 | 返回主页 | `/` | 回到聊天首页 |
 
 - **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护——未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401。

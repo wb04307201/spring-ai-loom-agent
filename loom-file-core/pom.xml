@@ -13,6 +13,16 @@
     <name>loom-file-core</name>
     <description>Core file operations library - pure Java, no Spring dependencies</description>
 
-    <!-- 无外部依赖，纯 JDK 实现 -->
+    <dependencies>
+        <!--
+            Test-scope only. The runtime API stays JDK-only (Path / String / Files); the test classpath
+            pulls JUnit 5 + AssertJ from spring-boot-starter-test. Mirrors loom-http-core/pom.xml:44-47.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 
 </project>

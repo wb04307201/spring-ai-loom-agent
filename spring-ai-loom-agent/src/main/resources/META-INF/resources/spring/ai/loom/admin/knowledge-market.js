@@ -174,8 +174,25 @@
       return;
     }
 
+    // 2026-10-06: 支持 ?status=PENDING 过滤 —— console 页的「知识库市场 (N)」
+    // 待审核 chip 跳过来时直接只显示待审条目。
+    const statusFilter = (new URLSearchParams(location.search).get("status") || "")
+      .toUpperCase();
+    const source = statusFilter
+      ? allKnowledge.filter(
+          (m) => String(m.status || "").toUpperCase() === statusFilter,
+        )
+      : allKnowledge;
+    if (source.length === 0) {
+      tableContainer.innerHTML =
+        '<div class="empty-state">当前筛选（' +
+        escapeHtml(statusFilter) +
+        "）下没有条目</div>";
+      return;
+    }
+
     const STATUS_ORDER = { PENDING: 0, APPROVED: 1, REJECTED: 2, WITHDRAWN: 3 };
-    const sorted = [...allKnowledge].sort((a, b) => {
+    const sorted = [...source].sort((a, b) => {
       const sa = STATUS_ORDER[String(a.status || "").toUpperCase()] ?? 99;
       const sb = STATUS_ORDER[String(b.status || "").toUpperCase()] ?? 99;
       if (sa !== sb) return sa - sb;

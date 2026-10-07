@@ -3981,7 +3981,11 @@ textarea::placeholder {
   padding: 7px 18px; font-size: 13px; cursor: pointer;
 }
 .askuser-submit:disabled { opacity: .5; cursor: not-allowed; }
-.askuser-frozen { opacity: .65; }
+/* Freeze 状态:终态卡片仍展示完整选项(E2E 2026-10-01 Issue 8 要求)。
+   原 opacity:.65 太弱,展开回看时复选框视觉上几乎不可见 → 提升到 .82,
+   并保留 pointer-events:none 防止误触提交。 */
+.askuser-frozen { opacity: .82; }
+.askuser-frozen .askuser-card { pointer-events: none; }
 .askuser-frozen .askuser-opt { cursor: default; }
 .askuser-frozen .askuser-opt:hover { border-color: var(--border-color, #e2e8f0); background: none; }
 /* §1 终态折叠摘要行(点击展开回看完整卡片) */
@@ -4194,6 +4198,13 @@ textarea::placeholder {
 
 /* ===== 2026-09-21 chat-ui-ux-fixes ===== */
 
+/* 2026-10-07: 历史回看的工具调用容器 —— 挂在 AI 气泡**内部**
+   （.bot-content 之后、.bubble-actions 之前），而非独立气泡。
+   此前渲染成独立 chat-item，视觉上把一次 AI 回复拆成了两段。 */
+.tool-call-inline {
+  margin: 8px 16px;
+}
+
 /* #1: Sub-task chip */
 .subtask-chip {
   display: inline-flex;
@@ -4218,7 +4229,11 @@ textarea::placeholder {
 .subtask-chip-cancelled { background: #f5f5f5; border-color: #bfbfbf; }
 .subtask-chip-fading { opacity: 0.3; }
 .subtask-chip-prompt { color: var(--text-3, rgba(0,0,0,0.65)); overflow: hidden; text-overflow: ellipsis; }
-.subtask-chip-spinner { animation: spin 1.2s linear infinite; display: inline-block; }
+/* 2026-10-07: 旋转动画只在**运行中**生效。
+   此前是无条件的 —— renderEnd 把图标从 ⏳ 改成 ✓ 后，CSS 动画仍在跑，
+   表现是"执行完了 ✓ 还一直转"；历史 chip 的静态 ✅ 同样在转。 */
+.subtask-chip-running .subtask-chip-spinner { animation: spin 1.2s linear infinite; display: inline-block; }
+.subtask-chip-spinner { display: inline-block; }
 /* 2026-09-22 #1 chip inline 展开:点击 chip 显示完整 prompt / ID / 状态 / elapsed / 错误信息 */
 .subtask-chip-wrapper { display: block; margin: 4px 0; max-width: 100%; }
 .subtask-chip-wrapper .subtask-chip { margin: 0; }

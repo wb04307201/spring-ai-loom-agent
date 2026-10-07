@@ -1,0 +1,38 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Petstore", "version": "1.0.0" },
+  "paths": {
+    "/pets": {
+      "get": {
+        "summary": "List pets",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "summary": "Create pet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/pets/{id}": {
+      "get": {
+        "summary": "Get pet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

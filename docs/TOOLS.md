@@ -24,16 +24,17 @@
 - [11. `IScheduleTool` — Scheduled Tasks](#11-ischeduletool--scheduled-tasks)
 - [12. `IAskUserTool` — AskUser Interactive Question](#12-iaskusertool--askuser-interactive-question)
 - [13. `IHtmlRenderTool` — HTML Render Screenshot](#13-ihtmlrendertool--html-render-screenshot)
-- [14. Replacing a Sub-Tool](#14-replacing-a-sub-tool)
+- [14. `IHttpTool` — Outbound HTTP Calls](#14-ihttptool--outbound-http-calls)
+- [15. Replacing a Sub-Tool](#15-replacing-a-sub-tool)
 
 ---
 
 ## 1. Tool Visibility & RBAC
 
-Since M3, all 10 always-on `I*Tool` beans are **always created** (plus `IHtmlRenderTool`, which is created only when `com.microsoft.playwright:playwright` is on the classpath) regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
+Since M3, all 11 always-on `I*Tool` beans are **always created** (plus `IHtmlRenderTool`, which is created only when `com.microsoft.playwright:playwright` is on the classpath) regardless of any `*.enabled` yml flag. Since M6, visibility is governed by two mechanisms instead:
 
 1. **Universal tools** (annotated `@ToolGroup(defaultGranted=true)`) — visible to every logged-in user. The 7 universal tools are listed below.
-2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 4 RBAC tools are listed below.
+2. **RBAC tools** (annotated `@ToolGroup(defaultGranted=false)`) — visible only after an admin assigns the tool group to a role via the `/admin/roles/{code}/tools` endpoint (persisted in `role_tool` table). The 5 RBAC tools are listed below.
 
 ### Universal tools (always visible)
 
@@ -55,6 +56,7 @@ Since M3, all 10 always-on `I*Tool` beans are **always created** (plus `IHtmlRen
 | `IMavenTool` | `tool_maven` | Arbitrary `mvn` builds; compile/package goes through `ICompileAndDeployTool` |
 | `ICompileAndDeployTool` | `tool_compile` | Spawns Docker containers; runs build pipelines; consumes network & disk resources |
 | `IHtmlRenderTool` | `tool_render` | Spawns a headless Chromium process (~150-300MB RAM per instance); requires the optional `com.microsoft.playwright:playwright` dependency on the classpath — without it the bean is not created at all |
+| `IHttpTool` | `tool_http` | Outbound HTTP calls to arbitrary hosts **plus profile credential injection**; the deployment-level `spring.ai.loom.agent.http.allowed-domains` gate is fail-closed (empty list ⇒ every call is denied) |
 
 ### Why the yml `*.enabled` switches no longer gate tools
 
@@ -62,7 +64,7 @@ The `*.enabled` properties still exist for backward compatibility (e.g. `time.en
 
 ### Migration note: V2.4 cleanup
 
-Flyway `V2.4__cleanup_universal_tools_from_role_tool.sql` ran a one-time `DELETE FROM role_tool WHERE group_name IN ('tool_schedule', 'tool_subtask', 'tool_knowledge', 'tool_time', 'tool_skill', 'tool_file')` to clear any historical RBAC rows for universal groups. Pre-existing databases now reflect M6 semantics: a `role` no longer needs to be granted universal tools for users to see them.
+A one-time `DELETE FROM role_tool WHERE group_name IN ('tool_schedule', 'tool_subtask', 'tool_knowledge', 'tool_time', 'tool_skill', 'tool_file')` cleared any historical RBAC rows for universal groups, so pre-existing databases now reflect M6 semantics: a `role` no longer needs to be granted universal tools for users to see them. (This cleanup lives in the `V2.4` section at the end of `V1.0__init.sql` — there is **no** standalone `V2.4__*.sql` file in the repo, so a fresh database never has those rows to begin with.)
 
 ### Re-enable example (replace with custom implementation)
 
@@ -77,20 +79,21 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 
 ## 2. `IEmbedTool` Overview
 
-`IEmbedTool` is an aggregate marker interface. 11 sub-interfaces each contribute independent `@Tool` methods to the LLM. `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
+`IEmbedTool` is an aggregate marker interface. 13 sub-interfaces each contribute independent `@Tool` methods to the LLM (one of them, `IHttpManageTool`, deliberately declares zero `@Tool` — it is a pure RBAC grant marker). `ICompileAndDeployTool` also extends `IEmbedTool` and is the recommended end-to-end entry point for deployment.
 
 | Sub-Interface | Default Impl | Methods | Visibility | Notes |
 |---------------------------|-----------------------------|---------|------------|------------------------------------------------|
 | `ITimeTool` | `DefaultTimeTool` | 2 | **universal** | Read-only current time / timezone conversion |
-| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); the demo app seeds 6 system skills into the default admin user's `user_skill` (`V1.1` migration) — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
+| `ISkillTool` | `DefaultSkillTool` | 2 | **universal** | Reads `user_skill` (DB); the demo app seeds 6 demo skills into the default admin user's `user_skill` (`V1.2` migration; the 3 official library skills come from `V1.0` + `V2.0`) — yml `skills[]` is no longer read; full skill list is auto-injected into the system prompt (no `listSkills` tool) |
 | `IFileTool` | `DefaultFileTool` | 16 | **universal** | Path-based; root = `{usersBasePath}/{username}/file/` |
 | `IKnowledgeTool` | `DefaultKnowledgeTool` | 1 | **universal** | Tool-based RAG: `searchKnowledge(knowledgeId, query, topK?)`; KB list is auto-injected in the system prompt (no `listKnowledgeBases` tool) |
-| `ISubTaskTool` | `DefaultSubTaskTool` | 4 | **universal** | `start_sub_task` + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
+| `ISubTaskTool` | `DefaultSubTaskTool` | 5 | **universal** | `start_sub_task` + **`start_sub_tasks`(parallel batch)** + `list_sub_tasks` + `cancel_sub_task` + `get_sub_task_history` — delegate/query/cancel/history, strictly scoped by `(username, conversationId)` |
 | `IScheduleTool` | `DefaultScheduleTool` | 4 | **universal** | create/cancel/list/history; fires as a sub-task; persisted to H2 (`loom_scheduled_task`) + restored on restart |
 | `IAskUserTool` | `DefaultAskUserTool` | 1 | **universal** | `askUser` — blocking same-stream question card; excluded from sub-task/scheduled-task tool schema |
 | `IGitTool` | `DefaultGitTool` (JGit 7.6) | 28 | **RBAC** | Requires `role_tool.tool_git` authorization; opt-in via `@Bean IGitTool` replacement |
 | `IMavenTool` | `DefaultMavenTool` (maven-invoker 3.3.0) | 6 | **RBAC** | Requires `role_tool.tool_maven`; needs `maven-invoker` on classpath |
 | `ICompileAndDeployTool` | `DefaultCompileAndDeployTool` | 1 | **RBAC** | Requires `role_tool.tool_compile`; end-to-end `git clone → build → docker run → health check` |
+| `IHttpTool` | `DefaultHttpTool` | 5 | **RBAC** | Calls registered upstream systems over HTTP; requires `role_tool.tool_http`; fail-closed domain allowlist (see §14) |
 | `IHtmlRenderTool` | `DefaultHtmlRenderTool` (Playwright 1.50.0) | 1 | **RBAC** | Requires `role_tool.tool_render`; bean created only when the optional `playwright` dependency is on the classpath; headless-Chromium HTML→PNG screenshots (UI prototypes / data-analysis one-pagers) |
 
 > Each tool's individual section below still lists any remaining yml flags as **legacy** — they are kept for backward compatibility only and have no functional effect since M3.
@@ -454,7 +457,7 @@ Deploy https://gitee.com/example/py-service.git, port 9000, requirements.txt at 
 | **Default** | `DefaultSubTaskTool` |
 | **Override** | Custom `@Bean ISubTaskTool` |
 | **State** | **Universal** — `@ToolGroup(defaultGranted=true)`. Sub-task runs inherit user identity — no privilege escalation surface. |
-| **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
+| **Methods** | `start_sub_task(prompt, systemContext)` — delegate a slice of work to a "sub-model" that runs **synchronously**<br/>**`start_sub_tasks(dimensions, systemContext)` — launch multiple independent sub-tasks in parallel and return one merged result (for multi-dimension scenarios like cross-review)**<br/>`list_sub_tasks()` — list active sub-tasks in the current conversation<br/>`cancel_sub_task(subTaskId)` — cancel a running sub-task in the current conversation<br/>`get_sub_task_history(limit)` — get sub-task history for the current conversation |
 
 The sub-task runs on the dedicated `loomSubTaskExecutor` pool (`ISubTaskExecutor` / `DefaultSubTaskExecutor`). Its tool set is filtered to **exclude self-tools** (`ISubTaskTool` / `IScheduleTool` / `IAskUserTool` — a sub-task cannot ask the user questions; anything needing user decision must be written into the sub-task's returned result and the main conversation decides whether to ask) so a sub-task cannot spawn further sub-tasks or schedules (recursion guard). Sub-task memory is namespaced `{conversationId}--sub--{subTaskId}`.
 
@@ -617,7 +620,83 @@ Playwright per-operation timeouts and the 60s browser-launch timeout); HTML size
 
 ---
 
-## 14. Replacing a Sub-Tool
+## 14. `IHttpTool` — Outbound HTTP Calls
+
+Five RBAC-gated tools that call registered upstream systems. Visibility requires `role_tool.tool_http` — an admin must grant the group via `/admin/roles/{code}/tools`.
+
+### The two HTTP faces
+
+LoomAgent ships **two separate HTTP surfaces**, and the distinction is a security boundary:
+
+| Face | Bean | Group | Exposed to the LLM? | What it does |
+|------|------|-------|----------------------|--------------|
+| **Call surface** | `IHttpTool` | `tool_http` | Yes — 5 `@Tool` methods | Invokes registered systems; may inject profile credentials |
+| **Write surface** | `IHttpManageTool` | `tool_http_manage` | **No — zero `@Tool` methods** | REST CRUD over profiles / systems / endpoints (writes files containing API credentials) |
+
+`IHttpManageTool` contributes **no tools at all**. It exists only so `tool_http_manage` is enumerable in the admin console, and the REST routes it guards are protected by `HttpManageGuard`. Granting `tool_http` does **not** grant `tool_http_manage`, and vice versa.
+
+### Tools
+
+| Tool | Parameters |
+|------|-----------|
+| `invokeEndpoint` | `system`, `method`, `path`, `params?`, `body?`, `bodyRaw?`, `headers?`, `assertions?`, `extract?`, `responseMode?` |
+| `httpBatch` | `operations?`, `concurrency?`, `failPolicy?`, `responseMode?`, `firstN?` |
+| `listEndpoints` | `system`, `tag?`, `source?` |
+| `getEndpoint` | `system`, `method`, `path` |
+| `getRequestHistory` | `system?`, `limit?`, `statusFilter?`, `since?` |
+
+- `assertions` — e.g. `{"type":"statusEquals","value":200}`; supported types are `statusEquals` / `statusIn` / `bodyContains` / `bodyJsonPathEquals` / `bodyJsonPathExists` / `responseTimeMsLt` / `headerEquals`
+- `extract` — JSONPath map, e.g. `{"userId":"$.id"}`
+- `responseMode` — `summary` / `full` / `file`
+- Failures are returned as **strings**, never thrown, so the model receives a usable diagnostic
+
+### Fail-closed domain allowlist
+
+`DefaultHttpTool` **hard-codes** `failClosed = true` (internal-tool mode has no switch). The effective allowlist is `spring.ai.loom.agent.http.allowed-domains`, which **defaults to an empty list**:
+
+```yaml
+spring:
+  ai:
+    loom:
+      agent:
+        http:
+          allowed-domains:
+            - api.example.com
+            - "localhost:6040"   # host:port pins one port
+            - ".example.com"      # leading-dot suffix match
+```
+
+**An empty list denies everything** — out of the box every `invokeEndpoint` returns `DomainNotAllowed`. A profile's own `allowedDomains` can only **narrow** an already-configured global list; it cannot open the gate.
+
+A bare host pattern is port-agnostic. A `host:PORT` pattern must match **both** host and port and deliberately does not fall back to host-only matching. `*.example.com` (star form) is not supported — use the leading-dot `.example.com`.
+
+> **Note**: the standalone `loom-http-mcp` jar defaults `failClosed = false` (see its README) so it can preserve its 1.1.1 behaviour. The embedded tool is always fail-closed.
+
+### Configuration
+
+All seven `spring.ai.loom.agent.http.*` properties bind through `LoomAgentProperties`:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `enabled` | `true` | Gates the REST write surface (`HttpManagementConfiguration`); the LLM tool beans are registered regardless |
+| `allowed-domains` | `[]` | Deployment-level allowlist (above) |
+| `timeoutMs` | `10000` | Per-request timeout |
+| `maxResponseSizeBytes` | `1 MiB` | Above this the response is truncated or spilled to a file |
+| `maxBatchConcurrency` | `10` | Cap on parallel `httpBatch` operations |
+| `maxRequestBodyBytes` | `10 MiB` | Request body cap |
+| `historyMaxEntriesPerSystem` | `1000` | Per-system history retention |
+
+Storage is per-user under `{usersBasePath}/{username}/http/` (`profiles/`, `systems/`, `history/`, `responses/`).
+
+### Known limitations
+
+- `httpBatch` silently drops `assertions` / `extract` / `responseMode` / `timeoutMs` for each operation — only `system` / `method` / `path` / `params` / `body` / `bodyRaw` / `headers` are mapped per op
+- `getEndpoint` returns the whole `System` object rather than a single endpoint schema
+- `listEndpoints` returns manually-registered endpoints only; the OpenAPI-merged segment is not implemented
+
+---
+
+## 15. Replacing a Sub-Tool
 
 Each sub-tool interface is registered with `@ConditionalOnMissingBean`, so a custom implementation wins automatically:
 

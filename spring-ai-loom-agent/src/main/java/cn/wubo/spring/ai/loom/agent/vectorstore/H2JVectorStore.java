@@ -14,13 +14,8 @@ import org.springframework.ai.observation.conventions.VectorStoreSimilarityMetri
 import org.springframework.ai.vectorstore.AbstractVectorStoreBuilder;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.filter.converter.SimpleVectorStoreFilterExpressionConverter;
 import org.springframework.ai.vectorstore.observation.AbstractObservationVectorStore;
 import org.springframework.ai.vectorstore.observation.VectorStoreObservationContext;
-import org.springframework.expression.Expression;
-import org.springframework.expression.ExpressionParser;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -45,12 +40,59 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  *   <li>删:先 DELETE FROM loom_vector_store,后清内存(DB 删 0 行幂等);</li>
  *   <li>搜索:零改动照搬旧实现 —— 不读 DB。</li>
  * </ul>
+ *
+ * <p>Filter 评估语义契约(Spring AI 2.0.1+ 引入,f93d7f01 适配):
+ * 上游删除了 {@code SimpleVectorStoreFilterExpressionConverter}(Spring AI 1.x 的
+ * SpEL 解析路径),换为 package-private
+ * {@code SimpleVectorStoreFilterExpressionEvaluator.evaluate(Filter.Expression, Map)}
+ * 直接 AST 评估 —— 本类静态 init 块反射调用之。新评估器与旧 SpEL 路径有以下 5 处
+ * 行为差异,callers(尤其是 KB UI / 自定义 filter 构造器)需知悉:
+ * <ul>
+ *   <li><b>NULLS FIRST</b>:GT/GTE/LT/LTE 中 {@code null &lt; 任何非 null}(旧 SpEL
+ *       走 {@code ConversionService},行为依类型而异);</li>
+ *   <li><b>数值 promote-to-double</b>:跨类型数字比较先统一 promote 到
+ *       {@code double}(旧 SpEL 保留原类型,可能出现 {@code Integer == Long} 失败);</li>
+ *   <li><b>Date → ISO-8601 UTC</b>:{@link java.util.Date} 过滤器值归一化到
+ *       ISO-8601 UTC 字符串后比较(旧 SpEL 走 {@code Date.compareTo});</li>
+ *   <li><b>引号 key 名去引号</b>:{@code "foo"} / {@code 'foo'} 形式的 key 在
+ *       metadata 查表前先 strip 引号(旧 SpEL 视引号为字面量);</li>
+ *   <li><b>IN/NIN 必须 List</b>:RHS 必须是 {@code List<?>},否则抛(旧 SpEL 接受
+ *       任何 iterable 并尝试转换)。</li>
+ * </ul>
+ * 项目当前 KB UI 经 {@code FilterExpressionBuilder} 产生 unquoted 单 key 字符串/
+ * 数字 metadata filter,<b>5 项差异都不会触发</b>;此处仅作未来维护者契约存档,避免
+ * 误用边角 case 时回归行为难以追溯。
  */
 public class H2JVectorStore extends AbstractObservationVectorStore {
 
     private static final Logger logger = LoggerFactory.getLogger(H2JVectorStore.class);
-    private static final SimpleVectorStoreFilterExpressionConverter FILTER_CONVERTER =
-            new SimpleVectorStoreFilterExpressionConverter();
+
+    // Spring AI 2.0 moved filter evaluation out of the public API surface — the evaluator
+    // (org.springframework.ai.vectorstore.SimpleVectorStoreFilterExpressionEvaluator) is now
+    // package-private. We invoke it via reflection so we don't fork upstream behavior.
+    // Constructed lazily once; constructor + evaluate(Filter.Expression, Map) are looked up by name.
+    private static final Object FILTER_EVALUATOR;
+    private static final java.lang.reflect.Method FILTER_EVALUATE_METHOD;
+    static {
+        Object evaluator;
+        java.lang.reflect.Method method;
+        try {
+            Class<?> clazz = Class.forName("org.springframework.ai.vectorstore.SimpleVectorStoreFilterExpressionEvaluator");
+            java.lang.reflect.Constructor<?> ctor = clazz.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            evaluator = ctor.newInstance();
+            method = clazz.getMethod("evaluate", Filter.Expression.class, Map.class);
+            // The class is package-private; the public `evaluate` method must be marked
+            // accessible too, otherwise Method.invoke() throws IllegalAccessException.
+            method.setAccessible(true);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(
+                    "Spring AI 2.0 removed public API for Filter.Expression evaluation; "
+                            + "reflective fallback failed", e);
+        }
+        FILTER_EVALUATOR = evaluator;
+        FILTER_EVALUATE_METHOD = method;
+    }
 
     static final String UPSERT_SQL =
             "MERGE INTO loom_vector_store (document_id, content, metadata_json, embedding, dim, score) "
@@ -67,7 +109,6 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
     // Ordered list of document IDs -- index matches JVector graph node index
     private final List<String> documentIds = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, VectorFloat<?>> embeddingMap = new ConcurrentHashMap<>();
-    private final ExpressionParser expressionParser;
     private final VectorizationProvider vectorizationProvider;
     private volatile List<VectorFloat<?>> currentVectors = List.of();
     @SuppressWarnings("rawtypes")
@@ -83,7 +124,6 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
         this.efConstruction = builder.efConstruction;
         this.efSearch = builder.efSearch;
         this.similarityFunction = builder.similarityFunction;
-        this.expressionParser = new SpelExpressionParser();
         this.vectorizationProvider = VectorizationProvider.getInstance();
         createNewIndex();
     }
@@ -423,14 +463,11 @@ public class H2JVectorStore extends AbstractObservationVectorStore {
         if (filterExpression == null) {
             return true;
         }
-        StandardEvaluationContext context = new StandardEvaluationContext();
-        context.setVariable("metadata", document.getMetadata());
-        String spelExpression = FILTER_CONVERTER.convertExpression(filterExpression);
-        logger.debug("[H2Vector] SpEL filter: '{}' on metadata: {}", spelExpression, document.getMetadata());
-        Expression expression = expressionParser.parseExpression(spelExpression);
-        Boolean result = expression.getValue(context, Boolean.class);
-        logger.debug("[H2Vector] SpEL result: {} for docId={}", result, document.getId());
-        return result != null && result;
+        try {
+            return (boolean) FILTER_EVALUATE_METHOD.invoke(FILTER_EVALUATOR, filterExpression, document.getMetadata());
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Filter evaluation failed for expression=" + filterExpression, e);
+        }
     }
 
     private String getDocIdByNodeIndex(int nodeIndex) {

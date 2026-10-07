@@ -8,7 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -36,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * dispatch 路由 (T6 #4 起 v1 skill 路由 bean 已全部退役, v2 是唯一注册者)。
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate
 @DisplayName("Skill List Dispatch IT — FU-4 v1 退役后 v2 Page handler 胜出")
 class SkillListDispatchIT {
 

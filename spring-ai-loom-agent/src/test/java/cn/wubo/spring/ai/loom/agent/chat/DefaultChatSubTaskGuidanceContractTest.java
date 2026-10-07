@@ -47,7 +47,8 @@ class DefaultChatSubTaskGuidanceContractTest {
                 mock(IKnowledge.class),
                 properties,
                 mock(IToolCallLogRepository.class),
-                mock(CapabilityService.class));
+                mock(CapabilityService.class),
+                mock(cn.wubo.spring.ai.loom.agent.token.ChatUsageService.class));
         buildDynamicSystemPrompt = DefaultChat.class.getDeclaredMethod(
                 "buildDynamicSystemPrompt", String.class, List.class);
         buildDynamicSystemPrompt.setAccessible(true);

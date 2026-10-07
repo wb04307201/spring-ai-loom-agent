@@ -10,6 +10,36 @@ import { sanitizeHtml } from "./markdown-renderer.js";
 
 // ===================== §1 Constants & Configuration =====================
 const API_PREFIX = "";
+
+/**
+ * 「关于」弹窗的内容 —— 单一真源，改这里即可（不必动 showAboutModal）。
+ *
+ * - `version` 留空表示**从后端读**（`/api/features` 的 `version` 字段，
+ *   后端从构建产物 `pom.properties` 取，故 pom 是唯一真源 —— 改 pom 即生效）。
+ *   仅当需要覆盖后端值时才填这里。
+ * - `description` / `links` 是自定义文案，按需替换。
+ * - 空字符串 / 空数组的字段会自动跳过渲染（不会留空白块）。
+ */
+const ABOUT_INFO = {
+  name: "灵梭 · Spring AI LoomAgent",
+  tagline: "开箱即用的 Spring AI 对话应用",
+  version: "", // 空 = 用后端读到的构建版本
+  stack: "Spring Boot 4.x · Spring AI 2.x · JDK 25 · H2",
+  description:
+    "一个 Spring Boot 自动配置库 —— 引一个依赖，即可为你的 Spring AI 应用获得" +
+    "完整的对话界面与平台能力：\n\n" +
+    "· 流式对话（推理过程折叠、多模态图文混合输入）\n" +
+    "· RAG 知识库（Tika 解析 + 内置 H2 向量库）\n" +
+    "· MCP 工具集成 + 技能市场（Prompt 模板，含审批流）\n" +
+    "· 子任务 / 定时任务 / 交互式提问\n" +
+    "· RBAC 权限与可视化管理控制台\n\n" +
+    "所有组件均以「接口 + 默认实现」提供，可整体替换。",
+  links: [
+    { label: "Gitee", url: "https://gitee.com/wb04307201/spring-ai-loom-agent" },
+    { label: "GitHub", url: "https://github.com/wb04307201/spring-ai-loom-agent" },
+  ],
+};
+
 const API = {
   autoLogin: "/spring/ai/loom/user/isAutoLogin",
   login: "/spring/ai/loom/user/login",
@@ -885,6 +915,7 @@ const auth = {
  ${isAdmin ? '<a class="user-menu-item" href="/spring/ai/loom/admin/console.html">控制台</a>' : ""}
  <a class="user-menu-item" id="user-menu-usage">我的用量</a>
  <a class="user-menu-item" id="user-menu-change-password">修改密码</a>
+ <a class="user-menu-item" id="user-menu-about">关于</a>
  <a class="user-menu-item user-menu-item-danger" id="user-menu-logout">登出</a>
  </div>
  </div>
@@ -913,6 +944,14 @@ const auth = {
         e.preventDefault();
         dropdown.style.display = "none";
         this.showUsageModal();
+      });
+    }
+    const about = document.getElementById("user-menu-about");
+    if (about) {
+      about.addEventListener("click", (e) => {
+        e.preventDefault();
+        dropdown.style.display = "none";
+        this.showAboutModal();
       });
     }
     const logout = document.getElementById("user-menu-logout");
@@ -1022,6 +1061,91 @@ const auth = {
   },
 
   /** 显示"我的用量"模态框（本月 token 用量） */
+  /**
+   * 「关于」模态框。
+   *
+   * <p>内容分两层：
+   * <ul>
+   *   <li><b>自动读取</b>：版本 / 技术栈 / 当前登录用户（后者取自 state，无需额外请求）</li>
+   *   <li><b>自定义文案</b>：见 {@link ABOUT_INFO}，改那里即可，不必动本方法</li>
+   * </ul>
+   */
+  showAboutModal() {
+    // 版本优先级：ABOUT_INFO.version（手动覆盖）> 后端 features.version（构建产物）> 「未知」
+    const version =
+      ABOUT_INFO.version ||
+      (state.features && state.features.version) ||
+      "未知";
+
+    let modal = document.getElementById("about-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "about-modal";
+      modal.className = "modal-overlay";
+      modal.innerHTML = `
+        <div class="modal-content" style="max-width: 520px;">
+          <div class="modal-header">
+            <h3>关于</h3>
+            <div class="close-button" id="about-modal-close">&times;</div>
+          </div>
+          <div class="modal-body" style="padding: 24px 32px;">
+            <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 18px;">
+              <img src="/static/logo.png" alt="logo" style="width: 48px; height: 48px;" />
+              <div>
+                <div style="font-size: 18px; font-weight: 600;">${escapeHtml(ABOUT_INFO.name)}</div>
+                <div style="font-size: 12px; color: var(--text-muted);">${escapeHtml(ABOUT_INFO.tagline)}</div>
+              </div>
+            </div>
+
+            <div id="about-custom-block"></div>
+
+            <div style="margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted); line-height: 1.9;">
+              <div><strong>版本</strong>：${escapeHtml(version)}</div>
+              <div><strong>技术栈</strong>：${escapeHtml(ABOUT_INFO.stack)}</div>
+            </div>
+
+            <div id="about-links" style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-btn" id="about-modal-ok">关闭</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      // 自定义文案块（有内容才渲染）
+      const custom = document.getElementById("about-custom-block");
+      if (ABOUT_INFO.description) {
+        custom.innerHTML =
+          '<div style="font-size: 13px; line-height: 1.8; color: var(--text-secondary, #475569); white-space: pre-wrap;">' +
+          escapeHtml(ABOUT_INFO.description) +
+          "</div>";
+      }
+
+      // 链接（有才渲染）
+      const links = document.getElementById("about-links");
+      links.innerHTML = (ABOUT_INFO.links || [])
+        .filter((l) => l && l.url && l.label)
+        .map(
+          (l) =>
+            '<a class="user-link" href="' +
+            escapeHtml(l.url) +
+            '" target="_blank" rel="noopener noreferrer">' +
+            escapeHtml(l.label) +
+            "</a>",
+        )
+        .join("");
+
+      const close = () => (modal.style.display = "none");
+      document.getElementById("about-modal-close").addEventListener("click", close);
+      document.getElementById("about-modal-ok").addEventListener("click", close);
+      // 点遮罩关闭（点内容区不关）
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) close();
+      });
+    }
+    modal.style.display = "flex";
+  },
+
   async showUsageModal() {
     let modal = document.getElementById("usage-modal");
     if (!modal) {
@@ -1224,6 +1348,9 @@ const ui = {
  </div>
  </div>`;
     this.mainContent.appendChild(item);
+    // 记录最近一个 AI 气泡的 .bubble —— 历史渲染时 TOOL_CALL 条目要挂进它内部
+    // （而非新建独立气泡），见 renderMessages 的 TOOL_CALL 分支。
+    this._lastBotBubble = item.querySelector(".bubble");
     this.scrollToBottom();
   },
 
@@ -1234,6 +1361,9 @@ const ui = {
     this._currentOriginEl = null;
     this._currentActionsEl = null;
     this._currentBubbleId = null;
+    // 必须一并重置 —— clearChat() 已把 DOM 清空，若仍指向旧气泡（游离节点），
+    // 后续 TOOL_CALL 会 append 到看不见的元素上（静默丢失）。
+    this._lastBotBubble = null;
     if (!messages || messages.length === 0) return;
     for (const msg of messages) {
       const role = msg.messageType || msg.role || msg.getMessage?.();
@@ -1265,6 +1395,23 @@ const ui = {
         // Show actions for historical messages
         const actions = document.getElementById("actions-" + id);
         if (actions) actions.style.display = "";
+      } else if (role === "TOOL_CALL") {
+        // 工具调用条目（后端从 loom_tool_call_log 注入）。
+        //
+        // 挂载位置：**上一个 AI 气泡内部**（.bot-content 之后、.bubble-actions 之前），
+        // 而非新建独立气泡 —— 与实时渲染一致（实时也是 bubble.appendChild），
+        // 也符合「一次 AI 回复 = 一个气泡」的心智模型。
+        // 此前渲染成独立 chat-item，视觉上把一次回复拆成了两段。
+        if (window.ToolCallRenderer) {
+          const host = this._lastBotBubble || this.mainContent;
+          const node = document.createElement("div");
+          node.className = "tool-call-inline";
+          node.innerHTML = window.ToolCallRenderer.render(msg);
+          const actions = host.querySelector(".bubble-actions");
+          if (actions) host.insertBefore(node, actions);
+          else host.appendChild(node);
+          window.ToolCallRenderer.bindInteractions(node);
+        }
       }
     }
   },
@@ -1554,12 +1701,17 @@ const conversation = {
       text.style.removeProperty("display");
       actions.style.removeProperty("display");
     };
-    const save = async () => {
+    // focusOnEmpty=false 用于失焦路径：此时用户已经把焦点移到别处，
+    // 再 focus() 抢回焦点会打断他的下一次点击。
+    const save = async ({ focusOnEmpty = true } = {}) => {
       if (completed) return;
       const title = input.value.trim();
       if (!title) {
         showToast("对话名称不能为空", "warning");
-        input.focus();
+        // Enter 路径把焦点留在输入框继续编辑；失焦路径保持用户已经点走的位置，
+        // 直接退出编辑态，不制造「输入框又弹回来」的错觉。
+        if (focusOnEmpty) input.focus();
+        else cancel();
         return;
       }
       completed = true;
@@ -1590,7 +1742,9 @@ const conversation = {
       }
     });
     input.addEventListener("blur", () => {
-      if (!completed) cancel();
+      // 失焦即保存：用户改完名直接点别处是常见路径，静默丢弃编辑是数据丢失。
+      // Esc 走 cancel() 置 completed=true，到这里短路，不受影响。
+      if (!completed) save({ focusOnEmpty: false });
     });
   },
 
@@ -4612,26 +4766,46 @@ const mcp = {
     );
   },
 
-  /** Read persisted selection; returns null if missing/corrupt. */
+  /** Read persisted selection; returns null if missing/corrupt.
+   *  v2 schema = `{toolGroups: [...], mcps: [...]}`;v1 schema = `[...]`(仅 MCP ids,
+   *  E2E 2026-10-01 Issue 3 修复前遗物 — 只持久化 selectedMcps,reload 后 LOCAL 默认勾选丢失)。
+   *  返回统一形状 `{toolGroups, mcps}`,v1 schema 解析时 toolGroups=[] 触发 fallback。
+   */
   _loadPersisted() {
     try {
       const raw = localStorage.getItem(this._storageKey());
       if (!raw) return null;
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr)
-        ? arr.filter((s) => typeof s === "string")
-        : null;
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.toolGroups) && Array.isArray(parsed.mcps)) {
+        return {
+          toolGroups: parsed.toolGroups.filter((s) => typeof s === "string"),
+          mcps: parsed.mcps.filter((s) => typeof s === "string"),
+        };
+      }
+      // v1 schema 兼容:纯数组视为历史 MCP 列表(Issue 3 修复前唯一持久化对象)
+      if (Array.isArray(parsed)) {
+        return {
+          toolGroups: [],
+          mcps: parsed.filter((s) => typeof s === "string"),
+        };
+      }
+      return null;
     } catch (_) {
       return null;
     }
   },
 
-  /** Persist current selection. */
+  /** Persist current selection (v2 schema — toolGroups + mcps 双轨制)。
+   *  v2 起 LOCAL + MCP 都持久化,避免旧版"只存 MCP → reload 后 LOCAL 默认勾选丢失"的 bug。
+   */
   _savePersisted() {
     try {
       localStorage.setItem(
         this._storageKey(),
-        JSON.stringify(state.selectedMcps),
+        JSON.stringify({
+          toolGroups: state.selectedToolGroups,
+          mcps: state.selectedMcps,
+        }),
       );
     } catch (_) {
       // localStorage may be disabled (private mode, quota) — fail silently
@@ -4776,16 +4950,29 @@ const mcp = {
         // id 会自动剔除,UI 也不再出现 "checked + disabled" 死锁态。
         const toolIds = data.filter((c) => c.type === "LOCAL" && c.effectiveEnabled === true).map((c) => c.id);
         const mcpIds = data.filter((c) => c.type === "MCP" && c.effectiveEnabled === true).map((c) => c.id);
+        // E2E 2026-10-01 Issue 3:角色授权的 RBAC LOCAL tool 默认勾选必须由服务端
+        // role_tool.default_enabled 透传到 picker,而不是"全勾"。
+        const defaultToolIds = data
+          .filter((c) => c.type === "LOCAL" && c.effectiveEnabled === true && c.defaultEnabled === true)
+          .map((c) => c.id);
         const persisted = this._loadPersisted();
-        if (persisted && persisted.length > 0) {
-          state.selectedToolGroups = persisted.filter((n) => toolIds.includes(n));
-          state.selectedMcps = persisted.filter((n) => mcpIds.includes(n));
+        // v2 schema:peristed.toolGroups / persisted.mcps 都是数组,可独立判断是否有过 LOCAL 记录
+        const hasToolHistory = persisted && Array.isArray(persisted.toolGroups) && persisted.toolGroups.length > 0;
+        const hasMcpHistory = persisted && Array.isArray(persisted.mcps) && persisted.mcps.length > 0;
+        if (hasToolHistory || hasMcpHistory) {
+          // 恢复用户上次的勾选(v1 schema 兼容:toolGroups=[] 时走 defaultToolIds fallback)
+          state.selectedToolGroups = hasToolHistory
+            ? persisted.toolGroups.filter((n) => toolIds.includes(n))
+            : defaultToolIds.slice();
+          state.selectedMcps = hasMcpHistory
+            ? persisted.mcps.filter((n) => mcpIds.includes(n))
+            : mcpIds.slice();
         } else {
-          // 默认:effectiveEnabled=true 的全勾(角色授权的都能用)
-          state.selectedToolGroups = toolIds.slice();
+          // 首次 / 无持久化:LOCAL 用服务端 defaultEnabled,MCP 保持"角色授权的全勾"行为
+          state.selectedToolGroups = defaultToolIds.slice();
           state.selectedMcps = mcpIds.slice();
         }
-        // 重新持久化一次,顺手清理残留(下次 refresh 就干净了)
+        // 重新持久化一次,顺手把 v1 schema 升级到 v2,清理残留(下次 refresh 就干净了)
         this._savePersisted();
         return;
       }

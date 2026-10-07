@@ -55,6 +55,25 @@ public interface IUser {
     void changePassword(String username, String oldPassword, String newPassword);
 
     /**
+     * admin 重置他人密码（**不校验旧密码** —— admin 无从得知）。
+     *
+     * <p>与 {@link #changePassword} 的分工：后者是"本人改密"（校验旧密码），
+     * 本方法是"管理员重置"（信任调用方已通过 admin 路由鉴权）。
+     * 忘密码时若没有本方法，唯一办法是删号重建 —— 会丢会话/技能/角色。
+     *
+     * <p><b>权限边界</b>：目标用户为 ADMIN 时**一律拒绝**（即使系统有多个 admin）。
+     * 理由：重置后可登录成对方账号，等价于静默接管；而删除是可察觉的破坏。
+     * 故比 {@link #deleteUser} 的"最后一个管理员保护"更严格 —— 删除只保护最后一个，
+     * 重置一个都不许。
+     *
+     * @param username    目标用户名
+     * @param newPassword 新密码明文（至少 6 位），存储时 BCrypt 加盐
+     * @throws cn.wubo.spring.ai.loom.agent.excepton.LoomAgentRuntimeException
+     *         用户不存在 / 目标是管理员 / 密码不合规
+     */
+    void resetPassword(String username, String newPassword);
+
+    /**
      * List all users (admin only — guard at route level)
      */
     List<UserInfo> listAllUsers();

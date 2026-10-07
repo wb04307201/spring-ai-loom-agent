@@ -20,15 +20,18 @@
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-zhipuai</artifactId>-->
 <!--        </dependency>-->
-        <dependency>
-            <groupId>com.alibaba.cloud.ai</groupId>
-            <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
-            <version>1.1.2.3</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>com.alibaba.cloud.ai</groupId>-->
+<!--            <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>-->
+<!--            <version>1.1.2.3</version>-->
+<!--        </dependency>-->
 <!--        <dependency>-->
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-ollama</artifactId>-->
 <!--        </dependency>-->
+        <!-- 2026-10-01: 切换到 OpenAI SDK + DashScope OpenAI 兼容端点,验证流式 thinking
+             (Anthropic SDK 2.0.1 内部 buffer 了 thinking_delta,只在流末尾 emit 一次;
+             OpenAI SDK 通过 metadata.reasoningContent 逐帧 emit,见 docs/notes/2026-10-01-thinking-stream.md) -->
 <!--        <dependency>-->
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-model-anthropic</artifactId>-->
@@ -50,19 +53,51 @@
 <!--            <groupId>org.springframework.ai</groupId>-->
 <!--            <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>-->
 <!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>org.springframework.ai</groupId>-->
-<!--            <artifactId>spring-ai-starter-model-openai</artifactId>-->
-<!--        </dependency>-->
+        <!-- 2026-10-01: 让 test app 也能演示 renderHtmlFile 工具(IFile + Playwright 触发 bean 创建)
+             让 model 在 chat 里实际跑通 renderHtmlFile → viewFileUrl 流程,验证 Bug #5 重构后
+             工具间协作是否正常。Playwright Chromium 首次运行会下载 ~150MB 浏览器到本地缓存,
+             后续运行复用缓存。详见 docs/provision-chromium.sh(D8/§2 镜像 provision 替代方案)。 -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.50.0</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- lib 的 playwright 是 optional(不传递);IT(HtmlRenderEngineIT)要真跑 Chromium,显式引入 -->
+        <!-- Spring Boot 4 split web-test utilities into a separate module:
+             org.springframework.boot.test.web.client.TestRestTemplate moved to
+             org.springframework.boot.resttestclient.* (FQN may change in 4.2; the
+             class is still TestRestTemplate but lives in spring-boot-resttestclient). -->
         <dependency>
-            <groupId>com.microsoft.playwright</groupId>
-            <artifactId>playwright</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-resttestclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- TestRestTemplateTestAutoConfiguration needs RestTemplateBuilder from
+             spring-boot-restclient (moved out of spring-boot-web in Spring Boot 4). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-restclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- HTTP 工具链确定性测试用的假上游。wiremock-standalone 是单 jar 包,
+             内置 Jetty 12 + ee10-servlet,避开了 split-jar(3.5.4)里
+             jetty-ee10-servlet:12.0.8 与 jetty-util:12.1.12 的 API 版本错配
+             (NoSuchMethodError: Environment.ensure)。loom-http-core 用同款依赖、
+             已实测可跑。 -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.5.4</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -79,7 +114,19 @@
                          SyncMcp 跳过该 client（页面表现为该 MCP 缺席）。
                          强制 file.encoding=UTF-8 规避（JDK 18+ 默认 UTF-8 无此问题；
                          打包 jar 运行需同样加 -Dfile.encoding=UTF-8）。 -->
-                    <jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>
+                    <!-- Java 17 在中文 Windows 上默认字符集是 GBK；MCP SDK 0.18.x 的
+                         StdioClientTransport 读 MCP 服务器 stdout 用平台默认字符集（写侧才是显式 UTF-8），
+                         含非 ASCII 字符的 MCP 工具响应（如 mcp-server-chart 的 × / 弯引号）会被 GBK
+                         解码破坏 JSON 结构 → JsonParseException → 响应被丢弃 → listTools 20s 超时 →
+                         SyncMcp 跳过该 client（页面表现为该 MCP 缺席）。
+                         强制 file.encoding=UTF-8 规避（JDK 18+ 默认 UTF-8 无此问题；
+                         打包 jar 运行需同样加 -Dfile.encoding=UTF-8）。
+
+                         2026-09：api.minimaxi.com 的 TLS 证书 CRL/OCSP 检查在 Windows 上
+                         CRYPT_E_REVOCATION_OFFLINE（JDK 走 OCSP 失败回退 CRL，CRL endpoint 也连不通）。
+                         关掉 CRL/OCSP 检查（仅关掉过期检查不影响证书签名验证）。
+                         Claude Code (Node.js) 默认就不做 OCSP 检查，所以同样的 URL 能通。 -->
+                    <jvmArguments>-Dfile.encoding=UTF-8 -Dcom.sun.security.enableCRLDP=false -Dcom.sun.net.ssl.checkRevocation=false</jvmArguments>
                 </configuration>
             </plugin>
         </plugins>

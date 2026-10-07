@@ -14,7 +14,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.test.context.TestPropertySource;
@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 对着真实应用 DataSource 手动接线(mock VectorStore 退位真实 bean,避免
  * DashScope 网络调用 —— ChatTest/SubTask IT 同款先例)。
  */
-@MockBean(VectorStore.class)
+@MockitoBean(types = VectorStore.class)
 @SpringBootTest(classes = LoomAgentTestApplication.class)
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE",

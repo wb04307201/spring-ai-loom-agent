@@ -25,7 +25,8 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-advisors-vector-store</artifactId>
+            <artifactId>spring-ai-vector-store-advisor</artifactId>
+            <version>${spring-ai.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -55,6 +56,13 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
         </dependency>
+        <!-- Spring Boot 4.x moved Flyway auto-configuration out of spring-boot-autoconfigure
+             into a separate spring-boot-flyway module (package: org.springframework.boot.flyway.*) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+            <version>${spring-boot.version}</version>
+        </dependency>
         <dependency>
             <groupId>io.github.wb04307201</groupId>
             <artifactId>file-view-spring-boot-starter</artifactId>
@@ -76,7 +84,7 @@
             <artifactId>maven-invoker</artifactId>
         </dependency>
         <!-- HTML 渲染截图工具(IHtmlRenderTool)依赖。optional:消费者不引入 →
-             HtmlRenderEngine / IHtmlRenderTool bean 因 @ConditionalOnClass 不创建(镜像 maven-invoker 先例) -->
+             HtmlRenderEngine / IHtmlRenderTool bean 因 @ConditionalOnClass 不创建(镜像 maven-invoker 先例)。 -->
         <dependency>
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
@@ -89,6 +97,13 @@
         <dependency>
             <groupId>io.github.wb04307201</groupId>
             <artifactId>loom-file-core</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <!-- 内部 HTTP 工具壳:DefaultHttpTool 消费 HttpEngine。HttpConfig/InvokeRequest/
+             BatchRequest 由此传递,Task 7/8 会加入 bean 装配与 REST 写面。 -->
+        <dependency>
+            <groupId>io.github.wb04307201</groupId>
+            <artifactId>loom-http-core</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
         <dependency>

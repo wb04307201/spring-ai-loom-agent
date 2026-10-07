@@ -12,7 +12,8 @@ import java.nio.file.Paths;
  * ├── datasource/                   ← 全局 H2
  * └── users/{username}/             ← usersBasePath（默认 {loomHome}/users）
  *     ├── file/                     ← 上传 + file/git/maven/render 工具沙箱根
- *     └── compile-workspaces/       ← 编译部署 workspace（成功即删）
+ *     ├── compile-workspaces/       ← 编译部署 workspace（成功即删）
+ *     └── http/                     ← HTTP profile / system / history 存储根
  * </pre>
  *
  * <p>路径双轨制：主库（多租户嵌入）一切用户路径经本类从 usersBasePath 派生，
@@ -39,6 +40,9 @@ public final class LoomPaths {
 
     /** 用户树下的目录名：compile workspace 子目录。 */
     public static final String COMPILE_WORKSPACES_SUBDIR = "compile-workspaces";
+
+    /** 用户树下的目录名：HTTP profile / system / history 存储根。 */
+    public static final String HTTP_SUBDIR = "http";
 
     /**
      * 归一化 usersBasePath：null/blank → {@link #DEFAULT_USERS_BASE}，否则原样返回。
@@ -69,6 +73,17 @@ public final class LoomPaths {
      */
     public static Path userCompileWorkspacesDir(String usersBasePath, String username) {
         return userRoot(usersBasePath, username).resolve(COMPILE_WORKSPACES_SUBDIR);
+    }
+
+    /**
+     * 用户 HTTP 配置目录：{@code {usersBase}/{username}/http}。
+     * <p>存放该用户的 profile（含凭据）、system 定义、请求历史与 OpenAPI 缓存。
+     * 与 {@code file/}、{@code compile-workspaces/} 平级，file 工具沙箱够不到。
+     *
+     * <p>README/CLAUDE.md 的用户树表需同步补一行（Task 13）。
+     */
+    public static Path userHttpDir(String usersBasePath, String username) {
+        return userRoot(usersBasePath, username).resolve(HTTP_SUBDIR);
     }
 
     /**

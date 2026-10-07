@@ -94,7 +94,7 @@ Part of the [Spring AI LoomAgent](https://github.com/wb04307201/spring-ai-loom-a
 
 | MCP Server | Description |
 |------------|-------------|
-| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | Git operations via JGit (28 tools) |
+| [loom-git-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-git-mcp) | Git operations via JGit (14 tools) |
 | [loom-maven-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-maven-mcp) | Maven build operations (6 tools) |
 | [loom-compile-mcp](https://github.com/wb04307201/spring-ai-loom-agent/tree/main/loom-compile-mcp) | End-to-end deploy pipeline (1 tool) |
 

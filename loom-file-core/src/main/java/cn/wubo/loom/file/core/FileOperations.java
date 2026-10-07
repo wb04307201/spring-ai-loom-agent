@@ -716,8 +716,13 @@ public class FileOperations {
      * @return 操作结果
      */
     public String delete(Path basePath, String path, String confirmToken) {
+        // 2026-10-05 安全修复（trust boundary）：失败文案绝不回显期望令牌。
+        // 本方法是 5 个 MCP server 的 delete_file_or_directory 唯一实现，其返回值
+        // 直接成为 MCP tool result → 进入 LLM 上下文；旧实现回显令牌等于把钥匙交给 LLM。
+        // 回归锁：spring-ai-loom-agent-test 的 DeleteConfirmTokenLeakTest#coreLayer_*。
         if (confirmToken == null || !confirmToken.equals(cfg.deleteConfirmToken())) {
-            return "错误：需要确认。请传入 confirm=\"" + cfg.deleteConfirmToken() + "\" 才能执行删除。";
+            return "错误：删除需要显式确认。请在 confirm 参数中传入配置的 deleteConfirmToken 后重试；"
+                    + "若你不确定该值，请向用户询问，不要猜测或尝试其他删除方式。";
         }
         if (path == null || path.isBlank()) {
             return "错误：path 不能为空";

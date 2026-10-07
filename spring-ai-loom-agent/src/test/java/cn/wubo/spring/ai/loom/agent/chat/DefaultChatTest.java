@@ -87,7 +87,8 @@ class DefaultChatTest {
  when(request.getServerName()).thenReturn("localhost");
  when(request.getServerPort()).thenReturn(8080);
 
- chat = new DefaultChat(chatClient, mcp, List.of(), userConversation, file, skillStorage, knowledge, properties, toolCallLogRepository, new cn.wubo.spring.ai.loom.agent.capability.CapabilityService(List.of(), mcp, roleService));
+ chat = new DefaultChat(chatClient, mcp, List.of(), userConversation, file, skillStorage, knowledge, properties, toolCallLogRepository, new cn.wubo.spring.ai.loom.agent.capability.CapabilityService(List.of(), mcp, roleService),
+                mock(cn.wubo.spring.ai.loom.agent.token.ChatUsageService.class));
  }
 
  @SuppressWarnings("unchecked")

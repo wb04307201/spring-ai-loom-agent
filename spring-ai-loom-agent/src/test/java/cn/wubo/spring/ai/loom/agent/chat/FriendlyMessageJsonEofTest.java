@@ -52,7 +52,8 @@ class FriendlyMessageJsonEofTest {
                 mock(IKnowledge.class),
                 properties,
                 mock(IToolCallLogRepository.class),
-                mock(CapabilityService.class));
+                mock(CapabilityService.class),
+                mock(cn.wubo.spring.ai.loom.agent.token.ChatUsageService.class));
         friendlyMessage = DefaultChat.class.getDeclaredMethod("friendlyMessage", Throwable.class);
         friendlyMessage.setAccessible(true);
     }

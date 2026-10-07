@@ -269,6 +269,26 @@ table.user-table {
   background: #f8fafc;
 }
 
+/* 用户管理页：用户名可点 → 进用户详情页（会话列表 → 对话流水）。
+   修复前用户名列是纯文本，admin 无法从控制台进入详情页 ——
+   「用户列表 → 会话 → 对话日志」这条链路的第一环是断的。 */
+.user-detail-link {
+  color: var(--primary, #4f46e5);
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.15s ease;
+}
+
+.user-detail-link:hover {
+  border-bottom-color: currentColor;
+}
+
+.user-detail-link:focus-visible {
+  outline: 2px solid var(--primary, #4f46e5);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* 已分配角色列:多 badge 横向排列,空状态用 muted 文字 */
 .role-badge-list {
   display: flex;
@@ -332,6 +352,42 @@ table.user-table {
 }
 .user-link:hover {
   text-decoration: underline;
+}
+
+/* 2026-10-07: 日志页 tab 切换（Token 用量 / 对话日志）。
+   下划线式 tab，与 admin 整体风格一致；active 项用主色 + 加粗边框。 */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  margin-bottom: 20px;
+}
+.admin-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.admin-tab:hover {
+  color: var(--primary-color, #4f46e5);
+}
+.admin-tab.active {
+  color: var(--primary-color, #4f46e5);
+  border-bottom-color: var(--primary-color, #4f46e5);
+  font-weight: 600;
+}
+.admin-tab:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: -2px;
+}
+.tab-hint {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--text-muted, #64748b);
 }
 
 .usage-cell {
@@ -419,7 +475,10 @@ table.user-table {
   align-items: center;
   gap: 12px;
   font-size: 12px;
-  text-decoration: none; /* V5.4：bar-row 包了 <a>，去掉下划线 */
+  /* 2026-10-07: 原为 <a>(整行可点跳 user.html),V5.4 曾为此去掉下划线。
+     现改回纯 <div> —— 本 tab 是纯统计视图,用户入口统一在「对话日志」tab。
+     保留 text-decoration/color 是为了兼容将来可能的链接化。 */
+  text-decoration: none;
   color: inherit;
 }
 
@@ -950,6 +1009,22 @@ table.user-table {
   background: #fef2f2;
   color: #b91c1c;
   border: 1px solid #fecaca;
+}
+
+/* 2026-10-06: 待审核 chip 由纯展示改为可点跳转（console 页跨市场待办）。
+   <a> 需抹掉默认下划线/颜色，hover 时加深底色提示可点。 */
+.pending-chip-link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pending-chip-link:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+.pending-chip-link:focus-visible {
+  outline: 2px solid #b91c1c;
+  outline-offset: 2px;
 }
 
 /* M0 T11/T12: 审批状态徽章（admin market 表「状态」列渲染） */
