@@ -14,16 +14,16 @@ const API_PREFIX = "";
 /**
  * 「关于」弹窗的内容 —— 单一真源，改这里即可（不必动 showAboutModal）。
  *
- * - `version` 与 `docs/API.md` 顶部的 `> **Version**:` 保持一致。
- *   注意：`pom.xml` 里是开发版本号（1.0-SNAPSHOT），**不是**发布版本 ——
- *   发布版本以 README 依赖示例 / docs/API.md 标注为准。
- * - `description` / `links` / `tagline` 目前是占位内容，按需替换。
+ * - `version` 留空表示**从后端读**（`/api/features` 的 `version` 字段，
+ *   后端从构建产物 `pom.properties` 取，故 pom 是唯一真源 —— 改 pom 即生效）。
+ *   仅当需要覆盖后端值时才填这里。
+ * - `description` / `links` 是自定义文案，按需替换。
  * - 空字符串 / 空数组的字段会自动跳过渲染（不会留空白块）。
  */
 const ABOUT_INFO = {
   name: "灵梭 · Spring AI LoomAgent",
   tagline: "开箱即用的 Spring AI 对话应用",
-  version: "1.2.0",
+  version: "", // 空 = 用后端读到的构建版本
   stack: "Spring Boot 4.x · Spring AI 2.x · JDK 25 · H2",
   description:
     "一个 Spring Boot 自动配置库 —— 引一个依赖，即可为你的 Spring AI 应用获得" +
@@ -1071,6 +1071,12 @@ const auth = {
    * </ul>
    */
   showAboutModal() {
+    // 版本优先级：ABOUT_INFO.version（手动覆盖）> 后端 features.version（构建产物）> 「未知」
+    const version =
+      ABOUT_INFO.version ||
+      (state.features && state.features.version) ||
+      "未知";
+
     let modal = document.getElementById("about-modal");
     if (!modal) {
       modal = document.createElement("div");
@@ -1094,7 +1100,7 @@ const auth = {
             <div id="about-custom-block"></div>
 
             <div style="margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted); line-height: 1.9;">
-              <div><strong>版本</strong>：${escapeHtml(ABOUT_INFO.version)}</div>
+              <div><strong>版本</strong>：${escapeHtml(version)}</div>
               <div><strong>技术栈</strong>：${escapeHtml(ABOUT_INFO.stack)}</div>
             </div>
 

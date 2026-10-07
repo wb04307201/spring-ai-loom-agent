@@ -118,9 +118,11 @@ class AboutModalContractTest {
                 .as("ABOUT_INFO 的文案字段必须转义")
                 .contains("escapeHtml(ABOUT_INFO.name)")
                 .contains("escapeHtml(ABOUT_INFO.tagline)")
-                .contains("escapeHtml(ABOUT_INFO.version)")
                 .contains("escapeHtml(ABOUT_INFO.stack)")
                 .contains("escapeHtml(ABOUT_INFO.description)");
+        assertThat(body)
+                .as("版本（来自后端或常量）也必须转义 —— 后端值同样不可信")
+                .contains("escapeHtml(version)");
         assertThat(body)
                 .as("链接的 url 与 label 都必须转义")
                 .contains("escapeHtml(l.url)")
@@ -131,26 +133,36 @@ class AboutModalContractTest {
     }
 
     @Test
-    @DisplayName("ABOUT_INFO.version 与 docs/API.md 的版本标注一致")
-    void versionMatchesApiDoc() throws IOException {
+    @DisplayName("版本从后端读（不再硬编码），且有降级链")
+    void versionComesFromBackend() throws IOException {
         String js = source("/META-INF/resources/spring/ai/loom/app.js");
-        Matcher m = Pattern.compile("version:\\s*\"([^\"]+)\"").matcher(js);
-        assertThat(m.find()).as("应能从 ABOUT_INFO 提取 version").isTrue();
-        String jsVersion = m.group(1);
 
-        // docs/ 不在测试 classpath 上，走文件系统。测试 cwd = spring-ai-loom-agent-test
-        java.nio.file.Path apiDocPath = java.nio.file.Paths.get("..", "docs", "API.md");
-        assertThat(apiDocPath)
-                .as("docs/API.md 必须存在（相对 test 模块的 cwd）")
-                .exists();
-        String apiDoc = java.nio.file.Files.readString(apiDocPath, StandardCharsets.UTF_8);
+        // ABOUT_INFO.version 必须为空（空 = 用后端值）
+        Matcher m = Pattern.compile("version:\\s*\"([^\"]*)\"").matcher(js);
+        assertThat(m.find()).as("应能提取 ABOUT_INFO.version").isTrue();
+        assertThat(m.group(1))
+                .as("ABOUT_INFO.version 必须留空 —— 填了就会覆盖后端读到的构建版本，"
+                        + "版本号又变回硬编码")
+                .isEmpty();
 
-        Matcher m2 = Pattern.compile("^> \\*\\*Version\\*\\*: (.+)$", Pattern.MULTILINE).matcher(apiDoc);
-        assertThat(m2.find()).as("docs/API.md 顶部应有版本标注").isTrue();
-        String docVersion = m2.group(1).trim();
+        // 降级链：手动覆盖 > 后端 features.version > 未知
+        assertThat(js)
+                .as("必须优先用后端 features.version")
+                .contains("state.features && state.features.version");
+        assertThat(js)
+                .as("读不到时应有「未知」占位，而非空白")
+                .contains("\"未知\"");
+        assertThat(js)
+                .as("渲染处必须用解析后的 version 变量，而非 ABOUT_INFO.version")
+                .contains("escapeHtml(version)");
+    }
 
-        assertThat(jsVersion)
-                .as("版本号没有后端来源，是人工维护的两处 —— 漂移了很难发现，故用测试锁住")
-                .isEqualTo(docVersion);
+    @Test
+    @DisplayName("测试不得依赖 docs/API.md 的版本标注（版本真源已改为 pom）")
+    void noLongerDependsOnApiDocVersion() throws IOException {
+        String js = source("/META-INF/resources/spring/ai/loom/app.js");
+        assertThat(js)
+                .as("版本真源已改为构建产物（pom），前端不应再与 docs 的人工标注绑定")
+                .doesNotContain("与 docs/API.md 保持一致");
     }
 }

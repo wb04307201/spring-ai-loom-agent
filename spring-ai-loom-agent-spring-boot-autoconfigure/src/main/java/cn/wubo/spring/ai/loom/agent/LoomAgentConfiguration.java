@@ -4776,8 +4776,13 @@ public class LoomAgentConfiguration {
                     log.warn("/api/features degraded, knowledge=false: {}", e.getMessage());
                     knowledge = false;
                 }
+                // version 从构建产物读（Maven 默认生成的 pom.properties），
+                // 使 pom 成为版本单一真源 —— 前端「关于」弹窗据此显示，
+                // 不再硬编码。读不到时返回 "unknown"。
                 return ServerResponse.ok().contentType(MediaType.APPLICATION_JSON)
-                        .body(java.util.Map.of("knowledge", knowledge));
+                        .body(java.util.Map.of(
+                                "knowledge", knowledge,
+                                "version", cn.wubo.spring.ai.loom.agent.config.AppVersion.get()));
             });
             return builder.build();
         }
