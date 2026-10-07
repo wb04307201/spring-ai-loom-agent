@@ -18,10 +18,12 @@
 - [8. 技能工具（@Tool 注解）](#8-技能工具tool-注解)
 - [9. 知识库工具（@Tool 注解）](#9-知识库工具tool-注解)
 - [10. 终端管理](#10-终端管理)
-- [11. Maven 构建工具](#11-maven-构建工具)
- - [11.7 文件工具（@Tool 注解）](#117-文件工具tool-注解)
-- [12. 数据模型](#12-数据模型)
-- [13. 配置属性](#13-配置属性)
+- [11. 子任务与定时任务 API](#11-子任务与定时任务-api)
+- [12. Maven 构建工具](#12-maven-构建工具)
+- [13. 文件工具（@Tool 注解）](#13-文件工具tool-注解)
+- [14. Admin APIs](#14-admin-apis)
+- [15. 数据模型](#15-数据模型)
+- [16. 配置属性](#16-配置属性)
 
 ---
 
@@ -204,6 +206,7 @@ Accept: text/event-stream
 | `content` | string | AI 回复的文本片段 |
 | `reasoningContent` | string | 推理/思考过程（可选） |
 | `askUser` | object \| null | 第 3 组件。`null` = 普通内容帧；非空 = askUser 提问卡片事件（`AskUserEvent`，字段见下表），前端渲染内嵌选择卡片，`askUser` 工具阻塞等待作答 |
+| `subTaskEvent` | object \| null | 第 4 组件。`null` = 普通帧；非空 = 子任务生命周期事件（`SubTaskEvent`），驱动聊天流中实时显示的紧凑 chip |
 
 **`askUser`（`AskUserEvent`）字段**:
 
@@ -1162,7 +1165,94 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 11. Maven 构建工具
+## 11. 子任务与定时任务 API
+
+子任务按会话隔离，其 memory 命名空间为 `{conversationId}--sub--{subTaskId}`；定时任务同样按会话隔离，命名空间为 `loom-sched-{user}-{conv}-{name}`，并持久化到 loom-agent 自管的 `loom_scheduled_task` 表。`flex.schedule.limits` 的约束在 test app 中默认为 **最短间隔 10 分钟 / 最长存活 72 小时 / strict 模式**。
+
+### 11.1 查询子任务限额
+
+```http
+GET /spring/ai/loom/subtask/limits
+```
+
+**响应**：`{ "maxConcurrent": int, "maxHistory": int }`
+
+### 11.2 列出活跃子任务
+
+```http
+GET /spring/ai/loom/subtask/list/active?conversationId=...
+```
+
+### 11.3 列出子任务历史
+
+```http
+GET /spring/ai/loom/subtask/list/history?conversationId=...&limit=...
+```
+
+### 11.4 取消子任务
+
+```http
+POST /spring/ai/loom/subtask/kill/{id}
+```
+
+**权限**：仅限本人。跨会话取消返回 403。
+
+### 11.5 删除子任务历史条目
+
+```http
+DELETE /spring/ai/loom/subtask/history/{id}
+```
+
+### 11.6 查询定时任务限额
+
+```http
+GET /spring/ai/loom/schedule/limits
+```
+
+**响应**：`{ "minInterval": "PT10M", "maxLifetime": "PT72H", "mode": "strict" }`（ISO 8601 时长）
+
+### 11.7 列出全部定时任务
+
+```http
+GET /spring/ai/loom/schedule/list
+```
+
+**响应**：`TaskInfo[]` —— 当前用户可见的全部定时任务。
+
+### 11.8 取消定时任务
+
+```http
+POST /spring/ai/loom/schedule/cancel
+Content-Type: application/json
+
+{ "name": "loom-sched-alice-conv-1-防干眼提醒" }
+```
+
+**注意**：请求体字段是 **`name`**，不是 `taskName`。值必须是**完整的带命名空间名称**（由 `list` 返回）。非本人或任务不存在时返回 403。该操作同时删除对应的 `loom_scheduled_task` 行，避免 `ScheduleRestoreListener` 在重启时把它复活。
+
+### 11.9 取消某会话的全部定时任务
+
+```http
+POST /spring/ai/loom/schedule/by-conversation/{conversationId}/cancel-all
+```
+
+### 11.10 查询定时任务执行历史
+
+```http
+GET /spring/ai/loom/schedule/history/{name}
+```
+
+**权限**：仅限本人（非本人返回 403）。
+
+### 11.11 查询某会话的定时任务历史
+
+```http
+GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
+```
+
+---
+
+## 12. Maven 构建工具
 
 所有 Maven 工具的操作范围限定在用户文件目录（`{usersBasePath}/{username}/file/`）内。超出该范围的绝对路径将被拒绝。
 
@@ -1266,13 +1356,13 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 11.7 文件工具（@Tool 注解）
+## 13. 文件工具（@Tool 注解）
 
 所有文件工具均限定在用户文件目录（`{usersBasePath}/{username}/file/`）内，绝对路径及 `..` 越界会被拒绝并抛出 `SecurityException`。symlink 越界（userDir 内有指向外面的软链）也通过 `PathSecurityUtils.toRealPath` 跟链防御。预览/下载工具会自动创建 `file_info` 临时记录（`usage="temp"`）用于桥接访问。
 
-**资源约束**（详见 [11.7.1](#1171-文件工具配置ifiletool)）：`readTextFile` / `writeFile` / `editFile` 走 `file.maxFileSize`（默认 5 MB）；`readMediaFile` 走 `file.maxMediaSize`（默认 1 MB）；`directoryTree` / `searchFiles` 走 `file.maxWalkDepth` / `file.maxWalkEntries` / `file.excludedDirs`；`searchFiles` 还受 `file.maxSearchResults` 限制。
+**资源约束**（详见 [13.1 文件工具配置](#131-文件工具配置ifiletool)）：`readTextFile` / `writeFile` / `editFile` 走 `file.maxFileSize`（默认 5 MB）；`readMediaFile` 走 `file.maxMediaSize`（默认 1 MB）；`directoryTree` / `searchFiles` 走 `file.maxWalkDepth` / `file.maxWalkEntries` / `file.excludedDirs`；`searchFiles` 还受 `file.maxSearchResults` 限制。
 
-### 9.7.1 读取文本
+### 13.1 读取文本
 
 ```
 @Tool: readTextFile
@@ -1286,7 +1376,7 @@ GET /spring/ai/chat/loom/mcp
 | `head` | integer | 否 | 若提供，仅返回前 N 行 |
 | `tail` | integer | 否 | 若提供，仅返回后 N 行 |
 
-### 9.7.2 读取媒体文件
+### 13.2 读取媒体文件
 
 ```
 @Tool: readMediaFile
@@ -1298,7 +1388,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是 | 相对于用户文件目录的路径 |
 
-### 9.7.3 批量读取
+### 13.3 批量读取
 
 ```
 @Tool: readMultipleFiles
@@ -1310,7 +1400,7 @@ GET /spring/ai/chat/loom/mcp
 |---------|----------|------|---------------------------------------|
 | `paths` | string[] | 是 | 相对于用户文件目录的路径列表 |
 
-### 9.7.4 写入文件
+### 13.4 写入文件
 
 ```
 @Tool: writeFile
@@ -1323,7 +1413,7 @@ GET /spring/ai/chat/loom/mcp
 | `path` | string | 是 | 相对于用户文件目录的路径 |
 | `content` | string | 是 | 要写入的文本内容；超过 `file.maxFileSize` 时拒绝写入并返回错误 |
 
-### 9.7.5 编辑文件
+### 13.5 编辑文件
 
 ```
 @Tool: editFile
@@ -1338,7 +1428,7 @@ GET /spring/ai/chat/loom/mcp
 
 **唯一性校验**：`oldText` 在文件中出现 >1 次时**直接拒绝**（避免 LLM 误传导致多处被错误替换），并提示"在文件中出现 N 次，请提供更精确的上下文使其唯一"。空 `oldText` 也被拒绝。
 
-### 9.7.6 创建目录
+### 13.6 创建目录
 
 ```
 @Tool: createDirectory
@@ -1350,7 +1440,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是 | 相对于用户文件目录的路径 |
 
-### 9.7.7 移动文件
+### 13.7 移动文件
 
 ```
 @Tool: moveFile
@@ -1363,7 +1453,7 @@ GET /spring/ai/chat/loom/mcp
 | `source` | string | 是 | 源路径（相对于用户文件目录） |
 | `destination` | string | 是 | 目标路径（相对于用户文件目录） |
 
-### 9.7.8 搜索文件
+### 13.8 搜索文件
 
 ```
 @Tool: searchFiles
@@ -1375,7 +1465,7 @@ GET /spring/ai/chat/loom/mcp
 |-----------|--------|------|---------------------------------|
 | `pattern` | string | 否 | glob 模式，如 `*.txt` |
 
-### 9.7.9 列出允许目录
+### 13.9 列出允许目录
 
 ```
 @Tool: listAllowedDirectories
@@ -1383,7 +1473,7 @@ GET /spring/ai/chat/loom/mcp
 
 返回当前用户的文件操作目录。其他所有工具的 `path` 参数均相对于此目录。
 
-### 9.7.10 列出目录
+### 13.10 列出目录
 
 ```
 @Tool: listDirectory
@@ -1396,7 +1486,7 @@ GET /spring/ai/chat/loom/mcp
 | `path` | string | 是 | 目录路径（空字符串 = 根目录） |
 | `depth` | integer | 否 | 递归深度（默认 1） |
 
-### 9.7.11 列出目录（带大小）
+### 13.11 列出目录（带大小）
 
 ```
 @Tool: listDirectoryWithSizes
@@ -1408,7 +1498,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|-------------------------------------|
 | `path` | string | 是 | 目录路径（空字符串 = 根目录） |
 
-### 9.7.12 目录树
+### 13.12 目录树
 
 ```
 @Tool: directoryTree
@@ -1420,7 +1510,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|-------------------------------------|
 | `path` | string | 是 | 目录路径（空字符串 = 根目录） |
 
-### 9.7.13 文件信息
+### 13.13 文件信息
 
 ```
 @Tool: getFileInfo
@@ -1432,7 +1522,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是 | 相对于用户文件目录的路径 |
 
-### 9.7.14 下载链接
+### 13.14 下载链接
 
 ```
 @Tool: downloadFileUrl
@@ -1444,7 +1534,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是 | 相对于用户文件目录的路径 |
 
-### 9.7.15 预览链接
+### 13.15 预览链接
 
 ```
 @Tool: viewFileUrl
@@ -1456,7 +1546,7 @@ GET /spring/ai/chat/loom/mcp
 |--------|--------|------|---------------------------------|
 | `path` | string | 是 | 相对于用户文件目录的路径 |
 
-### 9.7.16 删除文件或目录
+### 13.16 删除文件或目录
 
 ```
 @Tool: deleteFileOrDirectory
@@ -1480,7 +1570,67 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 12. 数据模型
+## 14. Admin APIs
+
+所有 admin 端点都要求调用者的 `user_info.type = 'ADMIN'`；非管理员访问返回 403（`{"message": "无权限"}`）。`admin/*.html` 下的页面是这些端点的标准 UI。
+
+### 14.1 用户管理
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/admin/users` | 列出全部用户 |
+| POST | `/admin/users` | 创建用户（body：`CreateUserRequest` —— username, nickname, password, type）。用户名重复返回 400 |
+| DELETE | `/admin/users/{username}` | 删除用户；拒绝删除最后一个管理员 |
+| GET | `/admin/users/{username}/conversations` | 列出某用户的会话（admin 视角） |
+| GET | `/admin/users/{username}/roles` | 查询用户角色 |
+| PUT | `/admin/users/{username}/roles` | 替换用户角色（body：`SetUserRolesRequest` —— `{"roleCodes": ["dev", "ops"]}`）。返回 400 `{"error":"用户不存在: xxx"}` 或 `{"error":"角色不存在: xxx"}` |
+| PUT | `/admin/users/{username}/password` | **重置用户密码**（body：`ResetPasswordRequest` —— `{"newPassword": "..."}`，至少 6 位）。**不校验旧密码** —— 管理员无从得知用户的自选密码。以下情况返回 400：目标是 `ADMIN`（重置另一个管理员等同于静默接管账号）、用户不存在、密码过短或过长。UI 侧 ADMIN 行的按钮为 disabled。注意：由于新密码由管理员输入，管理员会知道它 —— 弹窗会提示管理员转告用户 |
+
+### 14.2 会话管理（admin）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/admin/conversations/{conversationId}/turns` | 列出每一轮及其 token 用量 |
+| GET | `/admin/conversations/{conversationId}/messages` | 列出原始 `ChatMessage` |
+| GET | `/admin/conversations/{conversationId}/flow` | 会话流水视图数据（含 TOOL_CALL / TOOL_RESULT / SUBTASK / SCHEDULE_FIRE / SYSTEM 事件），供 `conversation.html` 渲染 |
+| POST | `/admin/conversations/clean-batch` | 批量硬删除已软删的会话 |
+
+### 14.3 Token 用量统计与日志
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/admin/stats/tokens/monthly?year=2026&month=7` | 按用户聚合的月度用量（省略参数则取当月） |
+
+数据来自 `loom_chat_usage` 表，每轮对话由 `ChatUsageRecordingAdvisor` 写入一行 —— 该 advisor 用 `ChatClientMessageAggregator` 在**流终止后的聚合响应**里捕获 usage（原始 chunk 流的每帧 usage 都是 0）。
+
+### 14.4 角色 / MCP / 技能 / 知识库管理
+
+全部位于 `/admin/...`，已在以下章节记录：
+
+- [§ 5 知识库管理](#5-知识库管理) —— `admin/knowledge*`、`/api/knowledge-market*` 及知识库市场审批流（§5.8）
+- [§ 6 技能管理](#6-技能管理) —— `admin/market-skills*`、`/admin/roles/{code}/skills`
+- [§ 7 MCP 工具](#7-mcp-工具) —— `admin/mcps*`、`admin/mcp-tools*`
+
+### 14.5 Admin UI 页面（`admin/*.html`）
+
+| 页面 | 说明 |
+| --- | --- |
+| `admin/console.html` | 用户列表 + 角色分配 + 重置密码 + 批量清理内容。**不再链接到 `user.html`** —— 用户对话入口已统一收敛到「日志」页的第二个 tab |
+| `admin/roles.html` | RBAC 角色 + 授权 MCP / 技能 / 知识库 |
+| `admin/market-skills.html` | 技能市场：审批 / 直接增删改 |
+| `admin/knowledge-market.html` | 知识库市场：审批 / 直接增删改 |
+| `admin/mcps.html` | 维护 SDK MCP 工具的中文描述 |
+| `admin/conversation.html` | 深入查看任意用户的对话轮次（仅 admin） |
+| `admin/user.html?username=X` | 单用户视图：6 个月用量 + 角色 + 会话列表；每行可进入 `conversation.html` |
+| `admin/stats.html` | **双 tab**：(1) Token 用量统计（柱图 + 表格，用户名不可点）；(2) 对话日志 —— 用户列表 → `user.html` → `conversation.html` |
+
+「日志」页的两个 tab 刻意分离职责：Token tab 是纯统计视图，需要当月有数据；而对话日志 tab 列出**全部**用户，全新部署（无任何用量数据）时同样可用。
+
+所有 admin 页面共享固定左侧栏（见 README「管理控制台」章节）。
+
+---
+
+## 15. 数据模型
 
 ### ChatRequestRecord
 
@@ -1500,11 +1650,14 @@ GET /spring/ai/chat/loom/mcp
 {
  "content": "string",
  "reasoningContent": "string",
- "askUser": null
+ "askUser": null,
+ "subTaskEvent": null
 }
 ```
 
 `askUser` 普通帧为 `null`；非空时携带 `AskUserEvent` 提问卡片（见 § 3.1/3.2）。
+
+`subTaskEvent` 普通帧为 `null`；非空时携带 `SubTaskEvent`，描述子任务的生命周期（启动 / 完成 / 失败），前端在聊天流中渲染为紧凑 chip。注意该 chip 是**流式瞬态事件**，不落库 —— 历史回看时改由 `messageType=TOOL_CALL` 条目重建（见 § 2.2）。
 
 ### ConversationRecord
 
@@ -1594,7 +1747,7 @@ GET /spring/ai/chat/loom/mcp
 
 ---
 
-## 13. 配置属性
+## 16. 配置属性
 
 所有配置项在 `application.yml` 中以 `spring.ai.loom.agent` 为前缀。
 
@@ -1656,7 +1809,7 @@ GET /spring/ai/chat/loom/mcp
 
 > 同目录下同名文件自动追加序号：`file.txt` → `file(1).txt` → `file(2).txt`。
 
-### 11.7.1 文件工具配置（`IFileTool`）
+### 13.1 文件工具配置（`IFileTool`）
 
 文件工具（`IFileTool`）走 `spring.ai.loom.agent.file.*`，有一组针对 LLM 工具调用场景的默认安全/资源约束。
 
