@@ -9,7 +9,7 @@
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.wb04307201/spring-ai-loom-agent-spring-boot-starter?style=flat-square)
 [![star](https://gitee.com/wb04307201/spring-ai-loom-agent/badge/star.svg?theme=dark)](https://gitee.com/wb04307201/spring-ai-loom-agent)
 [![star](https://img.shields.io/github/stars/wb04307201/spring-ai-loom-agent)](https://github.com/wb04307201/spring-ai-loom-agent)
-[![GitCode Star](https://gitcode.com/wb04307201/spring-ai-loom-agent/star/badge.svg)](https://gitcode.com/wb04307201/spring-ai-loom-agent/overview)
+[![star](https://gitcode.com/wb04307201/spring-ai-loom-agent/star/badge.svg)](https://gitcode.com/wb04307201/spring-ai-loom-agent/overview)
 ![License](https://img.shields.io/badge/License-Apache2.0-blue.svg) ![JDK](https://img.shields.io/badge/JDK-25+-green.svg) ![SpringBoot](https://img.shields.io/badge/Spring%20Boot-4+-green.svg) ![SpringAI](https://img.shields.io/badge/Spring%20AI-2+-green.svg)
 
 <table>
