@@ -129,9 +129,15 @@ public class DefaultScheduleTool implements IScheduleTool {
     }
 
     @Override
-    @Tool(description = "创建一个定时任务。one_shot 类型的初始延迟可以从几秒起;"
-            + "fixed_delay/fixed_rate/cron 类型的重复间隔最短由 flex-schedule.limits 配置决定(默认 10 分钟),"
-            + "最长存活 3 天(强校验)。类型 cron / fixed_delay / fixed_rate / one_shot。")
+    // 2026-11-08: 描述与 flex-schedule limits 实际语义对齐（README 语义表：min-interval
+    // 适用 FIXED_DELAY/FIXED_RATE/ONE_SHOT，仅 CRON 豁免；max-lifetime 适用重复任务，
+    // ONE_SHOT 豁免）。旧文案"one_shot 初始延迟可以从几秒起"在 strict + min-interval 下
+    // 必然注册失败，误导 LLM 向用户做错误承诺（E2E 实测 PT30S 被拒）。
+    @Tool(description = "创建一个定时任务。类型 cron / fixed_delay / fixed_rate / one_shot。"
+            + "one_shot 的初始延迟与 fixed_delay/fixed_rate 的重复间隔均不得短于"
+            + " flex-schedule.limits 配置的最短间隔 min-interval(默认 10 分钟),cron 豁免该校验;"
+            + "重复任务(cron/fixed_delay/fixed_rate)最长存活 3 天(强校验),"
+            + "one_shot 只执行一次、不受存活上限约束。")
     public String createSchedule(String name, String scheduleType, String expression, String prompt, ToolContext toolContext) {
         // Mirror the prompt validation in DefaultSubTaskTool.startSubTask: an empty
         // prompt here would otherwise persist to H2 and explode at fire time when
