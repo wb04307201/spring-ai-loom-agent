@@ -1552,20 +1552,17 @@ public class LoomAgentConfiguration {
                         } catch (Exception e) {
                             log.warn("cancel-all: H2 cleanup failed: {}", e.getMessage());
                         }
-                        // And the audit-trail execution rows.
-                        int execRowsDeleted = 0;
-                        try {
-                            execRowsDeleted = loomScheduleExecutionRepository
-                                    .deleteByUserAndConversation(user, conv);
-                        } catch (Exception e) {
-                            log.warn("cancel-all: execution cleanup failed: {}", e.getMessage());
-                        }
+                        // 2026-11-08 (b 修复): 不再删除 loom_schedule_execution 审计行。
+                        // V1.0 schema 注释明文设计「取消/过期会删声明行,但执行历史保留」；
+                        // 此前这里连审计一起删，导致 admin 流水页 SCHEDULE_FIRE 永久消失，
+                        // 且与单条取消路径（工具/REST cancel 均保留审计）不一致。
+                        // 审计行生命周期由 ScheduleExecutionCleanup（按天 deleteOlderThan）
+                        // 与会话删除级联（deleteByUserAndConversation，conversation-delete 路径）统一管理。
                         java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
                         body.put("cancelled", cancelled);
                         body.put("rowsDeleted", rowsDeleted);
-                        body.put("execRowsDeleted", execRowsDeleted);
-                        log.info("schedule cancel-all: user={}, conv={}, cancelled={}, rowsDeleted={}, execRowsDeleted={}",
-                                user, conv, cancelled, rowsDeleted, execRowsDeleted);
+                        log.info("schedule cancel-all: user={}, conv={}, cancelled={}, rowsDeleted={}",
+                                user, conv, cancelled, rowsDeleted);
                         return ServerResponse.ok().body(body);
                     });
             // Frontend posts the FULL task name (already namespaced) in a JSON body {"name": "..."}.

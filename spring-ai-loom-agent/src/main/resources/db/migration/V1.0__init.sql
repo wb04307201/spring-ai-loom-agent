@@ -327,7 +327,11 @@ CREATE TABLE loom_schedule_execution (
  duration_ms BIGINT NOT NULL,
  success BOOLEAN NOT NULL,
  error_message CLOB,
- fired_by VARCHAR(16) NOT NULL DEFAULT 'SCHEDULER' -- 'SCHEDULER' / 'MANUAL'(预留)
+ fired_by VARCHAR(16) NOT NULL DEFAULT 'SCHEDULER', -- 'SCHEDULER' / 'MANUAL'(预留)
+ -- 2026-11-08 (c'): 本次触发派发的子任务 id（loom_subtask_history.subtask_id）。
+ -- ConversationFlowService.loadScheduleFires 用它精确配对 SCHEDULE_FIRE ↔ SUBTASK，
+ -- 不再依赖 ±5s 时间窗猜测。历史行为 NULL（配对回退时间窗）。
+ subtask_id VARCHAR(64)
 );
 CREATE INDEX idx_loom_schedule_execution_task_fire
  ON loom_schedule_execution(task_name, fire_time DESC);

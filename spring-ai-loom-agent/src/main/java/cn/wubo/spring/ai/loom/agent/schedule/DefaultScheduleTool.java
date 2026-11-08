@@ -257,7 +257,7 @@ public class DefaultScheduleTool implements IScheduleTool {
             throw new RuntimeException(e);
         } finally {
             long durationMs = System.currentTimeMillis() - startMs;
-            recordExecution(taskName, fireTime, durationMs, success, errorMessage);
+            recordExecution(taskName, fireTime, durationMs, success, errorMessage, id);
         }
     }
 
@@ -265,9 +265,11 @@ public class DefaultScheduleTool implements IScheduleTool {
      * Persist a fire event to {@code loom_schedule_execution} (mirrors
      * {@link ScheduleRestoreListener#recordExecution}). Called from the
      * LLM-tool / createSchedule path — every fire, success or failure.
+     * {@code subtaskId} (2026-11-08, c') is the id of the dispatched sub-task,
+     * enabling exact SCHEDULE_FIRE ↔ SUBTASK pairing in the admin flow view.
      */
     private void recordExecution(String taskName, Instant fireTime, long durationMs,
-                                 boolean success, String errorMessage) {
+                                 boolean success, String errorMessage, String subtaskId) {
         if (loomScheduleExecutionRepository == null) return;
         try {
             loomScheduleExecutionRepository.save(new LoomScheduleExecutionRecord(
@@ -277,7 +279,8 @@ public class DefaultScheduleTool implements IScheduleTool {
                     durationMs,
                     success,
                     errorMessage,
-                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER));
+                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER,
+                    subtaskId));
             int n = loomScheduleExecutionRepository.trimTaskHistory(taskName, maxExecutionsPerTask);
             if (n > 0) {
                 log.debug("Trimmed {} old execution row(s) for task [{}]", n, taskName);

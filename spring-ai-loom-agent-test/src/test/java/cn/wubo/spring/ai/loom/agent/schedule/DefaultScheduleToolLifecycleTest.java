@@ -296,6 +296,42 @@ class DefaultScheduleToolLifecycleTest {
     }
 
     /**
+     * c' 回归锁：runAsSubTask 触发时写入的执行审计行必须携带它所派发的
+     * subtask_id —— 这是 ConversationFlowService.loadScheduleFires 精确配对
+     * SCHEDULE_FIRE ↔ SUBTASK 的依据（不再依赖 ±5s 时间窗猜测）。
+     * 变异自证：把 recordExecution 的 subtaskId 传参改回 null，本用例必须变红。
+     */
+    @Test
+    void recordExecution_persistsDispatchedSubtaskId() {
+        TaskBuilder builder = mock(TaskBuilder.class);
+        when(flexService.task(any())).thenReturn(builder);
+        when(builder.fixedDelay(any())).thenReturn(builder);
+
+        when(executor.execute(any())).thenAnswer(inv -> {
+            cn.wubo.spring.ai.loom.agent.model.SubTaskRequest req = inv.getArgument(0);
+            return SubTaskResult.completed(req,
+                    System.currentTimeMillis() - 10, System.currentTimeMillis(), "ok");
+        });
+
+        tool.createSchedule("n", "fixed_delay", "600", "p", ctx("alice", "conv-1"));
+        org.mockito.ArgumentCaptor<Runnable> reg = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+        verify(builder).register(reg.capture());
+        reg.getValue().run();
+
+        // 捕获实际派发的 subtask id 与落库的执行行，两者必须一致。
+        org.mockito.ArgumentCaptor<cn.wubo.spring.ai.loom.agent.model.SubTaskRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(cn.wubo.spring.ai.loom.agent.model.SubTaskRequest.class);
+        verify(executor).execute(reqCap.capture());
+        org.mockito.ArgumentCaptor<LoomScheduleExecutionRecord> recCap =
+                org.mockito.ArgumentCaptor.forClass(LoomScheduleExecutionRecord.class);
+        verify(execRepo).save(recCap.capture());
+
+        assertThat(recCap.getValue().subtaskId())
+                .as("执行审计行必须带上它派发的 subtask_id（精确配对依据）")
+                .isEqualTo(reqCap.getValue().subTaskId());
+    }
+
+    /**
      * Defensive floor: the constructor clamps {@code Math.max(10, n)} so a
      * pathologically small cap ({@code <= 0}) can't break the WHERE NOT IN
      * subquery in {@code JdbcLoomScheduleExecutionRepository.trimTaskHistory}.

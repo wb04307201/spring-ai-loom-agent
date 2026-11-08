@@ -370,59 +370,67 @@ public class ConversationFlowService {
   }
  }
 
- private List<Event> loadSchedules(String username, String conversationId) {
-  // 保留为底层方法（被 loadScheduleFires 调用），不直接生成 SCHEDULE 事件。
-  List<ScheduleRow> rows = jdbcTemplate.query("select t.task_name, t.prompt, e.fire_time, e.duration_ms, e.success, e.error_message " + "from loom_scheduled_task t " + "join loom_schedule_execution e on t.task_name = e.task_name " + "where t.username = ? and t.conversation_id = ? order by e.fire_time", (rs, n) -> new ScheduleRow(rs.getString("task_name"), rs.getString("prompt"), rs.getTimestamp("fire_time") == null ? null : rs.getTimestamp("fire_time").toInstant(), rs.getLong("duration_ms"), rs.getBoolean("success"), rs.getString("error_message")), username, conversationId);
-  List<Event> out = new ArrayList<>();
-  for (ScheduleRow r : rows) {
-   Map<String, Object> data = new HashMap<>();
-   data.put("taskName", r.taskName());
-   data.put("prompt", r.prompt());
-   data.put("fireTime", r.fireTime());
-   data.put("durationMs", r.durationMs());
-   data.put("success", r.success());
-   data.put("error", r.errorMessage());
-   out.add(new Event("SCHEDULE", r.fireTime(), data));
-  }
-  return out;
- }
+ // 2026-11-08: 删除死代码 loadSchedules —— 注释声称"被 loadScheduleFires 调用"与事实不符
+ // （loadScheduleFires 自带查询），全仓无调用点，且其 INNER JOIN 声明表的老查询正是
+ // 本次 a 修复要淘汰的形态（loadSubtasks 死代码同款问题的重演）。SCHEDULE 事件类型
+ // 保留在 DEFAULT_TYPES / 前端 case 里（loadScheduleFires 的 types 门控用到该名字）。
 
  /**
   * 合并 SUBTASK + SCHEDULE 为 1 个 SCHEDULE_FIRE 事件。
   *
   * <p>每次 schedule 触发都产生 1 条 {@code loom_subtask_history}（sub-task 启动）
-  * 和 1 条 {@code loom_schedule_execution}（执行记录），两者 timestamp 几乎一致（实测相差几毫秒）。
-  * 之前作为两个独立事件展示，用户看着像"两个独立事件"，分不清因果关系。
+  * 和 1 条 {@code loom_schedule_execution}（执行记录）。
   * 合并后：1 个 SCHEDULE_FIRE 事件 = 1 次 schedule 触发，含 taskName / sub-task prompt / result /
   * status / 耗时 / 错误等完整信息。
+  *
+  * <p><b>2026-11-08 a+c' 修复</b>：审计渲染不再依赖活体声明行。此前用 INNER JOIN
+  * {@code loom_scheduled_task ⋈ loom_schedule_execution}，而所有取消路径都必须删声明行
+  * （防重启复活）→ 任务一取消，执行审计就从流水里消失，退化成无上下文裸 SUBTASK。
+  * 现改为：(a) 以 execution 审计表为主表（task_name 前缀过滤），声明表降级为 LEFT JOIN
+  * 补 prompt（拿不到用配对 subtask 的 prompt 兜底）；(c') 配对用 execution.subtask_id
+  * 精确匹配，NULL 历史行回退 ±5s 时间窗。
   */
  private List<Event> loadScheduleFires(String username, String conversationId) {
-  // 1. 拉 schedule 触发记录
-  List<ScheduleRow> executions = jdbcTemplate.query("select t.task_name, t.prompt, e.fire_time, e.duration_ms, e.success, e.error_message " + "from loom_scheduled_task t " + "join loom_schedule_execution e on t.task_name = e.task_name " + "where t.username = ? and t.conversation_id = ? order by e.fire_time", (rs, n) -> new ScheduleRow(rs.getString("task_name"), rs.getString("prompt"), rs.getTimestamp("fire_time") == null ? null : rs.getTimestamp("fire_time").toInstant(), rs.getLong("duration_ms"), rs.getBoolean("success"), rs.getString("error_message")), username, conversationId);
+  // 1. 拉 schedule 触发记录 —— 主表是审计表 loom_schedule_execution（活体声明行可能已被取消删除），
+  //    声明表 LEFT JOIN 只为补 prompt。task_name 命名空间前缀 loom-sched-{user}-{conv}- 做归属过滤。
+  String prefix = "loom-sched-" + username + "-" + conversationId + "-";
+  List<ScheduleRow> executions = jdbcTemplate.query("select e.task_name, e.fire_time, e.duration_ms, e.success, e.error_message, e.subtask_id, t.prompt " + "from loom_schedule_execution e " + "left join loom_scheduled_task t on t.task_name = e.task_name " + "where e.task_name like ? order by e.fire_time", (rs, n) -> new ScheduleRow(rs.getString("task_name"), rs.getString("prompt"), rs.getTimestamp("fire_time") == null ? null : rs.getTimestamp("fire_time").toInstant(), rs.getLong("duration_ms"), rs.getBoolean("success"), rs.getString("error_message"), rs.getString("subtask_id")), prefix + "%");
   // 2. 拉 sub-task 记录（按 started_at 排序）
   List<SubtaskRow> subtasks = jdbcTemplate.query("select subtask_id, prompt, status, started_at, finished_at, error_message, result_text " + "from loom_subtask_history where username = ? and conversation_id = ? order by started_at", (rs, n) -> new SubtaskRow(rs.getString("subtask_id"), rs.getString("prompt"), rs.getString("status"), rs.getLong("started_at"), rs.getLong("finished_at"), rs.getString("error_message"), rs.getString("result_text")), username, conversationId);
-  // 3. 按 fire_time 接近度（±5 秒）配对
+  // 3. 配对：优先 execution.subtask_id 精确匹配（c'）；NULL 历史行回退 fire_time ±5s 时间窗
   List<Event> out = new ArrayList<>();
   for (ScheduleRow exec : executions) {
    SubtaskRow matched = null;
-   if (exec.fireTime() != null) {
+   if (exec.subtaskId() != null) {
+    for (SubtaskRow sub : subtasks) {
+     if (exec.subtaskId().equals(sub.subtaskId())) {
+      matched = sub;
+      break;
+     }
+    }
+   }
+   if (matched == null && exec.subtaskId() == null && exec.fireTime() != null) {
     long fireMs = exec.fireTime().toEpochMilli();
     for (SubtaskRow sub : subtasks) {
-     if (matched != null) break;
-     long subMs = sub.startedAt();
-     if (Math.abs(subMs - fireMs) <= 5000) {
+     if (Math.abs(sub.startedAt() - fireMs) <= 5000) {
       matched = sub;
+      break;
      }
     }
    }
    Map<String, Object> data = new HashMap<>();
    data.put("taskName", exec.taskName());
-   // shortName = 去掉 loom-sched-{user}-{convId}- 前缀
+   // shortName = 精确剥离 loom-sched-{user}-{convId}- 前缀（username/conversationId
+   // 是方法参数，前缀可确定性拼出）。2026-11-08 修：旧实现 lastIndexOf('-') 只取
+   // 最后一段，任务名自身含连字符时被截半（audit-verify → verify），与前端
+   // app.js BUG-SCHEDULE-SHORTNAME 同款缺陷的后端漏修；精确剥离对 user/conv
+   // 段含连字符同样免疫（前端 UUID-36 启发式的 username 含 dash TODO 在此不存在）。
    String tn = exec.taskName();
-   int lastDash = tn.lastIndexOf('-');
-   if (lastDash > 0) data.put("shortName", tn.substring(lastDash + 1));
-   else data.put("shortName", tn);
-   data.put("prompt", exec.prompt());
+   data.put("shortName", tn.startsWith(prefix) ? tn.substring(prefix.length()) : tn);
+   // prompt：声明行在则用声明的；已删则回退配对 subtask 的 prompt（审计不缺上下文）
+   String prompt = exec.prompt();
+   if (prompt == null && matched != null) prompt = matched.prompt();
+   data.put("prompt", prompt);
    data.put("fireTime", exec.fireTime());
    data.put("durationMs", exec.durationMs());
    data.put("success", exec.success());
@@ -432,6 +440,9 @@ public class ConversationFlowService {
     data.put("subtaskStatus", matched.status());
     data.put("subtaskResult", matched.resultText());
     data.put("subtaskDurationMs", matched.finishedAt() - matched.startedAt());
+   } else if (exec.subtaskId() != null) {
+    // subtask 行已被清理（如按会话历史上限裁剪）但 execution 审计仍在 —— 保留 id 供前端关联
+    data.put("subtaskId", exec.subtaskId());
    }
    out.add(new Event("SCHEDULE_FIRE", exec.fireTime(), data));
   }
@@ -460,6 +471,6 @@ public class ConversationFlowService {
  }
 
  private record ScheduleRow(String taskName, String prompt, Instant fireTime, long durationMs, boolean success,
-                            String errorMessage) {
+                            String errorMessage, String subtaskId) {
  }
 }

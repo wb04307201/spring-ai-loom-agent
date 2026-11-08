@@ -227,7 +227,7 @@ public class ScheduleRestoreListener {
             log.error("调度子任务执行失败: task={}, sub={}", r.taskName(), id, e);
         } finally {
             long durationMs = System.currentTimeMillis() - startMs;
-            recordExecution(r, fireTime, durationMs, success, errorMessage);
+            recordExecution(r, fireTime, durationMs, success, errorMessage, id);
         }
     }
 
@@ -243,7 +243,8 @@ public class ScheduleRestoreListener {
                                  Instant fireTime,
                                  long durationMs,
                                  boolean success,
-                                 String errorMessage) {
+                                 String errorMessage,
+                                 String subtaskId) {
         if (executionRepo == null) {
             log.warn("recordExecution called but executionRepo is null — task [{}]", r.taskName());
             return;
@@ -258,7 +259,8 @@ public class ScheduleRestoreListener {
                     durationMs,
                     success,
                     errorMessage,
-                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER));
+                    LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER,
+                    subtaskId));
             int n = executionRepo.trimTaskHistory(r.taskName(), maxExecutionsPerTask);
             if (n > 0) {
                 log.debug("Trimmed {} old execution row(s) for task [{}]", n, r.taskName());

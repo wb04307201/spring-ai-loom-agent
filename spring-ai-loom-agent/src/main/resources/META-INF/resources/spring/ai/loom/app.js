@@ -4594,7 +4594,7 @@ const schedulePanel = {
     const r = await api.cancelAllSchedulesByConversation(convId);
     await dialog.alert({
       title: "已停止",
-      message: `运行时取消 ${r.cancelled} 条,删除 H2 配置 ${r.rowsDeleted} 条,删除执行历史 ${r.execRowsDeleted} 条`,
+      message: `运行时取消 ${r.cancelled} 条,删除 H2 配置 ${r.rowsDeleted} 条(执行审计保留,供流水页回看)`,
     });
     this.refresh();
   },
