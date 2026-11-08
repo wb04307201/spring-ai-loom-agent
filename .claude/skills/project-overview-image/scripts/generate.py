@@ -59,7 +59,7 @@ PILLARS = [  # 核心区卡片:(label_id, icon)
 TOOLS = [  # 工具区卡片:(label_id, icon, 方法数徽章)
     ("tool_file", "doc", 16), ("tool_knowledge", "ribbon", 1), ("tool_git", "branch", 28),
     ("tool_maven", "grid", 6), ("tool_deploy", "deploy", 1), ("tool_time", "clock", 2),
-    ("tool_skill", "spark", 2), ("tool_subtask", "layers", 4), ("tool_schedule", "cal", 4),
+    ("tool_skill", "spark", 2), ("tool_subtask", "layers", 5), ("tool_schedule", "cal", 4),
     ("tool_askuser", "ask", 1), ("tool_render", "monitor", 1), ("tool_http", "globe", 5),
 ]
 # 分类**由卡片 id 集合推导**,不再手写计数 —— 过去 UNIVERSAL_COUNT/RBAC_COUNT 是
