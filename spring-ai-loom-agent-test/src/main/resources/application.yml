@@ -46,16 +46,14 @@ spring:
     # 中转站模型列表无任何 embedding 模型（只有 chat 模型）→ 显式关闭 embedding，
     # 让 RAG 向量链优雅降级（VectorStore 不建、知识上传 503、前端隐藏📚知识空间），
     # 而不是用默认 text-embedding-ada-002 打到中转站 404。
-    # ⚠️ 两个键缺一不可（2026-11-07 实测）：
-    #   embedding=none      —— Spring AI 2.0.1 OpenAi embedding autoconfig 的真开关
-    #                          （@ConditionalOnProperty(spring.ai.model.embedding, havingValue=openai,
-    #                            matchIfMissing=true)；它不读 .text 子键）
-    #   embedding.text=none —— loom EmbeddingModelAvailableCondition 第 2 步判据
-    #                          （noMatch → 不建 h2VectorStore）；只设它会被第 1 步
-    #                          "EmbeddingModel bean 定义已在场" 抢先 match、向量照建
+    # 2026-11-09: 单键即可 —— loom EmbeddingModelAvailableCondition 第 2 步已改读
+    # 这个 Spring AI 标准父键（与 OpenAi*EmbeddingAutoConfiguration 的
+    # @ConditionalOnProperty(spring.ai.model.embedding, havingValue=openai,
+    # matchIfMissing=true) 同一信号）：provider 退场 + h2VectorStore 跳过。
+    # 旧的自创孪生键 spring.ai.model.embedding.text=none 已删除（"双键缺一不可"的
+    # 混淆根源，见 LoomAgentConfiguration.EmbeddingModelAvailableCondition 注释）。
     model:
       embedding: none
-      embedding.text: none
     mcp:
       client:
         stdio:

@@ -27,9 +27,11 @@ import static org.mockito.Mockito.when;
  * 锁定三个行为:
  * <ol>
  *   <li><b>崩溃防护(方案 B)</b>:Spring AI 标准开关
- *       {@code spring.ai.model.embedding.text=none}(或 {@code spring.ai.dashscope.enabled=false})
+ *       {@code spring.ai.model.embedding=none}(或 {@code spring.ai.dashscope.enabled=false})
  *       关掉 embedding 时,h2VectorStore 因 {@code EmbeddingModelAvailableCondition} 整体跳过,
- *       上下文正常启动 —— 修复前该场景构造器 eager 注入 NoSuchBeanDefinition 直接启动失败;</li>
+ *       上下文正常启动 —— 修复前该场景构造器 eager 注入 NoSuchBeanDefinition 直接启动失败;
+ *       2026-11-09 起条件直接读该<b>标准父键</b>(与上游 autoconfig 同信号),旧的 loom 自创键
+ *       {@code spring.ai.model.embedding.text} 已删除;</li>
  *   <li><b>全局开关(方案 A)</b>:{@code spring.ai.loom.agent.rag.enabled=false}
  *       时即使 EmbeddingModel 在场,RAG 链(VectorStore/IDocumentRead)
  *       也整段不激活;</li>
@@ -47,7 +49,7 @@ import static org.mockito.Mockito.when;
  * 仍创建 h2VectorStore,靠实例化时点晚于全部定义注册来解析注入)。真实部署只要有 provider
  * 在 classpath 且未被这两个开关关闭,EmbeddingModel 必然在场;"bean 缺席且不设任何开关"不是
  * 合法部署形态(AnyEmbeddingProviderCondition 在 classpath 无 provider 时已先关掉整段)。
- * 故本切片用 {@code embedding.text=none} 这一<b>用户真实开关</b>验证 clean-skip。
+ * 故本切片用 {@code spring.ai.model.embedding=none} 这一<b>用户真实开关</b>验证 clean-skip。
  */
 @DisplayName("RagConfiguration 降级切片(rag.enabled 开关 + embedding 标准开关防护)")
 class RagConfigurationSliceTest {
@@ -66,14 +68,70 @@ class RagConfigurationSliceTest {
     }
 
     @Test
-    @DisplayName("embedding.text=none → 上下文正常启动,VectorStore/IDocumentRead 缺席(方案 B 崩溃防护)")
-    void embeddingTextNone_contextStartsWithoutVectorStoreChain() {
-        runner.withPropertyValues("spring.ai.model.embedding.text=none")
+    @DisplayName("spring.ai.model.embedding=none → 上下文正常启动,VectorStore/IDocumentRead 缺席(方案 B 崩溃防护)")
+    void embeddingNone_contextStartsWithoutVectorStoreChain() {
+        runner.withPropertyValues("spring.ai.model.embedding=none")
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     assertThat(ctx).doesNotHaveBean(VectorStore.class);
                     assertThat(ctx).doesNotHaveBean(IDocumentRead.class);
                 });
+    }
+
+    /**
+     * 2026-11-09 键清理:loom 自创的 {@code spring.ai.model.embedding.text} 已删,
+     * 条件第 2 步改读 Spring AI 标准父键 {@code spring.ai.model.embedding}(与上游
+     * autoconfig 同一信号,消费者只需设一处)。
+     *
+     * <p><b>为什么直接单测 condition 而不是切片测旧键</b>:切片层无法区分新旧 ——
+     * 旧实现在 {@code embedding.text=none} 下 noMatch(VectorStore 缺席),新实现在同
+     * 配置下走第 3 步乐观放行,但切片里没有 EmbeddingModel bean、RagConfiguration 又被
+     * rag.enabled 属性门控……观察面撞车,断言两头都绿 = 空转假锁。本用例直接构造
+     * ConditionContext(bean 缺席 + 指定属性),断言 match 结果与<b>原因文案</b>:
+     * 只有真正读到 {@code spring.ai.model.embedding} 才会给出"disables"原因。
+     */
+    @Test
+    @DisplayName("EmbeddingModelAvailableCondition 第 2 步读标准父键 embedding=none,旧键 embedding.text 不再被读取")
+    void conditionReadsStandardParentKey_notLegacyTextKey() {
+        LoomAgentConfiguration.EmbeddingModelAvailableCondition condition =
+                new LoomAgentConfiguration.EmbeddingModelAvailableCondition();
+
+        // 标准父键 none → noMatch,且原因文案指名该键
+        org.springframework.core.env.StandardEnvironment env1 = new org.springframework.core.env.StandardEnvironment();
+        env1.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource(
+                "t1", java.util.Map.of("spring.ai.model.embedding", "none")));
+        org.springframework.boot.autoconfigure.condition.ConditionOutcome out1 =
+                condition.getMatchOutcome(contextWithoutEmbeddingBeans(env1), null);
+        assertThat(out1.isMatch())
+                .as("embedding=none(标准父键)必须 noMatch")
+                .isFalse();
+        assertThat(out1.getConditionMessage().toString())
+                .as("noMatch 原因必须指名标准父键 —— 证明第 2 步读的是它")
+                .contains("spring.ai.model.embedding=none");
+
+        // 旧键 embedding.text=none → 不再被读取:落到第 3 步乐观放行(match)
+        org.springframework.core.env.StandardEnvironment env2 = new org.springframework.core.env.StandardEnvironment();
+        env2.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource(
+                "t2", java.util.Map.of("spring.ai.model.embedding.text", "none")));
+        org.springframework.boot.autoconfigure.condition.ConditionOutcome out2 =
+                condition.getMatchOutcome(contextWithoutEmbeddingBeans(env2), null);
+        assertThat(out2.isMatch())
+                .as("旧键 embedding.text 已删除,不得再触发 noMatch(落到乐观放行)")
+                .isTrue();
+    }
+
+    /** bean 工厂里没有 EmbeddingModel(跳过第 1 步)+ 指定 Environment 的最小 ConditionContext。 */
+    private static org.springframework.context.annotation.ConditionContext contextWithoutEmbeddingBeans(
+            org.springframework.core.env.Environment env) {
+        org.springframework.beans.factory.support.DefaultListableBeanFactory bf =
+                new org.springframework.beans.factory.support.DefaultListableBeanFactory();
+        return new org.springframework.context.annotation.ConditionContext() {
+            @Override public org.springframework.beans.factory.support.BeanDefinitionRegistry getRegistry() { return bf; }
+            @Override public org.springframework.beans.factory.config.ConfigurableListableBeanFactory getBeanFactory() { return bf; }
+            @Override public org.springframework.core.env.Environment getEnvironment() { return env; }
+            @Override public org.springframework.core.io.ResourceLoader getResourceLoader() { return null; }
+            @Override public ClassLoader getClassLoader() { return getClass().getClassLoader(); }
+        };
     }
 
     @Test
@@ -123,13 +181,13 @@ class RagConfigurationSliceTest {
     }
 
     @Test
-    @DisplayName("解耦:RAG+Storage 合切片,embedding.text=none → IUpload 在、VectorStore 缺席(降级组合)")
+    @DisplayName("解耦:RAG+Storage 合切片,embedding=none → IUpload 在、VectorStore 缺席(降级组合)")
     void combinedSlice_degraded_uploadPresentVectorStoreAbsent() {
         new ApplicationContextRunner()
                 .withUserConfiguration(TestConfig.class,
                         LoomAgentConfiguration.RagConfiguration.class,
                         LoomAgentConfiguration.StorageConfiguration.class)
-                .withPropertyValues("spring.ai.model.embedding.text=none")
+                .withPropertyValues("spring.ai.model.embedding=none")
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed();
                     assertThat(ctx).hasSingleBean(IUpload.class);

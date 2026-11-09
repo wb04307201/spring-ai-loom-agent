@@ -803,7 +803,7 @@ public class LoomAgentConfiguration {
 
         /**
          * Embedding 可用性守卫(方案 B 崩溃防护):用户用 Spring AI 标准开关
-         * ({@code spring.ai.model.embedding.text=none} 或 {@code spring.ai.dashscope.enabled=false})
+         * ({@code spring.ai.model.embedding=none} 或 {@code spring.ai.dashscope.enabled=false})
          * 关掉 embedding 时,本 bean 跳过 → VectorStore 不创建 → 下游
          * @ConditionalOnBean(VectorStore) 链(reloader/DocumentRead/Upload/KnowledgeTool/
          * knowledge & upload 路由)整体干净消失,不再 NoSuchBeanDefinition 启动失败。
@@ -924,11 +924,18 @@ public class LoomAgentConfiguration {
                     && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, true).length > 0) {
                 return ConditionOutcome.match(message.because("EmbeddingModel bean definition present"));
             }
-            // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)
+            // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)。
+            //    2026-11-09 键清理:改读 Spring AI 标准父键 spring.ai.model.embedding
+            //    (=none 时 OpenAi*EmbeddingAutoConfiguration 的 @ConditionalOnProperty
+            //    havingValue=openai 不匹配、provider 退场)—— 与上游 autoconfig 读同一键,
+            //    消费者只需设一处。旧 loom 自创键 spring.ai.model.embedding.text 已删:
+            //    它蹲在上游命名空间、与标准键仅差 ".text"、语义重复,是"双键缺一不可"
+            //    混淆根源(只设父键时第 2 步读不到 → 乐观放行 → h2VectorStore 注册后
+            //    构造器注入缺 EmbeddingModel bean 启动崩)。
             org.springframework.core.env.Environment env = context.getEnvironment();
-            if ("none".equalsIgnoreCase(env.getProperty("spring.ai.model.embedding.text"))) {
+            if ("none".equalsIgnoreCase(env.getProperty("spring.ai.model.embedding"))) {
                 return ConditionOutcome.noMatch(message.because(
-                        "spring.ai.model.embedding.text=none disables all embedding providers"));
+                        "spring.ai.model.embedding=none disables all embedding providers"));
             }
             if ("false".equalsIgnoreCase(env.getProperty("spring.ai.dashscope.enabled"))) {
                 return ConditionOutcome.noMatch(message.because(
