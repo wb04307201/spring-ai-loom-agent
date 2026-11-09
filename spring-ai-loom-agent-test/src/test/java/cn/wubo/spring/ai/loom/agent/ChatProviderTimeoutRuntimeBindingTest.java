@@ -25,6 +25,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>变异自证方向:把 BFPP 的 {@code addLast} 改注释 / 把 {@code containsProperty}
  * 守卫改成恒 true,BFPP 静默失效时本类必须变红。
+ *
+ * <p><b>2026-11-09 升级 Spring AI 2.0.2 后的定位</b>:#6837 上游根治了 per-request 覆盖,
+ * 本类锁的 client 级绑定成为整条链的<b>唯一</b>配置入口(per-request 未设 timeout 时继承
+ * client);配合 {@code ChatProviderTimeoutWiringTest}(model options timeout 非 60s +
+ * customizer 为 null)覆盖完整链路。
  */
 @SpringBootTest(classes = LoomAgentTestApplication.class)
 class ChatProviderTimeoutRuntimeBindingTest {

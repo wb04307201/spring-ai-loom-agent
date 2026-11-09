@@ -97,40 +97,42 @@ class ChatProviderTimeoutWiringTest {
     }
 
     /**
-     * 真凶锁(2026-11-09 定位):Spring AI 2.0.1 的 {@code OpenAiChatOptions.timeout}
-     * <b>无法经属性配置</b>({@code OpenAiChatProperties.toOptions()} 不映射 timeout,
-     * 构造时回落到 {@code AbstractOpenAiOptions.DEFAULT_TIMEOUT = PT1M});而
-     * {@code OpenAiChatModel.buildRequestOptions(Prompt)} 把 options.timeout 塞进
-     * per-request {@code RequestOptions.timeout},{@code SpringAiOpenAiHttpClient.newCall()}
-     * 再对每个请求 {@code newBuilder()} 重建 client 并<b>覆盖</b> client 级 callTimeout
-     * —— 所以 client 级 600s 永远被 per-request 60s 压掉,流稳定死在 60.0s。
+     * 上游修复锁(Spring AI 2.0.2 / PR #6837,2026-11-09 升级):
+     * 2.0.1 的缺陷是 {@code OpenAiChatOptions.getTimeout()} 永不返回 null(未设时回落
+     * {@code DEFAULT_TIMEOUT=60s}),且 {@code toOptions()} 不映射 timeout ⇒ 每请求都被
+     * per-request RequestOptions.timeout=60s 覆盖 client 级 callTimeout,长流精确 60.0s 死。
+     * 2.0.2 起:未设时 timeout 为 null(继承 client 配置),autoconfig 把 *resolved* timeout
+     * 注入 chat model 的 default options。
      *
-     * <p>loom 的修复面:在 {@code chatClient} bean 上挂 {@code defaultOptions(
-     * modelOptions.mutate().timeout(...))} —— prompt 级 options 合并后带 600s,
-     * per-request 覆盖值随之变成 600s。本测试钉死该 customizer 在场且 timeout=600s;
-     * 变异方向:删掉 chatClient 的 defaultOptions 行 ⇒ customizer 为 null ⇒ 变红。
+     * <p>本锁钉死升级后契约:{@code spring.ai.openai.timeout=600s}(test yml 显式 +
+     * 库侧 BFPP 双通道)必须体现在 model default options 上 —— 要么 null(继承 client 级
+     * 600s),要么 ≥600s;<b>绝不允许是 60s</b>。变异方向:把 pom 降回 2.0.1 ⇒
+     * getTimeout()=PT1M ⇒ 红(这正是升级的意义所在)。
      *
-     * <p>注意:模型自身的 default options 仍是 60s(属性面不可配,Spring AI 缺陷),
-     * 故本锁<b>不</b>断言模型层,断言 loom 可控的 ChatClient 层。
+     * <p>同时断言 loom 不再挂 chatClient optionsCustomizer —— 2.0.2 后 f6fc16b0 的
+     * 反射 override 已删(上游根治,库侧补丁退役),customizer 应为 null。
      */
     @Test
-    void chatClientDefaultOptionsCarryTimeoutOverride() throws Exception {
+    void modelDefaultOptionsHonorConfiguredTimeout_afterUpstreamFix() throws Exception {
+        assertThat(chatModel)
+                .as("前提:当前 provider 是 OpenAI(2.0.2 契约)")
+                .isInstanceOf(OpenAiChatModel.class);
+        org.springframework.ai.openai.OpenAiChatOptions modelOpts =
+                ((OpenAiChatModel) chatModel).getOptions();
+        Duration timeout = modelOpts.getTimeout();
+        System.out.println("[wiring-probe] model defaultOptions timeout = " + timeout);
+        assertThat(timeout == null || timeout.compareTo(Duration.ofSeconds(600)) >= 0)
+                .as("2.0.2(#6837)后 model options timeout 必须为 null(继承 client)或 ≥600s,绝不能是 60s 陷阱")
+                .isTrue();
+
+        // f6fc16b0 的库侧 override 已退役:chatClient 不得再挂 optionsCustomizer
         assertThat(chatClient)
-                .as("loom chatClient 必须是 DefaultChatClient(反射链前提)")
+                .as("反射链前提")
                 .isInstanceOf(org.springframework.ai.chat.client.DefaultChatClient.class);
         Object spec = getField(chatClient, "defaultChatClientRequest");
         Object customizer = getField(spec, "optionsCustomizer");
         assertThat(customizer)
-                .as("chatClient 必须挂 defaultOptions customizer,否则 per-request 60s 覆盖无解")
-                .isNotNull();
-        assertThat(customizer).isInstanceOf(org.springframework.ai.chat.prompt.ChatOptions.Builder.class);
-        org.springframework.ai.chat.prompt.ChatOptions built =
-                ((org.springframework.ai.chat.prompt.ChatOptions.Builder<?>) customizer).build();
-        assertThat(built).isInstanceOf(org.springframework.ai.openai.OpenAiChatOptions.class);
-        Duration timeout = ((org.springframework.ai.openai.OpenAiChatOptions) built).getTimeout();
-        System.out.println("[wiring-probe] chatClient defaultOptions timeout = " + timeout);
-        assertThat(timeout)
-                .as("prompt 级 timeout 必须 ≥600s,per-request 覆盖才不会把流掐在 60s")
-                .isEqualTo(Duration.ofSeconds(600));
+                .as("上游已根治 per-request 覆盖,库侧反射 override 应已删除(customizer 为 null)")
+                .isNull();
     }
 }
