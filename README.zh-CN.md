@@ -87,36 +87,38 @@
 ### 1. 引入聊天依赖
 ```xml
 <dependency>
- <groupId>io.github.wb04307201</groupId>
- <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.2.0</version>
+    <groupId>io.github.wb04307201</groupId>
+    <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
+    <version>1.2.1</version>
 </dependency>
 ```
 
 ### 2. 添加Spring AI模型依赖
-测试应用通过 Spring AI Alibaba 对接阿里百炼（Qwen）：
+例如使用 OpenAI 兼容格式api
 ```xml
 <dependency>
- <groupId>com.alibaba.cloud.ai</groupId>
- <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
- <version>1.1.2.3</version>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-openai</artifactId>
 </dependency>
 ```
+
 ```yaml
 spring:
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+    openai:
+      api-key: ${NEW_API_KEY}
+      base-url: http://123.56.128.32:3000/v1
       chat:
         options:
-          model: qwen3.7-plus
-          multi_model: true
-          enable_thinking: true
+          model: qwen3.8-max
+          max-completion-tokens: 983616
+          stream-options:
+            include-usage: true
+          extra-body:
+            enable_thinking: true
 ```
 
 > [使用其他模型可参考](https://docs.spring.io/spring-ai/reference/api/chatmodel.html)
-
-> **注意**: 如需基于文档进行问答，请确保模型支持多模态输入（如 `multi_model: true`），文档内容会通过 System Prompt 注入。
 
 ### 3. 启动项目
 访问`http://localhost:8080/spring/ai/loom`
@@ -145,8 +147,8 @@ PDF、DOCX、XLSX、PPTX、MD、TXT、HTML、CSV、RTF 等。
 以时间MCP服务为例，添加依赖：
 ```xml
 <dependency>
- <groupId>org.springframework.ai</groupId>
- <artifactId>spring-ai-starter-mcp-client</artifactId>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-mcp-client</artifactId>
 </dependency>
 ```
 
@@ -205,29 +207,24 @@ spring:
 市场流程：提交 → PENDING → admin 审批通过 → APPROVED → 其他用户可订阅。也可通过角色授权自动下发知识库给用户（类似技能）。知识库市场 REST API 见 [docs/API.zh-CN.md → §5.8 知识市场](docs/API.zh-CN.md#58-知识市场)。
 
 ### 更换其它RAG以替换默认实现
-下面以qdrant向量数据库为例，添加依赖和配置：
+下面以qdrant向量数据库为例，添加依赖、embeding模型、rag配置：
 ```xml
 <dependency>
- <groupId>org.springframework.ai</groupId>
- <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
 </dependency>
 ```
 
-添加配置：
 ```yaml
 spring:
   ai:
+    # qdrant配置
     vectorstore:
       qdrant:
         host: localhost
         port: 6334
         collection-name: qwen-collection-name
-```
-
-其它rag可选配置如下：
-```yaml
-spring:
-  ai:
+    # 其它rag可选配置
     loom:
       agent:
         rag:
@@ -236,7 +233,7 @@ spring:
           top-k: 4 # top-k，默认4
 ```
 
-> `rag.enabled=false`(或容器内无 `EmbeddingModel` bean,例如 `spring.ai.model.embedding.text=none`)会干净地关闭整条 RAG 链 —— 应用照常启动,知识库元数据 CRUD 保留,前端隐藏知识空间入口。`GET /spring/ai/loom/api/features` 返回 `{ "knowledge": false }`。
+> `rag.enabled=false`(或容器内无 `EmbeddingModel` bean,例如 `spring.ai.model.embedding=none`)会干净地关闭整条 RAG 链 —— 应用照常启动,知识库元数据 CRUD 保留,前端隐藏知识空间入口。`GET /spring/ai/loom/api/features` 返回 `{ "knowledge": false }`。
 
 ## 管理控制台
 
@@ -256,9 +253,6 @@ spring:
 - **未登录跳 login**: 所有 admin HTML 路径都受鉴权保护——未登录访问 302 重定向到 `/spring/ai/loom/login.html`；API 调用返 401。
 - **"清理聊天内容" 唯一入口**: 只保留 `控制台 → 批量清理` 按钮——原 user 行 / conversation 行的"清理内容"/"一键清理"按钮已整合删除。
 - **Role gating**: 所有 admin 路径都要求 `user_info.type = 'ADMIN'`——非 admin 访问 admin URL 被重定向回聊天首页。
-
-
-
 
 ---
 

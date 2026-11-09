@@ -88,37 +88,38 @@ File, Git, Maven, and Compile each have a **standalone MCP server module** — t
 ### 1. Add LoomAgent Dependency
 ```xml
 <dependency>
- <groupId>io.github.wb04307201</groupId>
- <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
- <version>1.2.0</version>
+    <groupId>io.github.wb04307201</groupId>
+    <artifactId>spring-ai-loom-agent-spring-boot-starter</artifactId>
+    <version>1.2.1</version>
 </dependency>
 ```
 
 ### 2. Add a Spring AI Model Dependency
-The test application uses Alibaba's Qwen (DashScope) via Spring AI Alibaba. Swap the dependency and config for any other provider:
+For example, using an OpenAI-compatible API:
 ```xml
 <dependency>
- <groupId>com.alibaba.cloud.ai</groupId>
- <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
- <version>1.1.2.3</version>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-openai</artifactId>
 </dependency>
 ```
 
 ```yaml
 spring:
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+    openai:
+      api-key: ${NEW_API_KEY}
+      base-url: http://123.56.128.32:3000/v1
       chat:
         options:
-          model: qwen3.7-plus
-          multi_model: true
-          enable_thinking: true
+          model: qwen3.8-max
+          max-completion-tokens: 983616
+          stream-options:
+            include-usage: true
+          extra-body:
+            enable_thinking: true
 ```
 
 > [For other models, see the Spring AI docs](https://docs.spring.io/spring-ai/reference/api/chatmodel.html).
-
-> **Note**: For document-based Q&A, ensure the model supports multimodal input (e.g., `multi_model: true`). Document content is injected via System Prompt.
 
 ### 3. Start the Project
 Visit `http://localhost:8080/spring/ai/loom`
@@ -151,8 +152,8 @@ Taking the time MCP service as an example, add the dependency:
 
 ```xml
 <dependency>
- <groupId>org.springframework.ai</groupId>
- <artifactId>spring-ai-starter-mcp-client</artifactId>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-mcp-client</artifactId>
 </dependency>
 ```
 
@@ -215,31 +216,24 @@ Market workflow: submit → PENDING → admin approve → APPROVED → other use
 For the knowledge market REST API, see [docs/API.md → §5.8 Knowledge Market](docs/API.md#58-knowledge-market).
 
 ### Replace the Default RAG Implementation
-The following example uses Qdrant as the vector store. Add the dependency:
+The following example uses Qdrant as the vector store. Add the dependency, embedding model, and RAG configuration:
 ```xml
 <dependency>
- <groupId>org.springframework.ai</groupId>
- <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
 </dependency>
 ```
-
-Add configuration:
 
 ```yaml
 spring:
   ai:
+    # Qdrant configuration
     vectorstore:
       qdrant:
         host: localhost
         port: 6334
         collection-name: qwen-collection-name
-```
-
-Optional RAG configuration:
-
-```yaml
-spring:
-  ai:
+    # Optional RAG configuration
     loom:
       agent:
         rag:
@@ -248,7 +242,7 @@ spring:
           top-k: 4 # Top-k results, default 4
 ```
 
-> Setting `rag.enabled=false` (or providing no `EmbeddingModel` bean, e.g. `spring.ai.model.embedding.text=none`) cleanly disables the whole RAG chain — the app still starts, knowledge-base metadata CRUD survives, and the frontend hides the knowledge-space entry. `GET /spring/ai/loom/api/features` reports `{ "knowledge": false }`.
+> Setting `rag.enabled=false` (or providing no `EmbeddingModel` bean, e.g. `spring.ai.model.embedding=none`) cleanly disables the whole RAG chain — the app still starts, knowledge-base metadata CRUD survives, and the frontend hides the knowledge-space entry. `GET /spring/ai/loom/api/features` reports `{ "knowledge": false }`.
 
 ## Admin Console
 
@@ -268,10 +262,6 @@ The admin console is a sidebar-navigated single-page-app shell. After admin logi
 - **未登录跳 login**: All admin HTML paths are auth-protected. Unauthenticated access 302-redirects to `/spring/ai/loom/login.html`; API calls 401.
 - **"清理聊天内容" 唯一入口**: Only `控制台 → 批量清理` button. The duplicate "清理内容" / "一键清理" buttons in user row / conversation row were consolidated.
 - **Role gating**: All admin paths require `user_info.type = 'ADMIN'`. Non-admin attempting admin URL is redirected back to chat home.
-
----
-
-
 
 ---
 
