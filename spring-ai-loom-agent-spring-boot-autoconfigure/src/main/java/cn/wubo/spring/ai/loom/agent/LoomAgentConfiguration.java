@@ -437,75 +437,18 @@ public class LoomAgentConfiguration {
             return new cn.wubo.spring.ai.loom.agent.market.MarketMetrics(registry);
         }
 
-        /**
-         * 放宽 Spring AI 内部 {@code JsonParser} 使用的 ObjectMapper，
-         * 允许 JS 风格注释（{@code //}、{@code /* *}{@code /}）和单引号。
-         * <p>
-         * 部分 LLM（特别是 qwen 系列）在工具调用时输出的 JSON 会带 JS 注释，
-         * 默认的 Jackson 配置会抛 {@code JsonParseException: Unexpected character ('/') ... maybe a comment}，
-         * 整条工具链直接断掉。开启 {@code ALLOW_COMMENTS} 后这类 LLM 输出能正常解析。
-         */
-        @Bean
-        public org.springframework.beans.factory.SmartInitializingSingleton springAiJsonParserConfig() {
-            return () -> {
-                // Spring AI 2.0 ships Jackson 3 (tools.jackson.databind.json.JsonMapper).
-                // The old Jackson 2 com.fasterxml.jackson.databind.ObjectMapper + JsonParser.Feature
-                // enum was removed. Reflectively enable the StreamReadFeature equivalents so this
-                // config stays compatible across Jackson 2 (Spring AI 1.x) and Jackson 3 (2.x+).
-                enableAllowCommentsViaReflection();
-            };
-        }
-
-        private static void enableAllowCommentsViaReflection() {
-            try {
-                Object mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getObjectMapper").invoke(null);
-                if (mapper == null) {
-                    // Spring AI 2.0 renamed the accessor — fall back to Jackson 3's getJsonMapper().
-                    try {
-                        mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getJsonMapper").invoke(null);
-                    } catch (NoSuchMethodException ignored) {
-                        LOG.warn("Spring AI JsonParser exposes neither getObjectMapper nor getJsonMapper; "
-                                + "skipping lenient-JSON configuration");
-                        return;
-                    }
-                }
-                invokeConfigure(mapper, "ALLOW_COMMENTS");
-                invokeConfigure(mapper, "ALLOW_YAML_COMMENTS");
-                invokeConfigure(mapper, "ALLOW_SINGLE_QUOTES");
-                invokeConfigure(mapper, "ALLOW_UNQUOTED_FIELD_NAMES");
-            } catch (Throwable t) {
-                LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
-            }
-        }
-
-        /**
-         * Jackson 2 used {@code om.configure(JsonParser.Feature.X, true)}; Jackson 3 uses
-         * {@code om.enable(StreamReadFeature.X)}. The Jackson 2 class may not even be on the
-         * classpath under Spring AI 2.0. We look up both feature enums via reflection and call
-         * whichever one we find.
-         */
-        private static void invokeConfigure(Object mapper, String featureName) {
-            // Try Jackson 2 first
-            try {
-                Class<?> jackson2Feature = Class.forName("com.fasterxml.jackson.core.JsonParser$Feature");
-                Object feature = Enum.valueOf((Class<Enum>) jackson2Feature, featureName);
-                mapper.getClass().getMethod("configure", jackson2Feature, boolean.class)
-                        .invoke(mapper, feature, true);
-                return;
-            } catch (ClassNotFoundException | NoSuchMethodException ignored) {
-                // fall through to Jackson 3 path
-            } catch (ReflectiveOperationException e) {
-                LOG.debug("Jackson 2 configure({}) failed, will try Jackson 3: {}", featureName, e.getMessage());
-            }
-            // Jackson 3 path: mapper.enable(StreamReadFeature.X)
-            try {
-                Class<?> jackson3Feature = Class.forName("tools.jackson.core.StreamReadFeature");
-                Object feature = Enum.valueOf((Class<Enum>) jackson3Feature, featureName);
-                mapper.getClass().getMethod("enable", jackson3Feature).invoke(mapper, feature);
-            } catch (ReflectiveOperationException e) {
-                LOG.debug("Jackson 3 enable({}) not available: {}", featureName, e.getMessage());
-            }
-        }
+        // 2026-11-09 删除 springAiJsonParserConfig / enableAllowCommentsViaReflection /
+        // invokeConfigure:该反射链在 Spring AI 2.x(Jackson 3)上**从未生效** ——
+        // ① getObjectMapper 在 2.x 已移除,getMethod 抛 NoSuchMethodException(回退到
+        //    getJsonMapper 的分支永远走不到,异常被外层 catch(Throwable) 吞掉只留 WARN);
+        // ② Jackson 3 的 JsonMapper 不可变,没有 enable(...) 方法,宽松 feature 只能经
+        //    Builder 在构建期施加;③ 4 个 feature 名在 2.x 的 StreamReadFeature 里不存在
+        //    (改名/挪到 JsonReadFeature),Enum.valueOf 抛 IllegalArgumentException。
+        // 替代方案(零反射、跨版本稳健):cn.wubo.spring.ai.loom.agent.tool.JsonLenient
+        // 在自有解析点(LoggingToolCallback 委托前 / DefaultAskUserTool.parseOptions)
+        // 剥离 JS 注释,回归锁 JsonLenientTest + LoggingToolCallbackJsonSanitizeTest。
+        // 残留差异:单引号/未加引号字段名在 2.x 仍不容错(与旧反射在 2.x 的实际效果一致,
+        // 旧反射在 2.x 从未生效过,故不构成回归)。
 
         @Bean
         public LoomAgentProperties loomAgentProperties(org.springframework.core.env.Environment environment) {
@@ -601,8 +544,6 @@ public class LoomAgentConfiguration {
             );
             return builder.build();
         }
-
-
 
         /**
          * 暴露 {@link MessageChatMemoryAdvisor} 为独立 bean —— 之前只在

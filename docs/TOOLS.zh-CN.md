@@ -511,7 +511,7 @@ Git 仓库：https://gitee.com/wb04307201/java-brain.git
 | `question` | string | 是 | 问题正文 — 一句话，清晰具体 |
 | `header` | string | 否 | 短标题/chip（2-6 字，如"部署方式"），可传 null |
 | `background` | string | 否 | 为什么问这个问题的背景说明（1-2 句），可传 null |
-| `optionsJson` | string | 是 | 选项 JSON 数组字符串，2-4 个：`[{"label":"选项A","description":"补充说明"},{"label":"选项B"}]`（用 String 而非类型化 List —— 对 qwen 系模型的 tool-args JSON 容错更好；服务端用 Spring AI 宽容 `JsonParser` 解析） |
+| `optionsJson` | string | 是 | 选项 JSON 数组字符串，2-4 个：`[{"label":"选项A","description":"补充说明"},{"label":"选项B"}]`（用 String 而非类型化 List —— 对 qwen 系模型的 tool-args JSON 容错更好；服务端经 JsonLenient 剥 JS 注释后解析,兼容 qwen 系 tool-args） |
 | `multiSelect` | boolean | 否 | 是否允许多选（null = false） |
 | `allowCustomInput` | boolean | 否 | 是否允许"其他"自定义输入（null = false） |
 

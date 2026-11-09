@@ -542,7 +542,7 @@ Scheduled tasks are namespaced `loom-sched-{username}-{conversationId}-{name}` a
 | `question` | string | Yes | Question text — one sentence, clear and specific |
 | `header` | string | No | Short title/chip (2-6 words, e.g. "Deployment method"); may be null |
 | `background` | string | No | Why the question is asked (1-2 sentences); may be null |
-| `optionsJson` | string | Yes | JSON array of 2-4 options: `[{"label":"Option A","description":"extra note"},{"label":"Option B"}]` (a string, not a typed list — better tool-args JSON tolerance for qwen-family models; parsed server-side with Spring AI's lenient `JsonParser`) |
+| `optionsJson` | string | Yes | JSON array of 2-4 options: `[{"label":"Option A","description":"extra note"},{"label":"Option B"}]` (a string, not a typed list — better tool-args JSON tolerance for qwen-family models; parsed server-side with JsonLenient comment-stripping for qwen-family tool-args) |
 | `multiSelect` | boolean | No | Allow selecting multiple options (null = false) |
 | `allowCustomInput` | boolean | No | Allow a free-text "other" answer (null = false) |
 
