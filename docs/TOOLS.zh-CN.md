@@ -138,7 +138,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | 方法 | 用途 |
 |--------------------------|--------------------------------------------------------------------|
 | `readTextFile` | 读取单个文本文件 |
-| `readMediaFile` | 读取媒体文件（图片/音频） |
+| `readMediaFile` | 读取媒体文件元数据（MIME/大小）；仅 `includeBase64=true` 时返回 base64 |
 | `readMultipleFiles` | 一次读取多个文件 |
 | `writeFile` | 创建或覆盖写入文件 |
 | `editFile` | 在已存在的文件中进行定点文本编辑 |

@@ -44,10 +44,12 @@ public class LoomFileMcpService {
         return fileOps.readText(basePath, path, head, tail);
     }
 
-    @McpTool(name = "read_media_file", description = "读取本地图片或音频文件，返回 base64 编码数据和 MIME 类型。")
+    @McpTool(name = "read_media_file", description = "读取本地图片或音频文件的元数据(MIME/大小/文件名)。"
+            + "默认不返回 base64(模型无法从 base64 文本看见图片,视觉理解请走聊天附件);仅转存/转发场景传 include_base64=true。")
     public String readMediaFile(
-            @McpToolParam(description = "相对于基础目录的文件路径") String path) {
-        return fileOps.readMedia(basePath, path);
+            @McpToolParam(description = "相对于基础目录的文件路径") String path,
+            @McpToolParam(description = "true 时才返回全量 base64 数据(转存/转发场景);缺省为元数据卡", required = false) Boolean includeBase64) {
+        return fileOps.readMedia(basePath, path, Boolean.TRUE.equals(includeBase64));
     }
 
     @McpTool(name = "read_multiple_files", description = "同时读取多个文件内容，比逐个读取更高效。单个文件读取失败不会影响其他文件。")

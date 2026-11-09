@@ -155,13 +155,20 @@ public class FileOperations {
     // ==================== Directory operations ====================
 
     /**
-     * 读取媒体文件（图片/音频），返回 base64 编码。
+     * 读取媒体文件（图片/音频）。
      *
-     * @param basePath 基础目录
-     * @param path     相对路径
-     * @return MIME 类型和 base64 数据，或错误信息
+     * <p><b>2026-11-09 契约重构</b>：默认<b>不</b>返回 base64 —— LLM 无法把 base64 文本
+     * 还原成视觉输入（Spring AI tool result 是纯文本通道；Chrome E2E 实测模型思考自认
+     * "I cannot visually interpret base64 text"），147KB PNG ≈ 5 万 token 纯烧上下文，
+     * 还会诱导模型徒劳手解 IHDR。默认返回<b>元数据卡</b>（MIME/大小/文件名 + 引导：
+     * 视觉理解走聊天附件通道，转存/转发才 opt-in base64）。
+     *
+     * @param basePath       基础目录
+     * @param path           相对路径
+     * @param includeBase64  true 时才读取并返回全量 base64（转存/转发场景）
+     * @return 元数据卡，或 includeBase64=true 时 MIME + base64，或错误信息
      */
-    public String readMedia(Path basePath, String path) {
+    public String readMedia(Path basePath, String path, boolean includeBase64) {
         Path filePath;
         try {
             filePath = resolvePathForRead(basePath, path);
@@ -179,12 +186,23 @@ public class FileOperations {
             if (size > cfg.maxMediaSize()) {
                 return "错误：媒体文件大小 " + formatSize(size) + " 超过限制 " + formatSize(cfg.maxMediaSize());
             }
-            byte[] data = Files.readAllBytes(filePath);
-            String base64 = Base64.getEncoder().encodeToString(data);
             String mimeType = Files.probeContentType(filePath);
             if (mimeType == null || mimeType.isBlank()) {
                 mimeType = "application/octet-stream";
             }
+            if (!includeBase64) {
+                return "媒体文件元数据："
+                        + "\n- 文件：" + filePath.getFileName()
+                        + "\n- MIME类型：" + mimeType
+                        + "\n- 文件大小：" + formatSize(size)
+                        + "\n说明：本工具默认不返回 base64 —— 大模型无法从 base64 文本"
+                        + "“看见”图片内容，返回只会浪费上下文。"
+                        + "\n- 需要视觉理解：请让用户把该图片作为聊天附件（+ 按钮）发送；"
+                        + "也可调用 viewFileUrl 生成预览链接给用户。"
+                        + "\n- 确需原始数据（转存/转发）：再次调用并传 includeBase64=true。";
+            }
+            byte[] data = Files.readAllBytes(filePath);
+            String base64 = Base64.getEncoder().encodeToString(data);
             return "MIME类型：" + mimeType + "\nBase64数据：\n" + base64;
         } catch (IOException e) {
             return "读取媒体文件失败：" + e.getMessage();

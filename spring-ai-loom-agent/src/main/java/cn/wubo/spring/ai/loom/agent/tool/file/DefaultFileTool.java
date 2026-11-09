@@ -66,15 +66,18 @@ public class DefaultFileTool implements IFileTool {
         return fileOps.readText(basePath, path, head, tail);
     }
 
-    @Tool(description = "读取本地图片或音频文件，返回 base64 编码数据和 MIME 类型。")
+    @Tool(description = "读取本地图片或音频文件的元数据(MIME/大小/文件名)。默认不返回 base64:"
+            + "你无法从 base64 文本中'看见'图片内容,需要视觉理解时请引导用户把图片作为聊天附件发送,"
+            + "或调用 viewFileUrl 生成预览链接;仅转存/转发等确需原始数据的场景传 includeBase64=true。")
     @Override
     public String readMediaFile(
             @ToolParam(description = "相对于用户文件目录的文件路径") String path,
+            @ToolParam(description = "true 时才返回全量 base64 数据(转存/转发场景);缺省为元数据卡", required = false) Boolean includeBase64,
             ToolContext toolContext) {
         String username = tryGetUsername(toolContext);
         if (username == null) return "错误：缺少 username 上下文";
         Path basePath = getUserFileDir(username);
-        return fileOps.readMedia(basePath, path);
+        return fileOps.readMedia(basePath, path, Boolean.TRUE.equals(includeBase64));
     }
 
     @Tool(description = "同时读取多个文件内容，比逐个读取更高效。单个文件读取失败不会影响其他文件。")

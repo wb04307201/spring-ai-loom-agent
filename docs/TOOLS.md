@@ -140,7 +140,7 @@ public IGitTool customGitTool() { return new MyGitTool(); }
 | Method | Purpose |
 |---------------------------|-------------------------------------------------------------------------|
 | `readTextFile` | Read text content of a single file |
-| `readMediaFile` | Read a media file (image/audio) |
+| `readMediaFile` | Read media file metadata (MIME/size); base64 only via `includeBase64=true` |
 | `readMultipleFiles` | Read several files in one call |
 | `writeFile` | Create or overwrite a file |
 | `editFile` | Targeted text edit in an existing file |

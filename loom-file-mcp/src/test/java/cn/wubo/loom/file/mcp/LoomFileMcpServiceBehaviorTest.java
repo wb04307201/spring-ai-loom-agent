@@ -101,19 +101,28 @@ class LoomFileMcpServiceBehaviorTest {
     class ReadMediaFile {
 
         @Test
-        @DisplayName("二进制文件:返回 base64 + MIME 类型")
-        void returnsBase64AndMime() throws Exception {
+        @DisplayName("默认回元数据卡:MIME+大小在场,base64 不在(LLM 看不了 base64 文本)")
+        void returnsMetadataCardByDefault() throws Exception {
             byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
             Files.write(base.resolve("x.png"), png);
-            String out = service.readMediaFile("x.png");
-            assertThat(out).isNotBlank();
+            String out = service.readMediaFile("x.png", null);
+            assertThat(out).contains("MIME类型：").doesNotContain("Base64数据");
+        }
+
+        @Test
+        @DisplayName("includeBase64=true 才回 base64(转存/转发场景 opt-in)")
+        void returnsBase64WhenOptIn() throws Exception {
+            byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
+            Files.write(base.resolve("x.png"), png);
+            String out = service.readMediaFile("x.png", Boolean.TRUE);
+            assertThat(out).contains("Base64数据");
         }
 
         @Test
         @DisplayName("文本文件当媒体读:不得抛异常(失败也是字符串)")
         void nonMediaFileDoesNotThrow() throws Exception {
             write("t.txt", "hello");
-            service.readMediaFile("t.txt");
+            service.readMediaFile("t.txt", null);
         }
     }
 

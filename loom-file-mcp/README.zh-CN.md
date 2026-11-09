@@ -55,7 +55,7 @@ java -jar target/loom-file-mcp-1.0-SNAPSHOT.jar
 | 工具 | 说明 |
 |------|------|
 | `readTextFile` | 读取文件文本内容，支持 `head`/`tail` 局部读取 |
-| `readMediaFile` | 读取图片/音频文件，返回 base64 编码 + MIME 类型 |
+| `readMediaFile` | 读取图片/音频文件元数据(MIME/大小/文件名);仅 `includeBase64=true` 时返回 base64 |
 | `readMultipleFiles` | 批量读取多个文件 |
 
 ### 写入 / 编辑操作

@@ -55,7 +55,7 @@ All properties under `loom.file.mcp`:
 | Tool | Description |
 |------|-------------|
 | `readTextFile` | Read file as text. Supports `head`/`tail` for partial reads |
-| `readMediaFile` | Read image/audio file, returns base64 + MIME type |
+| `readMediaFile` | Read image/audio file metadata (MIME/size/name); base64 only with `includeBase64=true` |
 | `readMultipleFiles` | Batch read multiple files in one call |
 
 ### Write / Edit Operations
