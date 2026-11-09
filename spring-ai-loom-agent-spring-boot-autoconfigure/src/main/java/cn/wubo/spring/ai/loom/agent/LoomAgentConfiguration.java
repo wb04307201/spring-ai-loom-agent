@@ -587,6 +587,8 @@ public class LoomAgentConfiguration {
     @Configuration
     static class ChatConfiguration {
 
+        private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatConfiguration.class);
+
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
         public ChatClient chatClient(ChatModel chatModel,
@@ -597,7 +599,75 @@ public class LoomAgentConfiguration {
             builder.defaultAdvisors(messageChatMemoryAdvisor, // chat-memory advisor (bean, so sub-task executor can also reuse it)
                     new SimpleLoggerAdvisor() // logger advisor
             );
+            applyPromptLevelTimeoutOverride(builder, chatModel, properties);
             return builder.build();
+        }
+
+        /**
+         * 2026-11-09:修「流式请求稳定 60.0s 被 okhttp 掐断」的真凶(2e67c59a 修的是
+         * client 级 callTimeout,但被 per-request 覆盖,从未真正生效于流式路径)。
+         *
+         * <p><b>缺陷链(字节码实证)</b>:Spring AI 2.0.1 的 {@code OpenAiChatOptions.timeout}
+         * 属性面不可配({@code OpenAiChatProperties.toOptions()} 不映射 timeout),构造时回落
+         * {@code AbstractOpenAiOptions.DEFAULT_TIMEOUT = 60s};而
+         * {@code OpenAiChatModel.buildRequestOptions(Prompt)} 把 <b>prompt options</b> 的
+         * timeout 塞进 per-request {@code RequestOptions.timeout};
+         * {@code SpringAiOpenAiHttpClient.newCall()} 对每个请求 {@code newBuilder()} 重建
+         * okhttp client 并用该值<b>覆盖</b> client 级 callTimeout。⇒ 即便
+         * {@code spring.ai.openai.timeout=600s} 让 client 级是 600s(实测),每个请求仍被
+         * prompt options 里那个 60s 压回去,流精确死在 60.0±1s
+         * (栈:{@code InterruptedIOException: timeout @ RealCall.timeoutExit})。
+         *
+         * <p><b>修法</b>:{@code ChatClient.Builder.defaultOptions(modelOptions.mutate().timeout(600s))}
+         * —— optionsCustomizer 在 {@code DefaultChatClientUtils} 里经
+         * {@code modelOptions.mutate().combineWith(customizer)} 合并,customizer 的非空
+         * timeout 覆盖模型默认 60s ⇒ prompt options timeout=600s ⇒ per-request 覆盖值
+         * 随之变成 600s。取值与 client 级同源({@code spring.ai.loom.agent.chat.timeout-seconds},
+         * 默认 600)。
+         *
+         * <p><b>为什么用反射</b>:autoconfigure 模块不编译依赖 spring-ai-openai(消费方
+         * 可能用任意 provider),对"options builder 有 timeout(Duration) 方法"的 provider
+         * 通用生效,没有则静默跳过(warn)。
+         *
+         * <p>回归锁:{@code ChatProviderTimeoutWiringTest}(client 级 600s + customizer
+         * timeout 600s 双断言;变异:删本方法调用 ⇒ customizer 为 null ⇒ 变红)。
+         */
+        private static void applyPromptLevelTimeoutOverride(ChatClient.Builder builder,
+                                                            ChatModel chatModel,
+                                                            LoomAgentProperties properties) {
+            long seconds = properties.getChat().getTimeoutSeconds();
+            if (seconds <= 0) return; // 显式关掉 ⇒ 不干预,与 BFPP 语义一致
+            try {
+                org.springframework.ai.chat.prompt.ChatOptions modelOptions = chatModel.getOptions();
+                if (modelOptions == null) return;
+                Object b = modelOptions.getClass().getMethod("mutate").invoke(modelOptions);
+                java.lang.reflect.Method timeoutSetter = findTimeoutSetter(b.getClass());
+                if (timeoutSetter == null) {
+                    log.debug("ChatModel options builder {} has no timeout(Duration) setter — skip prompt-level override",
+                            b.getClass().getName());
+                    return;
+                }
+                timeoutSetter.invoke(b, java.time.Duration.ofSeconds(seconds));
+                @SuppressWarnings({"unchecked", "rawtypes"})
+                org.springframework.ai.chat.prompt.ChatOptions.Builder<?> typed =
+                        (org.springframework.ai.chat.prompt.ChatOptions.Builder) b;
+                builder.defaultOptions(typed);
+                log.info("Prompt-level chat timeout override applied: {}s (model default options timeout trap bypassed)", seconds);
+            } catch (Exception e) {
+                log.warn("Failed to apply prompt-level chat timeout override, long streams may be cut at provider default: {}",
+                        e.getMessage());
+            }
+        }
+
+        private static java.lang.reflect.Method findTimeoutSetter(Class<?> c) {
+            while (c != null && c != Object.class) {
+                try {
+                    return c.getMethod("timeout", java.time.Duration.class);
+                } catch (NoSuchMethodException ignored) {
+                    c = c.getSuperclass();
+                }
+            }
+            return null;
         }
 
         /**

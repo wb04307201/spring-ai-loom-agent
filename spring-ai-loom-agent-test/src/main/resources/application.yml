@@ -56,6 +56,11 @@ spring:
       # 国际版端点(用户也可用 https://api.minimaxi.com/v1 — 同 API 不同域);
       # Spring AI OpenAI SDK 自动追加 /chat/completions。
       base-url: https://api.minimaxi.com/v1
+      # 2026-11-09: client 级 callTimeout 双保险。60s 掐断的真凶是 per-request
+      # OpenAiChatOptions.timeout=60s 覆盖(Spring AI 2.0.1 属性面不可配),已由库侧
+      # chatClient defaultOptions 修复(LoomAgentConfiguration.applyPromptLevelTimeoutOverride,
+      # 回归锁 ChatProviderTimeoutWiringTest);本显式键仅保留 client 级兜底。
+      timeout: 600s
       chat:
         options:
           model: MiniMax-M3
