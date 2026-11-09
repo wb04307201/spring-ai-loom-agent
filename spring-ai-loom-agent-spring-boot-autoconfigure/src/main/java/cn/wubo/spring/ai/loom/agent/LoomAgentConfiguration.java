@@ -437,75 +437,18 @@ public class LoomAgentConfiguration {
             return new cn.wubo.spring.ai.loom.agent.market.MarketMetrics(registry);
         }
 
-        /**
-         * 放宽 Spring AI 内部 {@code JsonParser} 使用的 ObjectMapper，
-         * 允许 JS 风格注释（{@code //}、{@code /* *}{@code /}）和单引号。
-         * <p>
-         * 部分 LLM（特别是 qwen 系列）在工具调用时输出的 JSON 会带 JS 注释，
-         * 默认的 Jackson 配置会抛 {@code JsonParseException: Unexpected character ('/') ... maybe a comment}，
-         * 整条工具链直接断掉。开启 {@code ALLOW_COMMENTS} 后这类 LLM 输出能正常解析。
-         */
-        @Bean
-        public org.springframework.beans.factory.SmartInitializingSingleton springAiJsonParserConfig() {
-            return () -> {
-                // Spring AI 2.0 ships Jackson 3 (tools.jackson.databind.json.JsonMapper).
-                // The old Jackson 2 com.fasterxml.jackson.databind.ObjectMapper + JsonParser.Feature
-                // enum was removed. Reflectively enable the StreamReadFeature equivalents so this
-                // config stays compatible across Jackson 2 (Spring AI 1.x) and Jackson 3 (2.x+).
-                enableAllowCommentsViaReflection();
-            };
-        }
-
-        private static void enableAllowCommentsViaReflection() {
-            try {
-                Object mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getObjectMapper").invoke(null);
-                if (mapper == null) {
-                    // Spring AI 2.0 renamed the accessor — fall back to Jackson 3's getJsonMapper().
-                    try {
-                        mapper = org.springframework.ai.util.json.JsonParser.class.getMethod("getJsonMapper").invoke(null);
-                    } catch (NoSuchMethodException ignored) {
-                        LOG.warn("Spring AI JsonParser exposes neither getObjectMapper nor getJsonMapper; "
-                                + "skipping lenient-JSON configuration");
-                        return;
-                    }
-                }
-                invokeConfigure(mapper, "ALLOW_COMMENTS");
-                invokeConfigure(mapper, "ALLOW_YAML_COMMENTS");
-                invokeConfigure(mapper, "ALLOW_SINGLE_QUOTES");
-                invokeConfigure(mapper, "ALLOW_UNQUOTED_FIELD_NAMES");
-            } catch (Throwable t) {
-                LOG.warn("Could not configure Spring AI JsonParser to allow comments: {}", t.getMessage());
-            }
-        }
-
-        /**
-         * Jackson 2 used {@code om.configure(JsonParser.Feature.X, true)}; Jackson 3 uses
-         * {@code om.enable(StreamReadFeature.X)}. The Jackson 2 class may not even be on the
-         * classpath under Spring AI 2.0. We look up both feature enums via reflection and call
-         * whichever one we find.
-         */
-        private static void invokeConfigure(Object mapper, String featureName) {
-            // Try Jackson 2 first
-            try {
-                Class<?> jackson2Feature = Class.forName("com.fasterxml.jackson.core.JsonParser$Feature");
-                Object feature = Enum.valueOf((Class<Enum>) jackson2Feature, featureName);
-                mapper.getClass().getMethod("configure", jackson2Feature, boolean.class)
-                        .invoke(mapper, feature, true);
-                return;
-            } catch (ClassNotFoundException | NoSuchMethodException ignored) {
-                // fall through to Jackson 3 path
-            } catch (ReflectiveOperationException e) {
-                LOG.debug("Jackson 2 configure({}) failed, will try Jackson 3: {}", featureName, e.getMessage());
-            }
-            // Jackson 3 path: mapper.enable(StreamReadFeature.X)
-            try {
-                Class<?> jackson3Feature = Class.forName("tools.jackson.core.StreamReadFeature");
-                Object feature = Enum.valueOf((Class<Enum>) jackson3Feature, featureName);
-                mapper.getClass().getMethod("enable", jackson3Feature).invoke(mapper, feature);
-            } catch (ReflectiveOperationException e) {
-                LOG.debug("Jackson 3 enable({}) not available: {}", featureName, e.getMessage());
-            }
-        }
+        // 2026-11-09 删除 springAiJsonParserConfig / enableAllowCommentsViaReflection /
+        // invokeConfigure:该反射链在 Spring AI 2.x(Jackson 3)上**从未生效** ——
+        // ① getObjectMapper 在 2.x 已移除,getMethod 抛 NoSuchMethodException(回退到
+        //    getJsonMapper 的分支永远走不到,异常被外层 catch(Throwable) 吞掉只留 WARN);
+        // ② Jackson 3 的 JsonMapper 不可变,没有 enable(...) 方法,宽松 feature 只能经
+        //    Builder 在构建期施加;③ 4 个 feature 名在 2.x 的 StreamReadFeature 里不存在
+        //    (改名/挪到 JsonReadFeature),Enum.valueOf 抛 IllegalArgumentException。
+        // 替代方案(零反射、跨版本稳健):cn.wubo.spring.ai.loom.agent.tool.JsonLenient
+        // 在自有解析点(LoggingToolCallback 委托前 / DefaultAskUserTool.parseOptions)
+        // 剥离 JS 注释,回归锁 JsonLenientTest + LoggingToolCallbackJsonSanitizeTest。
+        // 残留差异:单引号/未加引号字段名在 2.x 仍不容错(与旧反射在 2.x 的实际效果一致,
+        // 旧反射在 2.x 从未生效过,故不构成回归)。
 
         @Bean
         public LoomAgentProperties loomAgentProperties(org.springframework.core.env.Environment environment) {
@@ -586,6 +529,8 @@ public class LoomAgentConfiguration {
 
     @Configuration
     static class ChatConfiguration {
+
+        private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatConfiguration.class);
 
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
@@ -858,7 +803,7 @@ public class LoomAgentConfiguration {
 
         /**
          * Embedding 可用性守卫(方案 B 崩溃防护):用户用 Spring AI 标准开关
-         * ({@code spring.ai.model.embedding.text=none} 或 {@code spring.ai.dashscope.enabled=false})
+         * ({@code spring.ai.model.embedding=none} 或 {@code spring.ai.dashscope.enabled=false})
          * 关掉 embedding 时,本 bean 跳过 → VectorStore 不创建 → 下游
          * @ConditionalOnBean(VectorStore) 链(reloader/DocumentRead/Upload/KnowledgeTool/
          * knowledge & upload 路由)整体干净消失,不再 NoSuchBeanDefinition 启动失败。
@@ -979,11 +924,18 @@ public class LoomAgentConfiguration {
                     && beanFactory.getBeanNamesForType(EmbeddingModel.class, true, true).length > 0) {
                 return ConditionOutcome.match(message.because("EmbeddingModel bean definition present"));
             }
-            // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)
+            // 2) 标准关闭开关(属性读取与 bean 注册顺序无关)。
+            //    2026-11-09 键清理:改读 Spring AI 标准父键 spring.ai.model.embedding
+            //    (=none 时 OpenAi*EmbeddingAutoConfiguration 的 @ConditionalOnProperty
+            //    havingValue=openai 不匹配、provider 退场)—— 与上游 autoconfig 读同一键,
+            //    消费者只需设一处。旧 loom 自创键 spring.ai.model.embedding.text 已删:
+            //    它蹲在上游命名空间、与标准键仅差 ".text"、语义重复,是"双键缺一不可"
+            //    混淆根源(只设父键时第 2 步读不到 → 乐观放行 → h2VectorStore 注册后
+            //    构造器注入缺 EmbeddingModel bean 启动崩)。
             org.springframework.core.env.Environment env = context.getEnvironment();
-            if ("none".equalsIgnoreCase(env.getProperty("spring.ai.model.embedding.text"))) {
+            if ("none".equalsIgnoreCase(env.getProperty("spring.ai.model.embedding"))) {
                 return ConditionOutcome.noMatch(message.because(
-                        "spring.ai.model.embedding.text=none disables all embedding providers"));
+                        "spring.ai.model.embedding=none disables all embedding providers"));
             }
             if ("false".equalsIgnoreCase(env.getProperty("spring.ai.dashscope.enabled"))) {
                 return ConditionOutcome.noMatch(message.because(
@@ -1552,20 +1504,17 @@ public class LoomAgentConfiguration {
                         } catch (Exception e) {
                             log.warn("cancel-all: H2 cleanup failed: {}", e.getMessage());
                         }
-                        // And the audit-trail execution rows.
-                        int execRowsDeleted = 0;
-                        try {
-                            execRowsDeleted = loomScheduleExecutionRepository
-                                    .deleteByUserAndConversation(user, conv);
-                        } catch (Exception e) {
-                            log.warn("cancel-all: execution cleanup failed: {}", e.getMessage());
-                        }
+                        // 2026-11-08 (b 修复): 不再删除 loom_schedule_execution 审计行。
+                        // V1.0 schema 注释明文设计「取消/过期会删声明行,但执行历史保留」；
+                        // 此前这里连审计一起删，导致 admin 流水页 SCHEDULE_FIRE 永久消失，
+                        // 且与单条取消路径（工具/REST cancel 均保留审计）不一致。
+                        // 审计行生命周期由 ScheduleExecutionCleanup（按天 deleteOlderThan）
+                        // 与会话删除级联（deleteByUserAndConversation，conversation-delete 路径）统一管理。
                         java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
                         body.put("cancelled", cancelled);
                         body.put("rowsDeleted", rowsDeleted);
-                        body.put("execRowsDeleted", execRowsDeleted);
-                        log.info("schedule cancel-all: user={}, conv={}, cancelled={}, rowsDeleted={}, execRowsDeleted={}",
-                                user, conv, cancelled, rowsDeleted, execRowsDeleted);
+                        log.info("schedule cancel-all: user={}, conv={}, cancelled={}, rowsDeleted={}",
+                                user, conv, cancelled, rowsDeleted);
                         return ServerResponse.ok().body(body);
                     });
             // Frontend posts the FULL task name (already namespaced) in a JSON body {"name": "..."}.

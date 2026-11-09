@@ -46,8 +46,13 @@ public class LoggingToolCallback implements ToolCallback {
         Instant start = Instant.now();
         boolean isError = false;
         String result = "";
+        // 2026-11-09: qwen tool_use arguments 常带 JS 注释,而 Spring AI 2.x 共享
+        // JsonMapper 不可变(反射开 ALLOW_COMMENTS 的路子在 2.x 从未生效) ⇒ 在本
+        // 包装点(embed + MCP 唯一入口)剥净注释再委托,MethodToolCallback 永远
+        // 看不到注释。审计日志仍记**原始** arguments(审计保真)。
+        String sanitized = JsonLenient.sanitize(arguments);
         try {
-            result = delegate.call(arguments, toolContext);
+            result = delegate.call(sanitized, toolContext);
             return result;
         } catch (Exception e) {
             isError = true;

@@ -30,7 +30,8 @@ public class JdbcLoomScheduleExecutionRepository implements ILoomScheduleExecuti
             + " duration_ms BIGINT NOT NULL,"
             + " success BOOLEAN NOT NULL,"
             + " error_message CLOB,"
-            + " fired_by VARCHAR(16) NOT NULL DEFAULT 'SCHEDULER'"
+            + " fired_by VARCHAR(16) NOT NULL DEFAULT 'SCHEDULER',"
+            + " subtask_id VARCHAR(64)"
             + ")";
 
     private static final String DDL_INDEX_TASK_FIRE =
@@ -41,12 +42,20 @@ public class JdbcLoomScheduleExecutionRepository implements ILoomScheduleExecuti
             "CREATE INDEX IF NOT EXISTS idx_loom_schedule_execution_fire"
                     + " ON " + TABLE_NAME + "(fire_time)";
 
+    /**
+     * 2026-11-08 (c'): defensive column add for databases whose table was
+     * created before the {@code subtask_id} column existed (ensureSchema's
+     * CREATE TABLE IF NOT EXISTS is a no-op on them). Idempotent.
+     */
+    private static final String DDL_ADD_SUBTASK_ID =
+            "ALTER TABLE " + TABLE_NAME + " ADD COLUMN IF NOT EXISTS subtask_id VARCHAR(64)";
+
     private static final String COLUMNS =
-            " execution_id, task_name, fire_time, duration_ms, success, error_message, fired_by";
+            " execution_id, task_name, fire_time, duration_ms, success, error_message, fired_by, subtask_id";
 
     private static final String INSERT_SQL =
-            "INSERT INTO " + TABLE_NAME + " (task_name, fire_time, duration_ms, success, error_message, fired_by)"
-                    + " VALUES (?, ?, ?, ?, ?, ?)";
+            "INSERT INTO " + TABLE_NAME + " (task_name, fire_time, duration_ms, success, error_message, fired_by, subtask_id)"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?)";
 
     private final JdbcTemplate jdbc;
 
@@ -66,12 +75,14 @@ public class JdbcLoomScheduleExecutionRepository implements ILoomScheduleExecuti
                 rs.getLong("duration_ms"),
                 rs.getBoolean("success"),
                 rs.getString("error_message"),
-                rs.getString("fired_by"));
+                rs.getString("fired_by"),
+                rs.getString("subtask_id"));
     }
 
     @Override
     public void ensureSchema() {
         jdbc.execute(DDL);
+        jdbc.execute(DDL_ADD_SUBTASK_ID);
         jdbc.execute(DDL_INDEX_TASK_FIRE);
         jdbc.execute(DDL_INDEX_FIRE);
         log.debug("JdbcLoomScheduleExecutionRepository schema ensured at {}", TABLE_NAME);
@@ -85,7 +96,8 @@ public class JdbcLoomScheduleExecutionRepository implements ILoomScheduleExecuti
                 r.durationMs(),
                 r.success(),
                 r.errorMessage(),
-                r.firedBy() == null ? LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER : r.firedBy());
+                r.firedBy() == null ? LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER : r.firedBy(),
+                r.subtaskId());
     }
 
     @Override

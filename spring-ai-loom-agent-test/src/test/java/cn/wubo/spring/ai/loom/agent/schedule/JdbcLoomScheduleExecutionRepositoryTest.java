@@ -188,6 +188,29 @@ class JdbcLoomScheduleExecutionRepositoryTest {
     }
 
     @Test
+    void save_persistsSubtaskId_roundTrip() {
+        Instant t = Instant.parse("2026-11-08T10:00:00Z");
+        repository.save(new LoomScheduleExecutionRecord(
+                null, "remind", t, 42L, true, null,
+                LoomScheduleExecutionRecord.FIRED_BY_SCHEDULER, "sub-uuid-1"));
+
+        LoomScheduleExecutionRecord stored = repository.findByTaskName("remind", 0).get(0);
+        assertThat(stored.subtaskId())
+                .as("subtask_id 列是 SCHEDULE_FIRE 精确配对的依据，必须落库")
+                .isEqualTo("sub-uuid-1");
+    }
+
+    @Test
+    void save_legacySevenArgConstructor_leavesSubtaskIdNull() {
+        repository.save(fire("remind", Instant.parse("2026-11-08T10:00:00Z"), true));
+
+        LoomScheduleExecutionRecord stored = repository.findByTaskName("remind", 0).get(0);
+        assertThat(stored.subtaskId())
+                .as("兼容构造器保持 NULL —— 流水配对回退 ±5s 时间窗")
+                .isNull();
+    }
+
+    @Test
     void deleteByUserAndConversation_withBlankArgs_isNoOp() {
         repository.save(fire("loom-sched-alice-conv-1-remind", Instant.now(), true));
         assertThat(repository.deleteByUserAndConversation(null, "conv-1")).isZero();

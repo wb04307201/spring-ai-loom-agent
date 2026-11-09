@@ -62,11 +62,13 @@ public class DefaultAskUserTool implements IAskUserTool {
 
     private static List<AskUserOption> parseOptions(String optionsJson) {
         if (optionsJson == null || optionsJson.isBlank()) return List.of();
-        // Spring AI 的共享 ObjectMapper:InfrastructureConfiguration 已开
-        // ALLOW_COMMENTS / ALLOW_SINGLE_QUOTES(qwen tool-args 容错先例)
+        // 2026-11-09: Spring AI 2.x 共享 JsonMapper 不可变,旧的"InfrastructureConfiguration
+        // 反射开 ALLOW_COMMENTS"从未在 2.x 生效(反射回退链是死的)⇒ qwen 的 optionsJson
+        // 带 JS 注释会直接 JsonParseException。改为解析前经 JsonLenient 剥注释
+        // (与 LoggingToolCallback 同一容错路径)。
         JsonMapper om = org.springframework.ai.util.json.JsonParser.getJsonMapper();
         try {
-            return om.readValue(optionsJson,
+            return om.readValue(cn.wubo.spring.ai.loom.agent.tool.JsonLenient.sanitize(optionsJson),
                     om.getTypeFactory().constructCollectionType(List.class, AskUserOption.class));
         } catch (Exception e) {
             throw new IllegalArgumentException(e.getMessage(), e);

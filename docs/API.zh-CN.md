@@ -1382,11 +1382,12 @@ GET /spring/ai/loom/schedule/history/by-conversation/{conversationId}
 @Tool: readMediaFile
 ```
 
-读取本地图片或音频文件，返回 base64 编码数据和 MIME 类型。
+读取本地图片或音频文件的**元数据**(MIME/大小/文件名)。默认**不返回 base64**——大模型无法从 base64 文本"看见"图片内容,返回只会浪费上下文;视觉理解请引导用户把图片作为聊天附件发送(或用 `viewFileUrl` 生成预览链接),仅转存/转发等确需原始数据的场景传 `includeBase64=true`。
 
 | 参数 | 类型 | 必填 | 说明 |
 |--------|--------|------|---------------------------------|
 | `path` | string | 是 | 相对于用户文件目录的路径 |
+| `includeBase64` | boolean | 否 | true 时才返回全量 base64 数据(转存/转发场景);缺省为元数据卡 |
 
 ### 13.3 批量读取
 

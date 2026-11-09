@@ -36,7 +36,7 @@ import static org.mockito.Mockito.when;
  * 6. searchFiles glob 模式匹配
  * 7. listAllowedDirectories / listDirectory / directoryTree
  * 8. getFileInfo 元数据
- * 9. readMediaFile base64 编码
+ * 9. readMediaFile 元数据卡 / includeBase64 opt-in
  * 10. 越权拒绝：绝对路径、.. 穿越、symlink
  * 11. 不同 username 路径隔离
  * 12. downloadFileUrl/viewFileUrl 路径不存在时返回错误
@@ -453,29 +453,41 @@ class DefaultFileToolTest {
 
     // ==================== 媒体 ====================
 
+    /**
+     * 2026-11-09 契约(readMediaFile 重构):默认<b>不</b>回 base64 —— LLM 无法把
+     * base64 文本还原成视觉输入(Chrome E2E 实证模型思考自认 "I cannot visually
+     * interpret base64 text"),147KB PNG ≈ 5 万 token 纯烧。默认回元数据卡 +
+     * 引导(视觉理解走聊天附件 / viewFileUrl;转存转发才 includeBase64=true)。
+     */
     @Test
-    @DisplayName("readMediaFile 返回 base64 编码")
-    void readMediaFile_returnsBase64() {
-        // 写入 3 字节已知内容
-        try {
-            Files.write(tmpRoot.resolve("tiny.bin"), new byte[]{1, 2, 3});
-        } catch (IOException e) {
-            fail(e);
-        }
-        String result = tool.readMediaFile("tiny.bin", ctx(username));
+    @DisplayName("readMediaFile 默认回元数据卡,不含 base64(防上下文炸弹)")
+    void readMediaFile_defaultReturnsMetadataCardWithoutBase64() throws IOException {
+        Files.write(tmpRoot.resolve("tiny.bin"), new byte[]{1, 2, 3});
+        String result = tool.readMediaFile("tiny.bin", null, ctx(username));
+        assertTrue(result.contains("MIME类型："), "元数据卡应含 MIME 类型: " + result);
+        assertTrue(result.contains("文件大小"), "元数据卡应含文件大小: " + result);
+        assertFalse(result.contains("Base64数据"), "默认不得回 base64: " + result);
+        assertTrue(result.length() < 600, "元数据卡必须短(防上下文炸弹), 实际 " + result.length());
+    }
+
+    @Test
+    @DisplayName("readMediaFile includeBase64=true 才回 base64(转存/转发场景)")
+    void readMediaFile_includeBase64TrueReturnsBase64Payload() throws IOException {
+        Files.write(tmpRoot.resolve("tiny.bin"), new byte[]{1, 2, 3});
+        String result = tool.readMediaFile("tiny.bin", Boolean.TRUE, ctx(username));
         assertTrue(result.startsWith("MIME类型："), "应输出 MIME 类型头: " + result);
-        assertTrue(result.contains("Base64数据"), "应包含 base64 数据: " + result);
+        assertTrue(result.contains("Base64数据"), "opt-in 时应包含 base64 数据: " + result);
         assertTrue(result.contains("AQID"), "1,2,3 的 base64 编码应为 AQID: " + result);
     }
 
     @Test
-    @DisplayName("readMediaFile 超过 maxMediaSize 拒绝")
+    @DisplayName("readMediaFile 超过 maxMediaSize 拒绝(两种模式一致)")
     void readMediaFile_oversizedRejected() throws IOException {
         // 默认 maxMediaSize=1MB，写 1MB+1 字节
         byte[] data = new byte[(int) (cfg.getMaxMediaSize() + 1)];
         Files.write(tmpRoot.resolve("big.bin"), data);
-        String result = tool.readMediaFile("big.bin", ctx(username));
-        assertTrue(result.contains("超过限制"), "应拒绝过大媒体: " + result);
+        assertTrue(tool.readMediaFile("big.bin", null, ctx(username)).contains("超过限制"), "默认模式应拒绝过大媒体");
+        assertTrue(tool.readMediaFile("big.bin", Boolean.TRUE, ctx(username)).contains("超过限制"), "opt-in 模式同样应拒绝");
     }
 
     // ==================== 越权与隔离 ====================

@@ -12,7 +12,7 @@ public interface IFileTool extends IEmbedTool {
 
     String readTextFile(String path, Integer head, Integer tail, ToolContext toolContext);
 
-    String readMediaFile(String path, ToolContext toolContext);
+    String readMediaFile(String path, Boolean includeBase64, ToolContext toolContext);
 
     String readMultipleFiles(List<String> paths, ToolContext toolContext);
 
