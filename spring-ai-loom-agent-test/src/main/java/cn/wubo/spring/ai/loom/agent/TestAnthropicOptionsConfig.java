@@ -33,9 +33,16 @@ public class TestAnthropicOptionsConfig {
      * 4-dim deterministic fake — enough for {@code h2VectorStore} to instantiate and the
      * RAG condition chain to pass. The test app does not perform real embedding lookups in
      * the unit/IT gate (those tests don't exercise RAG retrieval).
+     *
+     * <p>2026-11-07 加属性闸 {@code loom.test.fake-embedding.enabled}（默认 true，IT 不受影响）：
+     * 该 fake bean 在场时 {@code EmbeddingModelAvailableCondition} 第 1 步「bean 定义已在场」
+     * 恒 match，yml 的 {@code spring.ai.model.embedding(.text)=none} 无法关掉 RAG 链；
+     * 需要真实验「无 embedding 部署」形态时设 false，让条件走第 2 步 noMatch → 不建 VectorStore。
      */
     @Bean
     @Primary
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            name = "loom.test.fake-embedding.enabled", havingValue = "true", matchIfMissing = true)
     public EmbeddingModel testFakeEmbeddingModel() {
         return new EmbeddingModel() {
             @Override

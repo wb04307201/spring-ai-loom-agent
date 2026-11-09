@@ -3,17 +3,24 @@ spring:
     url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
     openai:
-      api-key: ${MINIMAX_API_KEY}
-      base-url: https://api.minimaxi.com/v1
+      # 2026-11-07: 从 MiniMax 切到私人 new-api 中转（转发阿里百炼 Qwen），与 main yml 同源。
+      # 起因:MiniMax 账户余额耗尽 —— 真实 LLM 的 IT（HttpToolBrowserIT 等）收到
+      # 402 insufficient balance → LLM 回复为空 → 工具调用断言长期红。
+      # 实测中转站:/chat/completions 流式、reasoning_content、tool_calls 增量帧、
+      # 末帧 usage(stream_options.include_usage) 全正常。
+      api-key: ${NEW_API_KEY}
+      base-url: http://123.56.128.32:3000/v1
       chat:
         options:
-          model: MiniMax-M3
-          max-completion-tokens: 131072
+          model: qwen3.8-max
+          max-completion-tokens: 983616
+          # Spring AI 2.0.1 的 yml 绑定面没有 stream-usage setter（旧键被静默忽略），
+          # 必须用 stream-options.include-usage 让末帧带 token 用量。
+          stream-options:
+            include-usage: true
+          # qwen 的 thinking 开关不是 OpenAiChatOptions 字段，经 extra-body 透传到请求体顶层。
           extra-body:
-            thinking:
-              type: adaptive
-            reasoning_split: true
-          stream-usage: true
+            enable_thinking: true
     loom:
       agent:
         http:

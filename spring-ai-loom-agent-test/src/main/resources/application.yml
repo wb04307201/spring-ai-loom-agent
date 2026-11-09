@@ -17,113 +17,45 @@ spring:
         repository:
           jdbc:
             initialize-schema: always
-#    openai:
-#      api-key: ${DASHSCOPE_API_KEY}
-#      chat:
-#        options:
-#          model: qwen3.7-plus
-#          enable_thinking: true
-#          stream-options:
-#            include_usage: true
-#      embedding:
-#        options:
-#          model: text-embedding-v4
-#      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/compatible-mode
-#    zhipuai:
-#      api-key: ${ZHIPUAI_API_KEY}
-#    anthropic:
-#      # DashScope (Alibaba Cloud Bailian) Anthropic-compatible endpoint. Set
-#      # DASHSCOPE_PERSON_TOKEN_API_KEY in the run environment; the key is *not* committed.
-#      api-key: ${DASHSCOPE_PERSON_TOKEN_API_KEY}
-#      base-url: https://ws-xn7i8blnbtowo2im.cn-beijing.maas.aliyuncs.com/apps/anthropic
-#      # 2026-09-30 (sub-task 流稳定性修复): Spring AI Anthropic 默认 timeout=60s,
-#      # 流式 sub-task 跑 12 个月 Bing 搜索时 200+ 秒,到 60s okhttp3 主动发
-#      # RST_STREAM CANCEL 中断流(底层是 HTTP/2 stream was reset: CANCEL)。
-#      # 提高到 10 分钟配合 sub-task timeout-seconds=300 一起工作。
-#      timeout: 600s
-#      chat:
-#        options:
-#          model: qwen3.8-max
-#          multi_model: true
-#          enable_thinking: true
+    # 2026-11-07: 私人 new-api 中转（转发阿里百炼 Qwen）。Spring AI OpenAI starter 走
+    # /chat/completions 端点（参考百炼「OpenAI 兼容-Chat Completions」文档，非 Responses API）。
     openai:
-      # 2026-10-01: 切到 MiniMax OpenAI 兼容 Chat Completions 端点(测试流式 thinking)。
-      # MiniMax-M3 模型:OpenAI 兼容 API 默认 enable thinking(文档: "OpenAI-compatible
-      # requests enable it when omitted");用 thinking.type=enabled 显式声明。
-      # streaming usage:stream_options.include_usage=true 让最后一帧带 token 用量。
-      # 见 https://platform.minimax.io/docs/api-reference/text-chat-openai
-      api-key: ${MINIMAX_API_KEY}
-      # 国际版端点(用户也可用 https://api.minimaxi.com/v1 — 同 API 不同域);
-      # Spring AI OpenAI SDK 自动追加 /chat/completions。
-      base-url: https://api.minimaxi.com/v1
-      # 2026-11-09: client 级 callTimeout 双保险。60s 掐断的真凶是 per-request
-      # OpenAiChatOptions.timeout=60s 覆盖(Spring AI 2.0.1 属性面不可配),已由库侧
-      # chatClient defaultOptions 修复(LoomAgentConfiguration.applyPromptLevelTimeoutOverride,
-      # 回归锁 ChatProviderTimeoutWiringTest);本显式键仅保留 client 级兜底。
+      api-key: ${NEW_API_KEY}
+      # 中转站会追加 /chat/completions；实测流式 + reasoning_content + 末帧 usage 正常
+      base-url: http://123.56.128.32:3000/v1
+      # 2026-11-09: Spring AI 2.0.2 已修 per-request timeout 覆盖陷阱(#6837:未设时
+      # OpenAiChatOptions.timeout 为 null=继承 client 配置,autoconfig 注入 resolved
+      # timeout)。本显式键 = client 级 callTimeout 唯一配置入口,库侧 BFPP
+      # (spring.ai.loom.agent.chat.timeout-seconds,默认 600)在未显式配置时兜底。
       timeout: 600s
       chat:
         options:
-          model: MiniMax-M3
-          # 2026-10-01 防流截断:thinking + tool_use 联用容易撞默认 token 上限,
-          # 未闭合的 tool_use JSON → 流末尾 JsonEOFException。OpenAI ChatCompletions
-          # 用 max_completion_tokens(老字段 max_tokens 已被 OpenAI 弃用);Anthropic SDK
-          # 用 max_tokens。
-          # MiniMax 官方推荐值:M3 系列 131072 (128K),上限 524288 (512K);其他模型 65536 (64K),上限 200K。
-          # 文档原话:"如果生成因 length 原因中断,请尝试调高此值"——直接设到推荐上限最稳。
-          max-completion-tokens: 131072
-          # extra-body 塞 MiniMax 特有参数:
-          # - thinking.type=enabled:OpenAI 兼容路径下显式打开 thinking(默认 on,显式更清晰)
-          # - reasoning_split=true:思考内容走 reasoning_details 字段(开发者友好的
-          #   分离式结构,免去 prefix/extract 后处理);MiniMax 官方推荐 Interleaved
-          #   Thinking 场景配这个参数。
+          model: qwen3.8-max
+          # ⚠️ OpenAI ChatCompletions 规范字段是 max_completion_tokens（Spring AI 键名
+          # max-completion-tokens）；用户原写的 max_output_tokens 是 DashScope 原生/Anthropic
+          # 风格键，OpenAiChatOptions 无此字段会被静默忽略 → 不生效。
+          max-completion-tokens: 983616
+          # OpenAI 标准：让最后一帧带 token 用量 → loom_chat_usage 落库（ChatUsageRecordingAdvisor）。
+          # Spring AI 2.0.1 的 Options 无 stream-usage setter，必须用 stream-options.include-usage。
+          stream-options:
+            include-usage: true
+          # enable_thinking 不是 OpenAiChatOptions 字段（直接写会被静默忽略），
+          # 必须经 extra-body 原样透传给中转站/百炼。实测中转站接受该顶层参数。
           extra-body:
-            thinking:
-              type: adaptive
-            reasoning_split: true
-          # OpenAI 标准 stream_options 让最后一帧带 token 用量 → loom_chat_usage 落库
-          stream-usage: true
-#    anthropic:
-#      # MiniMax Anthropic-compatible endpoint (Spring AI 2.0 official recommendation for MiniMax).
-#      # API key must be provided via env var ANTHROPIC_API_KEY — never commit a real key.
-#      api-key: ${ANTHROPIC_API_KEY}
-#      # Use the same .com host Claude Code is configured with (the .cn host has a separate
-#      # TLS chain with a stricter cert path that's expired).
-#      base-url: https://api.minimaxi.com/anthropic
-#      chat:
-#        options:
-#          model: MiniMax-M3
-#          thinking:
-#            type: adaptive
-#    anthropic:
-#      api-key: ${NEW_API_KEY}
-#      base-url: http://123.56.128.32:3000
-#      chat:
-#        options:
-#          model: qwen3.7-plus
-#    ollama:
-#      chat:
-#        enabled: false
-#      embedding:
-#        options:
-#          model: qwen3-embedding
-#    ollama:
-#      chat:
-#        options:
-#          model: qwen3
-#      embedding:
-#        options:
-#          model: qwen3-embedding
-#      base-url: http://localhost:11434
-#    vectorstore:
-#      redis:
-#        initialize-schema: true
-#        index-name: custom-index
-#        prefix: custom-prefix
-#      qdrant:
-#        host: localhost
-#        port: 6334
-##        collection-name: custom-collection-name
-#        collection-name: qwen-collection-name
+            enable_thinking: true
+    # 中转站模型列表无任何 embedding 模型（只有 chat 模型）→ 显式关闭 embedding，
+    # 让 RAG 向量链优雅降级（VectorStore 不建、知识上传 503、前端隐藏📚知识空间），
+    # 而不是用默认 text-embedding-ada-002 打到中转站 404。
+    # ⚠️ 两个键缺一不可（2026-11-07 实测）：
+    #   embedding=none      —— Spring AI 2.0.1 OpenAi embedding autoconfig 的真开关
+    #                          （@ConditionalOnProperty(spring.ai.model.embedding, havingValue=openai,
+    #                            matchIfMissing=true)；它不读 .text 子键）
+    #   embedding.text=none —— loom EmbeddingModelAvailableCondition 第 2 步判据
+    #                          （noMatch → 不建 h2VectorStore）；只设它会被第 1 步
+    #                          "EmbeddingModel bean 定义已在场" 抢先 match、向量照建
+    model:
+      embedding: none
+      embedding.text: none
     mcp:
       client:
         stdio:
@@ -192,6 +124,14 @@ flex:
       min-interval: 10m
       max-lifetime: 72h
       mode: strict
+
+# 2026-11-07: 关掉 test app 的 4 维 fake EmbeddingModel（TestAnthropicOptionsConfig），
+# 与上方 spring.ai.model.embedding=none 配合实现真·无 embedding 部署形态（RAG 链关闭、
+# 知识空间按钮隐藏）。IT 用 test yml 不读此键，默认 true 不受影响。
+loom:
+  test:
+    fake-embedding:
+      enabled: false
 
 logging:
   level:
