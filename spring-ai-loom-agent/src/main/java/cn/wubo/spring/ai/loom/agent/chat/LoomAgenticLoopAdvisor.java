@@ -1,5 +1,6 @@
 package cn.wubo.spring.ai.loom.agent.chat;
 
+import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -9,20 +10,24 @@ import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionEligibilityChecker;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.lang.Nullable;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Loom agentic loop advisor —— 子类化 Spring AI {@link ToolCallingAdvisor},接管主聊天
- * 工具调用循环的迭代边界(spec 2026-11-21 agentic-loop-steering,Task 5 骨架)。
+ * 工具调用循环的迭代边界(spec 2026-11-21 agentic-loop-steering,Task 5 骨架 / Task 6
+ * 迭代收口写 / Task 7 steering 注入 + inbox 驱动续跑 + 护栏)。
  *
  * <p><b>S1 抑制语义(已按 spring-ai-client-chat 2.0.2 源核实,回归锁
  * {@code LoomAgenticLoopAdvisorNoOpTest})</b>:
@@ -38,26 +43,54 @@ import java.util.concurrent.atomic.AtomicReference;
  * 继承进链,而子任务无 SSE、无 steering 语义;缺本 advisor 时 Spring AI 自动注册默认
  * ToolCallingAdvisor,子任务行为与改造前逐字节一致。回归锁 {@code SubTaskLoopExclusionTest}。
  *
- * <p><b>A1 退化契约(Task 6 接线完成)</b>:四个循环钩子先从 advisor context 读取
+ * <p><b>A1 退化契约</b>:四个循环钩子先从 advisor context 读取
  * {@link StreamRunContext}({@link StreamRunContext#CONTEXT_KEY}):
  * <ul>
  *   <li>context 无该 key(子任务 / 自定义 IChat / 非 SSE 路径)→ 钩子<b>纯 super</b>;</li>
- *   <li>context 有该 key(主对话,SSE lambda 已经 request attribute 接线)→
- *       {@link #doFinalizeLoop} / {@link #doFinalizeLoopStream} 在外层迭代结束做
- *       <b>迭代收口写</b>:逐迭代 ASSISTANT 行({@link StreamRunContext#memory()}
- *       的 {@link MemoryWriter})+ 思考落库({@link StreamRunContext#flushReasoning()},
- *       每外层迭代一行 → spec S3)+ {@link StreamRunContext#markPerIterationMode()}
- *       (接管记忆写权,{@link LoomMemoryAdvisor#after} 据此跳过聚合单写,防双写)。</li>
+ *   <li>context 有该 key 但 inbox 恒空(无 steering)→ 内层 drain 空转返回 super 原列表、
+ *       外层收口残留为空不续跑、迭代 0 不发 iteration 帧 —— 帧序列/记忆行/usage 行
+ *       与改造前逐行等价(A1,回归锁 NoOp/ReasoningPerIteration/UsageNoDoubleCount)。</li>
  * </ul>
- * 无 steering 单迭代时:1 ASSISTANT + 1 reasoning = 与改造前逐行等价(A1)。
- * 流式路径收口文本来源:{@link #doAfterStream} 每轮缓存该轮聚合响应,
- * finalize hook 在最后一轮 doAfterStream 之后被调用(concatWith tail 的
- * {@code handleToolCallRecursion} 时序),取缓存即为当前外层迭代的聚合响应 ——
- * 其 context 携带同一 {@link StreamRunContext} 引用(R14:advisor param 经
- * 终端 ChatModel*Advisor 的 {@code Map.copyOf(request.context())} 透传到响应 context,
- * 已按 2.0.2 sources 核实,回归锁 {@code ReasoningPerIterationTest})。
- * Task 7 在本类接线 steering 消费(drain inbox → 注入 USER 行 → 续跑下一外层迭代,
- * 续跑开始处调 {@code ctx.emitIteration(idx)} + {@code ctx.resetReasoningDelta()})。
+ *
+ * <p><b>Task 7 steering 消费(本类核心)</b>:
+ * <ol>
+ *   <li><b>内层注入</b>({@link #doGetNextInstructionsForToolCall} / {@code ...Stream}):
+ *       工具结果就位后、下一轮模型调用前 drain inbox,每条 steering 经
+ *       {@link MemoryWriter#writeUser} 落 USER 行 + append 进 instructions +
+ *       {@link StreamRunContext#emitAck} 转正帧。<b>A4 注入位置</b>:super 返回的
+ *       conversationHistory 以 ToolResponseMessage 收尾,USER 行 append 其后 ——
+ *       消息序列 [...assistant(tool_call), tool_result, USER(steering)]。
+ *       注入前查 stop/runTimeout(D-3 内层查超时),触发则不注入,残留交外层收口可见处置。</li>
+ *   <li><b>外层续跑</b>({@link #doFinalizeLoop} / {@code ...Stream}):迭代收口写
+ *       (finalizeIteration,Task 6)后 {@code inbox.closeAndRemaining()} 原子收口 ——
+ *       残留非空且护栏未触 → {@link SteeringInbox#reopen()} 重开接受窗口 + 残留注入
+ *       下一迭代 prompt + 重入完整循环;空 → super 收口(run 结束,inbox 保持收口,
+ *       后续 steer 被拒 → 前端回退普通发送,G2 收尾竞态)。</li>
+ *   <li><b>护栏</b>(G6/D-3):{@code currentIteration() >= maxContinuations} 或
+ *       {@code activeElapsedMs() >= runTimeoutSeconds*1000}(活跃计时,暂停区间不计)
+ *       或 {@code isStopped()} → 不续跑,残留经 {@link StreamRunContext#emitTerminalAck}
+ *       发 steerAck(NOT_INJECTED) 可见终态(R11/A2,绝不静默蒸发)。</li>
+ * </ol>
+ *
+ * <p><b>续跑重入机制(已按 2.0.2 sources 核实 —— 对 brief "chain.copy(this).nextCall"
+ * 字面的必要订正)</b>:{@code DefaultAroundAdvisorChain.copy(after)} 返回的是
+ * {@code originalAdvisors.subList(indexOf(after)+1, size)} —— <b>严格排除 after 自身</b>。
+ * 若续跑直接 {@code chain.copy(this).nextCall(req)},续跑迭代只过下游 advisor
+ * (usage/ChatModel)单轮模型调用:<b>没有工具循环、没有 doFinalizeLoop 重入</b> ——
+ * 续跑的 ASSISTANT/reasoning 逐迭代行将永久丢失(LoomMemoryAdvisor.after 因
+ * perIterationMode 跳过聚合单写),steering 也无法再纠偏,违反 spec §5.4/§5.10。
+ * 故续跑重入 = {@code this.adviseCall/adviseStream(contReq, 原 chain)} 递归穿过本 advisor
+ * 自身:adviseCall/adviseStream 内部每模型轮仍走 {@code chain.copy(this).nextCall/nextStream}
+ * (ToolCallingAdvisor:167/293)—— R16(c) 的实质要求"重入覆盖 order=100 的
+ * ChatUsageRecordingAdvisor、用 copy(this) 而非新造链"逐轮成立(S3 逐轮 usage 行),
+ * 且续跑迭代获得完整工具循环 + 内层 drain + 收口写 + 递归续跑(护栏封顶)。
+ * copy 读 originalAdvisors 快照(非已 pop 的 deque),原 chain 引用可安全递归复用。
+ * 上游 LoomMemoryAdvisor(order +200)不在 copy(this) 段内 → 续跑不重跑 before()
+ * (turn-initial USER 不双写);steering USER 行由本类注入点写、ASSISTANT 行由收口写(D-1)。
+ *
+ * <p>流式拼接(spec §5.1 点 3):{@code doFinalizeLoopStream} 返回
+ * {@code Flux.concat(本轮 finalEmissions, Flux.defer(续跑 adviseStream))} —— SSE 单连接
+ * 不变,SseController 无感知;续跑 flux 惰性订阅,本轮完成后才起下一迭代。
  *
  * <p>Issue1 不变式延续:builder 默认 {@code conversationHistoryEnabled=true}(与
  * {@code DefaultChatClient} 在本链形态下对 auto-register advisor 的计算结果一致 ——
@@ -69,6 +102,9 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
 
   private static final Logger log = LoggerFactory.getLogger(LoomAgenticLoopAdvisor.class);
 
+  /** 护栏默认值单一真源 = {@link LoomAgentProperties.LoopProperty}(Task 2 冻结 10/1800)。 */
+  private static final LoomAgentProperties.LoopProperty LOOP_DEFAULTS = new LoomAgentProperties.LoopProperty();
+
   /**
    * 最近一轮的聚合响应快照 —— {@link #doAfterStream} 每轮写入,
    * {@link #doFinalizeLoopStream} 在迭代收口时读取(当前外层迭代的
@@ -76,15 +112,40 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
    *
    * <p>advisor 实例每请求 new(DefaultChat.stream 逐请求 builder().build()),
    * SSE 单次订阅,per-round 顺序更新无并发问题;getAndSet(null) 消费即清,
-   * 防御性避免跨 run 悬挂。
+   * 防御性避免跨 run 悬挂。续跑迭代经 Flux.concat 串行订阅,缓存逐迭代消费不串扰。
    */
   private final AtomicReference<ChatClientResponse> lastRoundAggregated = new AtomicReference<>();
+
+  /**
+   * 最近一轮送模型的请求快照 —— {@link #doBeforeCall}/{@link #doBeforeStream} 每轮写入。
+   * 续跑 prompt 构造载体:finalize 钩子只拿得到响应,续跑 instructions 必须从末轮请求
+   * 的完整 history 派生(+ 本迭代 ASSISTANT 文本 + 残留 steering USER 行)。
+   */
+  private final AtomicReference<ChatClientRequest> lastProcessedRequest = new AtomicReference<>();
+
+  /** 外层续跑次数上限(G6):currentIteration() >= 此值即收口,残留可见终态。 */
+  private final int maxContinuations;
+
+  /** run 活跃时长上限秒数(D-3:暂停区间不计;区别于 chat.timeout-seconds 单次调用超时)。 */
+  private final int runTimeoutSeconds;
 
   protected LoomAgenticLoopAdvisor(ToolCallingManager toolCallingManager,
                                    ToolExecutionEligibilityChecker toolExecutionEligibilityChecker,
                                    int advisorOrder,
                                    boolean conversationHistoryEnabled) {
+    this(toolCallingManager, toolExecutionEligibilityChecker, advisorOrder, conversationHistoryEnabled,
+        LOOP_DEFAULTS.getMaxContinuations(), LOOP_DEFAULTS.getRunTimeoutSeconds());
+  }
+
+  protected LoomAgenticLoopAdvisor(ToolCallingManager toolCallingManager,
+                                   ToolExecutionEligibilityChecker toolExecutionEligibilityChecker,
+                                   int advisorOrder,
+                                   boolean conversationHistoryEnabled,
+                                   int maxContinuations,
+                                   int runTimeoutSeconds) {
     super(toolCallingManager, toolExecutionEligibilityChecker, advisorOrder, conversationHistoryEnabled);
+    this.maxContinuations = maxContinuations;
+    this.runTimeoutSeconds = runTimeoutSeconds;
   }
 
   @Override
@@ -189,7 +250,153 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
     ctx.markPerIterationMode();
   }
 
-  // ==================== A1 骨架 + Task 6 迭代收口写 ====================
+  // ==================== 护栏(G6/D-3) ====================
+
+  /**
+   * 外层续跑护栏:迭代触顶 / run 活跃超时 / stop 任一触发即收口。
+   * 活跃时长用 {@link StreamRunContext#activeElapsedMs()}(D-3:askUser 人等待
+   * pauseClock 区间不计,Task 8 接线暂停;本类只正确消费活跃值)。
+   */
+  private boolean continuationAllowed(StreamRunContext ctx) {
+    return ctx.currentIteration() < maxContinuations
+        && ctx.activeElapsedMs() < runTimeoutSeconds * 1000L
+        && !ctx.isStopped();
+  }
+
+  /**
+   * 内层注入点护栏(D-3 内层查超时 + spec §5.7 stop 每个内层注入点检查):
+   * 触发则本轮不注入 steering(消息留 inbox),当前迭代照常跑完,外层收口时
+   * 残留经终帧可见处置 —— 不硬掐正在进行的模型调用(spec §5.7 run 预算语义)。
+   */
+  private boolean innerInjectionAllowed(StreamRunContext ctx) {
+    return !ctx.isStopped() && ctx.activeElapsedMs() < runTimeoutSeconds * 1000L;
+  }
+
+  // ==================== steering 注入(A4 + R11) ====================
+
+  /**
+   * 把 steering 消息注入 instructions 并落 USER 行 + 发转正 ack 帧。
+   * 内层 drain 与外层续跑残留共用此点 —— Task 9(S4)审计行接线也在此单一入口。
+   * memory 写失败降级日志不打断注入(prompt 送达 ≠ 持久化,与 MemoryWriter 契约同策略)。
+   */
+  private void injectSteeringMessages(StreamRunContext ctx,
+                                      List<SteeringInbox.SteeringMessage> messages,
+                                      List<Message> instructionsOut) {
+    for (SteeringInbox.SteeringMessage m : messages) {
+      UserMessage userMessage = new UserMessage(m.text());
+      try {
+        ctx.memory().writeUser(userMessage);
+      } catch (Exception ex) {
+        log.warn("steering USER 行落库失败(注入继续): msg={} err={}", m.messageId(), ex.getMessage());
+      }
+      instructionsOut.add(userMessage);
+      // Task 9(S4)审计接线点:loom_chat_steering 行(conversation_id/username/
+      // message_text/injected_at=此刻/seq=本 run 注入序号)在此写入。本 task 留 hook 不建仓储。
+      ctx.emitAck(m.messageId());
+    }
+  }
+
+  /**
+   * 残留可见终态(R11/A2):护栏触顶/stop/已终止收口时,未注入的排队消息逐条发
+   * steerAck(NOT_INJECTED) 终帧(前端灰态气泡标"未发送(已停止)")。绝不静默蒸发。
+   */
+  private static void emitTerminalAcks(StreamRunContext ctx, List<SteeringInbox.SteeringMessage> residual) {
+    for (SteeringInbox.SteeringMessage m : residual) {
+      try {
+        ctx.emitTerminalAck(m.messageId());
+      } catch (Exception ex) {
+        log.warn("steering 终态帧发射失败: msg={} err={}", m.messageId(), ex.getMessage());
+      }
+    }
+  }
+
+  /**
+   * 内层 drain 公共逻辑:super instructions(tool_result 就位)之后 append steering
+   * USER 行(A4)。ctx 缺席 / 护栏触发 / inbox 空 → 原样返回 super 列表(A1 同实例)。
+   */
+  private List<Message> drainAndInject(StreamRunContext ctx, List<Message> superInstructions) {
+    if (!innerInjectionAllowed(ctx)) {
+      return superInstructions;
+    }
+    List<SteeringInbox.SteeringMessage> drained = ctx.inbox().drain();
+    if (drained.isEmpty()) {
+      return superInstructions;
+    }
+    List<Message> instructions = new ArrayList<>(superInstructions);
+    injectSteeringMessages(ctx, drained, instructions);
+    return instructions;
+  }
+
+  /**
+   * 续跑请求构造:末轮请求完整 history + 本迭代 ASSISTANT 文本 + 残留 steering USER 行
+   * (注入即落 memory + ack)。context 沿用末轮(同一 StreamRunContext/CONVERSATION_ID 引用),
+   * options 沿用末轮 ToolCallingChatOptions(重入 adviseCall/adviseStream 的循环前提)。
+   */
+  private ChatClientRequest buildContinuationRequest(StreamRunContext ctx,
+                                                     ChatClientRequest lastRequest,
+                                                     @Nullable ChatClientResponse lastRound,
+                                                     List<SteeringInbox.SteeringMessage> residual) {
+    List<Message> instructions = new ArrayList<>(lastRequest.prompt().getInstructions());
+    String assistantText = aggregatedAssistantText(lastRound);
+    if (assistantText != null) {
+      instructions.add(new AssistantMessage(assistantText));
+    }
+    injectSteeringMessages(ctx, residual, instructions);
+    return ChatClientRequest.builder()
+        .prompt(new Prompt(instructions, lastRequest.prompt().getOptions()))
+        .context(lastRequest.context())
+        .build();
+  }
+
+  // ==================== 迭代边界 + 内层注入 + 外层续跑 ====================
+
+  @Override
+  protected ChatClientRequest doInitializeLoop(ChatClientRequest chatClientRequest,
+                                               CallAdvisorChain callAdvisorChain) {
+    beginIteration(chatClientRequest);
+    return super.doInitializeLoop(chatClientRequest, callAdvisorChain);
+  }
+
+  @Override
+  protected ChatClientRequest doInitializeLoopStream(ChatClientRequest chatClientRequest,
+                                                     StreamAdvisorChain streamAdvisorChain) {
+    beginIteration(chatClientRequest);
+    return super.doInitializeLoopStream(chatClientRequest, streamAdvisorChain);
+  }
+
+  /**
+   * 每外层迭代开始(含续跑重入)取迭代序号。迭代 0 = 首轮,<b>不发 iteration 帧</b>
+   * (A1:无 steering 单迭代帧序列与改造前一致);续跑(idx>0)发 iteration 帧 +
+   * 复位 reasoning delta 状态机(spec §5.4,前端按迭代分段)。ctx 缺席(子任务)零副作用。
+   */
+  private void beginIteration(ChatClientRequest chatClientRequest) {
+    StreamRunContext ctx = runContextOf(chatClientRequest);
+    if (ctx == null) {
+      return;
+    }
+    int idx = ctx.nextIteration();
+    if (idx > 0) {
+      ctx.emitIteration(idx);
+      ctx.resetReasoningDelta();
+    }
+  }
+
+  @Override
+  protected ChatClientRequest doBeforeCall(ChatClientRequest chatClientRequest,
+                                           CallAdvisorChain callAdvisorChain) {
+    ChatClientRequest processed = super.doBeforeCall(chatClientRequest, callAdvisorChain);
+    // 末轮请求快照 = 续跑 prompt 的 history 载体(finalize 钩子只拿得到响应)
+    lastProcessedRequest.set(processed);
+    return processed;
+  }
+
+  @Override
+  protected ChatClientRequest doBeforeStream(ChatClientRequest chatClientRequest,
+                                             StreamAdvisorChain streamAdvisorChain) {
+    ChatClientRequest processed = super.doBeforeStream(chatClientRequest, streamAdvisorChain);
+    lastProcessedRequest.set(processed);
+    return processed;
+  }
 
   @Override
   protected ChatClientResponse doAfterStream(ChatClientResponse chatClientResponse,
@@ -206,39 +413,60 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   protected List<Message> doGetNextInstructionsForToolCall(ChatClientRequest chatClientRequest,
                                                            ChatClientResponse chatClientResponse,
                                                            ToolExecutionResult toolExecutionResult) {
-    // Task 7 在消费点接管:ctx != null 时先 drain inbox 注入 steering USER 行再续下一迭代。
-    // 本期(Task 6)仅读取验证接线通路(为 null 时即 A1/子任务路径),行为保持纯 super。
-    if (log.isTraceEnabled() && runContextOf(chatClientRequest) == null) {
-      log.trace("agentic loop: no StreamRunContext → pure super (A1 / subtask path)");
+    List<Message> instructions =
+        super.doGetNextInstructionsForToolCall(chatClientRequest, chatClientResponse, toolExecutionResult);
+    StreamRunContext ctx = runContextOf(chatClientRequest);
+    if (ctx == null) {
+      // A1/子任务路径:纯 super
+      return instructions;
     }
-    return super.doGetNextInstructionsForToolCall(chatClientRequest, chatClientResponse, toolExecutionResult);
+    // A4:super 的 conversationHistory 以 tool_result 收尾,steering USER append 其后、
+    // 下一轮模型调用之前 —— 正在执行的工具不中断(spec §5.2 注入语义)。
+    return drainAndInject(ctx, instructions);
   }
 
   @Override
   protected List<Message> doGetNextInstructionsForToolCallStream(ChatClientRequest chatClientRequest,
                                                                  ChatClientResponse chatClientResponse,
                                                                  ToolExecutionResult toolExecutionResult) {
-    // Task 7 流式版消费点(drain inbox 注入),本期同上门控 —— 纯 super。
-    if (log.isTraceEnabled() && runContextOf(chatClientRequest) == null) {
-      log.trace("agentic loop (stream): no StreamRunContext → pure super (A1 / subtask path)");
+    List<Message> instructions =
+        super.doGetNextInstructionsForToolCallStream(chatClientRequest, chatClientResponse, toolExecutionResult);
+    StreamRunContext ctx = runContextOf(chatClientRequest);
+    if (ctx == null) {
+      return instructions;
     }
-    return super.doGetNextInstructionsForToolCallStream(chatClientRequest, chatClientResponse, toolExecutionResult);
+    return drainAndInject(ctx, instructions);
   }
 
   @Override
   protected ChatClientResponse doFinalizeLoop(ChatClientResponse chatClientResponse,
                                               CallAdvisorChain callAdvisorChain) {
-    // Task 6 迭代收口写(主聊天/自定义 call 路径):ctx 在场 → ASSISTANT 逐迭代行 +
-    // reasoning 落库 + perIterationMode 标记(LoomMemoryAdvisor.after 据此跳过聚合单写);
-    // ctx 缺席(子任务/legacy)→ 钩子纯 super,after() 维持聚合单写(A1)。
-    // Task 7 在此判定"收口前 inbox 是否仍有残留 → 起下一外层迭代(借 callAdvisorChain.copy(...).nextCall 重入,
-    // 重入起点须覆盖 order=100 的 ChatUsageRecordingAdvisor 以保逐轮 usage 行)"。
-    // 骨架期(Task 6):无重入 —— 写完直接委托 super。
     StreamRunContext ctx = runContextOf(chatClientResponse);
-    if (ctx != null) {
-      finalizeIteration(ctx, chatClientResponse);
+    if (ctx == null) {
+      // 子任务/legacy:纯 super,after() 维持聚合单写(A1)
+      return super.doFinalizeLoop(chatClientResponse, callAdvisorChain);
     }
-    return super.doFinalizeLoop(chatClientResponse, callAdvisorChain);
+    // Task 6 迭代收口写:ASSISTANT 逐迭代行 + reasoning 落库 + perIterationMode 标记
+    finalizeIteration(ctx, chatClientResponse);
+
+    // Task 7 外层续跑:原子收口(CAS closing + drain,G2 收尾竞态)—— 收口后新 offer
+    // 一律被拒(steer 端点 queued:false → 前端回退普通发送),残留二选一可见处置。
+    List<SteeringInbox.SteeringMessage> residual = ctx.inbox().closeAndRemaining();
+    if (residual.isEmpty()) {
+      // A1/G2:无残留 → 正常收口,零重入
+      return super.doFinalizeLoop(chatClientResponse, callAdvisorChain);
+    }
+    ChatClientRequest lastRequest = lastProcessedRequest.get();
+    if (!continuationAllowed(ctx) || lastRequest == null || !ctx.inbox().reopen()) {
+      // 护栏触顶 / stop / inbox 已永久终止(stop/断连竞态)→ 残留可见终态(R11/A2)
+      emitTerminalAcks(ctx, residual);
+      return super.doFinalizeLoop(chatClientResponse, callAdvisorChain);
+    }
+    // 续跑:残留注入下一迭代 prompt(writeUser + ack),重入完整循环(见类 javadoc
+    // 重入机制订正:递归 adviseCall 内部每轮 chain.copy(this).nextCall 覆盖 usage advisor)。
+    ChatClientRequest continuation =
+        buildContinuationRequest(ctx, lastRequest, chatClientResponse, residual);
+    return this.adviseCall(continuation, callAdvisorChain);
   }
 
   @Override
@@ -247,13 +475,27 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
     // 流式路径收口时入参 finalEmissions flux 常为空(末轮自带 usage 不补发),文本从
     // doAfterStream 缓存的末轮聚合响应读取;其 context 带同一 StreamRunContext 引用
     // (R14:终端 ChatModel*Advisor 以 Map.copyOf(request.context()) 透传到响应 context)。
-    // Task 7 流式版收口点(重入逻辑),本期无重入 → 写完透传 super。
     ChatClientResponse lastRound = lastRoundAggregated.getAndSet(null);
     StreamRunContext ctx = runContextOf(lastRound);
-    if (ctx != null) {
-      finalizeIteration(ctx, lastRound);
+    if (ctx == null) {
+      return super.doFinalizeLoopStream(chatClientResponseFlux, streamAdvisorChain);
     }
-    return super.doFinalizeLoopStream(chatClientResponseFlux, streamAdvisorChain);
+    finalizeIteration(ctx, lastRound);
+
+    List<SteeringInbox.SteeringMessage> residual = ctx.inbox().closeAndRemaining();
+    if (residual.isEmpty()) {
+      return super.doFinalizeLoopStream(chatClientResponseFlux, streamAdvisorChain);
+    }
+    ChatClientRequest lastRequest = lastProcessedRequest.get();
+    if (!continuationAllowed(ctx) || lastRequest == null || !ctx.inbox().reopen()) {
+      emitTerminalAcks(ctx, residual);
+      return super.doFinalizeLoopStream(chatClientResponseFlux, streamAdvisorChain);
+    }
+    ChatClientRequest continuation = buildContinuationRequest(ctx, lastRequest, lastRound, residual);
+    // spec §5.1 点 3:Flux.concat(本轮流, 续跑流) —— SSE 单连接不变。续跑 flux 惰性
+    // (Flux.defer),本轮完成后才订阅;递归 adviseStream 的收口钩子可再续跑(护栏封顶)。
+    return super.doFinalizeLoopStream(chatClientResponseFlux, streamAdvisorChain)
+        .concatWith(Flux.defer(() -> this.adviseStream(continuation, streamAdvisorChain)));
   }
 
   // ==================== builder(仿 ToolCallingAdvisor.builder(),默认值一致) ====================
@@ -266,11 +508,27 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
    * 仿 {@link ToolCallingAdvisor.Builder}:默认 {@code ToolCallingManager.builder().build()}、
    * 默认 eligibility checker、{@code advisorOrder = DEFAULT_ORDER(+300)}、
    * {@code conversationHistoryEnabled = true} —— 逐项与 2.0.2 auto-register 对主链的计算结果对齐,
-   * 保证"替换"零行为漂移。
+   * 保证"替换"零行为漂移。护栏默认值取 {@link LoomAgentProperties.LoopProperty}(10/1800),
+   * DefaultChat 挂载时显式传绑定值(消费方 yml 可配)。
    */
   public static class Builder extends ToolCallingAdvisor.Builder<Builder> {
 
+    private int maxContinuations = LOOP_DEFAULTS.getMaxContinuations();
+    private int runTimeoutSeconds = LOOP_DEFAULTS.getRunTimeoutSeconds();
+
     protected Builder() {
+    }
+
+    /** 外层续跑次数上限(G6),默认 10。 */
+    public Builder maxContinuations(int maxContinuations) {
+      this.maxContinuations = maxContinuations;
+      return this;
+    }
+
+    /** run 活跃时长上限秒数(D-3),默认 1800。 */
+    public Builder runTimeoutSeconds(int runTimeoutSeconds) {
+      this.runTimeoutSeconds = runTimeoutSeconds;
+      return this;
     }
 
     @Override
@@ -290,13 +548,15 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
       copy.toolExecutionEligibilityChecker(getToolExecutionEligibilityChecker());
       copy.advisorOrder(getAdvisorOrder());
       copy.conversationHistoryEnabled(isConversationHistoryEnabled());
+      copy.maxContinuations(this.maxContinuations);
+      copy.runTimeoutSeconds(this.runTimeoutSeconds);
       return copy;
     }
 
     @Override
     public LoomAgenticLoopAdvisor build() {
       return new LoomAgenticLoopAdvisor(getToolCallingManager(), getToolExecutionEligibilityChecker(),
-          getAdvisorOrder(), isConversationHistoryEnabled());
+          getAdvisorOrder(), isConversationHistoryEnabled(), maxContinuations, runTimeoutSeconds);
     }
   }
 }

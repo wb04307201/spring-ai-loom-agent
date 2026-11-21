@@ -86,6 +86,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.ModelAndView;
@@ -533,7 +534,7 @@ public class LoomAgentConfiguration {
     // ==================== Storage ====================
 
     @Configuration
-    static class ChatConfiguration {
+    public static class ChatConfiguration {
 
         private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatConfiguration.class);
 
@@ -638,6 +639,8 @@ public class LoomAgentConfiguration {
             // Task 6(S3):StreamRunContext 的 MemoryWriter 绑定 —— 逐外层迭代 ASSISTANT 行
             // 由 loop advisor 经此写入会话记忆(LoomMemoryAdvisor.after 据此跳过聚合单写)。
             private final ChatMemory chatMemory;
+            // Task 7(S5):steer 端点归属校验(镜像 conversation GET 的 BUG-12a 所有权检查)。
+            private final cn.wubo.spring.ai.loom.agent.user.IUserConversation userConversation;
             // tool_call_log 唯一写入入口是 LoggingToolCallback — SseController 不再写
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -742,27 +745,52 @@ public class LoomAgentConfiguration {
                                         log.warn("iteration 帧发送失败: conv={} err={}", conversationId, e.getMessage());
                                     }
                                 },
-                                () -> entry.disposable().isDisposed());
+                                // R16(a)(Task 7):stop 信号只看 disposeRequested —— 旧绑定
+                                // entry.disposable().isDisposed() 在订阅建立前(subRef==null)
+                                // 恒 true,会让循环边界误判"已停止"。disposeRequested 由
+                                // stop/断连的 dispose 显式置位,订阅前恒 false,语义精确。
+                                disposeRequested::get,
+                                // Task 7(R11/A2):护栏触顶/stop 收口时残留 steering 的
+                                // "未注入"可见终态帧(steerAck NOT_INJECTED),前端灰态标
+                                // "未发送(已停止)"。与上方 INJECTED 转正帧分两条通道。
+                                messageId -> {
+                                    try {
+                                        entry.emitter().send(new ChatResponseRecord(
+                                                new SteerAck(messageId, SteerAck.STATUS_NOT_INJECTED)), MediaType.APPLICATION_JSON);
+                                    } catch (Exception e) {
+                                        log.warn("steering 终态帧发送失败: conv={} err={}", conversationId, e.getMessage());
+                                    }
+                                });
                 request.setAttribute(cn.wubo.spring.ai.loom.agent.chat.StreamRunContext.CONTEXT_KEY, runContext);
 
                 // 注册 lifecycle 自动清理
                 // #1 AskUser(spec D7 扩展): 非 stop 的流终止路径同样释放挂起提问 ——
                 // autoCleanup 不走 onStop,超时/断连/异常若不清,工具线程会阻塞满 timeout。
                 // R10:改用返回 Entry 引用的身份感知重载(新 run 覆盖注册后旧流清理不误删新 Entry)。
+                // Task 7(S5/A8):断连/超时/异常必须 dispose 订阅 —— 否则刷新页面后后端 run
+                // 继续 orphan 跑,持续写 memory/usage(不可接受)。dispose 经 wrapper 置
+                // disposeRequested(循环边界 isStopped 据此收敛)+ 取消 reactor 订阅。
+                // inbox 永久收口 + 残留可见终态(R11/A2,尽力发送,断连时 emitter 已关则降级日志)。
                 emitter.onTimeout(() -> {
                     log.debug("SSE 链接超时: user={} conv={}", username, conversationId);
                     askUserRegistry.cancelAll(username, conversationId);
+                    entry.disposable().dispose();
+                    emitterRegistry.terminateInbox(entry);
                     emitterRegistry.autoCleanup(username, conversationId, entry);
                     emitter.complete();
                 });
                 emitter.onCompletion(() -> {
                     log.debug("SSE 链接完成: user={} conv={}", username, conversationId);
                     askUserRegistry.cancelAll(username, conversationId);
+                    entry.disposable().dispose();
+                    emitterRegistry.terminateInbox(entry);
                     emitterRegistry.autoCleanup(username, conversationId, entry);
                 });
                 emitter.onError(e -> {
                     log.debug("SSE 链接错误: user={} conv={} err={}", username, conversationId, e.getMessage());
                     askUserRegistry.cancelAll(username, conversationId);
+                    entry.disposable().dispose();
+                    emitterRegistry.terminateInbox(entry);
                     emitterRegistry.autoCleanup(username, conversationId, entry);
                 });
                 CompletableFuture.runAsync(() -> {
@@ -853,6 +881,10 @@ public class LoomAgentConfiguration {
                                     // 冲刷残量(loop 未跑完/未 mark 的异常路径);正常单迭代时缓冲
                                     // 已被迭代收口 drain,二次 flush 为空 ⇒ 落库行数与改造前一致(A1)。
                                     runContext.flushReasoning();
+                                    // Task 7(R11/A2)兜底:正常完成时 loop advisor 收口已 drain inbox
+                                    // (残留为空);但自定义 IChat/无 loop 路径 inbox 未收口,此处永久
+                                    // 收口 + 残留终帧(在 complete() 前发,emitter 尚开)。空残留零帧(A1)。
+                                    emitterRegistry.terminateInbox(entry);
                                     emitterRegistry.autoCleanup(username, conversationId, entry);
                                     emitter.complete();
                                 });
@@ -876,6 +908,57 @@ public class LoomAgentConfiguration {
                 String username = UserContextHolder.getCurrentUser();
                 boolean stopped = emitterRegistry.stop(username, conversationId);
                 return java.util.Map.of("stopped", stopped, "conversationId", conversationId);
+            }
+
+            /**
+             * steering 插话端点(Task 7,spec 2026-11-21 §5.2):运行中用户追加输入,入队
+             * 本会话活跃 run 的 steering inbox,由 loop advisor 在下一迭代边界注入(A4)。
+             *
+             * <p>守卫:归属校验(镜像 conversation GET 的 BUG-12a 所有权检查,跨用户 403)+
+             * 文本 8KB 上限(超限 400)+ inbox 深度上限 20(满 429,Review Focus 5)。
+             * 响应:{@code {queued:true, messageId}}(已排队,必被 drain 读走)/
+             * {@code {queued:false}}(无活跃 run 或正在收口 → 前端回退普通 chat.send,G2)。
+             * messageId 服务端 UUID 生成,与灰态气泡一一对应,ack/终帧据此回显。
+             */
+            @PostMapping(value = "/spring/ai/loom/stream/{conversationId}/steer")
+            public ResponseEntity<java.util.Map<String, Object>> steer(
+                    @PathVariable("conversationId") String conversationId,
+                    @RequestBody(required = false) java.util.Map<String, Object> body) {
+                String username = UserContextHolder.getCurrentUser();
+                // 归属校验:会话必须属于当前用户(镜像 stop/GET conversation 的所有权语义)。
+                boolean owned = username != null && userConversation.exists(
+                        new cn.wubo.spring.ai.loom.agent.model.UserConversationRecord(username, conversationId));
+                if (!owned) {
+                    log.warn("拒绝跨用户 steering: caller={}, conv={}", username, conversationId);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "forbidden", "code", 403));
+                }
+                Object messageObj = body == null ? null : body.get("message");
+                String message = messageObj instanceof String s ? s : null;
+                if (message == null || message.isBlank()) {
+                    return ResponseEntity.badRequest().body(java.util.Map.of("error", "message 不能为空"));
+                }
+                // 8KB 上限按 UTF-8 字节计(emoji 多字节,真 8KB;Review Focus 5 不 OOM)。
+                if (message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 8192) {
+                    return ResponseEntity.badRequest().body(java.util.Map.of("error", "消息超过 8KB 上限"));
+                }
+                cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry.Entry entry =
+                        emitterRegistry.get(username, conversationId);
+                if (entry == null || entry.inbox().isClosing()) {
+                    // 无活跃 run / 正在收口 → queued:false,前端回退普通发送(G2 收尾竞态可见拒绝)
+                    return ResponseEntity.ok(java.util.Map.of("queued", false));
+                }
+                if (entry.inbox().depth() >= cn.wubo.spring.ai.loom.agent.chat.SteeringInbox.MAX_DEPTH) {
+                    return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                            .body(java.util.Map.of("error", "补充消息过多,请等待 AI 处理", "code", 429));
+                }
+                String messageId = java.util.UUID.randomUUID().toString();
+                boolean queued = emitterRegistry.steer(username, conversationId, messageId, message);
+                if (queued) {
+                    return ResponseEntity.ok(java.util.Map.of("queued", true, "messageId", messageId));
+                }
+                // offer 竞态被拒(收口/深度瞬时满)→ queued:false,前端回退(A2 拒绝即可见)
+                return ResponseEntity.ok(java.util.Map.of("queued", false));
             }
 
             /**

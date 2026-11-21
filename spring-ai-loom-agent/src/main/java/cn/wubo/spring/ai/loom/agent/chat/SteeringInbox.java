@@ -60,6 +60,12 @@ public class SteeringInbox {
 
     private final ConcurrentLinkedQueue<Node> queue = new ConcurrentLinkedQueue<>();
     private final AtomicBoolean closing = new AtomicBoolean(false);
+    /**
+     * 永久终止标志(stop/断连/登出)。与 {@link #closing}(迭代边界收口,可 {@link #reopen()})
+     * 区分:terminated 后 {@link #reopen()} 拒绝复活,offer 一律拒绝。R11/A2:终止路径必须
+     * 经 {@link #terminateAndRemaining()} 取残留做可见处置,不静默吞。
+     */
+    private final AtomicBoolean terminated = new AtomicBoolean(false);
     private final AtomicInteger depth = new AtomicInteger(0);
 
     /**
@@ -69,7 +75,7 @@ public class SteeringInbox {
      *         {@link #MAX_DEPTH},或入队撞上收口已原子撤单)
      */
     public boolean offer(String messageId, String text) {
-        if (closing.get()) {
+        if (closing.get() || terminated.get()) {
             return false;
         }
         // CAS 抢名额：depth 达到上限即拒绝,抢到才入队。
@@ -85,11 +91,13 @@ public class SteeringInbox {
         Node node = new Node(new SteeringMessage(messageId, text));
         beforeEnqueue(node.message); // 测试 seam(生产 no-op)：定格在"占额成功→入队"竞态窗口
         queue.add(node);
-        // 入队后复查 closing(A2 第三态修复)：过了首检后被抢占、期间收口(置 closing 并
+        // 入队后复查 closing/terminated(A2 第三态修复)：过了首检后被抢占、期间收口(置 closing 并
         // drain 完,读侧终止)的在途 offer,恢复后绝不能"返回 true + 消息蒸发"。
         // remove 失败 ⇔ 节点已被 drain 取走(消息已可见处置)→ 保持 true;
         // remove 成功 ⇔ 没人读过 → 原子撤单,回滚 depth 预约并返回 false(拒绝即可见通道)。
-        if (closing.get() && queue.remove(node)) {
+        // 复查含 terminated:stop/断连的永久终止与迭代收口同样闭合窗口;reopen 与 terminate
+        // 竞态时 terminated 单调恒真,offer 要么首检被拒要么复查撤单,不会落进已终止的队列。
+        if ((closing.get() || terminated.get()) && queue.remove(node)) {
             depth.decrementAndGet();
             return false;
         }
@@ -143,6 +151,65 @@ public class SteeringInbox {
     public List<SteeringMessage> closeAndRemaining() {
         close();
         return drain();
+    }
+
+    /**
+     * 续跑迭代边界重新开放收件(Task 7,spec 2026-11-21 §5.2 G2)——finalize 以
+     * {@link #closeAndRemaining()} 原子收口并取走残留后,若护栏未触、决定续跑下一外层迭代,
+     * 调本方法重开接受窗口:残留已注入续跑迭代,新迭代期间用户再插话重新排队。
+     *
+     * <p><b>为什么是 reopen 同一对象而不是换新 inbox</b>(plan Task 7 Step 4 授权的 builder
+     * 裁定):{@code SseEmitterRegistry.Entry} 是 record(inbox 分量不可变),ctx 与 Entry
+     * 共享同一 inbox 引用 —— 换对象必须同时原子替换两处,否则 registry.steer 仍向旧(已收口)
+     * inbox 入队,续跑期间 steering 恒被拒。收口后队列已被 drain 清空、depth 归零,
+     * reopen 即"每迭代一个全新接受窗口",语义等价新 inbox 且零引用替换竞态。
+     *
+     * <p><b>A2 不变式保持</b>:close→reopen 窗口内的 offer 被拒(false,前端回退普通发送,
+     * 可见拒绝通道);在途 offer(已过首检、占额后定格)恢复时复查 closing/terminated:
+     * 已 reopen 则消息留队由下一迭代边界 drain(true ⇒ 必被读走),未 reopen 则身份撤单(false)。
+     * {@link #terminate()} 后本方法恒拒绝(单调 terminated 标志压过 closing 复位),
+     * stop/断连的永久收口不会被续跑复活。
+     *
+     * @return true=已重开;false=已永久终止(stop/断连/登出),保持收口
+     */
+    public boolean reopen() {
+        if (terminated.get()) {
+            return false;
+        }
+        closing.set(false);
+        // 双重复查闭合 reopen↔terminate 竞态:置回 false 后若 terminate 已发生,
+        // 恢复 closing 并拒绝。offer 侧首检/复查都含 terminated,窗口内入队一律被拒或撤单。
+        if (terminated.get()) {
+            closing.set(true);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 永久终止(stop/断连/登出,R11):此后 offer 一律拒绝且 {@link #reopen()} 不得复活。
+     * 与 {@link #close()}(迭代边界收口,可 reopen)区分。残留处置用
+     * {@link #terminateAndRemaining()} —— 终止路径绝不静默吞掉已排队消息(A2)。
+     */
+    public void terminate() {
+        terminated.set(true);
+        closing.set(true);
+    }
+
+    /**
+     * 永久终止并取走未注入残留(R11 可见终态处置的取数端):stop/断连/登出路径调用,
+     * 残留交调用方经 steerAck(NOT_INJECTED) 终帧标记"未发送(已停止)",不静默蒸发。
+     *
+     * @return 终止瞬间仍在队列中的消息(按 FIFO 顺序,可能为空列表)
+     */
+    public List<SteeringMessage> terminateAndRemaining() {
+        terminate();
+        return drain();
+    }
+
+    /** 是否已永久终止(stop/断连/登出);terminated 蕴含 isClosing。 */
+    public boolean isTerminated() {
+        return terminated.get();
     }
 
     /**

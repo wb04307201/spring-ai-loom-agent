@@ -31,6 +31,13 @@ public class StreamRunContext {
     private final Consumer<String> ackEmitter;
     private final Consumer<Integer> iterationEmitter;
     private final BooleanSupplier stopSignal;
+    /**
+     * steering 残留"未注入"终态帧发射器(Task 7,R11/A2):护栏触顶/stop 收口时,
+     * 未注入的排队消息经此发 steerAck(NOT_INJECTED) 终帧,前端灰态气泡标
+     * "未发送(已停止)"。与 {@link #ackEmitter}(INJECTED 转正帧)分两条通道,
+     * 绝不把未注入消息伪装成已注入。
+     */
+    private final Consumer<String> terminalAckEmitter;
 
     /** 外层 agentic-loop 迭代序号,首迭代 = 0。 */
     private final AtomicInteger iteration = new AtomicInteger(-1);
@@ -60,18 +67,40 @@ public class StreamRunContext {
     private long activeStartNanos = System.nanoTime();
     private boolean paused;
 
+    /**
+     * 兼容构造(Task 1 冻结的 6-arg 签名,存量测试/消费方直连用):terminalAckEmitter
+     * 缺省 no-op —— 该形态不发射"未注入"终帧。<b>生产 SSE 接线必须用 7-arg 构造</b>
+     * 显式绑定终帧发射器(R11/A2:残留可见终态),否则护栏收口的残留只有日志没有帧。
+     */
     public StreamRunContext(SteeringInbox inbox,
                             MemoryWriter memory,
                             Consumer<String> reasoningFlush,
                             Consumer<String> ackEmitter,
                             Consumer<Integer> iterationEmitter,
                             BooleanSupplier stopSignal) {
+        this(inbox, memory, reasoningFlush, ackEmitter, iterationEmitter, stopSignal,
+                messageId -> {
+                });
+    }
+
+    /**
+     * 生产构造(Task 7):追加 terminalAckEmitter —— 护栏触顶/stop 收口时残留消息的
+     * "未注入"终态帧通道(R11),入参 messageId 与 steer 端点返回的 stable id 一致。
+     */
+    public StreamRunContext(SteeringInbox inbox,
+                            MemoryWriter memory,
+                            Consumer<String> reasoningFlush,
+                            Consumer<String> ackEmitter,
+                            Consumer<Integer> iterationEmitter,
+                            BooleanSupplier stopSignal,
+                            Consumer<String> terminalAckEmitter) {
         this.inbox = inbox;
         this.memory = memory;
         this.reasoningFlush = reasoningFlush;
         this.ackEmitter = ackEmitter;
         this.iterationEmitter = iterationEmitter;
         this.stopSignal = stopSignal;
+        this.terminalAckEmitter = terminalAckEmitter;
     }
 
     public SteeringInbox inbox() {
@@ -88,6 +117,15 @@ public class StreamRunContext {
      */
     public int nextIteration() {
         return iteration.incrementAndGet();
+    }
+
+    /**
+     * 当前外层迭代序号(不递增);尚未开始任何迭代时为 -1。
+     * Task 7 护栏判定用:{@code currentIteration() >= maxContinuations} 即续跑触顶
+     * (迭代 0 为首轮,续跑 k 产生迭代 k,触顶语义 = 已完成 maxContinuations 次续跑)。
+     */
+    public int currentIteration() {
+        return iteration.get();
     }
 
     /**
@@ -157,6 +195,16 @@ public class StreamRunContext {
      */
     public void emitAck(String messageId) {
         ackEmitter.accept(messageId);
+    }
+
+    /**
+     * 向 SSE 流发射 steering"未注入"终态帧(Task 7,R11/A2):护栏触顶/stop 收口时,
+     * 残留未注入消息经此标记终态(前端灰态气泡标"未发送(已停止)"),绝不静默蒸发。
+     *
+     * @param messageId 被拒绝注入的 steering 消息 ID(steer 端点返回的 stable id)
+     */
+    public void emitTerminalAck(String messageId) {
+        terminalAckEmitter.accept(messageId);
     }
 
     /**

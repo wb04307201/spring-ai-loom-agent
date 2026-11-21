@@ -77,6 +77,9 @@ class DefaultChatTest {
  properties = mock(LoomAgentProperties.class);
  when(properties.getDefaultSystem()).thenReturn("base-system");
  when(properties.getRag()).thenReturn(new LoomAgentProperties.RagProperty());
+ // Task 7:loop advisor 护栏读 getLoop()(maxContinuations/runTimeoutSeconds)——
+ // mock 默认返回 null 会 NPE,stub 真实默认值(与生产 binder 一致)。
+ when(properties.getLoop()).thenReturn(new LoomAgentProperties.LoopProperty());
 
  roleService = mock(IRoleService.class);
  when(roleService.getVisibleMcpsForUser(anyString())).thenReturn(List.of());

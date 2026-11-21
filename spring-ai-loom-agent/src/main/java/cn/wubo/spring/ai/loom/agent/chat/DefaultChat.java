@@ -257,6 +257,10 @@ public class DefaultChat implements IChat {
       .toolCallingManager(org.springframework.ai.model.tool.ToolCallingManager.builder()
           .observationRegistry(observationRegistry)
           .build())
+      // Task 7(G6/D-3):护栏阈值取绑定配置(消费方 yml spring.ai.loom.agent.loop.* 可配,
+      // 默认 10/1800 与 LoopProperty 一致)。
+      .maxContinuations(properties.getLoop().getMaxContinuations())
+      .runTimeoutSeconds(properties.getLoop().getRunTimeoutSeconds())
       .build());
   // StreamRunContext 经 SSE lambda → request attribute → advisor context 传递(Task 6 接线:
   // SseController 在调 chat.stream() 前 request.setAttribute(CONTEXT_KEY, ctx);
@@ -366,6 +370,9 @@ public class DefaultChat implements IChat {
   sb.append("• 子任务与定时任务：委派后台执行、按计划自动运行\n");
   sb.append("• 文件管理：预览 / 下载 / 删除上传与工具产生的文件\n");
   sb.append("• 交互式提问：在聊天中弹出选项卡片，一问一答澄清关键决策\n");
+  // Task 7(spec 2026-11-21 §5.2):steering 引导句 —— 运行中用户补充的消息经 inbox 在
+  // 下一迭代边界注入为 USER 行(A4),模型须优先回应。措辞由 Task 15 契约测试锁定。
+  sb.append("• 运行中补充：运行中用户补充的消息具有最高优先级,先回应补充再继续原任务\n");
   java.util.Set<String> visibleToolGroups = capabilityService.visibleToolGroupsFor(username);
   if (visibleToolGroups.contains("tool_git")) {
    sb.append("• Git 仓库管理：clone / commit / push / 分支等仓库操作\n");

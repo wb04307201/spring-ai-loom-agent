@@ -1,12 +1,16 @@
 package cn.wubo.spring.ai.loom.agent.stream;
 
 import cn.wubo.spring.ai.loom.agent.chat.SteeringInbox;
+import cn.wubo.spring.ai.loom.agent.model.ChatResponseRecord;
+import cn.wubo.spring.ai.loom.agent.model.SteerAck;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -21,7 +25,8 @@ import java.util.concurrent.CopyOnWriteArraySet;
  *
  * <p>steering（2026-11-21 agentic loop）：每个 {@link Entry} 携带一条 run 生命周期的
  * {@link SteeringInbox}；{@link #steer} 向在册 Entry 的 inbox 入队，{@link #stop} 在
- * dispose/complete 前先 {@code inbox.close()} 拒绝在途入队；旧流 onComplete 用
+ * dispose/complete 前先 {@link #terminateInbox} 永久收口 + 残留 steerAck(NOT_INJECTED)
+ * 可见终态（R11/A2，不静默吞排队消息）；旧流 onComplete 用
  * {@link #autoCleanup(String, String, Entry)} 身份感知移除，不误删新 run Entry（#6 竞态）。
  */
 @Component
@@ -63,9 +68,10 @@ public class SseEmitterRegistry {
     public boolean stop(String username, String conversationId) {
         Entry e = remove(username, conversationId);
         if (e == null) return false;
-        // steering 收口(先于 dispose/complete)：已拿走 Entry 引用的在途 steer 调用,
-        // 其后续 inbox.offer 一律被拒(closing),stop 意图优先,不会再排进残流。
-        e.inbox().close();
+        // steering 永久收口(先于 dispose/complete,R11/A2):terminate 拒绝在途入队,
+        // 残留未注入消息经 steerAck(NOT_INJECTED) 终帧可见处置("未发送(已停止)"),
+        // 绝不静默蒸发。终帧必须在 emitter.complete() 之前发(完成后 send 抛异常)。
+        terminateInbox(e);
         // 触发 onStop 回调（用于记录已产生的 token，避免停止后丢数据）
         if (e.onStop() != null) {
             try {
@@ -151,6 +157,8 @@ public class SseEmitterRegistry {
         int n = 0;
         for (Map.Entry<String, Entry> kv : byConv.entrySet()) {
             try {
+                // R11/A2:登出停流同样永久收口 + 残留可见终态(不静默吞排队 steering)
+                terminateInbox(kv.getValue());
                 if (kv.getValue().disposable() != null && !kv.getValue().disposable().isDisposed()) {
                     kv.getValue().disposable().dispose();
                 }
@@ -160,6 +168,27 @@ public class SseEmitterRegistry {
             }
         }
         return n;
+    }
+
+    /**
+     * 永久终止 Entry 的 steering inbox 并对残留发可见终态帧(R11/A2,Task 7)。
+     * stop/登出/断连共用:{@link SteeringInbox#terminateAndRemaining()} 原子收口取残留,
+     * 逐条经 {@code steerAck(NOT_INJECTED)} 帧标记"未发送(已停止)"。终帧尽力发送 ——
+     * 断连场景 emitter 可能已 complete(send 抛异常),捕获降级日志(前端已丢,帧不达不阻断清理)。
+     *
+     * @return 残留条数(已可见处置)
+     */
+    public int terminateInbox(Entry e) {
+        List<SteeringInbox.SteeringMessage> residual = e.inbox().terminateAndRemaining();
+        for (SteeringInbox.SteeringMessage m : residual) {
+            try {
+                e.emitter().send(new ChatResponseRecord(new SteerAck(m.messageId(), SteerAck.STATUS_NOT_INJECTED)),
+                        MediaType.APPLICATION_JSON);
+            } catch (Exception ex) {
+                log.warn("steering 终态帧发送失败(连接可能已关): msg={} err={}", m.messageId(), ex.getMessage());
+            }
+        }
+        return residual.size();
     }
 
     /**
