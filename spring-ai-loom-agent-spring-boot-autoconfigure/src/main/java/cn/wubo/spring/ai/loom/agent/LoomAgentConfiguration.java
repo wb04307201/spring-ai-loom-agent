@@ -5,6 +5,7 @@ import cn.wubo.flex.schedule.core.ExecutionHistory;
 import cn.wubo.flex.schedule.core.FlexScheduledTaskRegistrar;
 import cn.wubo.spring.ai.loom.agent.chat.DefaultChat;
 import cn.wubo.spring.ai.loom.agent.chat.IChat;
+import cn.wubo.spring.ai.loom.agent.chat.LoomMemoryAdvisor;
 import cn.wubo.spring.ai.loom.agent.document.DefaultDocumentRead;
 import cn.wubo.spring.ai.loom.agent.document.DefaultFileDocument;
 import cn.wubo.spring.ai.loom.agent.document.IDocumentRead;
@@ -57,6 +58,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.client.advisor.api.MemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
@@ -538,7 +540,7 @@ public class LoomAgentConfiguration {
         @ConditionalOnProperty(name = "spring.ai.chat.ui.init", havingValue = "true", matchIfMissing = true)
         @Bean
         public ChatClient chatClient(ChatModel chatModel,
-                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor messageChatMemoryAdvisor,
+                                     @Qualifier("messageChatMemoryAdvisor") org.springframework.ai.chat.client.advisor.api.MemoryAdvisor messageChatMemoryAdvisor,
                                      LoomAgentProperties properties) {
             ChatClient.Builder builder = ChatClient.builder(chatModel);
             if (properties.getDefaultSystem() != null) builder.defaultSystem(properties.getDefaultSystem());
@@ -549,7 +551,8 @@ public class LoomAgentConfiguration {
         }
 
         /**
-         * 暴露 {@link MessageChatMemoryAdvisor} 为独立 bean —— 之前只在
+         * 暴露 chat-memory advisor 为独立 bean（bean 名 {@code messageChatMemoryAdvisor}
+         * 保持不变 —— {@code @Qualifier} 与路由层按名注入处零改动）—— 之前只在
          * {@code ChatClient.Builder.defaultAdvisors(...)} 里 inline 构造,
          * 没有暴露,导致 {@code SubTaskConfiguration#defaultSubTaskExecutor} 通过
          * {@code ObjectProvider.getIfAvailable()} 拿到 null,在
@@ -568,14 +571,21 @@ public class LoomAgentConfiguration {
          * hasDownstreamMemoryAdvisor=true → ToolCallingAdvisor 关闭内部 history,
          * 中间轮次的 user 问句和 assistant tool_use 被丢,LLM hallucinated。
          *
-         * <p>Spring AI 1.x 时代 {@code MessageChatMemoryAdvisor.adviseStream()}
-         * 每个 chunk 都触发 after() 写 chat_memory(已修复,2.0 不再有此 bug)。
-         * 保留 {@code LastChunkMessageChatMemoryAdvisor.java} 文件但不再装配,
-         * 仅作回滚保险 — 如 2.0 默认实现仍写库重复,可即时切回。
+         * <p>2026-11-21 (spec D-1 agentic-loop-steering): 替换为 Loom 自有
+         * {@link LoomMemoryAdvisor} —— 上游 {@link MessageChatMemoryAdvisor} 是
+         * <b>final</b>,无法子类化接管 ASSISTANT 写入时机;loop advisor(Task 6/7)
+         * 需要逐外层迭代落 ASSISTANT 行,该 advisor 的 after() 检测到
+         * {@code StreamRunContext.perIterationMode} 即跳过聚合单写。
+         * <b>Issue1 两条不变式原样保留</b>:order = HIGHEST_PRECEDENCE + 200(上游)
+         * + implements MemoryAdvisor(auto-register 的 instanceof 探测),before()
+         * 去重读历史 + turn-initial USER 落库与上游逐语义一致;无 StreamRunContext
+         * 的路径(子任务 .call() / legacy)after() 仍单写聚合 ASSISTANT(A1)。
+         * 回归锁:{@code Issue1ChatMemoryAdvisorRegressionTest} +
+         * {@code LoomMemoryAdvisorTest}。
          */
         @Bean
-        public org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor messageChatMemoryAdvisor(org.springframework.ai.chat.memory.ChatMemory chatMemory) {
-            return org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor.builder(chatMemory).build();
+        public MemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
+            return new LoomMemoryAdvisor(chatMemory);
         }
 
         @ConditionalOnMissingBean(IChat.class)
