@@ -11,7 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.MemoryAdvisor;
 
 import java.util.Collections;
 import java.util.List;
@@ -43,7 +43,7 @@ import static org.mockito.Mockito.when;
 class DefaultSubTaskToolTimeoutTest {
 
     private ChatClient chatClient;
-    private MessageChatMemoryAdvisor memoryAdvisor;
+    private MemoryAdvisor memoryAdvisor;
     private ExecutorService pool;
     private IMcp mcp;
     private List<IEmbedTool> embedTools;
@@ -54,7 +54,7 @@ class DefaultSubTaskToolTimeoutTest {
     @BeforeEach
     void setUp() {
         chatClient = mock(ChatClient.class);
-        memoryAdvisor = mock(MessageChatMemoryAdvisor.class);
+        memoryAdvisor = mock(MemoryAdvisor.class);
         mcp = mock(IMcp.class);
         embedTools = Collections.emptyList();
         subTaskRegistry = new SubTaskRegistry(8, 100);

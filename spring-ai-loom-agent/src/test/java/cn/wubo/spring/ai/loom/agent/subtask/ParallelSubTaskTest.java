@@ -10,7 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.MemoryAdvisor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
@@ -44,7 +44,7 @@ import static org.mockito.Mockito.when;
 class ParallelSubTaskTest {
 
     private ChatClient chatClient;
-    private MessageChatMemoryAdvisor memoryAdvisor;
+    private MemoryAdvisor memoryAdvisor;
     private ExecutorService pool;
     private IMcp mcp;
     private SubTaskRegistry registry;
@@ -54,7 +54,7 @@ class ParallelSubTaskTest {
     @BeforeEach
     void setUp() {
         chatClient = mock(ChatClient.class);
-        memoryAdvisor = mock(MessageChatMemoryAdvisor.class);
+        memoryAdvisor = mock(MemoryAdvisor.class);
         mcp = mock(IMcp.class);
         List<IEmbedTool> embedTools = Collections.emptyList();
         registry = new SubTaskRegistry(8, 100);

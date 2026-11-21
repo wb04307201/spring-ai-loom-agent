@@ -219,6 +219,20 @@ public class DefaultChat implements IChat {
   requestSpec.advisors(new cn.wubo.spring.ai.loom.agent.token.ChatUsageRecordingAdvisor(
           chatUsageService, conversationId, username, 100));
 
+  // agentic loop advisor(spec 2026-11-21 Task 5):逐请求挂载(LoomAgenticLoopAdvisor javadoc
+  // A5 钉死:绝不可做成 defaultAdvisor/共享 bean —— 子任务复用同一 ChatClient bean,
+  // defaultAdvisor 会被子任务链继承)。它 implements ToolAdvisor → 抑制 Spring AI
+  // auto-register 的默认 ToolCallingAdvisor,主链恰好一个 tool advisor(S1,回归锁
+  // LoomAgenticLoopAdvisorNoOpTest)。
+  requestSpec.advisors(LoomAgenticLoopAdvisor.builder().build());
+  // StreamRunContext 经 SSE lambda → request attribute → advisor context 传递(brief 钉死)。
+  // 本 task SSE lambda 尚未创建 ctx(Task 6 接线)→ attribute 恒 null → advisor context
+  // 无该 key → 钩子纯 super(A1 退化,行为与改造前逐字节一致)。
+  Object streamRunContext = request.getAttribute(StreamRunContext.CONTEXT_KEY);
+  if (streamRunContext instanceof StreamRunContext ctx) {
+    requestSpec.advisors(a -> a.param(StreamRunContext.CONTEXT_KEY, ctx));
+  }
+
   ToolCallbackProvider toolCallbackProvider = mcp.getVisibleToolCallbackProvider(username, chatRequestRecord.mcps());
 
   if (toolCallbackProvider != null) {

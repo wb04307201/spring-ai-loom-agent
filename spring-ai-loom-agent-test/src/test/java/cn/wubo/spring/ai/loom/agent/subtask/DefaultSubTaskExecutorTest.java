@@ -7,7 +7,7 @@ import cn.wubo.spring.ai.loom.agent.model.SubTaskStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.MemoryAdvisor;
 import org.springframework.ai.tool.ToolCallbackProvider;
 
 import java.util.Map;
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.eq;
 class DefaultSubTaskExecutorTest {
 
     private ChatClient chatClient;
-    private MessageChatMemoryAdvisor memoryAdvisor;
+    private MemoryAdvisor memoryAdvisor;
     private ThreadPoolExecutor executor;
     private IMcp mcp;
     private java.util.List<cn.wubo.spring.ai.loom.agent.tool.IEmbedTool> embedTools;
@@ -36,7 +36,7 @@ class DefaultSubTaskExecutorTest {
     @BeforeEach
     void setUp() {
         chatClient = mock(ChatClient.class);
-        memoryAdvisor = mock(MessageChatMemoryAdvisor.class);
+        memoryAdvisor = mock(MemoryAdvisor.class);
         executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(2);
         mcp = mock(IMcp.class);
         embedTools = java.util.Collections.emptyList();
