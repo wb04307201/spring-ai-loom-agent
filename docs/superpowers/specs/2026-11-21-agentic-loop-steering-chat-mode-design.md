@@ -194,7 +194,7 @@ CHAT      : (用户点了"聊聊这个",问题保活)
 ### 5.6 持久化与历史一致性(G5)
 
 - **注入的 steering UserMessage 必须落 `SPRING_AI_CHAT_MEMORY`**(USER 行,注入时刻的时间戳/sequence)。写入者由 S2 确定:`ToolCallingAdvisor.conversationHistoryEnabled=true` 的 history 管理若已覆盖 instructions 追加行,则不显式 add(防双写);否则 loop advisor 注入时显式 `ChatMemory.add`。
-- **历史气泡分组规则**:`renderMessages` 按 **USER 行切分**——每条 USER 行 = 用户气泡 + 后续 AI 气泡的起点;两条 USER 行之间的所有 ASSISTANT/TOOL_CALL/reasoning 归同一 AI 气泡。steering 注入行天然是 USER 行 ⇒ live 与回放分组一致,**主 UI 回放无需新列/新表**(admin 流水的 B2 倒序修复另需 `loom_chat_steering` 审计表,见 §5.9,两者不冲突:主 UI 按 memory sequence 顺序,不走 ConversationFlowService 的 ts 重写)。
+- **历史气泡分组规则(⚠️ 已被 builder check 推翻,待 §12 裁定)**:原拟"按 USER 行切分、零新表"。核实 2.0.2 源码后不成立:`MessageChatMemoryAdvisor`(final)把整条流(含续跑)聚合成**单条 ASSISTANT 行**,steering USER 行(注入时写)在 sequence 上排在全部 assistant 文本之前 ⇒ 按 USER 切分会让前段输出全落最后一个气泡、首气泡为空(A6 必违)。持久化/回放模型见 §12 待裁定 D-1。
 - **迭代分隔线 P1 不进历史**(纯视觉装饰,回放不还原;气泡分组一致即满足 G5/A6)。
 - reasoning 配对(±10s 就近)与 TOOL_CALL 注入逻辑不动;多迭代产生更多轮 reasoning 行,`loom_chat_reasoning` append 语义天然兼容。
 
@@ -279,7 +279,7 @@ CREATE TABLE loom_chat_steering (
 | # | 验证目标 | 失败退路 |
 |---|---|---|
 | S1 | 自定义 `ToolCallingAdvisor` 子类经 `.advisors()` 装配后,`DefaultChatClient.autoRegisterToolCallingAdvisor` 是否抑制默认实例;`conversationHistoryEnabled` 检测(memory 上游)是否仍成立 | 退方案 (b):独立外层 advisor(+250),内层注入改用自定义 ToolCallingManager 包装 |
-| S2 | `doGetNextInstructionsForToolCall` 追加的 UserMessage 是否被 advisor 内部 history 机制持久化;显式 `ChatMemory.add` 是否双写 | 确定唯一写入者,契约锁锁死 |
+| S2 | ~~steering UserMessage 写入者~~ **前提已证伪**(ToolCallingAdvisor 零 memory 写入);改验:per-iteration ASSISTANT + steering USER 的落库方案(§12 D-1 裁定后)与 next-turn prompt 顺序保真 | 按 D-1 裁定 |
 | S3 | `chain.copy(this)` 重入是否逐轮重跑下游 `ChatUsageRecordingAdvisor`(order=100)且无 `UsageAccumulator` 双计;`Flux.concat` 续跑下 SSE lambda 的 delta/accum 行为 | usage 落库点移入 loop advisor 收口处(UsageAccumulator 全量),record 加幂等键 |
 | S4 | `loom_chat_steering` 审计匹配在两类注入场景下均正确:内层(前序 TOOL 行)+ finalize 续跑(前序 ASSISTANT 行);B2 豁免后 admin 流水时间线不倒序 | 匹配规则改按 memory sequence_id 对齐(需确认 sequence 在续跑轮的单调性) |
 | S5 | `emitterRegistry.autoCleanup` 是否 dispose 订阅;断连后 orphan run 是否继续写 memory/usage | 断连路径补 dispose + inbox 清理(§5.8) |
@@ -420,3 +420,43 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 - [MCP Elicitation 规范](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation):accept/decline/cancel 三态,客户端必须提供拒绝/取消出口
 - Spring AI 2.0.2 `spring-ai-client-chat` jar javap:`ToolCallingAdvisor` protected 钩子全集、`CallAdvisorChain.copy(Advisor)`、`UsageAccumulator`
 - 本仓:`Issue1ChatMemoryAdvisorRegressionTest`、`AskUserGuidanceContractTest`、`SseEmitterRegistry`、`app.js` §5/§7
+## 12. Builder check 收口(2026-11-21,独立评审 + 本人源码核实)
+
+独立评审代理(接手工程师视角)报告 6 项;本人对 2.0.2 sources jar 与本仓代码逐条核实。分类如下。
+
+### 12.1 已核实的事实订正(无论方案如何都成立)
+
+| 原假设 | 核实结论 | 证据 |
+|---|---|---|
+| ToolCallingAdvisor 的 conversationHistoryEnabled 管理 memory 追加行 | **证伪**:零 ChatMemory 写入,该旗标只控制请求内 instructions 传递 | sources `ToolCallingAdvisor:225,465` |
+| 多迭代回放可按 USER 行切分、零新表 | **证伪**:MessageChatMemoryAdvisor(final)聚合整条流成单条 ASSISTANT 行,steering USER 行 sequence 在前 ⇒ 切分后首气泡空、末气泡吞全部 | sources `MessageChatMemoryAdvisor:104,146,161` + `ChatClientMessageAggregator`(单 AssistantMessage) |
+| TOOL_CALL 按 createdAt 与消息合并排序 | **证伪**:端点 addAll 末尾,renderMessages 顺序遍历不排序,Message 序列化无 ts ⇒ 全挂最后一个气泡 | `LoomAgentConfiguration:2535–2537`、`app.js:1368–1414`、`ToolCallHistory` |
+| reasoning 多迭代"天然兼容" | **证伪**(第二轮已部分订正):整条流落一行;且单 ASSISTANT 行下 ±10s 配对只能挂一条 reasoning ⇒ 依赖 D-1 先解决行布局 | `LoomAgentConfiguration:746–757`、`ChatReasoningHistory:38` |
+| registry 竞态只覆盖入队侧 | **证伪**:register 无条件 put、autoCleanup 按 key remove 不认身份 ⇒ finalize→complete 窗口内回退发送会让旧流 onComplete 删掉新 run Entry | `SseEmitterRegistry:29,76` |
+| CHAT 保活与 300s 超时互不干扰 | **证伪**:future.get(300s) 照跑,CHAT 打字超时 → 404 + 文本丢失风险 | `DefaultAskUserTool:151` |
+
+### 12.2 待用户裁定(D-1/D-2/D-3,决定方案形态)
+
+**D-1(最高优先):多迭代 run 的持久化与回放模型。** 约束三难:"零 schema 改动 + memory advisor 上游不动(Issue1 锁) + 注入逻辑不动"无法同时满足。候选:
+- (A) **自定义 LoomMemoryAdvisor 替换 bean**(order +200 上游不变,implements BaseChatMemoryAdvisor):before 写 turn-initial USER;经 StreamRunContext 在每迭代边界写该迭代 ASSISTANT 行、每 steering 注入写 USER 行;after 不再写合并行。无 steering 单迭代 run 行为与今天一致(A1)。Issue1 测试改为断言"order 上游 + history 使能"不变式而非精确类名(契约演进)。**推荐**:next-turn prompt 顺序保真、回放/配对/TOOL_CALL 归位都自然成立;代价=动 Issue1 锁的那条线(保其神不改其形)+ 复刻 before 去重逻辑。
+- (B) loop advisor 显式逐迭代写 + 包装 ChatMemory bean 丢弃合并行:防双写脆弱,不推荐。
+- (C) memory 行保持合并,新增 loom_chat_run_segment 审计表,历史端点按审计表重构气泡/interleave:不动 memory 装配,但 next-turn prompt 里 steering USER 全排在合并 ASSISTANT 前(顺序失真),读侧重构复杂。D-1 选 A 时本表可退化为可选审计。
+- **连带 #3(TOOL_CALL 归位)**:D-1 选 A 后,历史端点给 Message 条目附 DB timestamp( additive 字段,仿 ChatReasoningHistory JDBC 取 ts)+ 服务端按 ts 把 TOOL_CALL interleave 进正确位置 ⇒ renderMessages 顺序渲染即归位。此处置**取代旧"Message 形状不变"裁定**(additive 向后兼容),记为我方裁定,随 D-1 一并审批。
+
+**D-2:CHAT 态与 300s 超时共存。** 候选:
+- (i) **进入 CHAT 态时重置/延长 deadline**(registry 加 extend 方法,CHAT 入口给新 300s 窗口):**推荐**,逃生通道不该原样重演死锁;代价=动"超时骨架不动"声明(实为小机制非重写)。
+- (ii) 接受过期:CHAT 文本 404 后自动转普通发送(run 已收口)或 steering(run 仍活),灰态标终态。纯前端,但用户体验差(打字打到一半问题没了)。
+
+**D-3:run-timeout 墙钟是否计人等待 + 内层边界是否查超时。** 候选:
+- (i) **预算只计活跃模型/工具时间,askUser/CHAT 阻塞期间暂停;内层注入点也查 timeout**:**推荐**,否则"等着等着 run 没了"+ 单迭代可远超 1800s。
+- (ii) 字面墙钟、仅外层查:实现薄,但人等待烧穿预算、与 D-2 过期叠加。
+
+### 12.3 我方自行裁定(技术项,记录备查)
+
+- **#6 registry 竞态**:register/autoCleanup 改 **Entry 身份感知**(remove 前比对引用,旧流 onComplete 不删新 Entry);前端 queued:false 回退**必须等本地流 complete 事件**再发(本地排队),不抢 register;**用户 stop 后的在途 steer 回退抑制**(stop 意图优先),灰态标"未发送(已停止)"。
+- **#4 reasoning 粒度**:第二轮已裁定按外层迭代 flush(StreamRunContext);其配对正确性依赖 D-1 选 A(每迭代一条 ASSISTANT 行)。D-1 若选 C 则配对需按审计表 segment ts 重构。
+- 灰态批量 ack 与回放连续 USER 行分组对齐、CHAT 文本不进 USER 行(卡片内渲染)、run 错误终止残留灰态终态标记、steering 引导句注入位置:评审认为可自行裁定,归 §8。
+
+### 12.4 评审确认无需追问的点
+
+S1/S3 本身、§8 裁量项、帧字段命名、inbox 载体、admin 流水是否纳入 G5(已纳入 G7)、子任务排除(E1)——评审已核对,不再列问。
