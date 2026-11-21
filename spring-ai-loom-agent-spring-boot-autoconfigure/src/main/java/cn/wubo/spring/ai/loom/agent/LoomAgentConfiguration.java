@@ -2205,6 +2205,28 @@ public class LoomAgentConfiguration {
                     return ServerResponse.badRequest().body(Map.of("error", "invalid answer"));
                 }
                 Object answer = body == null ? null : body.get("answer");
+                // Task 8(D-2):可选 mode 字段 —— "DISMISS"(「聊聊这个」,无需 answer 文本)
+                // / 缺省或 "ANSWER"(现有逻辑逐字节不变,A1)/ 其他 → 400。
+                Object rawMode = body == null ? null : body.get("mode");
+                if (rawMode != null && !(rawMode instanceof String)) {
+                    return ServerResponse.badRequest().body(Map.of("error", "invalid mode"));
+                }
+                String mode = rawMode == null || ((String) rawMode).isBlank()
+                        ? "ANSWER" : ((String) rawMode).trim().toUpperCase(java.util.Locale.ROOT);
+                if (mode.equals("DISMISS")) {
+                    // 哨兵经 answer(qid,user,DISMISS_SENTINEL) 注入 —— 与选项提交同一条
+                    // complete CAS 通道,竞态(超时/取消/重复点击)先到先得,后到 404。
+                    boolean dismissed = askUserRegistry.answer(qid, user,
+                            cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry.DISMISS_SENTINEL);
+                    if (!dismissed) {
+                        return ServerResponse.status(org.springframework.http.HttpStatus.NOT_FOUND)
+                                .body(Map.of("error", "not found"));
+                    }
+                    return ServerResponse.ok().body(Map.of("ok", true));
+                }
+                if (!mode.equals("ANSWER")) {
+                    return ServerResponse.badRequest().body(Map.of("error", "invalid mode"));
+                }
                 String answerText;
                 if (answer instanceof java.util.List<?> list) {
                     answerText = list.stream()

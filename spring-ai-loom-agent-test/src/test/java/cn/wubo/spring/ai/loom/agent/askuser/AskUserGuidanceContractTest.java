@@ -102,4 +102,58 @@ class AskUserGuidanceContractTest {
         // 【平台能力】段自述包含提问能力(此前唯独漏了 askUser)
         assertThat(prompt).contains("交互式提问");
     }
+
+    // ==================== Task 8:DISMISS 中性返回契约锁(D-2/A3) ====================
+
+    /**
+     * spec §5.3 原文逐字锁定 ——「聊聊这个」是<b>非错误中性信号</b>:
+     * 区别于超时/stop 的"[用户未作答]"与 is_error 路径,也不指示模型"继续"推进原问题,
+     * 而是等待用户下一轮补充消息(CC #33511 反面教材:错误/催促进入下轮会烧掉 escape hatch)。
+     * 变异自证:DISMISS 分支改走 CANCELLED/超时文案、或改 throw(is_error)⇒ 本用例红。
+     */
+    @Test
+    void dismissReturnTextIsNeutralVerbatimContract() throws Exception {
+        AskUserRegistry registry = new AskUserRegistry();
+        cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry sseRegistry =
+                new cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry();
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
+                org.mockito.Mockito.mock(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.class);
+        sseRegistry.register("alice", "conv-1", emitter, null, null);
+        // 卡片推送后立即经 registry 注入 DISMISS 哨兵(与 answer 端点 mode=DISMISS 同通道)
+        java.util.concurrent.atomic.AtomicReference<String> qidRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            cn.wubo.spring.ai.loom.agent.model.ChatResponseRecord rec = inv.getArgument(0);
+            String qid = rec.askUser().questionId();
+            qidRef.set(qid);
+            Thread t = new Thread(() -> registry.answer(qid, "alice", AskUserRegistry.DISMISS_SENTINEL));
+            t.setDaemon(true);
+            t.start();
+            return null;
+        }).when(emitter).send(org.mockito.ArgumentMatchers.any(Object.class),
+                org.mockito.ArgumentMatchers.any(org.springframework.http.MediaType.class));
+
+        DefaultAskUserTool tool = new DefaultAskUserTool(registry, sseRegistry, 5);
+        String optionsJson = "[{\"label\":\"A(推荐)\"},{\"label\":\"B\"}]";
+        // 非错误路径:正常返回字符串,不抛异常(throw=is_error 变异在此直接红)
+        String r = tool.askUser("选哪个?", null, null, optionsJson, false, false,
+                new ToolContext(java.util.Map.of("username", "alice", "parentConversationId", "conv-1")));
+
+        // spec §5.3 原文逐字
+        assertThat(r).isEqualTo("[用户想先聊聊] 用户选择暂不回答以上问题,想先自由讨论。"
+                + "请等待用户接下来的补充消息(将在下一轮送达),不要自行猜测答案或强行推进原问题。");
+        // 关键语义词(重复锁定,防逐字串被整段替换 yet 语义丢失)
+        assertThat(r).contains("等待用户").contains("补充");
+        // A3:不得伪装成"未作答"(超时/stop 文案),不得指令性"继续"推进
+        assertThat(r).doesNotContain("用户未作答");
+        assertThat(r).doesNotContain("继续");
+        // 无保活:dismiss 即 complete+remove(finally 清注册表,不留幽灵行)
+        assertThat(registry.get(qidRef.get())).isNull();
+    }
+
+    @Test
+    void dismissSentinelIsDistinctFromCancelledSentinel() {
+        assertThat(AskUserRegistry.DISMISS_SENTINEL).isEqualTo("__ASKUSER_DISMISS__");
+        assertThat(AskUserRegistry.DISMISS_SENTINEL).isNotEqualTo(AskUserRegistry.CANCELLED_SENTINEL);
+    }
 }

@@ -234,6 +234,14 @@ public class DefaultChat implements IChat {
   String serverName = request.getServerName(); // localhost 或 IP
   int serverPort = request.getServerPort(); // 8080
   props.put("baseUrl", scheme + "://" + serverName + ":" + serverPort);
+  // D-3(Task 8/R21):StreamRunContext 先于此读取一次,既进 toolContext(askUser 阻塞
+  // 等待期间 pauseClock/resumeClock 使 runTimeout 只计活跃时长,人工等待不计 —— toolContext
+  // 禁 null 值,仅上下文在场时注入;子任务链自建 props 不含此键,不暂停行为不变),
+  // 也供下方 advisor param 使用(SseController → request attribute → 同一 ctx 引用)。
+  Object streamRunContext = request.getAttribute(StreamRunContext.CONTEXT_KEY);
+  if (streamRunContext instanceof StreamRunContext runCtx) {
+   props.put(StreamRunContext.CONTEXT_KEY, runCtx);
+  }
   requestSpec.toolContext(props);
 
   requestSpec.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId));
@@ -267,7 +275,7 @@ public class DefaultChat implements IChat {
   // R14:advisor param 进 ChatClientRequest.context(ConcurrentHashMap),终端
   // ChatModel*Advisor 以 Map.copyOf(request.context()) 建响应 context →
   // LoomMemoryAdvisor.after() 与 doFinalizeLoop* 读到同一 ctx 引用)。
-  Object streamRunContext = request.getAttribute(StreamRunContext.CONTEXT_KEY);
+  // Task 8:同一引用另经上方 toolContext 注入(askUser D-3 时钟),ctx 读取已提前。
   if (streamRunContext instanceof StreamRunContext ctx) {
     requestSpec.advisors(a -> a.param(StreamRunContext.CONTEXT_KEY, ctx));
   }

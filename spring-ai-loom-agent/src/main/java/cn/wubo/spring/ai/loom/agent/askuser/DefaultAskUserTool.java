@@ -146,8 +146,19 @@ public class DefaultAskUserTool implements IAskUserTool {
         }
         log.info("askUser 提问: qid={} user={} conv={} question={}", questionId, username, conversationId, question);
 
+        // D-3(spec 2026-11-21 Task 8/R21):人工等待不计入 runTimeout —— 阻塞前暂停
+        // StreamRunContext 活跃时钟,finally 恢复,覆盖 回答/超时/中断/异常/dismiss/cancel
+        // 全部路径。ctx 仅在主流接线(DefaultChat 注入 toolContext)时存在;子任务/直连
+        // 路径无 ctx → 不暂停,行为不变。
+        Object runCtx = (toolContext == null || toolContext.getContext() == null)
+                ? null : toolContext.getContext().get(cn.wubo.spring.ai.loom.agent.chat.StreamRunContext.CONTEXT_KEY);
+        boolean hasRunClock = runCtx instanceof cn.wubo.spring.ai.loom.agent.chat.StreamRunContext;
+
         String answer;
         try {
+            if (hasRunClock) {
+                ((cn.wubo.spring.ai.loom.agent.chat.StreamRunContext) runCtx).pauseClock();
+            }
             answer = future.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (TimeoutException te) {
             long minutes = Math.max(1, timeoutSeconds / 60);
@@ -162,8 +173,18 @@ public class DefaultAskUserTool implements IAskUserTool {
         } finally {
             // 覆盖正常/超时/中断/异常全部路径:注册表不留幽灵行
             askUserRegistry.remove(questionId);
+            if (hasRunClock) {
+                ((cn.wubo.spring.ai.loom.agent.chat.StreamRunContext) runCtx).resumeClock();
+            }
         }
 
+        if (AskUserRegistry.DISMISS_SENTINEL.equals(answer)) {
+            // D-2「聊聊这个」(spec §5.3 原文,契约锁 AskUserGuidanceContractTest):
+            // 非错误中性返回(A3) —— 区别于超时/stop 的"[用户未作答]"与 is_error 路径,
+            // 不指示模型"继续/自行决策推进",而是等用户下一轮补充。
+            return "[用户想先聊聊] 用户选择暂不回答以上问题,想先自由讨论。"
+                    + "请等待用户接下来的补充消息(将在下一轮送达),不要自行猜测答案或强行推进原问题。";
+        }
         if (AskUserRegistry.CANCELLED_SENTINEL.equals(answer)) {
             return "[用户未作答] 用户已停止本次对话,未作答。";
         }

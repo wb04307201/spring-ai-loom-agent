@@ -25,6 +25,15 @@ public class AskUserRegistry {
     /** stop 取消哨兵:DefaultAskUserTool 识别后返回"用户已停止"文本(spec D7)。 */
     public static final String CANCELLED_SENTINEL = "__ASKUSER_CANCELLED__";
 
+    /**
+     * "聊聊这个" dismiss 哨兵(D-2,spec 2026-11-21 §5.3):前端卡片按钮即时经 answer 端点
+     * (mode=DISMISS)complete 被阻塞的工具 —— 区别于 stop 取消,这是<b>非错误中性返回</b>
+     * (Claude Code "Chat about this" 语义),卡片冻结、输入框回归自由聊天。
+     * 即 complete+remove,无保活状态、不重置任何 deadline;与 {@link #CANCELLED_SENTINEL}
+     * 是两个不同值,DefaultAskUserTool 据此走不同文案分支。
+     */
+    public static final String DISMISS_SENTINEL = "__ASKUSER_DISMISS__";
+
     private final Map<String, PendingQuestion> pending = new ConcurrentHashMap<>();
 
     /**
