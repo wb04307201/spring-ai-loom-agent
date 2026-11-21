@@ -604,10 +604,16 @@ public class LoomAgentConfiguration {
                           LoomAgentProperties properties,
                           cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
                           cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
-                          cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService) {
+                          cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
+                          ObjectProvider<io.micrometer.observation.ObservationRegistry> observationRegistryProvider) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
                     skillStorage, knowledge, properties, toolCallLogRepository, capabilityService,
-                    chatUsageService);
+                    chatUsageService,
+                    // R15(spec 2026-11-21 Task 6):客户端级 ObservationRegistry → loop advisor
+                    // 的 ToolCallingManager。DefaultChatClientBuilder:105-106 auto-register 模板
+                    // 本就带 client registry;S1 逐请求挂载抑制它后必须显式补回,否则工具
+                    // Micrometer span 静默降级 NOOP(bean 缺席时与 Spring AI 默认一致)。
+                    observationRegistryProvider.getIfAvailable(() -> io.micrometer.observation.ObservationRegistry.NOOP));
         }
 
         // ============== ：loom_tool_call_log 仓储 ==============
@@ -629,6 +635,9 @@ public class LoomAgentConfiguration {
             private final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry emitterRegistry;
             private final cn.wubo.spring.ai.loom.agent.askuser.AskUserRegistry askUserRegistry;
             private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
+            // Task 6(S3):StreamRunContext 的 MemoryWriter 绑定 —— 逐外层迭代 ASSISTANT 行
+            // 由 loop advisor 经此写入会话记忆(LoomMemoryAdvisor.after 据此跳过聚合单写)。
+            private final ChatMemory chatMemory;
             // tool_call_log 唯一写入入口是 LoggingToolCallback — SseController 不再写
 
             @PostMapping(value = "/spring/ai/loom/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -636,13 +645,32 @@ public class LoomAgentConfiguration {
                 SseEmitter emitter = new SseEmitter(0L);
 
                 String username = UserContextHolder.getCurrentUser();
-                final String conversationId = chatRecord.conversationId();
+                // Task 6:客户端未传 conversationId 时在此解析(DefaultChat 内部原本也会
+                // 兜底生成 —— 提前到 lambda 层生成一次,让 registry key、reasoning 落库、
+                // MemoryWriter 与 advisor context 用【同一个】id;否则 ctx 绑定 id 与
+                // 记忆写入 id 会分裂)。
+                String requestedConversationId = chatRecord.conversationId();
+                final boolean clientOmittedConversationId =
+                        requestedConversationId == null || requestedConversationId.isBlank();
+                final String conversationId = clientOmittedConversationId
+                        ? java.util.UUID.randomUUID().toString()
+                        : requestedConversationId;
+                final ChatRequestRecord effectiveRecord = clientOmittedConversationId
+                        ? new ChatRequestRecord(chatRecord.message(), conversationId,
+                                chatRecord.mcps(), chatRecord.enabledKnowledgeIds(),
+                                chatRecord.fileIds(), chatRecord.selectedSkillName(),
+                                chatRecord.enabledToolGroups())
+                        : chatRecord;
 
                 // 注册到 registry：disposable 暂存 wrapper
                 final java.util.concurrent.atomic.AtomicReference<reactor.core.Disposable> subRef = new java.util.concurrent.atomic.AtomicReference<>();
                 final java.util.concurrent.atomic.AtomicBoolean disposeRequested =
                         new java.util.concurrent.atomic.AtomicBoolean(false);
-                emitterRegistry.register(username, conversationId, emitter,
+                // R10(spec 2026-11-21 Task 6):必须用 register() 的【返回引用】做身份感知
+                // autoCleanup 与 inbox 绑定 —— 禁止 register 后 get 取回(put↔get 窗口里
+                // 新 run 覆盖注册会让旧流拿错 Entry,#6 竞态复活)。
+                final cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry.Entry entry =
+                        emitterRegistry.register(username, conversationId, emitter,
                         new reactor.core.Disposable() {
                             @Override
                             public void dispose() {
@@ -664,24 +692,78 @@ public class LoomAgentConfiguration {
                             askUserRegistry.cancelAll(username, conversationId);
                         });
 
+                // ============ Task 6(spec 2026-11-21):StreamRunContext 接线 ============
+                // 一条 SSE run 一个 ctx:steering inbox(来自 registry Entry)、逐迭代 ASSISTANT
+                // 落库(MemoryWriter→ChatMemory)、逐迭代 reasoning 落库(saveReasoning)、
+                // steerAck/iteration SSE 帧发射器、stop 信号。经 request attribute 传给
+                // DefaultChat.stream → advisor param → 循环 advisor / LoomMemoryAdvisor(R14)。
+                final cn.wubo.spring.ai.loom.agent.chat.StreamRunContext runContext =
+                        new cn.wubo.spring.ai.loom.agent.chat.StreamRunContext(
+                                entry.inbox(),
+                                new cn.wubo.spring.ai.loom.agent.chat.MemoryWriter() {
+                                    @Override
+                                    public void writeUser(org.springframework.ai.chat.messages.Message m) {
+                                        addMessageToMemory(m, "USER");
+                                    }
+
+                                    @Override
+                                    public void writeAssistant(org.springframework.ai.chat.messages.Message m) {
+                                        addMessageToMemory(m, "ASSISTANT");
+                                    }
+
+                                    private void addMessageToMemory(org.springframework.ai.chat.messages.Message m, String role) {
+                                        try {
+                                            chatMemory.add(conversationId, m);
+                                        } catch (Exception e) {
+                                            // 写失败降级日志,不打断主流(MemoryWriter 契约)
+                                            log.warn("逐迭代 {} 记忆落库失败: conv={} err={}", role, conversationId, e.getMessage());
+                                        }
+                                    }
+                                },
+                                text -> {
+                                    try {
+                                        chatUsageService.saveReasoning(conversationId, text);
+                                        log.info(" saveReasoning OK: conv={} len={}", conversationId, text.length());
+                                    } catch (Exception e) {
+                                        log.warn("saveReasoning 失败: {}", e.getMessage());
+                                    }
+                                },
+                                messageId -> {
+                                    try {
+                                        entry.emitter().send(new ChatResponseRecord(new SteerAck(messageId)), MediaType.APPLICATION_JSON);
+                                    } catch (Exception e) {
+                                        log.warn("steerAck 帧发送失败: conv={} err={}", conversationId, e.getMessage());
+                                    }
+                                },
+                                index -> {
+                                    try {
+                                        entry.emitter().send(new ChatResponseRecord(new IterationEvent(index)), MediaType.APPLICATION_JSON);
+                                    } catch (Exception e) {
+                                        log.warn("iteration 帧发送失败: conv={} err={}", conversationId, e.getMessage());
+                                    }
+                                },
+                                () -> entry.disposable().isDisposed());
+                request.setAttribute(cn.wubo.spring.ai.loom.agent.chat.StreamRunContext.CONTEXT_KEY, runContext);
+
                 // 注册 lifecycle 自动清理
                 // #1 AskUser(spec D7 扩展): 非 stop 的流终止路径同样释放挂起提问 ——
                 // autoCleanup 不走 onStop,超时/断连/异常若不清,工具线程会阻塞满 timeout。
+                // R10:改用返回 Entry 引用的身份感知重载(新 run 覆盖注册后旧流清理不误删新 Entry)。
                 emitter.onTimeout(() -> {
                     log.debug("SSE 链接超时: user={} conv={}", username, conversationId);
                     askUserRegistry.cancelAll(username, conversationId);
-                    emitterRegistry.autoCleanup(username, conversationId);
+                    emitterRegistry.autoCleanup(username, conversationId, entry);
                     emitter.complete();
                 });
                 emitter.onCompletion(() -> {
                     log.debug("SSE 链接完成: user={} conv={}", username, conversationId);
                     askUserRegistry.cancelAll(username, conversationId);
-                    emitterRegistry.autoCleanup(username, conversationId);
+                    emitterRegistry.autoCleanup(username, conversationId, entry);
                 });
                 emitter.onError(e -> {
                     log.debug("SSE 链接错误: user={} conv={} err={}", username, conversationId, e.getMessage());
                     askUserRegistry.cancelAll(username, conversationId);
-                    emitterRegistry.autoCleanup(username, conversationId);
+                    emitterRegistry.autoCleanup(username, conversationId, entry);
                 });
                 CompletableFuture.runAsync(() -> {
                     // ：让 ToolCallLogObservationHandler 拿到 conversationId / username
@@ -689,7 +771,7 @@ public class LoomAgentConfiguration {
                     // clear 之后才调 tool。下一个 chat 会覆盖 LATEST，不会内存泄漏）
                     cn.wubo.spring.ai.loom.agent.tool.ToolCallContextHolder.set(conversationId, username);
                     try {
-                        Flux<ChatResponse> chatResponseFlux = chat.stream(chatRecord, username, request);
+                        Flux<ChatResponse> chatResponseFlux = chat.stream(effectiveRecord, username, request);
 
                         // 2026-10-01 (thinking-stream A 方案 fix):Spring AI OpenAI SDK 把 reasoningContent
                         // 累加成「全量文本」emit per chunk(每帧 metadata.reasoningContent 是「截至目前
@@ -701,8 +783,9 @@ public class LoomAgentConfiguration {
                         // content 文本同 cumulative(chatResponse.getResult().getOutput().getText() 也是累加),
                         // 但 **content 必须保持原样发** — 同一会话多消息的 chat 历史/前端渲染状态机依赖
                         // "text 是全量"语义,改成 delta 会破坏 ChatMemory 持久化与未来历史回放。
-                        final StringBuilder reasoningAccum = new StringBuilder();
-                        final java.util.concurrent.atomic.AtomicInteger lastReasoningLen = new java.util.concurrent.atomic.AtomicInteger(0);
+                        //
+                        // Task 6(S3):delta 状态(lastReasoningLen)+ 缓冲(reasoningBuffer)移入
+                        // StreamRunContext —— 迭代边界复位由 loop advisor 负责,lambda 只读写 ctx。
 
                         reactor.core.Disposable subscription = chatResponseFlux
                                 .filter(chatResponse -> chatResponse.getResult() != null)
@@ -712,39 +795,46 @@ public class LoomAgentConfiguration {
                                         Object rcObj = chatResponse.getResult().getOutput().getMetadata().get("reasoningContent");
                                         String fullReasoning = rcObj instanceof String s ? s : null;
                                         // 算 delta:cumulative 减上次长度,得到本帧新增片段。
-                                        // 不常见边界:length 倒退(理论上不该发生,容错按 "" 处理)
+                                        // 不常见边界:length 倒退(理论上不该发生,容错按全量重发处理)
                                         String reasoningDelta = null;
                                         if (fullReasoning != null && !fullReasoning.isEmpty()) {
-                                            int last = lastReasoningLen.get();
+                                            int last = runContext.getLastReasoningLen();
                                             if (fullReasoning.length() > last) {
                                                 reasoningDelta = fullReasoning.substring(last);
-                                                lastReasoningLen.set(fullReasoning.length());
+                                                runContext.setLastReasoningLen(fullReasoning.length());
                                             } else if (fullReasoning.length() < last) {
                                                 // Provider 重启 / 流跨回合复用 → 整体重发,不 delta,前端会再次 append
                                                 // (虽然不完美但不该发生,记录日志便于排查)
                                                 log.warn(" stream reasoning length shrunk: {} -> {}", last, fullReasoning.length());
                                                 reasoningDelta = fullReasoning;
-                                                lastReasoningLen.set(fullReasoning.length());
+                                                runContext.setLastReasoningLen(fullReasoning.length());
                                             } else {
                                                 // 长度未变(thinking 已完成,provider 仍发同长度帧)→ 空 delta
                                                 reasoningDelta = "";
                                             }
-                                            reasoningAccum.append(reasoningDelta);
+                                            // 缓冲进入 ctx:loop advisor 迭代收口时 flushReasoning 落库
+                                            runContext.appendReasoning(reasoningDelta);
                                         }
                                         log.info(" stream NEXT: conv={} textLen={} reasoningAccumLen={} reasoningDeltaLen={}",
                                                 conversationId,
                                                 text == null ? 0 : text.length(),
-                                                reasoningAccum.length(),
+                                                runContext.reasoningBufferLength(),
                                                 reasoningDelta == null ? -1 : reasoningDelta.length());
                                         emitter.send(new ChatResponseRecord(text, reasoningDelta), MediaType.APPLICATION_JSON);
-                                        // ：每条 ChatResponse 携带有效 usage 时写一行到 loom_chat_usage
-                                        // (假设从 chat_memory 反推 JSON 在新版 Spring AI 失效，故改显式记录)
+                                        // usage 落库主链是 ChatUsageRecordingAdvisor(order=100,聚合
+                                        // 响应逐轮 record)。此处保留旧探针仅作降级兜底:原始 chunk 流
+                                        // 的 usage 通常恒为 DefaultUsage(0,0,0),record() 三项全 0 直接
+                                        // return ⇒ 无双计;若 advisor 被消费者替换仍不丢用量(S3)。
                                         var chatMeta = chatResponse.getMetadata();
                                         if (chatMeta != null && chatMeta.getUsage() != null) {
                                             var u = chatMeta.getUsage();
-                                            chatUsageService.record(
-                                                    conversationId, username,
-                                                    u.getPromptTokens(), u.getCompletionTokens(), u.getTotalTokens());
+                                            if ((u.getPromptTokens() == null ? 0 : u.getPromptTokens()) > 0
+                                                    || (u.getCompletionTokens() == null ? 0 : u.getCompletionTokens()) > 0
+                                                    || (u.getTotalTokens() == null ? 0 : u.getTotalTokens()) > 0) {
+                                                chatUsageService.record(
+                                                        conversationId, username,
+                                                        u.getPromptTokens(), u.getCompletionTokens(), u.getTotalTokens());
+                                            }
                                         }
                                         // tool_call_log 唯一入口是 LoggingToolCallback.call()。
                                         // 之前 SseController 在 stream chunk 里提前抓 chatResponse.getResult().getOutput().getToolCalls()
@@ -757,18 +847,13 @@ public class LoomAgentConfiguration {
                                     log.warn(" stream ERROR: conv={} err={}", conversationId, err.getMessage());
                                     emitter.completeWithError(err);
                                 }, () -> {
-                                    log.info(" stream COMPLETE: conv={} reasoningAccumLen={}", conversationId, reasoningAccum.length());
-                                    // ：流完整结束时把 AI 思考落库
-                                    String r = reasoningAccum.toString();
-                                    if (!r.isBlank()) {
-                                        try {
-                                            chatUsageService.saveReasoning(conversationId, r);
-                                            log.info(" saveReasoning OK: conv={} len={}", conversationId, r.length());
-                                        } catch (Exception e) {
-                                            log.warn("saveReasoning 失败: {}", e.getMessage());
-                                        }
-                                    }
-                                    emitterRegistry.autoCleanup(username, conversationId);
+                                    log.info(" stream COMPLETE: conv={} reasoningAccumLen={}", conversationId, runContext.reasoningBufferLength());
+                                    // Task 6(S3):reasoning 不再整条流单 flush —— 逐外层迭代由
+                                    // loop advisor doFinalizeLoop* flushReasoning 落库。此处仅兜底
+                                    // 冲刷残量(loop 未跑完/未 mark 的异常路径);正常单迭代时缓冲
+                                    // 已被迭代收口 drain,二次 flush 为空 ⇒ 落库行数与改造前一致(A1)。
+                                    runContext.flushReasoning();
+                                    emitterRegistry.autoCleanup(username, conversationId, entry);
                                     emitter.complete();
                                 });
                         subRef.set(subscription);

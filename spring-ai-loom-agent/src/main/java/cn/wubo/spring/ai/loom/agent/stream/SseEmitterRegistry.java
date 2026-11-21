@@ -31,10 +31,22 @@ public class SseEmitterRegistry {
     // username -> (conversationId -> Entry)
     private final Map<String, Map<String, Entry>> store = new ConcurrentHashMap<>();
 
-    public void register(String username, String conversationId, SseEmitter emitter, Disposable disposable, Runnable onStop) {
-        if (username == null || conversationId == null) return;
+    /**
+     * 注册一条活跃流并返回其 {@link Entry}(R10,spec 2026-11-21 Task 6)。
+     *
+     * <p><b>调用方必须用返回引用</b>做身份感知 {@link #autoCleanup(String, String, Entry)}
+     * 与 steering inbox 绑定 —— 禁止 register 后再 {@link #get} 取回:put↔get 窗口里
+     * 新 run 可能已覆盖注册,旧流会拿到<b>新</b> Entry,#6 竞态复活。
+     *
+     * @return 新建的 Entry;username/conversationId 为 null 时不入库但仍返回 Entry
+     *         (调用方引用语义统一;旧忽略返回值的调用点源码兼容)
+     */
+    public Entry register(String username, String conversationId, SseEmitter emitter, Disposable disposable, Runnable onStop) {
+        Entry entry = new Entry(emitter, disposable, System.currentTimeMillis(), onStop, new SteeringInbox());
+        if (username == null || conversationId == null) return entry;
         store.computeIfAbsent(username, k -> new ConcurrentHashMap<>())
-                .put(conversationId, new Entry(emitter, disposable, System.currentTimeMillis(), onStop, new SteeringInbox()));
+                .put(conversationId, entry);
+        return entry;
     }
 
     public Entry get(String username, String conversationId) {

@@ -45,6 +45,14 @@ public class StreamRunContext {
     // ---- reasoning 缓冲(当前迭代) ----
     private final StringBuilder reasoningBuffer = new StringBuilder();
 
+    /**
+     * 本迭代已推送的 provider 累积 reasoningContent 长度(SseController 的
+     * cumulative→delta 状态机读写此值,Task 6 从 lambda 本地 AtomicInteger 移入)。
+     * 只在 {@link #resetReasoningDelta()}(外层迭代边界)归零 —— 内层 tool 轮次
+     * 跨轮仍由 lambda 的 shrink 容错分支处理,与改造前逐字节一致(A1)。
+     */
+    private int lastReasoningLen;
+
     // ---- 活跃计时(D-3):暂停区间不计 ----
     /** 已结算的活跃纳秒(各活跃段之和)。 */
     private long accumulatedActiveNanos;
@@ -91,6 +99,33 @@ public class StreamRunContext {
         if (delta != null) {
             reasoningBuffer.append(delta);
         }
+    }
+
+    /**
+     * 读 cumulative→delta 状态机的已见累积长度(Task 6:SseController 的
+     * {@code lastReasoningLen} 本地变量移入本上下文,迭代边界可复位)。
+     */
+    public synchronized int getLastReasoningLen() {
+        return lastReasoningLen;
+    }
+
+    /** 更新 cumulative→delta 状态机的已见累积长度(SseController 每帧 delta 计算后写回)。 */
+    public synchronized void setLastReasoningLen(int len) {
+        lastReasoningLen = len;
+    }
+
+    /**
+     * 外层迭代边界复位 delta 累积长度(lastReasoningLen=0,缓冲不动 —— 落库由
+     * {@link #flushReasoning()} 负责)。Task 6 在 loop advisor 收口时调用;
+     * Task 7 续跑开始时同样调用,使新模型轮的累积 reasoning 从头计算 delta。
+     */
+    public synchronized void resetReasoningDelta() {
+        lastReasoningLen = 0;
+    }
+
+    /** 当前迭代缓冲中尚未落库的思考长度(仅日志/观测用)。 */
+    public synchronized int reasoningBufferLength() {
+        return reasoningBuffer.length();
     }
 
     /**

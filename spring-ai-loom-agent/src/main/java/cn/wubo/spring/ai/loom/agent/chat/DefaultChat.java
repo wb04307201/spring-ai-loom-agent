@@ -52,6 +52,16 @@ public class DefaultChat implements IChat {
  private final CapabilityService capabilityService;
  /** token 用量落库服务 —— 由 ChatUsageRecordingAdvisor 在流终止时调用。 */
  private final cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService;
+ /**
+  * 客户端级 ObservationRegistry(spec 2026-11-21 Task 6 / R15):Spring AI 2.0.2 的
+  * {@code DefaultChatClientBuilder} 在无显式模板时,auto-register 的默认 ToolCallingAdvisor
+  * 拿的是 {@code ToolCallingManager.builder().observationRegistry(clientRegistry).build()}。
+  * 主链改用逐请求 {@code LoomAgenticLoopAdvisor.builder().build()}(S1 抑制 auto-register)后,
+  * 该模板随之失效 —— builder 默认 manager 绑 ObservationRegistry.NOOP,工具 Micrometer span
+  * 静默降级。故这里显式把 bean 注入 loop advisor 的 ToolCallingManager,保持观测不降级。
+  * 缺省(旧 11-arg 构造 / bean 缺席)与 Spring AI 默认一致 = NOOP。
+  */
+ private final io.micrometer.observation.ObservationRegistry observationRegistry;
 
  public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
                     IUserConversation userConversation, IFile file,
@@ -60,6 +70,19 @@ public class DefaultChat implements IChat {
                     cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
                     CapabilityService capabilityService,
                     cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService) {
+  this(chatClient, mcp, embedTools, userConversation, file, skillStorage, knowledge, properties,
+          toolCallLogRepository, capabilityService, chatUsageService,
+          io.micrometer.observation.ObservationRegistry.NOOP);
+ }
+
+ public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
+                    IUserConversation userConversation, IFile file,
+                    ISkillStorage skillStorage, IKnowledge knowledge,
+                    LoomAgentProperties properties,
+                    cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
+                    CapabilityService capabilityService,
+                    cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
+                    io.micrometer.observation.ObservationRegistry observationRegistry) {
   this.chatClient = chatClient;
   this.mcp = mcp;
   this.embedTools = embedTools;
@@ -71,6 +94,8 @@ public class DefaultChat implements IChat {
   this.toolCallLogRepository = toolCallLogRepository;
   this.capabilityService = capabilityService;
   this.chatUsageService = chatUsageService;
+  this.observationRegistry = observationRegistry != null
+          ? observationRegistry : io.micrometer.observation.ObservationRegistry.NOOP;
  }
 
  private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
@@ -219,15 +244,25 @@ public class DefaultChat implements IChat {
   requestSpec.advisors(new cn.wubo.spring.ai.loom.agent.token.ChatUsageRecordingAdvisor(
           chatUsageService, conversationId, username, 100));
 
-  // agentic loop advisor(spec 2026-11-21 Task 5):逐请求挂载(LoomAgenticLoopAdvisor javadoc
-  // A5 钉死:绝不可做成 defaultAdvisor/共享 bean —— 子任务复用同一 ChatClient bean,
-  // defaultAdvisor 会被子任务链继承)。它 implements ToolAdvisor → 抑制 Spring AI
-  // auto-register 的默认 ToolCallingAdvisor,主链恰好一个 tool advisor(S1,回归锁
-  // LoomAgenticLoopAdvisorNoOpTest)。
-  requestSpec.advisors(LoomAgenticLoopAdvisor.builder().build());
-  // StreamRunContext 经 SSE lambda → request attribute → advisor context 传递(brief 钉死)。
-  // 本 task SSE lambda 尚未创建 ctx(Task 6 接线)→ attribute 恒 null → advisor context
-  // 无该 key → 钩子纯 super(A1 退化,行为与改造前逐字节一致)。
+  // agentic loop advisor(spec 2026-11-21 Task 5 挂载 / Task 6 接线+R15):逐请求挂载
+  // (LoomAgenticLoopAdvisor javadoc A5 钉死:绝不可做成 defaultAdvisor/共享 bean ——
+  // 子任务复用同一 ChatClient bean,defaultAdvisor 会被子任务链继承)。它 implements
+  // ToolAdvisor → 抑制 Spring AI auto-register 的默认 ToolCallingAdvisor,主链恰好一个
+  // tool advisor(S1,回归锁 LoomAgenticLoopAdvisorNoOpTest)。
+  // R15:显式注入客户端级 ObservationRegistry 的 ToolCallingManager —— per-request
+  // builder().build() 默认 manager 绑 NOOP,不注入则工具 Micrometer span 静默降级
+  // (auto-register 模板 DefaultChatClientBuilder:105-106 携带的 observationRegistry 随
+  // S1 抑制一同失效)。
+  requestSpec.advisors(LoomAgenticLoopAdvisor.builder()
+      .toolCallingManager(org.springframework.ai.model.tool.ToolCallingManager.builder()
+          .observationRegistry(observationRegistry)
+          .build())
+      .build());
+  // StreamRunContext 经 SSE lambda → request attribute → advisor context 传递(Task 6 接线:
+  // SseController 在调 chat.stream() 前 request.setAttribute(CONTEXT_KEY, ctx);
+  // R14:advisor param 进 ChatClientRequest.context(ConcurrentHashMap),终端
+  // ChatModel*Advisor 以 Map.copyOf(request.context()) 建响应 context →
+  // LoomMemoryAdvisor.after() 与 doFinalizeLoop* 读到同一 ctx 引用)。
   Object streamRunContext = request.getAttribute(StreamRunContext.CONTEXT_KEY);
   if (streamRunContext instanceof StreamRunContext ctx) {
     requestSpec.advisors(a -> a.param(StreamRunContext.CONTEXT_KEY, ctx));

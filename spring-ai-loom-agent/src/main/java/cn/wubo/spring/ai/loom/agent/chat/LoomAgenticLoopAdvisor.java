@@ -7,7 +7,10 @@ import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionEligibilityChecker;
 import org.springframework.ai.model.tool.ToolExecutionResult;
@@ -15,6 +18,7 @@ import org.springframework.lang.Nullable;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Loom agentic loop advisor —— 子类化 Spring AI {@link ToolCallingAdvisor},接管主聊天
@@ -34,15 +38,26 @@ import java.util.List;
  * 继承进链,而子任务无 SSE、无 steering 语义;缺本 advisor 时 Spring AI 自动注册默认
  * ToolCallingAdvisor,子任务行为与改造前逐字节一致。回归锁 {@code SubTaskLoopExclusionTest}。
  *
- * <p><b>A1 退化契约(Task 5 骨架实现)</b>:四个循环钩子先从 advisor context 读取
+ * <p><b>A1 退化契约(Task 6 接线完成)</b>:四个循环钩子先从 advisor context 读取
  * {@link StreamRunContext}({@link StreamRunContext#CONTEXT_KEY}):
  * <ul>
  *   <li>context 无该 key(子任务 / 自定义 IChat / 非 SSE 路径)→ 钩子<b>纯 super</b>;</li>
- *   <li>context 有该 key 但 inbox 为空(主对话 Task 6 接线前)→ 骨架期同样委托 super。</li>
+ *   <li>context 有该 key(主对话,SSE lambda 已经 request attribute 接线)→
+ *       {@link #doFinalizeLoop} / {@link #doFinalizeLoopStream} 在外层迭代结束做
+ *       <b>迭代收口写</b>:逐迭代 ASSISTANT 行({@link StreamRunContext#memory()}
+ *       的 {@link MemoryWriter})+ 思考落库({@link StreamRunContext#flushReasoning()},
+ *       每外层迭代一行 → spec S3)+ {@link StreamRunContext#markPerIterationMode()}
+ *       (接管记忆写权,{@link LoomMemoryAdvisor#after} 据此跳过聚合单写,防双写)。</li>
  * </ul>
- * 两条路径的循环行为都与默认 ToolCallingAdvisor 完全一致:无续跑、无额外模型调用。
- * Task 6/7 在本类接线 steering 消费(drain inbox → 注入 USER 行 → 续跑下一外层迭代)
- * 与 iteration/ack 帧发射;context 读取已就位,届时只增行为不改签名。
+ * 无 steering 单迭代时:1 ASSISTANT + 1 reasoning = 与改造前逐行等价(A1)。
+ * 流式路径收口文本来源:{@link #doAfterStream} 每轮缓存该轮聚合响应,
+ * finalize hook 在最后一轮 doAfterStream 之后被调用(concatWith tail 的
+ * {@code handleToolCallRecursion} 时序),取缓存即为当前外层迭代的聚合响应 ——
+ * 其 context 携带同一 {@link StreamRunContext} 引用(R14:advisor param 经
+ * 终端 ChatModel*Advisor 的 {@code Map.copyOf(request.context())} 透传到响应 context,
+ * 已按 2.0.2 sources 核实,回归锁 {@code ReasoningPerIterationTest})。
+ * Task 7 在本类接线 steering 消费(drain inbox → 注入 USER 行 → 续跑下一外层迭代,
+ * 续跑开始处调 {@code ctx.emitIteration(idx)} + {@code ctx.resetReasoningDelta()})。
  *
  * <p>Issue1 不变式延续:builder 默认 {@code conversationHistoryEnabled=true}(与
  * {@code DefaultChatClient} 在本链形态下对 auto-register advisor 的计算结果一致 ——
@@ -53,6 +68,17 @@ import java.util.List;
 public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
 
   private static final Logger log = LoggerFactory.getLogger(LoomAgenticLoopAdvisor.class);
+
+  /**
+   * 最近一轮的聚合响应快照 —— {@link #doAfterStream} 每轮写入,
+   * {@link #doFinalizeLoopStream} 在迭代收口时读取(当前外层迭代的
+   * ASSISTANT 文本 + advisor context 双重载体)。
+   *
+   * <p>advisor 实例每请求 new(DefaultChat.stream 逐请求 builder().build()),
+   * SSE 单次订阅,per-round 顺序更新无并发问题;getAndSet(null) 消费即清,
+   * 防御性避免跨 run 悬挂。
+   */
+  private final AtomicReference<ChatClientResponse> lastRoundAggregated = new AtomicReference<>();
 
   protected LoomAgenticLoopAdvisor(ToolCallingManager toolCallingManager,
                                    ToolExecutionEligibilityChecker toolExecutionEligibilityChecker,
@@ -77,11 +103,95 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
     if (chatClientRequest == null) {
       return null;
     }
-    Object value = chatClientRequest.context().get(StreamRunContext.CONTEXT_KEY);
+    return runContextOf(chatClientRequest.context());
+  }
+
+  /**
+   * 响应侧读取(R14 接线点之一):终端 ChatModel*Advisor 把 request context
+   * {@code Map.copyOf} 进 response context,故聚合响应的 context 必带同一
+   * {@link StreamRunContext} 引用;{@link LoomMemoryAdvisor#after} 同源读取。
+   */
+  @Nullable
+  static StreamRunContext runContextOf(@Nullable ChatClientResponse chatClientResponse) {
+    if (chatClientResponse == null) {
+      return null;
+    }
+    return runContextOf(chatClientResponse.context());
+  }
+
+  @Nullable
+  private static StreamRunContext runContextOf(@Nullable java.util.Map<String, Object> context) {
+    if (context == null) {
+      return null;
+    }
+    Object value = context.get(StreamRunContext.CONTEXT_KEY);
     return value instanceof StreamRunContext ctx ? ctx : null;
   }
 
-  // ==================== A1 骨架:四个循环钩子全委托 super ====================
+  /**
+   * 迭代收口文本:聚合响应所有 generation output 文本按序拼接(单生成时即最终回答)。
+   * chatResponse 缺失 → null(跳过 ASSISTANT 写,reasoning 仍 flush,与空回答日的
+   * legacy 行为差异仅限"无内容行",A1 常规轮不受影响)。
+   */
+  @Nullable
+  private static String aggregatedAssistantText(@Nullable ChatClientResponse response) {
+    if (response == null || response.chatResponse() == null) {
+      return null;
+    }
+    List<Generation> results = response.chatResponse().getResults();
+    if (results == null || results.isEmpty()) {
+      return null;
+    }
+    StringBuilder text = new StringBuilder();
+    for (Generation generation : results) {
+      if (generation == null || generation.getOutput() == null) {
+        continue;
+      }
+      String chunk = generation.getOutput().getText();
+      if (chunk != null) {
+        text.append(chunk);
+      }
+    }
+    return text.toString();
+  }
+
+  /**
+   * 外层迭代结束的收口写(spec S3 + D-1 接管):
+   * ASSISTANT 逐迭代行 → reasoning 逐迭代行(drain+复位 delta 状态)→ 标记
+   * perIterationMode 让 {@link LoomMemoryAdvisor#after} 跳过聚合单写(防双写)。
+   * 调用点无并发(Reactor 串行),内部异常一律吞成日志 —— 收口写失败绝不允许
+   * 掐断主聊天流(ChatUsageService/MemoryWriter 同策略)。
+   */
+  private static void finalizeIteration(StreamRunContext ctx, @Nullable ChatClientResponse aggregated) {
+    String assistantText = aggregatedAssistantText(aggregated);
+    try {
+      if (assistantText != null && !assistantText.isEmpty()) {
+        ctx.memory().writeAssistant(new AssistantMessage(assistantText));
+      }
+    } catch (Exception ex) {
+      log.warn("agentic loop 迭代 ASSISTANT 落库失败: {}", ex.getMessage());
+    }
+    try {
+      ctx.flushReasoning();
+      ctx.resetReasoningDelta();
+    } catch (Exception ex) {
+      log.warn("agentic loop 迭代 reasoning 落库失败: {}", ex.getMessage());
+    }
+    ctx.markPerIterationMode();
+  }
+
+  // ==================== A1 骨架 + Task 6 迭代收口写 ====================
+
+  @Override
+  protected ChatClientResponse doAfterStream(ChatClientResponse chatClientResponse,
+                                             StreamAdvisorChain streamAdvisorChain) {
+    // 流式路径每轮聚合响应在此透传(handledToolCallRecursion 内、finalize 之前)。
+    // 缓存最后一轮 = 当前外层迭代收口文本载体(finalize hook 读取)。
+    if (chatClientResponse != null) {
+      lastRoundAggregated.set(chatClientResponse);
+    }
+    return super.doAfterStream(chatClientResponse, streamAdvisorChain);
+  }
 
   @Override
   protected List<Message> doGetNextInstructionsForToolCall(ChatClientRequest chatClientRequest,
@@ -109,15 +219,31 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   @Override
   protected ChatClientResponse doFinalizeLoop(ChatClientResponse chatClientResponse,
                                               CallAdvisorChain callAdvisorChain) {
-    // Task 7 在此判定"收口前 inbox 是否仍有残留 → 起下一外层迭代(借 callAdvisorChain.copy(...).nextCall 重入)"。
-    // 骨架:纯 super —— 恒等透传、对 chain 零交互(= 无续跑重入)。
+    // Task 6 迭代收口写(主聊天/自定义 call 路径):ctx 在场 → ASSISTANT 逐迭代行 +
+    // reasoning 落库 + perIterationMode 标记(LoomMemoryAdvisor.after 据此跳过聚合单写);
+    // ctx 缺席(子任务/legacy)→ 钩子纯 super,after() 维持聚合单写(A1)。
+    // Task 7 在此判定"收口前 inbox 是否仍有残留 → 起下一外层迭代(借 callAdvisorChain.copy(...).nextCall 重入,
+    // 重入起点须覆盖 order=100 的 ChatUsageRecordingAdvisor 以保逐轮 usage 行)"。
+    // 骨架期(Task 6):无重入 —— 写完直接委托 super。
+    StreamRunContext ctx = runContextOf(chatClientResponse);
+    if (ctx != null) {
+      finalizeIteration(ctx, chatClientResponse);
+    }
     return super.doFinalizeLoop(chatClientResponse, callAdvisorChain);
   }
 
   @Override
   protected Flux<ChatClientResponse> doFinalizeLoopStream(Flux<ChatClientResponse> chatClientResponseFlux,
                                                           StreamAdvisorChain streamAdvisorChain) {
-    // Task 7 流式版收口点,同上门控
+    // 流式路径收口时入参 finalEmissions flux 常为空(末轮自带 usage 不补发),文本从
+    // doAfterStream 缓存的末轮聚合响应读取;其 context 带同一 StreamRunContext 引用
+    // (R14:终端 ChatModel*Advisor 以 Map.copyOf(request.context()) 透传到响应 context)。
+    // Task 7 流式版收口点(重入逻辑),本期无重入 → 写完透传 super。
+    ChatClientResponse lastRound = lastRoundAggregated.getAndSet(null);
+    StreamRunContext ctx = runContextOf(lastRound);
+    if (ctx != null) {
+      finalizeIteration(ctx, lastRound);
+    }
     return super.doFinalizeLoopStream(chatClientResponseFlux, streamAdvisorChain);
   }
 
