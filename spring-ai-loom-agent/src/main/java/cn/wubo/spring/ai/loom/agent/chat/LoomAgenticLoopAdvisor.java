@@ -129,9 +129,16 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   }
 
   /**
-   * 迭代收口文本:聚合响应所有 generation output 文本按序拼接(单生成时即最终回答)。
-   * chatResponse 缺失 → null(跳过 ASSISTANT 写,reasoning 仍 flush,与空回答日的
-   * legacy 行为差异仅限"无内容行",A1 常规轮不受影响)。
+   * 迭代收口文本:聚合响应所有 generation output 文本按序拼接(多 generation 合并为一行 =
+   * spec §5.10"该迭代文本"by-design,每外层迭代一行,与逐 generation 写行等量信息)。
+   * chatResponse 缺失 / generations 为空 → null(跳过 ASSISTANT 写,reasoning 仍 flush,
+   * 等价 legacy after() 写空列表 → 0 行的路径)。
+   *
+   * <p><b>R17(A1 绑定权威)</b>:generations 存在但文本为空 → 返回空串,调用方<b>仍写行</b> ——
+   * legacy {@code MessageChatMemoryAdvisor}/{@link LoomMemoryAdvisor#after} 对每个 generation
+   * 无条件写 ASSISTANT 行(JdbcChatMemoryRepository 只滤 ToolResponseMessage/带 tool-call 的
+   * AssistantMessage,<b>无 empty-text 过滤</b>),此处若跳空文本行即违反 A1"memory ONE
+   * ASSISTANT row 完全相同"。可达路径:Qwen empty finishReason=STOP self-talk 失败模式。
    */
   @Nullable
   private static String aggregatedAssistantText(@Nullable ChatClientResponse response) {
@@ -165,7 +172,9 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   private static void finalizeIteration(StreamRunContext ctx, @Nullable ChatClientResponse aggregated) {
     String assistantText = aggregatedAssistantText(aggregated);
     try {
-      if (assistantText != null && !assistantText.isEmpty()) {
+      // R17:generations 存在即写行(含空文本)—— legacy after() 每 generation 无条件写;
+      // assistantText==null 仅对应 chatResponse/generations 缺失(legacy 写空列表 0 行)→ 跳。
+      if (assistantText != null) {
         ctx.memory().writeAssistant(new AssistantMessage(assistantText));
       }
     } catch (Exception ex) {
@@ -197,8 +206,8 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   protected List<Message> doGetNextInstructionsForToolCall(ChatClientRequest chatClientRequest,
                                                            ChatClientResponse chatClientResponse,
                                                            ToolExecutionResult toolExecutionResult) {
-    // Task 6 在消费点接管:ctx != null 时先 drain inbox 注入 steering USER 行再续下一迭代。
-    // 骨架期仅读取验证接线通路(为 null 时即 A1/子任务路径),行为保持纯 super。
+    // Task 7 在消费点接管:ctx != null 时先 drain inbox 注入 steering USER 行再续下一迭代。
+    // 本期(Task 6)仅读取验证接线通路(为 null 时即 A1/子任务路径),行为保持纯 super。
     if (log.isTraceEnabled() && runContextOf(chatClientRequest) == null) {
       log.trace("agentic loop: no StreamRunContext → pure super (A1 / subtask path)");
     }
@@ -209,7 +218,7 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   protected List<Message> doGetNextInstructionsForToolCallStream(ChatClientRequest chatClientRequest,
                                                                  ChatClientResponse chatClientResponse,
                                                                  ToolExecutionResult toolExecutionResult) {
-    // Task 6 流式版消费点,同上门控
+    // Task 7 流式版消费点(drain inbox 注入),本期同上门控 —— 纯 super。
     if (log.isTraceEnabled() && runContextOf(chatClientRequest) == null) {
       log.trace("agentic loop (stream): no StreamRunContext → pure super (A1 / subtask path)");
     }

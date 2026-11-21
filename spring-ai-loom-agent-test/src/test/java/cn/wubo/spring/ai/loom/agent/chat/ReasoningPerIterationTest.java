@@ -150,6 +150,28 @@ class ReasoningPerIterationTest {
     }
 
     @Test
+    @DisplayName("R17 空文本末轮(Qwen self-talk):generations 存在 → 仍写恰 1 ASSISTANT 行(与 legacy after() 等量)")
+    void empty_assistant_text_still_writes_one_row_like_legacy() {
+        ChatUsageService usage = mock(ChatUsageService.class);
+        List<Message> assistantRows = new ArrayList<>();
+        StreamRunContext ctx = ctx(capturingWriter(assistantRows), text -> usage.saveReasoning(CONV, text));
+        LoomAgenticLoopAdvisor advisor = LoomAgenticLoopAdvisor.builder().build();
+
+        // 可达路径:provider 以空 content + finishReason=STOP 结束(self-talk 失败模式)。
+        // 改造前 legacy after() 对每 generation 无条件写行(JdbcChatMemoryRepository 无
+        // empty-text 过滤)→ 改造后必须同样恰 1 行空文本 ASSISTANT,否则 A1 破功(0 行)。
+        ctx.appendReasoning("self-talk-think");
+        advisor.doFinalizeLoop(responseWith(ctx, ""), mock(CallAdvisorChain.class));
+
+        assertThat(assistantRows).as("空文本仍须写 1 ASSISTANT 行(等量于 legacy)").hasSize(1);
+        assertThat(assistantRows.get(0)).isInstanceOf(AssistantMessage.class);
+        assertThat(((AssistantMessage) assistantRows.get(0)).getText()).isEmpty();
+        // reasoning 正常落库,不受 ASSISTANT 文本影响
+        verify(usage, times(1)).saveReasoning(CONV, "self-talk-think");
+        assertThat(ctx.perIterationMode()).isTrue();
+    }
+
+    @Test
     @DisplayName("ctx 缺席(子任务/legacy):doFinalizeLoop 纯 super —— 零写、chain 零交互、响应同实例")
     void null_context_finalize_pure_super() {
         ChatUsageService usage = mock(ChatUsageService.class);
