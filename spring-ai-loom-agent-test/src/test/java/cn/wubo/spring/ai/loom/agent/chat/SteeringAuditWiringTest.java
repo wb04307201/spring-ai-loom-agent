@@ -76,6 +76,12 @@ class SteeringAuditWiringTest {
         public List<SteeringAuditRow> findByConversationId(String convId) {
             return rows.stream().filter(r -> r.conversationId().equals(convId)).toList();
         }
+
+        @Override
+        public int deleteByConversation(String convId) {
+            // Task 10 R23 接口扩展(会话删除级联):本测试只验 record 接线,删除 no-op
+            return 0;
+        }
     }
 
     /** 必抛仓储:验证审计失败绝不掐断注入/聊天流。 */
@@ -89,6 +95,12 @@ class SteeringAuditWiringTest {
         @Override
         public List<SteeringAuditRow> findByConversationId(String convId) {
             return List.of();
+        }
+
+        @Override
+        public int deleteByConversation(String convId) {
+            // Task 10 R23 接口扩展:本测试只验 record 降级,删除路径不驱动
+            return 0;
         }
     }
 

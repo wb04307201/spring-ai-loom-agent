@@ -1,15 +1,19 @@
 package cn.wubo.spring.ai.loom.agent.chat;
 
+import cn.wubo.spring.ai.loom.agent.model.SteeringAuditRow;
 import cn.wubo.spring.ai.loom.agent.model.ToolCallLog;
 import cn.wubo.spring.ai.loom.agent.token.ChatUsageService;
+import cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository;
 import cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -37,18 +41,25 @@ public class ConversationFlowService {
  private final IToolCallLogRepository toolCallLogRepository;
  private final ChatUsageService chatUsageService;
  private final JsonMapper jsonMapper;
+ /**
+  * steering 注入审计仓储(Task 10 / S4,B2 豁免判定的确定性标记)。
+  * ObjectProvider 懒取:bean 缺席(消费方未装配)= null → 豁免整体降级为"无 steering 行",
+  * B2 全量锚定行为与改造前一致(A1)。
+  */
+ private final ObjectProvider<ILoomChatSteeringRepository> steeringRepositoryProvider;
  private static final Set<String> DEFAULT_TYPES = Set.of("USER", "ASSISTANT", "TOOL_CALL", "TOOL_RESULT", "SUBTASK", "SCHEDULE", "SCHEDULE_FIRE", "SYSTEM");
  /**
   * @Lazy 避免 DefaultChat → ConversationFlowService → ... 循环依赖
   */
  private final IChat chat;
 
- public ConversationFlowService(JdbcTemplate jdbcTemplate, IToolCallLogRepository toolCallLogRepository, ChatUsageService chatUsageService, JsonMapper jsonMapper, @Lazy IChat chat) {
+ public ConversationFlowService(JdbcTemplate jdbcTemplate, IToolCallLogRepository toolCallLogRepository, ChatUsageService chatUsageService, JsonMapper jsonMapper, @Lazy IChat chat, ObjectProvider<ILoomChatSteeringRepository> steeringRepositoryProvider) {
   this.jdbcTemplate = jdbcTemplate;
   this.toolCallLogRepository = toolCallLogRepository;
   this.chatUsageService = chatUsageService;
   this.jsonMapper = jsonMapper;
   this.chat = chat;
+  this.steeringRepositoryProvider = steeringRepositoryProvider;
  }
 
  public FlowResult flow(String conversationId, String username, int page, int size, Set<String> types) {
@@ -118,15 +129,40 @@ public class ConversationFlowService {
   // 处理"结束"时刻 — 不是用户发消息时刻。结果是 tool_call（10:50:20）反而早于 USER（10:50:23），
   // 时间线视觉顺序颠倒。改为用 conversation.createdAt 作为 USER 时刻，
   // conversation.updatedAt 作为最后一个 ASSISTANT 时刻。
+  //
+  // ⚠️ Task 10 / A7(G7) steering 豁免：中段插话的 USER 行落库时刻就是**真实注入时刻**
+  // （LoomAgenticLoopAdvisor 注入即写 USER 行 + 同点写 loom_chat_steering 审计行，
+  // "行存在 ⇔ 注入发生"是确定性契约），不是"流结束时刻"——一律拉回 createdAt 会让
+  // 插话排到其前序 ASSISTANT / 本轮工具调用之前，时间线倒序。故 B2 重写前先用审计表
+  // 圈出 steering USER 行并**跳过重写**（保留真实 ts）；无匹配审计行的 USER 行
+  // （turn-initial）沿用 createdAt + i*1ms 锚定，+1ms 计数器也只对**非豁免**的 USER 行
+  // 推进（无 steering 时与改造前逐 ms 一致，A1）。
+  // 匹配规则（S4）：content 与审计行 message_text 逐字相等 且 |USER 行 ts − injected_at|
+  // ≤ {@link #STEERING_MATCH_TOLERANCE}，全局按 Δt 升序贪心、行/事件双向至多各用一次
+  // （仿 ChatReasoningHistory.pair 的"就近配对"先例 —— 同文本重复插话按时刻就近分配，
+  // 且 turn-initial 撞同文本时毫秒级近邻必赢分钟级远邻）。匹配不依赖前序行是
+  // TOOL（内层 drain）还是 ASSISTANT（finalize 续跑）—— 两类注入场景统一走
+  // content+时刻匹配（S4 裁定；备选"按 sequence_id 对齐"因需确认续跑轮 sequence
+  // 单调性被否）。
+  // 豁免行 data 附 steering=true，供 admin 流水渲染「用户插话」徽章（Task 16）。
   if (meta.createdAt() != null) {
+   Map<Integer, SteeringAuditRow> steeringByEventIdx =
+           pairSteeringAudits(all, loadSteeringRows(conversationId));
    Instant firstUserTs = meta.createdAt();
    for (int i = 0; i < all.size(); i++) {
     if ("USER".equals(all.get(i).type())) {
      Event e = all.get(i);
+     if (steeringByEventIdx.containsKey(i)) {
+      // steering 行：豁免重写，保留真实注入时刻 ts；附徽章标记
+      Map<String, Object> data = new HashMap<>(e.data());
+      data.put("steering", true);
+      all.set(i, new Event(e.type(), e.ts(), data));
+      continue;
+     }
      if (e.ts() != null && e.ts().isAfter(firstUserTs)) {
       all.set(i, new Event(e.type(), firstUserTs, e.data()));
      }
-     firstUserTs = firstUserTs.plusMillis(1); // 多轮对话时每条 USER +1ms 拉开
+     firstUserTs = firstUserTs.plusMillis(1); // 多轮对话时每条（turn-initial）USER +1ms 拉开
     }
    }
   }
@@ -152,6 +188,77 @@ public class ConversationFlowService {
   List<Event> pageEvents = all.subList(fromIdx, toIdx);
 
   return new FlowResult(meta, stats, pageEvents, page, size, total, toIdx < total);
+ }
+
+ /**
+  * steering USER 行与审计行 {@code injected_at} 的最大配对间隔。
+  * 同一注入点两条写入（memory USER 行 + 审计行）毫秒级先后；跨轮 turn-initial
+  * 撞同文本时相隔至少一轮对话（分钟级）。10s 与 {@link ChatReasoningHistory#TOLERANCE}
+  * 先例对齐（包可见,单测直接验证边界)。
+  */
+ static final Duration STEERING_MATCH_TOLERANCE = Duration.ofSeconds(10);
+
+ /**
+  * 读 steering 注入审计行。降级契约：仓储 bean 缺席（ObjectProvider 空）或读失败 →
+  * 空列表 = 视为无 steering = B2 全量锚定，与豁免改造前行为完全一致（A1）。
+  * 审计表读异常绝不 500 admin 流水。
+  */
+ private List<SteeringAuditRow> loadSteeringRows(String conversationId) {
+  if (steeringRepositoryProvider == null) return List.of();
+  ILoomChatSteeringRepository repo = steeringRepositoryProvider.getIfAvailable();
+  if (repo == null) return List.of();
+  try {
+   List<SteeringAuditRow> rows = repo.findByConversationId(conversationId);
+   return rows == null ? List.of() : rows;
+  } catch (Exception e) {
+   log.warn("读取 steering 审计行失败，B2 豁免降级为全量锚定: conv={} err={}", conversationId, e.getMessage());
+   return List.of();
+  }
+ }
+
+ /**
+  * 纯函数：USER 事件 ↔ steering 审计行 就近配对。
+  *
+  * <p>候选对 = USER 事件（ts 非空）与审计行（injectedAt 非空）文本逐字相等且
+  * |Δt| ≤ {@link #STEERING_MATCH_TOLERANCE}；按 Δt 升序贪心，事件与审计行
+  * 各自至多使用一次（双向 consume-once）。返回 eventIndex → 审计行。
+  *
+  * <p>Δt 相等时按 (事件下标, 审计行在列表中的下标) 稳定排序 —— 审计行列表本身
+  * 按 (injected_at, seq) 升序，同刻并列时先到先配，全程确定性。
+  */
+ static Map<Integer, SteeringAuditRow> pairSteeringAudits(List<Event> all, List<SteeringAuditRow> auditRows) {
+  Map<Integer, SteeringAuditRow> bound = new HashMap<>();
+  if (auditRows.isEmpty()) return bound;
+  record Candidate(long distMillis, int eventIdx, int auditIdx) {}
+  List<Candidate> candidates = new ArrayList<>();
+  for (int i = 0; i < all.size(); i++) {
+   Event e = all.get(i);
+   if (!"USER".equals(e.type()) || e.ts() == null || e.data() == null) continue;
+   Object content = e.data().get("content");
+   if (!(content instanceof String text)) continue;
+   for (int r = 0; r < auditRows.size(); r++) {
+    SteeringAuditRow row = auditRows.get(r);
+    if (row.injectedAt() == null || !text.equals(row.messageText())) continue;
+    long d = Math.abs(Duration.between(e.ts(), row.injectedAt()).toMillis());
+    if (d <= STEERING_MATCH_TOLERANCE.toMillis()) {
+     candidates.add(new Candidate(d, i, r));
+    }
+   }
+  }
+  candidates.sort(Comparator.comparingLong(Candidate::distMillis)
+          .thenComparingInt(Candidate::eventIdx)
+          .thenComparingInt(Candidate::auditIdx));
+  Set<Integer> usedEvents = new HashSet<>();
+  Set<Integer> usedAudits = new HashSet<>();
+  for (Candidate c : candidates) {
+   // 先双查再双加：被拒绝的候选不得消耗 used 标记（&& 短路会误伤，对齐 pair() 先例）
+   if (!usedEvents.contains(c.eventIdx()) && !usedAudits.contains(c.auditIdx())) {
+    usedEvents.add(c.eventIdx());
+    usedAudits.add(c.auditIdx());
+    bound.put(c.eventIdx(), auditRows.get(c.auditIdx()));
+   }
+  }
+  return bound;
  }
 
  private Meta loadMeta(String conversationId, String username) {

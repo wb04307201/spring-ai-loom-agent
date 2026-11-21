@@ -181,11 +181,13 @@ public class LoomAgentConfiguration {
 
     /**
      * 删除会话时的资源清理：先杀掉该会话名下所有在飞子任务，再取消该会话名下所有定时任务，
-     * 最后由调用方软删 user_conversation 映射。
+     * 删除各审计/历史表行，最后由调用方软删 user_conversation 映射。
      * <p>
-     * 三个依赖都可缺省(subtask/schedule 功能可被关闭)，缺省时对应清理跳过。
+     * 四个依赖都可缺省(subtask/schedule/steering 功能可被关闭)，缺省时对应清理跳过。
      *
-     * @return {@code [subtasksKilled, schedulesCancelled, scheduleRowsDeleted]}
+     * @return {@code [subtasksKilled, schedulesCancelled, scheduleRowsDeleted,
+     *         scheduleExecRowsDeleted, subTaskHistoryRowsDeleted, subTaskDequeCleared,
+     *         steeringRowsDeleted]}
      */
     static int[] cleanupConversationResources(
             String conversationId,
@@ -194,7 +196,8 @@ public class LoomAgentConfiguration {
             cn.wubo.flex.schedule.core.FlexScheduledTaskService flexService,
             cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository loomScheduleTriggerRepository,
             cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository loomScheduleExecutionRepository,
-            cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository) {
+            cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository loomSubTaskHistoryRepository,
+            cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository loomChatSteeringRepository) {
         // 1. Stop active sub-tasks (cancels the running workers via the cancel hook).
         int subtasksKilled = registry != null ? registry.killAllByConversation(conversationId) : 0;
         // 2. Cancel every flex-schedule task bound to this conversation in the runtime.
@@ -225,8 +228,14 @@ public class LoomAgentConfiguration {
         int subTaskDequeCleared = (registry != null && username != null && conversationId != null)
                 ? registry.removeAllByConversation(username, conversationId)
                 : 0;
+        // R23(Task 10):steering 注入审计行随会话删除 —— 不留悬挂行。
+        // 归属仅 conversation_id 即可唯一定位(审计表无跨会话共享 id)。
+        int steeringRowsDeleted = (loomChatSteeringRepository != null && conversationId != null)
+                ? loomChatSteeringRepository.deleteByConversation(conversationId)
+                : 0;
         return new int[]{subtasksKilled, schedulesCancelled, scheduleRowsDeleted,
-                scheduleExecRowsDeleted, subTaskHistoryRowsDeleted, subTaskDequeCleared};
+                scheduleExecRowsDeleted, subTaskHistoryRowsDeleted, subTaskDequeCleared,
+                steeringRowsDeleted};
     }
 
     // ==================== Chat ====================
@@ -2683,11 +2692,13 @@ public class LoomAgentConfiguration {
                 IUserConversation userConversation,
                 cn.wubo.spring.ai.loom.agent.chat.ChatReasoningHistory chatReasoningHistory,
                 cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
+                org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.SubTaskRegistry> subTaskRegistry,
                 ObjectProvider<cn.wubo.flex.schedule.core.FlexScheduledTaskService> flexService,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleTriggerRepository> loomScheduleTriggerRepository,
                 ObjectProvider<cn.wubo.spring.ai.loom.agent.schedule.ILoomScheduleExecutionRepository> loomScheduleExecutionRepository,
-                ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository> loomSubTaskHistoryRepository) {
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.subtask.ILoomSubTaskHistoryRepository> loomSubTaskHistoryRepository,
+                ObjectProvider<cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository> loomChatSteeringRepository) {
             RouterFunctions.Builder builder = RouterFunctions.route();
             builder.GET("spring/ai/loom/conversation", request -> ServerResponse.ok().body(userConversation.getList()));
             builder.POST("spring/ai/loom/user-conversations", request -> {
@@ -2744,18 +2755,17 @@ public class LoomAgentConfiguration {
                 // 前端历史视图填充思考折叠区(无 reasoning 时原样返回,零契约破坏)
                 var withThinking = chatReasoningHistory.attachThinking(
                         conversationId, chatMemoryRepository.findByConversationId(conversationId));
-                // 工具调用注入:SPRING_AI_CHAT_MEMORY 无 metadata 列,工具调用不在其中,
-                // 故从 loom_tool_call_log 读出后作为**独立条目**(messageType=TOOL_CALL)
-                // 追加到列表末尾。前端按 createdAt 与消息合并排序渲染,
-                // 使 askUser 卡片 / 子任务 chip 在历史回看时不再消失。
-                //
-                // 用 List<Object> 承载两种形态:Message(既有消息) 与 Map(工具调用条目)。
-                // Jackson 按各自实际类型序列化,Message 仍是 {media,messageType,metadata,text},
-                // 工具条目是 {messageType:TOOL_CALL,toolName,arguments,result,...}。
-                var out = new java.util.ArrayList<Object>(withThinking);
-                out.addAll(cn.wubo.spring.ai.loom.agent.chat.ToolCallHistory.inject(
-                        conversationId, toolCallLogRepository));
-                return ServerResponse.ok().body(out);
+                // Task 10 / #3(取代旧"追加末尾"形状):TOOL_CALL 条目不再 addAll 到末尾 ——
+                // ChatHistoryAssembler 给 Message 条目附 additive 顶层 timestamp(JDBC 按
+                // sequence_id 取 spring_ai_chat_memory 行时间戳,仿 attachThinking 先例;
+                // 失败逐条降级消息 metadata 里 JdbcChatMemoryRepository 回读的行时间戳),
+                // 再与 TOOL_CALL 条目按 Instant 时间轴稳定归并(同刻消息在前 = 无工具/
+                // 单迭代会话输出顺序与改造前逐条一致 A1;ts 取不到落末尾=旧行为),
+                // renderMessages 顺序遍历即把每个工具挂进正确气泡(Task 14 前端对接)。
+                return ServerResponse.ok().body(cn.wubo.spring.ai.loom.agent.chat.ChatHistoryAssembler.assemble(
+                        jdbcTemplate, conversationId, withThinking,
+                        cn.wubo.spring.ai.loom.agent.chat.ToolCallHistory.inject(
+                                conversationId, toolCallLogRepository)));
             });
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
@@ -2766,11 +2776,14 @@ public class LoomAgentConfiguration {
                         flexService.getIfAvailable(),
                         loomScheduleTriggerRepository.getIfAvailable(),
                         loomScheduleExecutionRepository.getIfAvailable(),
-                        loomSubTaskHistoryRepository.getIfAvailable());
+                        loomSubTaskHistoryRepository.getIfAvailable(),
+                        loomChatSteeringRepository.getIfAvailable());
                 userConversation.deleteById(conversationId);
                 log.info("会话删除清理: conv={}, user={}, subtasks={}, schedules={}, scheduleRowsDeleted={}, " +
-                                "scheduleExecRowsDeleted={}, subTaskHistoryRowsDeleted={}, subTaskDequeCleared={}",
-                        conversationId, username, cleaned[0], cleaned[1], cleaned[2], cleaned[3], cleaned[4], cleaned[5]);
+                                "scheduleExecRowsDeleted={}, subTaskHistoryRowsDeleted={}, subTaskDequeCleared={}, " +
+                                "steeringRowsDeleted={}",
+                        conversationId, username, cleaned[0], cleaned[1], cleaned[2], cleaned[3], cleaned[4],
+                        cleaned[5], cleaned[6]);
                 return ServerResponse.ok().body(true);
             });
 

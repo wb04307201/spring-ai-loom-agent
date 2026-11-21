@@ -49,6 +49,9 @@ public class JdbcLoomChatSteeringRepository implements ILoomChatSteeringReposito
                     + " (conversation_id, username, message_text, injected_at, seq)"
                     + " VALUES (?, ?, ?, ?, ?)";
 
+    private static final String DELETE_BY_CONV_SQL =
+            "DELETE FROM " + TABLE_NAME + " WHERE conversation_id = ?";
+
     private static final RowMapper<SteeringAuditRow> ROW_MAPPER = (rs, n) -> new SteeringAuditRow(
             rs.getLong("id"),
             rs.getString("conversation_id"),
@@ -91,5 +94,13 @@ public class JdbcLoomChatSteeringRepository implements ILoomChatSteeringReposito
                         + " WHERE conversation_id = ?"
                         + " ORDER BY injected_at, seq",
                 ROW_MAPPER, convId);
+    }
+
+    @Override
+    public int deleteByConversation(String convId) {
+        if (convId == null || convId.isBlank()) {
+            return 0;
+        }
+        return jdbc.update(DELETE_BY_CONV_SQL, convId);
     }
 }

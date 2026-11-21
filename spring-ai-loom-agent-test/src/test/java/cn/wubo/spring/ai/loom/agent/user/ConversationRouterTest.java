@@ -40,7 +40,11 @@ class ConversationRouterTest {
                 conversations,
                 reasoningHistory,
                 emptyToolCallLogRepository(),
-                emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider());
+                // Task 10:interleave 的 chat_memory 行时间戳查询用 JdbcTemplate(mock:
+                // query 返回 null → assembler 逐条降级消息 metadata 时间戳,不干扰本类断言)
+                mock(org.springframework.jdbc.core.JdbcTemplate.class),
+                emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(),
+                emptyProvider());
     }
 
     /**

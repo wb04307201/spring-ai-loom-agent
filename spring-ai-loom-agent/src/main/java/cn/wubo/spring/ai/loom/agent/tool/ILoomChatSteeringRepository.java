@@ -40,4 +40,17 @@ public interface ILoomChatSteeringRepository {
      * —— Task 10 历史交错按此顺序与 chat memory 行合并。
      */
     List<SteeringAuditRow> findByConversationId(String convId);
+
+    /**
+     * 删除某会话的全部审计行（Task 10 / R23：会话删除级联清理）。
+     *
+     * <p>由 {@code LoomAgentConfiguration.cleanupConversationResources} 在
+     * {@code DELETE spring/ai/loom/conversation/{id}} 时调用 —— 审计行随会话消失，
+     * 不留悬挂行（与 {@code loom_schedule_execution.deleteByUserAndConversation}
+     * 的级联先例一致；本表归属仅 conversation_id 即可唯一定位，无需 username 复核）。
+     *
+     * @param convId 会话 ID；null/空白 → 0（no-op，与 findByConversationId 同守卫）
+     * @return 实际删除的行数
+     */
+    int deleteByConversation(String convId);
 }

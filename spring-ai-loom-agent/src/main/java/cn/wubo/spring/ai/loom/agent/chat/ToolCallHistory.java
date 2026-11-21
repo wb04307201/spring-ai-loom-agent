@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -102,6 +103,35 @@ public final class ToolCallHistory {
 
     /** 测试假仓库使用的固定会话 id。 */
     static final String TEST_CONVERSATION_ID = "conv-1";
+
+    /**
+     * 从注入条目读回 {@code createdAt} 的 {@link Instant}（Task 10 / #3 服务端 interleave 用）。
+     *
+     * <p>条目里的 {@code createdAt} 是 {@code r.createdAt().toString()}（UTC ISO-8601，
+     * {@link Instant#toString()} 的产物），{@link Instant#parse(CharSequence)} 可无损还原。
+     * 解析失败 / 字段缺失 / 非字符串 → 返回 null（调用方 nullsLast 落末尾，等价旧"追加末尾"，
+     * 绝不凭猜测插入位置）。
+     *
+     * <p><b>时区（R22 修订）</b>：{@code loom_tool_call_log.created_at} 是
+     * TIMESTAMP(9) WITH TIME ZONE，写入侧 {@code Timestamp.from(instant)} 已把它归一到
+     * {@link Instant}（绝对时刻，与时区无关）；chat_memory 主对手是 TIMESTAMP 无时区，
+     * 二者都转 Instant 后在同一时间轴比较，无 ±偏移错配。
+     */
+    static Instant createdAtOf(Map<String, Object> entry) {
+        if (entry == null) return null;
+        Object v = entry.get("createdAt");
+        if (v instanceof Instant instant) return instant;
+        if (v instanceof String s && !s.isBlank()) {
+            try {
+                return Instant.parse(s);
+            } catch (Exception e) {
+                log.debug("TOOL_CALL createdAt 解析失败，排到末尾: createdAt={}", s);
+                return null;
+            }
+        }
+        return null;
+    }
+
 
     private static Map<String, Object> toEntry(ToolCallLog r) {
         Map<String, Object> e = new LinkedHashMap<>();

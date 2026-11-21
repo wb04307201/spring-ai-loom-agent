@@ -38,13 +38,14 @@ class ConversationLifecycleListenerTest {
         CompletableFuture<?> f = new CompletableFuture<>();
         registry.attachFuture(id, f);
 
-        // No persistence repositories wired → all four persistence counters are 0.
+        // No persistence repositories wired → all persistence counters are 0.
         int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
-                "conv-1", "alice", registry, flexService, null, null, null);
+                "conv-1", "alice", registry, flexService, null, null, null, null);
 
         // 1 subtask killed, 1 schedule cancelled (only alice/conv-1), no persisted rows;
-        // the just-cancelled task is also removed from the in-memory history deque.
-        assertThat(cleaned).containsExactly(1, 1, 0, 0, 0, 1);
+        // the just-cancelled task is also removed from the in-memory history deque;
+        // Task 10/R23: 7th slot = steering audit rows deleted (0 here, repo absent).
+        assertThat(cleaned).containsExactly(1, 1, 0, 0, 0, 1, 0);
         assertThat(f.isCancelled()).isTrue();
         verify(flexService).cancel("loom-sched-alice-conv-1-remind");
         verify(flexService, never()).cancel("loom-sched-alice-conv-2-other");
@@ -53,19 +54,51 @@ class ConversationLifecycleListenerTest {
 
     @Test
     void toleratesMissingSubtaskRegistryAndSchedule() {
-        // Both optional dependencies absent — no exception, zero counts.
+        // All optional dependencies absent — no exception, zero counts.
         int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
-                "conv-1", "alice", null, null, null, null, null);
-        assertThat(cleaned).containsExactly(0, 0, 0, 0, 0, 0);
+                "conv-1", "alice", null, null, null, null, null, null);
+        assertThat(cleaned).containsExactly(0, 0, 0, 0, 0, 0, 0);
     }
 
     @Test
     void doesNotCancelOtherUsersSchedulesForSameConvName() {
         int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
-                "conv-1", "bob", null, flexService, null, null, null);
+                "conv-1", "bob", null, flexService, null, null, null, null);
         // Only bob's conv-1 schedule cancelled, not alice's.
-        assertThat(cleaned).containsExactly(0, 1, 0, 0, 0, 0);
+        assertThat(cleaned).containsExactly(0, 1, 0, 0, 0, 0, 0);
         verify(flexService).cancel("loom-sched-bob-conv-1-foo");
         verify(flexService, never()).cancel("loom-sched-alice-conv-1-remind");
+    }
+
+    /**
+     * R23(Task 10)验收项:会话删除必须级联清 loom_chat_steering 审计行 ——
+     * cleanupConversationResources 第 7 槽返回仓储 deleteByConversation 的行数,
+     * 且按 conversationId 精确删除。
+     */
+    @Test
+    void deletesSteeringAuditRowsForConversation() {
+        cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringRepo =
+                mock(cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository.class);
+        when(steeringRepo.deleteByConversation("conv-1")).thenReturn(3);
+
+        int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
+                "conv-1", "alice", null, null, null, null, null, steeringRepo);
+
+        assertThat(cleaned).containsExactly(0, 0, 0, 0, 0, 0, 3);
+        verify(steeringRepo).deleteByConversation("conv-1");
+    }
+
+    /** username 缺席(异常态)也必须删审计 —— 归属只靠 conversation_id,与调度级联不同。 */
+    @Test
+    void deletesSteeringAuditRowsEvenWithoutUsername() {
+        cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringRepo =
+                mock(cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository.class);
+        when(steeringRepo.deleteByConversation("conv-9")).thenReturn(1);
+
+        int[] cleaned = LoomAgentConfiguration.cleanupConversationResources(
+                "conv-9", null, null, null, null, null, null, steeringRepo);
+
+        assertThat(cleaned[6]).as("R23:steering 删除不依赖 username").isEqualTo(1);
+        verify(steeringRepo).deleteByConversation("conv-9");
     }
 }
