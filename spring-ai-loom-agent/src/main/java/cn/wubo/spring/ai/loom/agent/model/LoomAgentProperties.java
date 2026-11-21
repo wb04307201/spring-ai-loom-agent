@@ -100,6 +100,11 @@ public class LoomAgentProperties {
 
  private RenderProperty render = new RenderProperty();
 
+ /**
+ * Agentic loop(steering 续跑)护栏配置。yml 通过 {@code spring.ai.loom.agent.loop.*} 配置。
+ */
+ private LoopProperty loop = new LoopProperty();
+
  @Data
  public static class RagProperty {
  /**
@@ -430,6 +435,23 @@ public class LoomAgentProperties {
  @Data
  public static class AskUserProperty {
  private long timeoutSeconds = 300;
+ }
+
+ /**
+ * Agentic loop(steering 续跑)护栏配置(Task 2,agentic-loop-steering)。
+ * yml 通过 {@code spring.ai.loom.agent.loop.*} 配置。
+ * <ul>
+ * <li>{@code maxContinuations} — 单次 run 内最多续跑(迭代)轮数;触顶即收口,
+ * 残留 steering 消息经 ack 帧标"未注入"终态(默认 10,spec 护栏)</li>
+ * <li>{@code runTimeoutSeconds} — 单次 run 活跃时长上限秒数(不含 askUser 等人
+ * 的暂停区间,D-3);到点收口(默认 1800 = 30 分钟)</li>
+ * </ul>
+ * 无 enabled 开关:steering 是平台默认能力,护栏只有阈值没有启停。
+ */
+ @Data
+ public static class LoopProperty {
+ private int maxContinuations = 10;
+ private int runTimeoutSeconds = 1800;
  }
 
  /**

@@ -475,6 +475,9 @@ public class LoomAgentConfiguration {
                 properties.setAskuser(bound.getAskuser());
                 properties.setChat(bound.getChat());
                 properties.setRender(bound.getRender());
+                // loop:漏了这一行 ⇒ spring.ai.loom.agent.loop.* 覆盖被静默丢弃,
+                // 护栏恒为默认值(setHttp 同类缺陷的防线,见下面的 http 注释)
+                properties.setLoop(bound.getLoop());
                 // http:漏了这一行 ⇒ spring.ai.loom.agent.http.* 全部配置项失效
                 // (allowedDomains / timeoutMs / maxResponseSizeBytes / maxBatchConcurrency /
                 //  maxRequestBodyBytes / historyMaxEntriesPerSystem / enabled)。

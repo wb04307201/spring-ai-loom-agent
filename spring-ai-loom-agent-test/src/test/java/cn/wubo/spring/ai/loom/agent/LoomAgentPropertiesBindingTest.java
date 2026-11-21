@@ -65,6 +65,19 @@ class LoomAgentPropertiesBindingTest {
     }
 
     @Test
+    void loopGuardrailKeysFromEnvironmentAreBound() {
+        // 守卫 loomAgentProperties 手动拷贝块(setLoop 缺失 ⇒ Task 6 护栏恒为默认值,
+        // 与 setAskuser/setHttp 同款"漏拷即静默失效"缺陷)
+        MockEnvironment env = new MockEnvironment();
+        env.setProperty("spring.ai.loom.agent.loop.max-continuations", "3");
+        env.setProperty("spring.ai.loom.agent.loop.run-timeout-seconds", "60");
+        LoomAgentProperties props =
+                new LoomAgentConfiguration.InfrastructureConfiguration().loomAgentProperties(env);
+        assertThat(props.getLoop().getMaxContinuations()).isEqualTo(3);
+        assertThat(props.getLoop().getRunTimeoutSeconds()).isEqualTo(60);
+    }
+
+    @Test
     void renderDefaultsSurviveManualCopy() {
         // 守卫 2bd0b5d 类缺陷:loomAgentProperties 手动拷贝块漏 setRender() 时,
         // bound 实例的 render 会被丢掉,返回默认实例 —— 默认值断言能过但覆盖值会丢,
