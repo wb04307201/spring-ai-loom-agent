@@ -22,13 +22,13 @@
 
 - G1 运行中自由文本输入(steering):入 inbox,迭代边界注入同一 run,前端灰态可见。
 - G2 跨轮续跑:run 收尾时 inbox 非空 → 自动续跑,用户的话不掉缝里。
-- G3 askUser 双通道:自定义答案(已有)+ "聊聊这个"逃生通道(新增),提问期间输入框有明确出口。
+- G3 askUser 双通道:自定义答案(已有,= CC Other)+ "聊聊这个"**即时 dismiss**(新增,= CC Chat about this),提问期间输入框有明确出口;dismiss 后用户自由文本走 steering,无保活/无 deadline 重置。
 - G4 事件驱动气泡:用户插话处强制开新 AI 气泡;纯迭代续跑留在同一气泡内。
 - G5 历史回放与 live 视图气泡分组一致。
 - G6 护栏:续跑次数上限、run 墙钟预算、stop 信号在每个边界生效。
 - G7 admin 流水时间线在 steering 注入后仍正确(修复 B2 时间戳重写对中段 USER 行的误伤)。
 - G8 断连/刷新不留 orphan run(订阅 dispose + inbox 清理)。
-- G9 CHAT 态全生命周期出口完备(超时/stop/404/断连均复位状态,文本不静默丢)。
+- G9 "聊聊这个"即时 dismiss 后无悬挂态:工具立即返回合法信号、卡片冻结、输入回 RUNNING;用户后续自由文本走 steering,不存在 CHAT 保活/404/文本静默丢(原 A9 场景由构造消除)。
 
 ### 非目标(本期不做,留待后续)
 
@@ -45,13 +45,13 @@
 
 - A1 无 steering 输入时行为与今天不一致(本特性必须是纯增量:inbox 空 → 单迭代,帧序列与现状完全相同)。
 - A2 用户输入静默丢失(CC 已知 queued-input-dropped 坑;任何未注入的输入必须有可见终态)。
-- A3 "聊聊这个"走 cancel/超时路径返回"用户未作答"(模型会误以为被拒绝;必须走 answer 通道合法返回)。
+- A3 "聊聊这个"走 cancel/超时路径返回"用户未作答"或 `is_error`(模型会误以为被拒绝;必须走 answer 通道返回**非错误**的 dismiss 信号——CC #33511 正是 `is_error:true` 覆盖讨论意图致死键)。
 - A4 在 assistant tool_call 与对应 tool_result 之间插入 user 消息(provider API 契约违反 + ChatMemory 污染)。
 - A5 子任务 / 定时任务获得 steering 或续跑能力(递归护栏哲学:疑问写进执行结果,由主任务决定)。
 - A6 刷新页面后气泡分组与 live 视图不同。
 - A7 admin 流水时间线倒序(steering USER 行被 B2 重写拉回会话创建时刻,出现在本轮工具调用之前)。
 - A8 断连/刷新后 orphan run 继续写 memory/usage(现有 SSE lifecycle 不 dispose 订阅,长 run 放大此风险)。
-- A9 CHAT 态用户文本静默丢失(提交到已失效 qid 收 404 却无提示;或历史 result 2048 截断丢话)。
+- A9 ~~CHAT 态用户文本静默丢失~~ **由 D-2 即时 dismiss 构造消除**:无 CHAT 保活态,用户自由文本是普通 steering(灰态可见 + ack/终态),不存在"提交到已失效 qid 收 404 吞文本"。保留为反目标防回潮(若有人 reintroduce 保活 CHAT 态则违反)。
 
 ## 3. 现状与约束(代码事实,2026-11-21 核实)
 
@@ -60,7 +60,7 @@
 | Spring AI 2.0.2 `ToolCallingAdvisor` 实现内层工具循环,`adviseCall` = `doInitializeLoop → doBeforeCall → chain.copy(this).nextCall → doAfterCall → UsageAccumulator 累加 → isToolCallResponse 判定 → doGetNextInstructionsForToolCall 拼下一轮 / doFinalizeLoop 收口`;Stream 侧有对称 `*Stream` 钩子;全部 `protected`(javap 核实) | `spring-ai-client-chat-2.0.2.jar` | 官方扩展点 = **继承并覆写钩子**,不是从零手写循环 |
 | `MessageChatMemoryAdvisor` order = HIGHEST_PRECEDENCE+200,必须位于 `ToolCallingAdvisor`(+300)上游,否则 auto-register 检测下游 MemoryAdvisor → `conversationHistoryEnabled=false` → 多轮 tool_use 历史丢失 | `LoomAgentConfiguration` javadoc + `Issue1ChatMemoryAdvisorRegressionTest` | 自定义 advisor **保持 +300 order**,memory 仍在上游;此回归锁必须继续绿 |
 | SSE 侧信道:`SseEmitterRegistry` 按 `(username, conversationId)` 注册 `Entry(emitter, disposable, startMs, onStop)`;askUser 卡片帧 / 子任务生命周期帧都经它推入同一条 SSE;`stop(username, convId)` 已存在 | `stream/SseEmitterRegistry.java`、`DefaultAskUserTool:124`、`DefaultSubTaskExecutor:171` | steering ack / 迭代事件帧复用同一通道;run 注册表 = SseEmitterRegistry,不另造 |
-| askUser 阻塞等待:`AskUserRegistry` pending Map + `CompletableFuture.complete` 先到先得;`POST /ask/{qid}/answer`;超时默认 300s 返回"用户未作答";前端终态 已答✓/已超时/已取消/已失效,freeze 折叠摘要 | `askuser/AskUserRegistry.java`、`DefaultAskUserTool`、`app.js askUserCards` | 双通道 = answer 端点加 mode 字段 + 第五种终态;不动阻塞/超时骨架 |
+| askUser 阻塞等待:`AskUserRegistry` pending Map + `CompletableFuture.complete` 先到先得;`POST /ask/{qid}/answer`;超时默认 300s 返回"用户未作答";前端终态 已答✓/已超时/已取消/已失效,freeze 折叠摘要 | `askuser/AskUserRegistry.java`、`DefaultAskUserTool`、`app.js askUserCards` | 双通道 = answer 端点加 mode=DISMISS(即时 complete,无保活)+ 第五种终态"转入对话";不动阻塞/超时骨架 |
 | 前端一问一答锁:`disableSend()`(textarea+按钮)、`setToolbarLocked()`(知识空间/MCP/技能/文件/新对话 + 侧栏切换锁) | `app.js:1486/1522` | 解锁范围要显式分层(§5.5) |
 | 气泡内分段机制已存在:askUser 后 `ui._currentAnswerEl` 重定向到 `askuser-bot-content-{qid}`,同一气泡多个流式写作目标 | `app.js:1968/1986` | 迭代分段复用该机制,不新造 |
 | reasoning 流式 delta + 思考落库:实际位于 **`LoomAgentConfiguration`(autoconfigure 模块)WebConfiguration 内联 SSE lambda(~630–760 行)**,非独立 SseController 类;`reasoningAccum` 跨整条流累积,onComplete 一次性 `saveReasoning` 落一行;`lastReasoningLen` 有长度回缩容错(全量重发) | `LoomAgentConfiguration:691–759`、`ChatUsageService.saveReasoning`(seq=max+1)、`DefaultChat.REASONING_CONTENT_KEY` | 多迭代必须按外层迭代 flush+复位(§5.4);改动在 autoconfigure 模块 ⇒ 需 reinstall 该模块 |
@@ -90,7 +90,8 @@
 | A 锁输入框(死锁) | pending 时 disableSend | ✗ 300s 干等,澄清时刻恰恰最想说话 |
 | B 卡片停靠 composer | ChatGPT 式 elicitation | ✗ 推翻 2026-09-21 #3"卡片与回复共用气泡"裁定;live/历史两套渲染路径;并发卡片需队列 |
 | C 输入框状态路由(pending 时回车=作答) | 隐式路由 | ✗ CC 本尊不这么做;用户不知道自己的话被怎么处理,歧义靠猜 |
-| **D 锁 + 卡片显式双通道出口** | 输入框锁,但卡片恒有"其他(自定义答案)"与"聊聊这个";后者冻结卡片为"转入对话"终态、解锁输入框、文本经 answer 通道 mode=CHAT 回传 | ✓ **选定**。与 CC 协议同构(`answers` vs `response`),消歧靠显式动作不靠状态机 |
+| **(D′) 锁 + 卡片双通道,"聊聊这个"即时 dismiss** | 输入框锁;卡片恒有"其他(自定义答案)"(=CC Other)与"聊聊这个"(=CC Chat about this)。后者**点击即 complete future 返回非错误 dismiss 信号** → 工具立即解锁、卡片冻结"💬 转入对话"、输入回 RUNNING;用户自由文本走 steering 下一轮注入。**无 CHAT 保活态、无 deadline 重置** | ✓ **选定(D-2 用户裁定,CC #33511+SDK+changelog 核实)**。与 CC 协议同构(`response` dismiss vs `answers`);超时/404/保活问题由构造消除 |
+| ~~(D) CHAT 保活态~~ | 点"聊聊这个"后问题保活、输入框进 CHAT 态、文本经 answer mode=CHAT 回传 | ✗ **废弃**:future.get(300s) 照跑 → CHAT 打字超时 404 丢文本,G3 死锁在逃生通道重演;需 deadline 重置(动超时骨架)。D-2 裁定改即时 dismiss |
 
 ### 4.3 气泡拆分
 
@@ -118,7 +119,7 @@
 
 1. **`doGetNextInstructionsForToolCall` / `...Stream`(内层注入点)**:工具结果就位后、下一轮模型调用前,drain 本 run inbox → 每条 steering 文本构造 `UserMessage` append 进 instructions,并:
    - 经 `SseEmitterRegistry.Entry.emitter` 推 `steerAck` 帧(前端灰态转正);
-   - 持久化责任见 §5.6(S2 确定由 advisor history 机制覆盖还是显式 `ChatMemory.add`,防双写)。
+   - 持久化责任见 §5.10(D-1 选 A:`LoomMemoryAdvisor` 逐迭代写 ASSISTANT、逐注入写 USER;loop advisor 不直接写 memory,防双写)。
 2. **`doFinalizeLoop` / `...Stream`(外层续跑点)**:内层循环结束(模型给出无 tool_call 的最终文本)后:
    - 原子地检查 inbox(与 run 注销互斥,见 §5.2 竞态);非空 → drain 注入 + `chain.copy(this).nextCall/nextStream` 续跑,迭代计数 +1;
    - 空 → 正常收口。
@@ -137,20 +138,17 @@
 - **stop 语义(我的裁定,与 CC 有意分歧)**:stop → run 取消,inbox 未注入消息**丢弃但可见**——对应灰态气泡标记"未发送(已停止)",toast 提示条数。不做 CC 式"停止后自动发出"(前端自动重发链路复杂,且用户按停止的意图通常含"别继续了");可见终态满足 A2。
 - **注入语义**:当前正在执行的工具**不中断**(A4 硬约束);steering 文本作为 UserMessage 进入下一轮模型输入。system prompt 增补一句引导:"运行中用户补充的消息具有最高优先级,先回应补充再继续原任务"(措辞进契约测试)。
 
-### 5.3 askUser 双通道(G3)
+### 5.3 askUser 双通道(G3,D-2 即时 dismiss 模型)
 
-- **answer 端点扩展**:`POST /ask/{qid}/answer` body 增加 `mode` 字段:`ANSWER`(缺省,现状不变)/ `CHAT`。`CHAT` 时 `answer` 字段承载用户自由文本,`CompletableFuture.complete` 的返回值带标记,`DefaultAskUserTool` 返回文本形如:`用户未直接作答,而是说:{原文}`(完整带原话,A3;措辞进 `AskUserGuidanceContractTest` 同款契约锁)。
-- **卡片 UI**:选项列表后恒有"其他(自定义答案)"(已有 `allowCustomInput` 通道,= CC Other)+ 新增按钮 **"💬 聊聊这个"**。点击 → 卡片 freeze 为第五种终态 **"💬 转入对话"**(摘要行同款折叠),输入框解锁进入 CHAT 态(§5.5),placeholder"说说你的想法,回车发送"。
-- **问题保活**:CHAT 态下 pending question 不注销(工具仍阻塞等待);摘要行提供"返回选项"恢复卡片(复用 `restorePending` 先例),用户可反悔改选选项。提交 CHAT 文本或选项答案后,问题终态落定。
-- **多卡 pending**:输入框保持锁直到全部落定;提示条显示"N 个问题待回答";"聊聊这个"作用于最早一张。
-- **历史渲染**:`tool-call-renderer.js` 只读卡片增加"转入对话"徽章 + CHAT 文本展示;`ToolCallHistory.inject` 的 arguments/result 形状不变(mode 在 arguments 里自然带出)。
-- **超时/stop 路径完全不动**:300s 超时仍返回"用户未作答"。
-- **CHAT 态的超时/stop/断连出口(新增,必须覆盖)**:
-  - 用户在 CHAT 态打字期间 300s 倒计时**继续跑**;超时触发 → `AskUserRegistry` 哨兵 complete → 卡片 freeze"已超时" → 前端**必须退出 CHAT 态回 RUNNING**(若流仍活)或 IDLE(流已结束),不得停留在"回复 AI 的问题"badge 对着已死卡片。
-  - CHAT 态提交到已超时/已取消的 qid → answer 端点 404 → 前端 toast"问题已失效" + 状态复位,**不得**静默吞文本(A2)。
-  - stop / 断连 → `cancelAllActive` 现有路径释放 future;前端 CHAT 态同步复位。
-  - `AskUserRegistry.complete` 先到先得语义不变:CHAT 提交与选项点击竞态由现有 CAS 兜底,后到者收 409/404 + 前端复位。
-- **工具返回文本截断豁免(新增)**:`ToolCallHistory.inject` 的 `result` 上限 2048 字符;CHAT 模式用户原话可达 8KB ⇒ 历史卡片会截断丢话。裁定:CHAT 模式的 result 文本**豁免截断**(与 `askUser.optionsJson` 豁免同款理由:用户输入是卡片语义的唯一来源),或 steering/CHAT 文本上限收紧到 2048——**倾向前者**(豁免),builder 按 S2 持久化结果确认。
+**协议依据(核实)**:CC SDK `response` 字段 = "用户 dismiss 问卷卡片、改打一段不属于任何具体问题的自由回复",模型收 "The user responded: …" 而非逐题答案;CC #33511 证实 "Chat about this" 点击即产生 tool_result(其 bug 是错带 `is_error:true` 把讨论意图覆盖成拒绝);changelog 6514 证实自由文本答案须用**中性措辞**(旧版叫模型"继续"即使用户要求先等待/解释)。⇒ 正确形态:**点击即返回非错误 dismiss 信号,工具立即解锁,卡片退出,输入回自由聊天**;用户后续文本是普通 steering,不是卡片答案。
+
+- **answer 端点扩展**:`POST /ask/{qid}/answer` body 增加 `mode` 字段:`ANSWER`(缺省,现状不变)/ `DISMISS`。`DISMISS` **不承载用户文本**(点击即触发,无输入),`CompletableFuture.complete` 一个 dismiss 哨兵(类比 `CANCELLED_SENTINEL` 但语义不同),`DefaultAskUserTool` 识别后返回**非错误**中性文本,形如:`[用户想先聊聊] 用户选择暂不回答以上问题,想先自由讨论。请等待用户接下来的补充消息(将在下一轮送达),不要自行猜测答案或强行推进原问题。` 措辞进 `AskUserGuidanceContractTest` 同款契约锁(断言:非 is_error、含"等待用户补充"、不含"用户未作答"/"继续"指令)。
+- **卡片 UI**:选项列表后恒有"其他(自定义答案)"(已有 `allowCustomInput`,= CC Other,文本作为答案值)+ 新增按钮 **"💬 聊聊这个"**。点击 → 立即 POST mode=DISMISS → 卡片 freeze 为第五种终态 **"💬 转入对话"**(摘要行折叠)→ 输入框回 **RUNNING**(非 CHAT 保活态),placeholder"说说你的想法,回车补充(下一轮生效)"。**无"返回选项"**(卡片已终态,不可逆;用户若反悔可在自由文本里说明,模型下一轮可重新 askUser)。
+- **无保活、无 deadline 重置**:dismiss 即 complete future + `askUserRegistry.remove`,300s 计时对该问题终结。不存在"CHAT 打字期间超时 404"场景(A9 由构造消除)。
+- **多卡 pending**:输入框保持锁直到全部落定;提示条显示"N 个问题待回答";"聊聊这个"作用于最早一张,dismiss 后若仍有 pending 则继续 ASK_PENDING,全落定才回 RUNNING。
+- **历史渲染**:`tool-call-renderer.js` 只读卡片增加"转入对话"徽章;dismiss 的 result 是固定短文本(无用户原话),**天然不触发 2048 截断**(原 B6 豁免需求消除);用户后续自由文本作为 steering USER 行独立渲染(§5.6),不在卡片内。
+- **超时/stop/断连路径完全不动**:300s 超时仍返回"用户未作答";stop/断连 `cancelAll` 哨兵释放 future。dismiss 与超时/stop 的竞态由现有 `complete` 先到先得 CAS 兜底,后到者收 404 + 前端卡片已 freeze 不重复处理。
+- **与 steering 的衔接**:dismiss 后模型收到"等待用户补充"信号,理想情况输出简短 acknowledg 并结束本轮(无 tool_call)→ `doFinalizeLoop` 查 inbox:用户已打字 → 续跑注入;用户还没打 → run 收口回 IDLE,用户文本走普通 send。**两条路都自然,无需特殊协调**。模型若不听话自行推进(弱模型风险),用户 steering 仍会在下一轮纠偏——可接受降级。
 
 ### 5.4 SSE 帧增量
 
@@ -176,24 +174,22 @@ RUNNING   : (有活跃流,无 pending askUser)
             回车 = POST steer → 渲染灰态用户气泡(pending)→ steerAck 转正
             无活跃 run 的 queued:false → 自动转 chat.send()
 ASK_PENDING: (有 pending askUser 卡片)
-            textarea 锁定,placeholder"回答上方卡片,或点'聊聊这个'自由输入"
+            textarea 锁定,placeholder"回答上方卡片,或点'聊聊这个'自由讨论"
             composer 上方提示条:"AI 正在等你回答 · 剩余 m:ss · ↓定位"(点击滚动到卡片;多卡显示数量)
-CHAT      : (用户点了"聊聊这个",问题保活)
-            textarea 解锁,badge"回复 AI 的问题",回车 = /ask/{qid}/answer mode=CHAT
-            提交后回 RUNNING;"返回选项"回 ASK_PENDING
+            点"聊聊这个" → POST mode=DISMISS → 卡片 freeze"转入对话" → 回 RUNNING(无 CHAT 保活态)
 ```
 
 - **灰态气泡**:queued 消息立即渲染为灰色用户气泡(与 CC 一致),`steerAck` 转正;stop 时标"未发送(已停止)"。**灰态气泡是 A2 的 UI 兜底:任何时刻用户都能看到自己的话处于什么状态。**
 - **事件驱动气泡(G4)**:`steerAck` 到达 → 当前 AI 气泡封口(操作栏落地)→ 灰态用户气泡转正 → 开新 AI 气泡(复用 `renderBotMessage` + `_currentAnswerEl` 重定向)。纯迭代续跑(`iteration` 帧)→ 同气泡内轻量分隔线 + 新写作分段。
 - **锁的分层解锁**:textarea/发送按钮按状态机;工具栏(知识空间/MCP/技能/文件/新对话)与侧栏切换锁 **P1 保留**(N3/N4);`+` 附件与 ✎ 画板运行中保持锁定。
-- **`state.isStreaming` 语义保持"有活跃流"**(全仓 8 个消费点:createNew/startRename/switchTo 守卫、stopStream、abortStream、send 空文本守卫等),新增 `inputMode` 状态(IDLE/RUNNING/ASK_PENDING/CHAT)只管输入区,**不得**让 RUNNING 态下 isStreaming=false(否则侧栏锁守卫全部失效)。
+- **`state.isStreaming` 语义保持"有活跃流"**(全仓 8 个消费点:createNew/startRename/switchTo 守卫、stopStream、abortStream、send 空文本守卫等),新增 `inputMode` 状态(IDLE/RUNNING/ASK_PENDING)只管输入区,**不得**让 RUNNING 态下 isStreaming=false(否则侧栏锁守卫全部失效)。
 - **RUNNING 态按钮契约(与存量 IT 的兼容裁定)**:`#send-btn` **不 disabled**、文案"发送消息"不变,改为旁挂小 badge 提示"运行中·回车补充下一轮";`#stop-btn` 显示逻辑不变。理由:`ChatSmokeBrowserIT`/`HttpToolBrowserIT` 的流开始信号断言 `send-btn.disabled===true`,若按钮语义变更需同步改 IT——**裁定为同步改这两个 IT 的开始信号**(改以 `stop-btn 可见 + isStreaming` 判定),按钮可用性变更是特性本意,不迁就旧断言;结束信号(`!disabled && textContent==='发送消息'`)保持可过。
 - **发送空文本守卫**:`send()` 现有 `!text && !state.isStreaming` 分支在 RUNNING 态含义变化,输入区状态机接管后此守卫仅 IDLE 态生效。
 - **scrollToBottom**:沿用 isAtBottom 守卫 + 浮动按钮(2026-09-21 #2),新气泡/分段不破坏。
 
 ### 5.6 持久化与历史一致性(G5)
 
-- **注入的 steering UserMessage 必须落 `SPRING_AI_CHAT_MEMORY`**(USER 行,注入时刻的时间戳/sequence)。写入者由 S2 确定:`ToolCallingAdvisor.conversationHistoryEnabled=true` 的 history 管理若已覆盖 instructions 追加行,则不显式 add(防双写);否则 loop advisor 注入时显式 `ChatMemory.add`。
+- **注入的 steering UserMessage 落 `SPRING_AI_CHAT_MEMORY`**(USER 行,注入时刻 ts/sequence)。**写入者 = 自定义 `LoomMemoryAdvisor`(D-1 选 A)**:它在每 steering 注入点写 USER 行、每迭代边界写该迭代 ASSISTANT 行;loop advisor 不直接写 memory(防双写)。next-turn prompt 顺序保真(USER 注入行在该迭代 ASSISTANT 之前)。详见 §5.10。
 - **历史气泡分组规则(⚠️ 已被 builder check 推翻,待 §12 裁定)**:原拟"按 USER 行切分、零新表"。核实 2.0.2 源码后不成立:`MessageChatMemoryAdvisor`(final)把整条流(含续跑)聚合成**单条 ASSISTANT 行**,steering USER 行(注入时写)在 sequence 上排在全部 assistant 文本之前 ⇒ 按 USER 切分会让前段输出全落最后一个气泡、首气泡为空(A6 必违)。持久化/回放模型见 §12 待裁定 D-1。
 - **迭代分隔线 P1 不进历史**(纯视觉装饰,回放不还原;气泡分组一致即满足 G5/A6)。
 - reasoning 配对(±10s 就近)与 TOOL_CALL 注入逻辑不动;多迭代产生更多轮 reasoning 行,`loom_chat_reasoning` append 语义天然兼容。
@@ -215,7 +211,7 @@ CHAT      : (用户点了"聊聊这个",问题保活)
 ### 5.8 安全与隔离
 
 - steer 端点走 AuthenticationFilter + 会话归属校验(镜像 stop);inbox 按 `(username, conversationId)` 严格隔离,跨用户/跨会话不可见(与 subtask 隔离同款哲学)。
-- steering 文本与 CHAT 文本均为用户可控输入:前端渲染经 `esc()`/textContent(现有惯例),后端进 prompt 前不执行任何解析;8KB 上限。
+- steering 文本与 askUser 自定义答案文本均为用户可控输入:前端渲染经 `esc()`/textContent(现有惯例),后端进 prompt 前不执行任何解析;steering 8KB 上限,自定义答案沿用现有约束。
 - 不新增任何工具可见性面(loop advisor 不是工具,不进 RBAC;steering 是所有登录用户的对话能力,与 universal 工具同级)。
 - **inbox 深度上限**(新增):per-run 排队上限 20 条,超限 steer 端点返回 429 + 前端 toast"补充消息过多,请等待 AI 处理"。防 spam 撑爆内存/上下文。
 - **断连/刷新处置**(新增,核实 `LoomAgentConfiguration:657–672`):`emitter.onTimeout/onCompletion/onError` 现有路径只 `askUserRegistry.cancelAll + autoCleanup`,**不 dispose 订阅** ⇒ 刷新页面后后端 run 可能继续 orphan 跑。本期必须补:断连 → dispose 订阅 + 清 inbox + 灰态气泡随页面消失(前端已丢)。长 run 使刷新概率上升,orphan run 会继续写 memory/usage ⇒ 不可接受。`autoCleanup` 是否已 dispose 由 S5 核实,未则补。
@@ -244,6 +240,23 @@ CREATE TABLE loom_chat_steering (
 - 主 UI `renderMessages` 不受 B2 影响(它按 memory sequence 顺序 + TOOL_CALL createdAt 注入,不走 ConversationFlowService),§5.6 分组规则不变。
 - 回归锁:新增 `ConversationFlowSteeringTimelineTest`(多轮 + 中段插话 → USER 事件 ts 保持注入时刻、不倒序);变异:去掉豁免 ⇒ 红。S4 前置验证匹配规则在 finalize-续跑注入(前序是 ASSISTANT 而非 TOOL)场景下仍正确。
 
+### 5.10 持久化与回放模型(D-1 选 A:自定义 LoomMemoryAdvisor)
+
+**问题(核实)**:Spring AI `MessageChatMemoryAdvisor`(final,order +200 上游)在 `before()` 写一条 USER 行、`after()` 把**整条流**(含 `Flux.concat` 所有续跑迭代)经 `ChatClientMessageAggregator` 聚合成**单条 ASSISTANT 行**。steering USER 行(注入时写)sequence 排在全部 assistant 文本之前 ⇒ 按 USER 行切分回放时首气泡空、末气泡吞全部(A6)。`ToolCallingAdvisor` 零 memory 写入(`conversationHistoryEnabled` 只管请求内 instructions)。
+
+**裁定:自定义 `LoomMemoryAdvisor` 替换 `messageChatMemoryAdvisor` bean**(autoconfigure `@ConditionalOnMissingBean` 天然支持替换)。约束松弛点 = Issue1 锁的"精确类名"断言改为"order 上游 + history 使能"不变式(保其神不改其形)。
+
+- **order 保持 HIGHEST_PRECEDENCE+200**(上游于 loop advisor +300),`implements BaseChatMemoryAdvisor`(使 `ToolCallingAdvisor` auto-register 的 `instanceof MemoryAdvisor` 下游检测仍判定 history 由上游管理 ⇒ `conversationHistoryEnabled` 语义不变)。
+- **before()**:复刻 `MessageChatMemoryAdvisor` 的去重逻辑(`isMemoryAlreadyInPrompt`)读历史 + 写 turn-initial USER 行。无 steering 单迭代 run 行为与今天一致(A1)。
+- **迭代边界写 ASSISTANT**:经 `StreamRunContext` 回调,loop advisor 在每外层迭代结束时把**该迭代**的 assistant 文本写一条 ASSISTANT 行(ts=迭代结束时刻)。`after()` **不再写合并行**(避免双写/顺序失真)。
+- **steering 注入写 USER**:loop advisor 每注入一条 steering UserMessage,`LoomMemoryAdvisor` 同步写 USER 行(ts=注入时刻,sequence 在该迭代 ASSISTANT 之前)。
+- **next-turn prompt 顺序保真**:memory 行序 = [turn USER, iter1 ASSISTANT, steering USER, iter2 ASSISTANT, …],`before()` 读历史拼 prompt 时顺序自然正确(模型看到插话发生在对应输出之后)。
+- **reasoning 配对**:每迭代一条 ASSISTANT 行 + 每迭代一条 reasoning 行(§5.4 flush),±10s 就近配对自然成立(无 steering 单迭代 run 仍一行,`ChatReasoningHistoryTest` 9 测试绿)。
+- **TOOL_CALL 归位(#3)**:历史端点给 Message 条目附 DB timestamp(additive 字段,仿 `ChatReasoningHistory` JDBC 取 ts)+ 服务端按 ts 把 `ToolCallHistory.inject` 的 TOOL_CALL interleave 进正确位置(不再 addAll 末尾)⇒ `renderMessages` 顺序渲染即归位到正确气泡。**取代旧"Message 形状不变"裁定**(additive 向后兼容,旧前端忽略新字段不破坏)。
+- **回放气泡分组**:memory 行序天然 = [USER, ASSISTANT…, USER(steering), ASSISTANT…] ⇒ `renderMessages` 按 USER 行切分即正确分组(原 §5.6 规则在 D-1 选 A 下**成立**,此前证伪是因合并 ASSISTANT 行,现已逐迭代拆)。
+- **Issue1 回归锁演进**:`Issue1ChatMemoryAdvisorRegressionTest` 断言改为"memory advisor order < ToolCallingAdvisor.DEFAULT_ORDER + 实现 MemoryAdvisor 接口 + conversationHistoryEnabled 不被下游检测关闭",不再断言精确类名 `MessageChatMemoryAdvisor`。变异:把 LoomMemoryAdvisor order 改到 +300 下游 ⇒ 红。
+- **S2 改验**:LoomMemoryAdvisor 逐迭代/逐注入写入无重复行、无遗漏;next-turn prompt 顺序与 live 一致;无 steering 单迭代 run 的 memory 行布局与改造前完全相同(A1)。
+
 ## 6. 回归门与变异自证
 
 1. **存量全绿**:默认 `mvn test -pl spring-ai-loom-agent-test`(494+)+ 显式 `-Dtest='*IT'`(228+,清库三目录)全绿;`Issue1ChatMemoryAdvisorRegressionTest` 必须继续绿(memory-order 不变式)。
@@ -251,9 +264,8 @@ CREATE TABLE loom_chat_steering (
 3. **新契约/单元测试**:
    - steering drain 位置:注入发生在 tool_result 之后、下一次模型调用之前(消息序列断言);
    - finalize 竞态:收口与 steer 并发 → 要么 queued 要么显式 false,无第三态;
-   - CHAT 模式工具返回文本含用户原话、非"用户未作答"(扩展 `AskUserGuidanceContractTest`);
-   - CHAT 态超时/stop/404 → 前端状态复位 + 文本不静默丢(A9);
-   - CHAT result 8KB 历史完整(截断豁免,B6);
+   - DISMISS 模式工具返回非错误中性"等待用户补充"文本,非"用户未作答"/is_error/"继续"指令(扩展 `AskUserGuidanceContractTest`);
+   - DISMISS 即 complete+remove,无保活;与超时/stop 竞态先到先得,后到 404 不重复 freeze;
    - 护栏:max-continuations / run-timeout 触发收口;
    - 子任务 advisor 列表不含 loop advisor(E1);
    - `isStreaming` 守卫:RUNNING 态 createNew/switchTo/startRename 仍被拦(A2);
@@ -264,14 +276,14 @@ CREATE TABLE loom_chat_steering (
    - `loom_chat_steering` round-trip + ensureSchema 幂等(C15)。
 4. **变异自证**(外部审计面板不可用,沿用变异惯例):
    - 去掉内层 drain → steering 注入测试红;
-   - CHAT 模式改走 cancel 路径 → 契约测试红;
+   - DISMISS 模式改走 cancel/is_error 路径 → 契约测试红;
    - finalize 不查 inbox → 续跑测试红;
    - 历史分组不按 USER 行切 → 回放一致性测试红;
    - B2 豁免去掉 → admin 流水时间线测试红(D1);
    - reasoning 改回整条流一行 → 多迭代配对测试红(C5);
    - loop advisor 改默认 bean 挂载 → 子任务排除测试红(E1)。
 5. **存量 IT 信号同步改(非回归,是契约演进)**:`ChatSmokeBrowserIT` / `HttpToolBrowserIT` 流开始信号从 `send-btn.disabled===true` 改为 `stop-btn 可见 + isStreaming`(RUNNING 态按钮解锁是特性本意);结束信号不变。
-6. **BrowserIT 新增**:灰态气泡→ack 转正、插话开新气泡、askUser"聊聊这个"全流程(含超时/stop/返回选项)、提示条定位、多迭代思考分段;composer/气泡/admin 流水改版的截图基线本机 `-DupdateBaselines=true` 重建(index + admin-conversation)。
+6. **BrowserIT 新增**:灰态气泡→ack 转正、插话开新气泡、askUser"聊聊这个"即时 dismiss 全流程(点击→freeze→回 RUNNING→steering)、提示条定位、多迭代思考分段;composer/气泡/admin 流水改版的截图基线本机 `-DupdateBaselines=true` 重建(index + admin-conversation)。
 7. **波及面矩阵逐项核销**:§7.5 A1–F5 每项在实施 PR 里标注处置与验证结果,矩阵作为完工 checklist,防遗漏。
 
 ## 7. Spike 清单(实施前置,先于一切产品代码)
@@ -279,7 +291,7 @@ CREATE TABLE loom_chat_steering (
 | # | 验证目标 | 失败退路 |
 |---|---|---|
 | S1 | 自定义 `ToolCallingAdvisor` 子类经 `.advisors()` 装配后,`DefaultChatClient.autoRegisterToolCallingAdvisor` 是否抑制默认实例;`conversationHistoryEnabled` 检测(memory 上游)是否仍成立 | 退方案 (b):独立外层 advisor(+250),内层注入改用自定义 ToolCallingManager 包装 |
-| S2 | ~~steering UserMessage 写入者~~ **前提已证伪**(ToolCallingAdvisor 零 memory 写入);改验:per-iteration ASSISTANT + steering USER 的落库方案(§12 D-1 裁定后)与 next-turn prompt 顺序保真 | 按 D-1 裁定 |
+| S2 | D-1 已裁定选 A(自定义 LoomMemoryAdvisor);改验:逐迭代 ASSISTANT + 逐注入 USER 写入无重复/遗漏、next-turn prompt 顺序保真、无 steering 单迭代 run 行布局与改造前相同(A1) | 按 §5.10 实现,spike 验证写入边界 |
 | S3 | `chain.copy(this)` 重入是否逐轮重跑下游 `ChatUsageRecordingAdvisor`(order=100)且无 `UsageAccumulator` 双计;`Flux.concat` 续跑下 SSE lambda 的 delta/accum 行为 | usage 落库点移入 loop advisor 收口处(UsageAccumulator 全量),record 加幂等键 |
 | S4 | `loom_chat_steering` 审计匹配在两类注入场景下均正确:内层(前序 TOOL 行)+ finalize 续跑(前序 ASSISTANT 行);B2 豁免后 admin 流水时间线不倒序 | 匹配规则改按 memory sequence_id 对齐(需确认 sequence 在续跑轮的单调性) |
 | S5 | `emitterRegistry.autoCleanup` 是否 dispose 订阅;断连后 orphan run 是否继续写 memory/usage | 断连路径补 dispose + inbox 清理(§5.8) |
@@ -316,11 +328,11 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 | # | 功能 | 影响 | 处置 | 验证 |
 |---|---|---|---|---|
 | B1 | 卡片渲染/freeze/四终态 | 新增第五终态"转入对话" | §5.3 | 新 BrowserIT |
-| B2 | answer 端点 / AskUserRegistry CAS | mode=CHAT 扩展;先到先得不变 | §5.3 | 单测:CHAT/选项竞态 |
-| B3 | 300s 超时 / cancelAll / 断连释放 | CHAT 态必须同步复位;倒计时不暂停 | §5.3 | 新单测 + BrowserIT |
-| B4 | 阻塞工具线程 / ChatMemory ON_COMPLETE | CHAT 返回合法文本,非"用户未作答" | §5.3/A3 | AskUserGuidanceContractTest 扩展 + 变异 |
-| B5 | tool-call-renderer 只读卡片(admin 共用) | 新终态徽章 + CHAT 文本展示 | §5.3 | admin conversation BrowserIT |
-| B6 | ToolCallHistory result 2048 截断 | CHAT 文本豁免截断 | §5.3 | 单测:8KB CHAT 文本历史完整 |
+| B2 | answer 端点 / AskUserRegistry CAS | mode=DISMISS 扩展(无文本,dismiss 哨兵);先到先得不变 | §5.3 | 单测:DISMISS/选项/超时竞态 |
+| B3 | 300s 超时 / cancelAll / 断连释放 | 不动;dismiss 即 complete+remove,无保活态需复位 | §5.3 | 存量 + DISMISS 竞态单测 |
+| B4 | 阻塞工具线程 / ChatMemory ON_COMPLETE | DISMISS 返回非错误中性"等待用户补充"文本,非"用户未作答"/is_error | §5.3/A3 | AskUserGuidanceContractTest 扩展 + 变异 |
+| B5 | tool-call-renderer 只读卡片(admin 共用) | 新终态"转入对话"徽章;result 固定短文本无截断问题 | §5.3 | admin conversation BrowserIT |
+| B6 | ~~ToolCallHistory result 2048 截断豁免~~ | **消除**:dismiss result 是固定短文本;用户自由文本走 steering USER 行独立渲染,不在卡片 result 里 | §5.3 | 无需豁免 |
 | B7 | 子任务/定时 schema 级排除 askUser | 不变 | A5 | 存量回归 |
 | B8 | 多卡 pending | 输入锁到全部落定;提示条计数 | §5.3 | 新单测 |
 
@@ -341,7 +353,9 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 | C11 | LoggingToolCallback / JsonLenient | 不动 | 无改动 | JsonLenientTest 等存量 |
 | C12 | DefaultChat onErrorResume → toErrorResponse | 续跑中某迭代失败 → 错误帧 + 收口;inbox 残留可见处置 | §5.2 | 新单测 |
 | C13 | chat.timeout-seconds(600s 单调用) | 不变;run-timeout 1800s 是外层新键 | §5.7 | ChatProviderTimeoutWiringTest 绿 |
-| C14 | ChatMemory 写入责任 | S2 防双写 | §5.6/§7 S2 | spike + 单测 |
+| C14 | ChatMemory 写入责任 | D-1 选 A:LoomMemoryAdvisor 逐迭代/逐注入写,loop advisor 不直接写 | §5.10/§7 S2 | spike + 单测无重复行 |
+| C16 | LoomMemoryAdvisor 替换 bean + Issue1 锁演进 | order +200 上游不变,断言改不变式非精确类名 | §5.10 | Issue1 测试改 + 变异(order 下游⇒红) |
+| C17 | 历史端点 Message 附 ts + TOOL_CALL 服务端 interleave | additive 字段,取代旧形状冻结裁定 | §5.10/#3 | 回放一致性测试 + 旧前端兼容 |
 | C15 | loom_chat_steering 新表 | V1.0 段 + ensureSchema | §5.9 | 清库启动 + round-trip 单测 |
 
 ### D. admin 控制台 / 统计
@@ -383,7 +397,8 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 - inbox 载体具体类/挂载位置(倾向 SseEmitterRegistry.Entry);竞态互斥的具体实现(锁 vs CAS)。
 - `iteration`/`steerAck` 帧字段命名与 `ChatResponseRecord` 兼容构造器形态。
 - 提示条/分隔线/灰态气泡的具体样式(复用现有视觉 token,a11y 色板不得漂移,`A11yTokenDriftContractTest` 守卫)。
-- CHAT 态"返回选项"的交互细节。
+- ~~CHAT 态"返回选项"的交互细节~~ **消除**:D-2 即时 dismiss,卡片终态不可逆,无返回选项。
+- DISMISS 哨兵常量命名与 `CANCELLED_SENTINEL` 的区分;dismiss 返回文本措辞(契约锁断言关键词)。
 - reasoning 复位用显式帧信号还是长度回缩检测(倾向显式)。
 - usage 落库口径已核实为"每模型轮一行"(order=100 下游逐轮重入),S3 仅验证无双计;若 S3 推翻则落库点移入 loop advisor 收口处。
 - `loom_chat_steering` 审计表字段/索引细节、ensureSchema 实现、admin 流水「用户插话」徽章样式、steeringCount 是否进 computeStats。
@@ -406,7 +421,10 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 | 新增 `loom_chat_steering` 审计表修 admin 流水 B2 倒序 | 整体分析核实 `ConversationFlowService:116–147` 后裁定(§5.9),确定性标记优于时间窗启发式(项目先例) |
 | RUNNING 态 send-btn 解锁 + 同步改 ChatSmoke/HttpTool IT 开始信号 | 整体分析核实 IT 断言后裁定(§5.5),按钮可用性是特性本意 |
 | 断连/刷新必须 dispose 订阅 + 清 inbox | 整体分析核实 SSE lifecycle 不 dispose 后裁定(§5.8/A8) |
-| CHAT result 豁免 2048 截断 | 整体分析核实 ToolCallHistory 截断后裁定(§5.3/A9) |
+| ~~CHAT result 豁免 2048 截断~~ | **消除**:D-2 即时 dismiss,result 固定短文本;用户文本走 steering USER 行 |
+| D-2 "聊聊这个"即时 dismiss(无 CHAT 保活/无 deadline 重置) | **用户裁定** + CC #33511/SDK/changelog 核实(§5.3/§12.2) |
+| D-1 自定义 LoomMemoryAdvisor 逐迭代写 | **用户裁定**(§12.2 D-1 选 A) |
+| D-3 run 预算暂停人等待 + 内层查超时 | 我方裁定(随 D-2 即时 dismiss 后 askUser 阻塞仍可能长,§12.2 D-3 选 i) |
 | loop advisor 逐请求挂载,不得默认/bean 化 | 整体分析核实子任务共享 ChatClient 后裁定(§5.1/E1) |
 | usage advisor order=100 在下游,逐轮重入落库口径不变 | 整体分析 javap+代码核实(§5.4),S3 验证 |
 
@@ -433,7 +451,7 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 | TOOL_CALL 按 createdAt 与消息合并排序 | **证伪**:端点 addAll 末尾,renderMessages 顺序遍历不排序,Message 序列化无 ts ⇒ 全挂最后一个气泡 | `LoomAgentConfiguration:2535–2537`、`app.js:1368–1414`、`ToolCallHistory` |
 | reasoning 多迭代"天然兼容" | **证伪**(第二轮已部分订正):整条流落一行;且单 ASSISTANT 行下 ±10s 配对只能挂一条 reasoning ⇒ 依赖 D-1 先解决行布局 | `LoomAgentConfiguration:746–757`、`ChatReasoningHistory:38` |
 | registry 竞态只覆盖入队侧 | **证伪**:register 无条件 put、autoCleanup 按 key remove 不认身份 ⇒ finalize→complete 窗口内回退发送会让旧流 onComplete 删掉新 run Entry | `SseEmitterRegistry:29,76` |
-| CHAT 保活与 300s 超时互不干扰 | **证伪**:future.get(300s) 照跑,CHAT 打字超时 → 404 + 文本丢失风险 | `DefaultAskUserTool:151` |
+| CHAT 保活与 300s 超时互不干扰 | **证伪 → D-2 改即时 dismiss 消除**:future.get(300s) 照跑,保活 CHAT 打字超时 → 404 丢文本;裁定点击即 complete 返回非错误 dismiss 信号,无保活态 | `DefaultAskUserTool:151`、CC #33511、SDK `response`、changelog 6514 |
 
 ### 12.2 待用户裁定(D-1/D-2/D-3,决定方案形态)
 
@@ -443,19 +461,15 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 - (C) memory 行保持合并,新增 loom_chat_run_segment 审计表,历史端点按审计表重构气泡/interleave:不动 memory 装配,但 next-turn prompt 里 steering USER 全排在合并 ASSISTANT 前(顺序失真),读侧重构复杂。D-1 选 A 时本表可退化为可选审计。
 - **连带 #3(TOOL_CALL 归位)**:D-1 选 A 后,历史端点给 Message 条目附 DB timestamp( additive 字段,仿 ChatReasoningHistory JDBC 取 ts)+ 服务端按 ts 把 TOOL_CALL interleave 进正确位置 ⇒ renderMessages 顺序渲染即归位。此处置**取代旧"Message 形状不变"裁定**(additive 向后兼容),记为我方裁定,随 D-1 一并审批。
 
-**D-2:CHAT 态与 300s 超时共存。** 候选:
-- (i) **进入 CHAT 态时重置/延长 deadline**(registry 加 extend 方法,CHAT 入口给新 300s 窗口):**推荐**,逃生通道不该原样重演死锁;代价=动"超时骨架不动"声明(实为小机制非重写)。
-- (ii) 接受过期:CHAT 文本 404 后自动转普通发送(run 已收口)或 steering(run 仍活),灰态标终态。纯前端,但用户体验差(打字打到一半问题没了)。
+**D-2:~~CHAT 态与 300s 超时共存~~ 已裁定:即时 dismiss(用户纠正 + 核实)。** 原 (i) 重置 deadline / (ii) 接受过期**均废弃**——前提"CHAT 保活态"本身错误。CC #33511 证实"Chat about this"点击即产生 tool_result(bug 是错带 is_error);SDK `response` = dismiss 问卷改自由回复;changelog 6514 自由文本须中性措辞。⇒ **点击即 complete future 返回非错误 dismiss 信号,工具立即解锁,卡片冻结,输入回 RUNNING,用户自由文本走 steering**。无保活、无 deadline 重置、无 404 吞文本。详见 §5.3(D′)。
 
-**D-3:run-timeout 墙钟是否计人等待 + 内层边界是否查超时。** 候选:
-- (i) **预算只计活跃模型/工具时间,askUser/CHAT 阻塞期间暂停;内层注入点也查 timeout**:**推荐**,否则"等着等着 run 没了"+ 单迭代可远超 1800s。
-- (ii) 字面墙钟、仅外层查:实现薄,但人等待烧穿预算、与 D-2 过期叠加。
+**D-3:run-timeout 墙钟是否计人等待 + 内层边界是否查超时。裁定:(i) 预算只计活跃模型/工具时间,askUser 阻塞等待期间暂停;内层注入点也查 timeout。** 理由:D-2 即时 dismiss 消除了 CHAT 长保活,但普通 askUser 仍可阻塞至 300s(用户选选项/打自定义答案),多次 askUser + 子任务(600s)的人等待仍能烧穿字面墙钟;"等着等着 run 没了"不可接受。loop advisor 经 StreamRunContext 记录 askUser 阻塞区间,预算计时扣除;内层注入点查 timeout 防单迭代远超 1800s。交互测试覆盖人等待场景。
 
 ### 12.3 我方自行裁定(技术项,记录备查)
 
 - **#6 registry 竞态**:register/autoCleanup 改 **Entry 身份感知**(remove 前比对引用,旧流 onComplete 不删新 Entry);前端 queued:false 回退**必须等本地流 complete 事件**再发(本地排队),不抢 register;**用户 stop 后的在途 steer 回退抑制**(stop 意图优先),灰态标"未发送(已停止)"。
 - **#4 reasoning 粒度**:第二轮已裁定按外层迭代 flush(StreamRunContext);其配对正确性依赖 D-1 选 A(每迭代一条 ASSISTANT 行)。D-1 若选 C 则配对需按审计表 segment ts 重构。
-- 灰态批量 ack 与回放连续 USER 行分组对齐、CHAT 文本不进 USER 行(卡片内渲染)、run 错误终止残留灰态终态标记、steering 引导句注入位置:评审认为可自行裁定,归 §8。
+- 灰态批量 ack 与回放连续 USER 行分组对齐、dismiss 后用户自由文本作为 steering USER 行独立渲染(不在卡片 result 内)、run 错误终止残留灰态终态标记、steering 引导句注入位置:评审认为可自行裁定,归 §8。
 
 ### 12.4 评审确认无需追问的点
 
