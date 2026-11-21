@@ -24,6 +24,7 @@
 - 前端用户可控字段一律 `esc()`/textContent;a11y 色板不得漂移(`A11yTokenDriftContractTest` 守卫,禁用 #6366f1/#94a3b8 等废弃 token)。
 - 截图基线改版后本机 `-DupdateBaselines=true` 重建。
 - 项目只跑全新库;V1.0 新增段后已有库须清库重跑(既定升级策略)。
+- **回归必须含活体 Chrome E2E(用户硬性要求)**:headless BrowserIT 之外,回归阶段必须**启动真实服务**(`mvn spring-boot:run -pl spring-ai-loom-agent-test`,jvmArguments 已固化 `-Dfile.encoding=UTF-8`)并用**真实 Chrome**(chrome-devtools / playwright MCP)驱动冒烟,覆盖:steering 灰态→ack 转正、插话开新气泡、askUser"聊聊这个"即时 dismiss→续跑、多迭代思考分段、历史刷新回放分组、admin 流水时间线。活体冒烟抓 headless 漏掉的缺陷(favicon 404/console error、GBK 中文解析、思考面板默认折叠需点开才算可见、真实渲染偏移)。**E2E gotchas(项目记忆)**:curl 中文 body 必须 UTF-8 文件;服务重启后必须重新登录(cookie session);思考面板默认折叠,断言可见前需点开。活体冒烟用的用户树/库走 test 模块 `./target/` 覆盖,不触碰 ~/.loom。
 
 ## Review Focus
 
@@ -1104,6 +1105,27 @@ Expected: 默认 494+ 全绿;IT 228+ 全绿(含新增)。Issue1/ChatReasoningHis
 - LoomMemoryAdvisor order 改 +300 ⇒ Issue1 红
 
 每变异跑对应测试确认红,还原确认绿。记录结果。
+
+- [ ] **Step 3.5: 活体 Chrome E2E 冒烟(用户硬性要求,headless IT 之外必做)**
+
+启动真实服务并用真实 Chrome 驱动,验证 headless 抓不到的活体缺陷:
+
+```bash
+# 后台启动测试应用(jvmArguments 已固化 -Dfile.encoding=UTF-8;库/用户树走 ./target/ 覆盖)
+mvn spring-boot:run -pl spring-ai-loom-agent-test
+```
+
+用 chrome-devtools / playwright MCP 打开 `http://localhost:8080/spring/ai/loom/index.html`,**先登录**(重启后 cookie 失效必须重新登录),逐项冒烟并截图/断言 console 无 error:
+
+1. **steering 灰态→转正**:发一条触发多工具轮的长任务(如"列出当前时间再帮我分析…"),RUNNING 态输入框可打字 → 回车 → 灰态用户气泡出现 → steerAck 后转正 → AI 新气泡续跑回应插话。
+2. **事件驱动气泡**:插话处旧 AI 气泡封口 + 用户气泡 + 新 AI 气泡,时序正确;纯迭代续跑同气泡分隔线。
+3. **askUser 聊聊这个**:触发 askUser 卡片 → 点"💬 聊聊这个" → 卡片冻结"转入对话" → 输入框回 RUNNING → 打字回车 → 续跑。确认**无 404 toast、无"用户未作答"**。
+4. **多迭代思考分段**:点开思考折叠面板(默认折叠,**必须点开才算可见**),确认每迭代独立分段、内容不合并。
+5. **历史刷新回放**:刷新页面 → 重新登录 → 气泡分组与 live 一致,工具 chip/askUser 卡片归位正确气泡,steering 文本转义 inert。
+6. **admin 流水时间线**:进 admin conversation 流水页 → 中段插话 USER 事件按真实注入时刻排序,**不倒序**;「用户插话」徽章渲染。
+7. **活体缺陷扫描**:每页 console 无 error(尤其 favicon 404、GBK 中文解析错);中文 steering 文本(含 emoji 🚀)经真实 SSE 渲染完整不乱码。
+
+**E2E gotchas**:curl 中文 body 用 UTF-8 文件;服务重启后重新登录;思考面板点开才可见。冒烟发现缺陷 → 回 owning task 修复 + 补 headless IT 锁 → 重跑。冒烟通过截图/记录归档。
 
 - [ ] **Step 4: Commit**
 
