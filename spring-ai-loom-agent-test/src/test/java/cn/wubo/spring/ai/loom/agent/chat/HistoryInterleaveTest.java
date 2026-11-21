@@ -17,6 +17,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -224,23 +225,50 @@ class HistoryInterleaveTest {
                 .containsExactly("USER:任务", "ASSISTANT:完成", "TC:tc-late");
     }
 
-    // ==================== 用例 4（降级不变式） ====================
+    // ==================== 用例 4（降级不变式，直接驱动 assembler） ====================
 
     @Test
-    @DisplayName("ts 取不到的条目排到末尾（= 旧「追加末尾」行为），绝不打乱消息相对顺序")
-    void unparseable_or_missing_ts_falls_back_to_tail() {
-        // createdAt 无法解析成 Instant 的条目理论上不出现（inject 统一 Instant.toString()），
-        // 这里用纯 JDBC 路径验证归并稳定性：消息全有 ts（metadata 兜底 + JDBC 主路径同值），
-        // 工具条目按 createdAt 插入正确位置。
-        String conv = newConv();
-        seedMemory(conv, "USER", "问", T0, 1);
-        seedMemory(conv, "ASSISTANT", "答", T0.plusSeconds(10), 2);
-        seedToolLog(conv, "tc-mid", "listDirectory", T0.plusSeconds(4));
-        seedToolLog(conv, "tc-tail", "listFiles", T0.plusSeconds(20));
+    @DisplayName("ts 取不到的条目(消息无 CONVERSATION_TS / 工具 createdAt 不可解析或 null)落末尾且不扰动正常条目顺序")
+    void missing_or_unparseable_ts_falls_back_to_tail() {
+        // HTTP 形态下消息恒有行时间戳(NOT NULL),该降级分支只能在 assembler 层真断言:
+        // jdbcTemplate=null 强制走 metadata 兜底 → 无 key 的消息 ts 解析为 null。
+        Instant t1 = T0.plusSeconds(10);
+        Instant t2 = T0.plusSeconds(20);
+        List<org.springframework.ai.chat.messages.Message> msgs = List.of(
+                org.springframework.ai.chat.messages.UserMessage.builder()
+                        .text("有ts")
+                        .metadata(Map.of(
+                                org.springframework.ai.chat.memory.repository.jdbc
+                                        .JdbcChatMemoryRepository.CONVERSATION_TS, t1))
+                        .build(),
+                new org.springframework.ai.chat.messages.UserMessage("无ts"));
 
-        List<Map<String, Object>> body = getConversation(conv);
-        assertThat(body).extracting(HistoryInterleaveTest::sig)
-                .containsExactly("USER:问", "TC:tc-mid", "ASSISTANT:答", "TC:tc-tail");
+        List<Map<String, Object>> tools = new ArrayList<>();
+        tools.add(toolEntry("tc-ok", t2));
+        tools.add(toolEntry("tc-garbage", "not-a-timestamp"));
+        Map<String, Object> nullTs = new java.util.HashMap<>();
+        nullTs.put("messageType", "TOOL_CALL");
+        nullTs.put("toolCallId", "tc-null");
+        nullTs.put("createdAt", null);
+        tools.add(nullTs);
+
+        List<Map<String, Object>> out = ChatHistoryAssembler.assemble(null, "conv-unit", msgs, tools);
+
+        // 正常条目按时间轴在前,相对顺序不受降级条目扰动
+        assertThat(out).extracting(HistoryInterleaveTest::sig)
+                .containsExactly("USER:有ts", "TC:tc-ok",
+                        // 降级三兄弟落末尾,按插入序稳定:消息先于工具(与归并输入序一致)
+                        "USER:无ts", "TC:tc-garbage", "TC:tc-null");
+        // 无 ts 的消息条目不混入伪 timestamp 键
+        assertThat(out.get(2)).doesNotContainKey("timestamp");
+    }
+
+    private static Map<String, Object> toolEntry(String callId, Object createdAt) {
+        Map<String, Object> e = new java.util.HashMap<>();
+        e.put("messageType", "TOOL_CALL");
+        e.put("toolCallId", callId);
+        e.put("createdAt", createdAt instanceof Instant i ? i.toString() : createdAt);
+        return e;
     }
 
     // ==================== 用例 5（attachThinking 兼容） ====================

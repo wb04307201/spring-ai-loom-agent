@@ -114,6 +114,32 @@ class LoomChatSteeringRepositoryTest {
                 });
     }
 
+    @Test
+    @DisplayName("deleteByConversation 真 DB:删本会话全部行并返回行数,他会话零波及,null/blank 防御 0 行不抛(R23)")
+    void deleteByConversation_realDb() {
+        Instant base = Instant.parse("2026-11-22T14:00:00Z");
+        repository.record("conv-del", "alice", "第一条", base, 1);
+        repository.record("conv-del", "alice", "第二条", base.plusSeconds(1), 2);
+        repository.record("conv-del-keep", "alice", "别家会话", base, 1);
+
+        assertThat(repository.deleteByConversation("conv-del"))
+                .as("返回实际删除行数")
+                .isEqualTo(2);
+        assertThat(repository.findByConversationId("conv-del"))
+                .as("R23 验收:删会话后审计行清零")
+                .isEmpty();
+        assertThat(repository.findByConversationId("conv-del-keep"))
+                .as("隔离:conversation_id 精确匹配,他会话行不得受波及")
+                .hasSize(1);
+
+        // 幂等/防御:不存在会话、null、空白都返回 0 且不抛(级联路径可放心调用)
+        assertThat(repository.deleteByConversation("conv-not-exist")).isZero();
+        assertThat(repository.deleteByConversation(null)).isZero();
+        assertThat(repository.deleteByConversation("   ")).isZero();
+        // 二次删除仍 0(不抛)
+        assertThat(repository.deleteByConversation("conv-del")).isZero();
+    }
+
     private static DriverManagerDataSource freshDs() {
         DriverManagerDataSource ds = new DriverManagerDataSource();
         ds.setDriverClassName("org.h2.Driver");
