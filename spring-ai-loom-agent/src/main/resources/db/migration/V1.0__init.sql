@@ -980,3 +980,29 @@ WHERE ms.author = 'system' AND ms.name = 'STAR-IJ 讲清一件事'
 INSERT INTO user_role (username, role_code)
 SELECT 'wb04307201', 'base'
 WHERE NOT EXISTS (SELECT 1 FROM user_role WHERE username = 'wb04307201' AND role_code = 'base');
+
+
+-- =============================================================
+-- ==== S4 steering 注入审计（spec 2026-11-21 agentic-loop-steering §5.9 / Task 9）====
+-- agentic-loop advisor 每真正把一条 steering 注入模型（内层 drain / 外层续跑残留，
+-- 单一入口 injectSteeringMessages）写一行；未注入终态（护栏触顶/stop 的
+-- NOT_INJECTED）与被拒 steering 绝不写行 —— "行存在 ⇔ 注入发生"是该表作为
+-- 确定性标记的契约，Task 10 admin 流水 B2 时间戳改写豁免 + 历史交错按
+-- (conversation_id, injected_at, seq) 读取合并。
+-- seq = 本 run（一次 SSE 流）内注入序号，从 1 单调递增（loop advisor
+-- per-request 实例携带计数器）；injected_at 同刻行靠 seq 稳定定序。
+-- 全新库政策：本段只在 fresh init 跑一次；仓储侧另有 ensureSchema 幂等兜底
+-- （仿 JdbcLoomScheduleExecutionRepository），IF NOT EXISTS 形态见
+-- JdbcLoomChatSteeringRepository。
+-- =============================================================
+
+CREATE TABLE loom_chat_steering (
+ id BIGINT AUTO_INCREMENT PRIMARY KEY,
+ conversation_id VARCHAR(255) NOT NULL,
+ username VARCHAR(64) NOT NULL,
+ message_text CLOB NOT NULL, -- steering 原文（CLOB 多字节/emoji 无损，审计文案=用户原文）
+ injected_at TIMESTAMP NOT NULL,
+ seq INT NOT NULL
+);
+CREATE INDEX idx_loom_chat_steering_conv
+ ON loom_chat_steering(conversation_id, injected_at, seq);

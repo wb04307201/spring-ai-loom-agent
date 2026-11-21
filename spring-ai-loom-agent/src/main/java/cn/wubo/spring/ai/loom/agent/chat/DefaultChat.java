@@ -62,6 +62,13 @@ public class DefaultChat implements IChat {
   * 缺省(旧 11-arg 构造 / bean 缺席)与 Spring AI 默认一致 = NOOP。
   */
  private final io.micrometer.observation.ObservationRegistry observationRegistry;
+ /**
+  * steering 注入审计仓储(spec 2026-11-21 Task 9 / S4,表 loom_chat_steering)。
+  * 逐请求经 {@code LoomAgenticLoopAdvisor.builder().steeringAudit(repo, convId, username)}
+  * 传入 loop advisor —— advisor 本身 per-request new,归属信息天然逐请求绑定。
+  * null(旧直连构造 / 未装配 bean)= 审计关闭,注入路径零副作用。
+  */
+ private final cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringAuditRepository;
 
  public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
                     IUserConversation userConversation, IFile file,
@@ -72,7 +79,7 @@ public class DefaultChat implements IChat {
                     cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService) {
   this(chatClient, mcp, embedTools, userConversation, file, skillStorage, knowledge, properties,
           toolCallLogRepository, capabilityService, chatUsageService,
-          io.micrometer.observation.ObservationRegistry.NOOP);
+          io.micrometer.observation.ObservationRegistry.NOOP, null);
  }
 
  public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
@@ -83,6 +90,19 @@ public class DefaultChat implements IChat {
                     CapabilityService capabilityService,
                     cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
                     io.micrometer.observation.ObservationRegistry observationRegistry) {
+  this(chatClient, mcp, embedTools, userConversation, file, skillStorage, knowledge, properties,
+          toolCallLogRepository, capabilityService, chatUsageService, observationRegistry, null);
+ }
+
+ public DefaultChat(ChatClient chatClient, IMcp mcp, List<IEmbedTool> embedTools,
+                    IUserConversation userConversation, IFile file,
+                    ISkillStorage skillStorage, IKnowledge knowledge,
+                    LoomAgentProperties properties,
+                    cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
+                    CapabilityService capabilityService,
+                    cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
+                    io.micrometer.observation.ObservationRegistry observationRegistry,
+                    cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringAuditRepository) {
   this.chatClient = chatClient;
   this.mcp = mcp;
   this.embedTools = embedTools;
@@ -96,6 +116,7 @@ public class DefaultChat implements IChat {
   this.chatUsageService = chatUsageService;
   this.observationRegistry = observationRegistry != null
           ? observationRegistry : io.micrometer.observation.ObservationRegistry.NOOP;
+  this.steeringAuditRepository = steeringAuditRepository;
  }
 
  private final cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository;
@@ -269,6 +290,10 @@ public class DefaultChat implements IChat {
       // 默认 10/1800 与 LoopProperty 一致)。
       .maxContinuations(properties.getLoop().getMaxContinuations())
       .runTimeoutSeconds(properties.getLoop().getRunTimeoutSeconds())
+      // Task 9(S4):steering 注入审计接线 —— 仓储 + 本请求归属逐请求传入
+      // (advisor 本身 per-request,seq 计数器随实例 per-run 重启)。仓储缺省
+      // null(旧直连构造/未装配)= 审计关闭,注入行为与 S4 前逐字节一致。
+      .steeringAudit(steeringAuditRepository, conversationId, username)
       .build());
   // StreamRunContext 经 SSE lambda → request attribute → advisor context 传递(Task 6 接线:
   // SseController 在调 chat.stream() 前 request.setAttribute(CONTEXT_KEY, ctx);

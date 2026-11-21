@@ -1,6 +1,7 @@
 package cn.wubo.spring.ai.loom.agent.chat;
 
 import cn.wubo.spring.ai.loom.agent.model.LoomAgentProperties;
+import cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -20,14 +21,16 @@ import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.lang.Nullable;
 import reactor.core.publisher.Flux;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Loom agentic loop advisor —— 子类化 Spring AI {@link ToolCallingAdvisor},接管主聊天
  * 工具调用循环的迭代边界(spec 2026-11-21 agentic-loop-steering,Task 5 骨架 / Task 6
- * 迭代收口写 / Task 7 steering 注入 + inbox 驱动续跑 + 护栏)。
+ * 迭代收口写 / Task 7 steering 注入 + inbox 驱动续跑 + 护栏 / Task 9 注入审计接线 S4)。
  *
  * <p><b>S1 抑制语义(已按 spring-ai-client-chat 2.0.2 源核实,回归锁
  * {@code LoomAgenticLoopAdvisorNoOpTest})</b>:
@@ -129,12 +132,33 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   /** run 活跃时长上限秒数(D-3:暂停区间不计;区别于 chat.timeout-seconds 单次调用超时)。 */
   private final int runTimeoutSeconds;
 
+  /**
+   * steering 注入审计仓储(Task 9 / S4,spec §5.9)。null = 未接线(子任务直连构造 /
+   * 消费方替换 advisor 不带审计)→ 注入路径零副作用,行为与 S4 前逐字节一致。
+   */
+  @Nullable
+  private final ILoomChatSteeringRepository steeringAuditRepo;
+
+  /** 审计行归属(逐请求由 DefaultChat 经 builder 显式传入;任一为 null 视同未接线)。 */
+  @Nullable
+  private final String steeringConvId;
+  @Nullable
+  private final String steeringUsername;
+
+  /**
+   * 本 run 注入序号(Task 9 "seq = 本 run 内注入序号",从 1 单调递增)。advisor
+   * 逐请求 new(DefaultChat.stream per-request builder().build())⇒ 计数器天然
+   * per-run 重启;内层 drain 与续跑残留共用同一 advisor 实例 ⇒ 跨迭代持续递增不重号。
+   */
+  private final AtomicInteger steeringSeq = new AtomicInteger(0);
+
   protected LoomAgenticLoopAdvisor(ToolCallingManager toolCallingManager,
                                    ToolExecutionEligibilityChecker toolExecutionEligibilityChecker,
                                    int advisorOrder,
                                    boolean conversationHistoryEnabled) {
     this(toolCallingManager, toolExecutionEligibilityChecker, advisorOrder, conversationHistoryEnabled,
-        LOOP_DEFAULTS.getMaxContinuations(), LOOP_DEFAULTS.getRunTimeoutSeconds());
+        LOOP_DEFAULTS.getMaxContinuations(), LOOP_DEFAULTS.getRunTimeoutSeconds(),
+        null, null, null);
   }
 
   protected LoomAgenticLoopAdvisor(ToolCallingManager toolCallingManager,
@@ -143,9 +167,25 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
                                    boolean conversationHistoryEnabled,
                                    int maxContinuations,
                                    int runTimeoutSeconds) {
+    this(toolCallingManager, toolExecutionEligibilityChecker, advisorOrder, conversationHistoryEnabled,
+        maxContinuations, runTimeoutSeconds, null, null, null);
+  }
+
+  protected LoomAgenticLoopAdvisor(ToolCallingManager toolCallingManager,
+                                   ToolExecutionEligibilityChecker toolExecutionEligibilityChecker,
+                                   int advisorOrder,
+                                   boolean conversationHistoryEnabled,
+                                   int maxContinuations,
+                                   int runTimeoutSeconds,
+                                   @Nullable ILoomChatSteeringRepository steeringAuditRepo,
+                                   @Nullable String steeringConvId,
+                                   @Nullable String steeringUsername) {
     super(toolCallingManager, toolExecutionEligibilityChecker, advisorOrder, conversationHistoryEnabled);
     this.maxContinuations = maxContinuations;
     this.runTimeoutSeconds = runTimeoutSeconds;
+    this.steeringAuditRepo = steeringAuditRepo;
+    this.steeringConvId = steeringConvId;
+    this.steeringUsername = steeringUsername;
   }
 
   @Override
@@ -275,9 +315,12 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
   // ==================== steering 注入(A4 + R11) ====================
 
   /**
-   * 把 steering 消息注入 instructions 并落 USER 行 + 发转正 ack 帧。
-   * 内层 drain 与外层续跑残留共用此点 —— Task 9(S4)审计行接线也在此单一入口。
-   * memory 写失败降级日志不打断注入(prompt 送达 ≠ 持久化,与 MemoryWriter 契约同策略)。
+   * 把 steering 消息注入 instructions 并落 USER 行 + 写 {@code loom_chat_steering}
+   * 审计行(Task 9 / S4)+ 发转正 ack 帧。
+   * 内层 drain 与外层续跑残留共用此点 —— "行存在 ⇔ 注入发生"的确定性契约正依赖
+   * 这单一入口(未注入终态走 {@link #emitTerminalAcks},绝不经此)。
+   * memory 写失败降级日志不打断注入(prompt 送达 ≠ 持久化,与 MemoryWriter 契约同策略);
+   * 审计写失败同样只 log.warn —— 审计缺行绝不掐断主聊天流(ToolCallHistory/usage 同策略)。
    */
   private void injectSteeringMessages(StreamRunContext ctx,
                                       List<SteeringInbox.SteeringMessage> messages,
@@ -290,8 +333,19 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
         log.warn("steering USER 行落库失败(注入继续): msg={} err={}", m.messageId(), ex.getMessage());
       }
       instructionsOut.add(userMessage);
-      // Task 9(S4)审计接线点:loom_chat_steering 行(conversation_id/username/
-      // message_text/injected_at=此刻/seq=本 run 注入序号)在此写入。本 task 留 hook 不建仓储。
+      // Task 9(S4)审计接线:注入即写 loom_chat_steering(spec §5.9)。seq = 本 run 注入
+      // 序号(steeringSeq 计数器,advisor per-request ⇒ per-run 从 1 单调);repo/归属
+      // 未接线(任一 null)跳过 —— 子任务/替换 advisor 路径零副作用。异常吞成日志:
+      // 审计行缺失由 Task 10 B2 豁免按"无行=未注入"降级处理,绝不反噬聊天流。
+      if (steeringAuditRepo != null && steeringConvId != null && steeringUsername != null) {
+        int seq = steeringSeq.incrementAndGet();
+        try {
+          steeringAuditRepo.record(steeringConvId, steeringUsername, m.text(), Instant.now(), seq);
+        } catch (Exception ex) {
+          log.warn("steering 审计行落库失败(注入继续): msg={} seq={} err={}",
+              m.messageId(), seq, ex.getMessage());
+        }
+      }
       ctx.emitAck(m.messageId());
     }
   }
@@ -515,6 +569,12 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
 
     private int maxContinuations = LOOP_DEFAULTS.getMaxContinuations();
     private int runTimeoutSeconds = LOOP_DEFAULTS.getRunTimeoutSeconds();
+    @Nullable
+    private ILoomChatSteeringRepository steeringAuditRepo;
+    @Nullable
+    private String steeringConvId;
+    @Nullable
+    private String steeringUsername;
 
     protected Builder() {
     }
@@ -528,6 +588,20 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
     /** run 活跃时长上限秒数(D-3),默认 1800。 */
     public Builder runTimeoutSeconds(int runTimeoutSeconds) {
       this.runTimeoutSeconds = runTimeoutSeconds;
+      return this;
+    }
+
+    /**
+     * steering 注入审计接线(Task 9 / S4,spec §5.9):仓储 + 行归属(convId/username)。
+     * 三者任一为 null ⇒ 审计整组关闭(注入路径零副作用)—— 子任务/替换 advisor/未配
+     * 仓储 bean 的部署天然落此形态。DefaultChat 逐请求挂载时显式传入。
+     */
+    public Builder steeringAudit(@Nullable ILoomChatSteeringRepository repo,
+                                 @Nullable String convId,
+                                 @Nullable String username) {
+      this.steeringAuditRepo = repo;
+      this.steeringConvId = convId;
+      this.steeringUsername = username;
       return this;
     }
 
@@ -550,13 +624,15 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
       copy.conversationHistoryEnabled(isConversationHistoryEnabled());
       copy.maxContinuations(this.maxContinuations);
       copy.runTimeoutSeconds(this.runTimeoutSeconds);
+      copy.steeringAudit(this.steeringAuditRepo, this.steeringConvId, this.steeringUsername);
       return copy;
     }
 
     @Override
     public LoomAgenticLoopAdvisor build() {
       return new LoomAgenticLoopAdvisor(getToolCallingManager(), getToolExecutionEligibilityChecker(),
-          getAdvisorOrder(), isConversationHistoryEnabled(), maxContinuations, runTimeoutSeconds);
+          getAdvisorOrder(), isConversationHistoryEnabled(), maxContinuations, runTimeoutSeconds,
+          steeringAuditRepo, steeringConvId, steeringUsername);
     }
   }
 }

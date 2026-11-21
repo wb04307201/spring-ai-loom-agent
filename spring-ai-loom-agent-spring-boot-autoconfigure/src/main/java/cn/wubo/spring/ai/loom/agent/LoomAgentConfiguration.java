@@ -606,7 +606,10 @@ public class LoomAgentConfiguration {
                           cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository toolCallLogRepository,
                           cn.wubo.spring.ai.loom.agent.capability.CapabilityService capabilityService,
                           cn.wubo.spring.ai.loom.agent.token.ChatUsageService chatUsageService,
-                          ObjectProvider<io.micrometer.observation.ObservationRegistry> observationRegistryProvider) {
+                          ObjectProvider<io.micrometer.observation.ObservationRegistry> observationRegistryProvider,
+                          // Task 9(S4):steering 注入审计仓储 —— ObjectProvider 懒取,
+                          // bean 缺席(消费方未装配)= null = 审计关闭,注入路径零副作用。
+                          ObjectProvider<cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository> steeringAuditRepositoryProvider) {
             return new DefaultChat(chatClient, mcp, embedTools, userConversation, file,
                     skillStorage, knowledge, properties, toolCallLogRepository, capabilityService,
                     chatUsageService,
@@ -614,7 +617,8 @@ public class LoomAgentConfiguration {
                     // 的 ToolCallingManager。DefaultChatClientBuilder:105-106 auto-register 模板
                     // 本就带 client registry;S1 逐请求挂载抑制它后必须显式补回,否则工具
                     // Micrometer span 静默降级 NOOP(bean 缺席时与 Spring AI 默认一致)。
-                    observationRegistryProvider.getIfAvailable(() -> io.micrometer.observation.ObservationRegistry.NOOP));
+                    observationRegistryProvider.getIfAvailable(() -> io.micrometer.observation.ObservationRegistry.NOOP),
+                    steeringAuditRepositoryProvider.getIfAvailable());
         }
 
         // ============== ：loom_tool_call_log 仓储 ==============
@@ -623,6 +627,19 @@ public class LoomAgentConfiguration {
         public cn.wubo.spring.ai.loom.agent.tool.IToolCallLogRepository defaultToolCallLogRepository(
                 org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
             return new cn.wubo.spring.ai.loom.agent.tool.JdbcToolCallLogRepository(jdbcTemplate);
+        }
+
+        // ============== ：loom_chat_steering steering 注入审计仓储(Task 9 / S4) ==============
+        // schema 主路径是 V1.0 Flyway 段;ensureSchema() 是幂等兜底(仿
+        // loomScheduleExecutionRepository 的装配风格),保证绕过 Flyway 的部署同样可写。
+        @Bean
+        @ConditionalOnMissingBean(cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository.class)
+        public cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository defaultLoomChatSteeringRepository(
+                org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+            cn.wubo.spring.ai.loom.agent.tool.JdbcLoomChatSteeringRepository repo =
+                    new cn.wubo.spring.ai.loom.agent.tool.JdbcLoomChatSteeringRepository(jdbcTemplate);
+            repo.ensureSchema();
+            return repo;
         }
 
         @Slf4j
