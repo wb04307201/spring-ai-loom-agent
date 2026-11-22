@@ -1393,18 +1393,25 @@ const ui = {
    * @returns {{contentEl: HTMLElement, thinkingContainer: HTMLElement, thinkingBodyEl: HTMLElement}|null}
    *   新分段的三个挂载点;anchor 已脱离文档或找不到气泡时返回 null(调用方降级,不抛)
    */
-  startIterationSegment(anchorEl, index) {
+  startIterationSegment(anchorEl, index, opts) {
+    // Task 14:第三参 { withDivider:false } —— 历史回放复用同一分段机制但**不画分隔线**
+    // (spec §5.6 裁定:迭代分隔线是纯视觉装饰,回放不还原)。live iteration 帧两参调用
+    // 行为逐字节不变(EventBubbleBrowserIT 锁定)。
+    const withDivider = !opts || opts.withDivider !== false;
     if (!anchorEl || !anchorEl.isConnected) return null;
     const bubble = anchorEl.closest(".bubble");
     if (!bubble) return null;
     const sid = (anchorEl.id || "seg") + "-it-" + index;
     const actions = bubble.querySelector(".bubble-actions");
-    const divider = document.createElement("div");
-    divider.className = "iteration-divider";
-    divider.setAttribute("role", "separator");
-    divider.setAttribute("aria-label", "第 " + (Number(index) + 1) + " 轮迭代");
-    divider.innerHTML =
-      `<span class="iteration-divider-label">第 ${Number(index) + 1} 轮</span>`;
+    let divider = null;
+    if (withDivider) {
+      divider = document.createElement("div");
+      divider.className = "iteration-divider";
+      divider.setAttribute("role", "separator");
+      divider.setAttribute("aria-label", "第 " + (Number(index) + 1) + " 轮迭代");
+      divider.innerHTML =
+        `<span class="iteration-divider-label">第 ${Number(index) + 1} 轮</span>`;
+    }
     const thinkingTpl = document.createElement("div");
     // 思考分段 markup 与 renderBotMessage 模板同构(toggleThinking 按 id 契约工作)
     thinkingTpl.innerHTML = `
@@ -1423,11 +1430,11 @@ const ui = {
     contentEl.className = "bot-content iteration-segment";
     contentEl.style.margin = "16px";
     if (actions) {
-      bubble.insertBefore(divider, actions);
+      if (divider) bubble.insertBefore(divider, actions);
       bubble.insertBefore(thinkingContainer, actions);
       bubble.insertBefore(contentEl, actions);
     } else {
-      bubble.appendChild(divider);
+      if (divider) bubble.appendChild(divider);
       bubble.appendChild(thinkingContainer);
       bubble.appendChild(contentEl);
     }
@@ -1439,6 +1446,25 @@ const ui = {
     };
   },
 
+  /**
+   * Task 14(A6/G5/R25):历史回放气泡分组 —— 与 live(Task 12 事件驱动分组)收敛。
+   *
+   * 服务端(Task 10 ChatHistoryAssembler)已按 Instant 把 TOOL_CALL interleave 进消息时间轴,
+   * 响应顺序即时间序。真实 run 的工具完成时刻恒早于其迭代的 ASSISTANT 文本行落库时刻 ⇒
+   * 典型形态 [USER, TOOL(迭代1), ASSISTANT(迭代1), USER(steering), TOOL(迭代2), ASSISTANT(迭代2)]。
+   * 旧前端把 TOOL_CALL 挂 `_lastBotBubble || mainContent` —— 先于本轮 ASSISTANT 到达的工具
+   * 悬浮在 mainContent 顶部(R25 过渡态),或错挂进上一轮气泡(#3 缺陷)。分组规则(spec §5.6/§5.10):
+   *  · USER 行 → 用户气泡 + 开本轮 AI 气泡脚手架(本轮输出与工具都落进它;
+   *    无任何内容/工具的孤儿脚手架在轮次结束移除 —— 未回答的旧会话与改造前形态一致 A1);
+   *  · ASSISTANT 行 → 填当前分段;同轮多条(纯迭代续跑,无 steering 夹行)经
+   *    startIterationSegment(withDivider:false) 同气泡开分段 —— 每段独立思考折叠,
+   *    分隔线不进历史(spec §5.6 裁定,与 live G4 的气泡级分组同构);
+   *  · TOOL_CALL → 缓冲,在分段/轮次收口处(ASSISTANT 填充后、USER 边界、列表末尾)统一
+   *    flush 到"当前分段正文之后、.bubble-actions 之前" —— 恒挂所属气泡内不悬浮。
+   *    旧形态(工具 ts 天然最晚)的 flush 位置 = 旧 _lastBotBubble 挂载位置,A1 逐位一致;
+   *  · 全部文本经 renderMarkdown(sanitize)或 textContent —— steering/助手文本载荷 inert
+   *    (Review Focus 1;旧 origin.innerHTML=原文 是真实 XSS 面,已改 textContent)。
+   */
   renderMessages(messages) {
     this.clearChat();
     this._currentAskUserBubble = null;
@@ -1450,55 +1476,122 @@ const ui = {
     // 后续 TOOL_CALL 会 append 到看不见的元素上（静默丢失）。
     this._lastBotBubble = null;
     if (!messages || messages.length === 0) return;
+
+    let histSeq = 0;
+    let bubble = null; // 当前 AI 气泡的 .bubble 元素
+    let curContent = null; // 当前分段的正文容器
+    let curThinkingBox = null; // 当前分段的思考折叠容器
+    let curThinking = null; // 当前分段的思考正文
+    let curOrigin = null; // 气泡级复制载荷
+    let segFilled = false; // 当前分段是否已消费过一条 ASSISTANT 行
+    let segIndex = 0; // 本气泡已开的分段数
+    let bubbleUsed = false; // 气泡已产出正文或工具(孤儿脚手架守卫)
+    const toolBuffer = [];
+
+    const openScaffold = () => {
+      const id =
+        "hist-" +
+        Date.now() +
+        "-" +
+        ++histSeq +
+        "-" +
+        Math.random().toString(36).slice(2, 6);
+      this.renderBotMessage(id); // 内部已记录 this._lastBotBubble
+      bubble = this._lastBotBubble;
+      curContent = document.getElementById(id);
+      curThinkingBox = document.getElementById("thinking-" + id);
+      curThinking = document.getElementById("thinking-body-" + id);
+      curOrigin = document.getElementById("origin-" + id);
+      segFilled = false;
+      segIndex = 0;
+      bubbleUsed = false;
+    };
+
+    // 工具恒挂进所属气泡内(正文之后、操作栏之前)—— 与实时渲染一致,绝不新建独立气泡。
+    const flushTools = () => {
+      if (!toolBuffer.length) return;
+      if (!bubble) openScaffold(); // 退化形态(工具先于一切消息):为工具开一个 AI 气泡,绝不悬浮 mainContent
+      const actions = bubble.querySelector(".bubble-actions");
+      for (const node of toolBuffer) {
+        bubble.insertBefore(node, actions);
+        if (window.ToolCallRenderer) window.ToolCallRenderer.bindInteractions(node);
+      }
+      toolBuffer.length = 0;
+      bubbleUsed = true;
+    };
+
+    const pruneScaffold = () => {
+      if (bubble && !bubbleUsed) {
+        const item = bubble.closest(".chat-item-left");
+        if (item) item.remove();
+        if (this._lastBotBubble === bubble) this._lastBotBubble = null;
+      }
+      bubble = null;
+      curContent = null;
+      curThinkingBox = null;
+      curThinking = null;
+      curOrigin = null;
+      segFilled = false;
+      segIndex = 0;
+      bubbleUsed = false;
+    };
+
     for (const msg of messages) {
       const role = msg.messageType || msg.role || msg.getMessage?.();
       const content =
         msg.text || msg.content || msg.getContent?.() || msg.getText?.() || "";
       if (role === "USER" || role === "user") {
+        flushTools(); // 用户行之前缓冲的工具属上一轮(旧形态:工具 ts 最晚)
+        pruneScaffold(); // 上一轮无输出(未回答/立即停止)→ 移除空脚手架
         this.renderUserMessage(content);
+        openScaffold(); // 用户轮次拥有自己的 AI 气泡:先于 ASSISTANT 行到达的工具落在本气泡(R25 收敛)
       } else if (
         role === "ASSISTANT" ||
         role === "assistant" ||
         role === "MODEL"
       ) {
-        const id =
-          "hist-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-        this.renderBotMessage(id);
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = renderMarkdown(content);
-        const origin = document.getElementById("origin-" + id);
-        if (origin) origin.innerHTML = content;
-        // 历史按轮思考：后端 attachThinking 注入 metadata.thinking，
-        // 填进 renderBotMessage 已创建的思考折叠区（默认隐藏，点开可见）
+        if (!bubble) openScaffold(); // 防御:无 USER 行(异常形态/降级尾部)时补开气泡,不悬浮
+        if (segFilled) {
+          // 同轮第二条起 = 纯迭代续跑 → 同一气泡内分段(G4),分隔线不进历史(spec §5.6)
+          const seg = this.startIterationSegment(curContent, ++segIndex, {
+            withDivider: false,
+          });
+          if (seg) {
+            curContent = seg.contentEl;
+            curThinkingBox = seg.thinkingContainer;
+            curThinking = seg.thinkingBodyEl;
+          }
+        }
+        if (curContent) curContent.innerHTML = renderMarkdown(content);
+        // 复制/下载载荷:必须 textContent(旧 innerHTML=原文 会把 <img onerror> 解析执行,
+        // display:none 不阻止 img 加载 —— Review Focus 1)。气泡级跨分段累加,与 live 同构。
+        if (curOrigin) curOrigin.textContent += content || "";
+        // 历史按迭代思考:后端 attachThinking 按 ±10s 配对注入 metadata.thinking,
+        // 填进当前分段的思考折叠区(默认隐藏,点开可见;与 live 每迭代独立折叠同构)
         const thinking = msg.metadata && msg.metadata.thinking;
         if (thinking) {
-          const tc = document.getElementById("thinking-" + id);
-          const tb = document.getElementById("thinking-body-" + id);
-          if (tc) tc.style.display = "";
-          if (tb) tb.innerHTML = renderMarkdown(thinking);
+          if (curThinkingBox) curThinkingBox.style.display = "";
+          if (curThinking) curThinking.innerHTML = renderMarkdown(thinking);
         }
-        // Show actions for historical messages
-        const actions = document.getElementById("actions-" + id);
-        if (actions) actions.style.display = "";
+        const actions = bubble && bubble.querySelector(".bubble-actions");
+        if (actions) actions.style.display = ""; // 有内容 → 操作栏落地
+        segFilled = true;
+        bubbleUsed = true;
+        flushTools(); // 本迭代缓冲的工具落在本分段正文之后(服务端序:工具先于本轮文本行)
       } else if (role === "TOOL_CALL") {
-        // 工具调用条目（后端从 loom_tool_call_log 注入）。
-        //
-        // 挂载位置：**上一个 AI 气泡内部**（.bot-content 之后、.bubble-actions 之前），
-        // 而非新建独立气泡 —— 与实时渲染一致（实时也是 bubble.appendChild），
-        // 也符合「一次 AI 回复 = 一个气泡」的心智模型。
-        // 此前渲染成独立 chat-item，视觉上把一次回复拆成了两段。
+        // 工具调用条目(后端从 loom_tool_call_log 注入,已按 createdAt interleave)。
+        // 不立即挂载:此刻还无法区分"本轮工具"(后面紧跟其 ASSISTANT 行)与"上一轮尾工具"
+        // (旧形态 ts 最晚)。缓冲,由 flushTools 在分段/轮次收口处挂进所属气泡。
         if (window.ToolCallRenderer) {
-          const host = this._lastBotBubble || this.mainContent;
           const node = document.createElement("div");
           node.className = "tool-call-inline";
           node.innerHTML = window.ToolCallRenderer.render(msg);
-          const actions = host.querySelector(".bubble-actions");
-          if (actions) host.insertBefore(node, actions);
-          else host.appendChild(node);
-          window.ToolCallRenderer.bindInteractions(node);
+          toolBuffer.push(node);
         }
       }
     }
+    flushTools();
+    pruneScaffold();
   },
 
   scrollToBottom() {

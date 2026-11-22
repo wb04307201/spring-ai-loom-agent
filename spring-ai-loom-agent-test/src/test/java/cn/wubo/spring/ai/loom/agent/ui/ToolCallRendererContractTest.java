@@ -191,26 +191,31 @@ class ToolCallRendererContractTest {
     }
 
     @Test
-    @DisplayName("历史工具调用挂在 AI 气泡内部，不是独立气泡")
+    @DisplayName("历史工具调用挂在 AI 气泡内部，不是独立气泡（R25：缓冲统一落位，无悬浮回退）")
     void toolCallsRenderInsideBotBubble() throws IOException {
         String appJs = source("/META-INF/resources/spring/ai/loom/app.js");
-        int start = appJs.indexOf("} else if (role === \"TOOL_CALL\") {");
-        assertThat(start).as("应能定位 TOOL_CALL 分支").isGreaterThan(-1);
-        String branch = appJs.substring(start, Math.min(start + 1200, appJs.length()));
+        int branch = appJs.indexOf("} else if (role === \"TOOL_CALL\") {");
+        assertThat(branch).as("应能定位 TOOL_CALL 分支").isGreaterThan(-1);
+        int start = appJs.indexOf("renderMessages(messages) {");
+        int end = appJs.indexOf("scrollToBottom() {", start);
+        String body = appJs.substring(start, end);
 
-        assertThat(branch)
-                .as("必须挂进上一个 AI 气泡（_lastBotBubble），而非新建 chat-item —— "
-                        + "独立气泡会把一次 AI 回复拆成两段")
-                .contains("this._lastBotBubble");
-        assertThat(branch)
-                .as("应插在 .bubble-actions 之前（即正文之后、操作按钮之前）")
-                .contains("insertBefore(node, actions)");
-        assertThat(branch)
+        assertThat(body)
+                .as("工具条目必须先缓冲、在分段/轮次收口处统一 flush —— 服务端 interleave 后"
+                        + "工具恒先于本轮 ASSISTANT 到达，立即挂载无法区分本轮/上轮归属")
+                .contains("toolBuffer.push(node)");
+        assertThat(body)
+                .as("flush 必须插进所属气泡 .bubble-actions 之前（正文之后），而非新建 chat-item")
+                .contains("bubble.insertBefore(node, actions)");
+        assertThat(body)
+                .as("R25 收敛：不得再有 `_lastBotBubble || mainContent` 悬浮回退（旧过渡态）")
+                .doesNotContain("|| this.mainContent");
+        assertThat(body)
                 .as("不应再新建 chat-item（旧实现）")
                 .doesNotContain("chat-item chat-item-left tool-call-item");
-        assertThat(branch)
-                .as("不应再 append 到 mainContent（那会变成独立气泡）")
-                .doesNotContain("this.mainContent.appendChild(item)");
+        assertThat(body)
+                .as("TOOL_CALL 分支不再直接 append 到 mainContent（那会变成悬浮）")
+                .doesNotContain("host.appendChild(node)");
 
         assertThat(appJs)
                 .as("renderBotMessage 必须记录最近的气泡供 TOOL_CALL 挂载")
