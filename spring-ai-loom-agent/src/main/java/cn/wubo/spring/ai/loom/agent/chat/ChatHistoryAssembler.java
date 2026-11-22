@@ -45,12 +45,12 @@ import java.util.Map;
  * 无工具/单迭代无 steering 会话的输出与改造前逐条一致,A1);
  * timestamp 为 null 的条目(nullsLast)落末尾。
  *
- * <p><b>与 renderMessages 的关系(Task 14 对接,已核 app.js:1357-1417)</b>:
- * 旧前端把 TOOL_CALL 挂到 `_lastBotBubble || mainContent`,交错后迭代 1 的工具
- * 排在其 ASSISTANT 文本行之前 → 旧前端下工具条渲染在气泡上方而非气泡内 ——
- * 这是 spec C17 明令的过渡态,气泡归位在 Task 14 前端改造后完成;
- * 消息条目相对顺序(USER 恒在其 ASSISTANT 之前)不变,分组按 USER 行切分
- * (§5.6/§5.10)因此语义成立。
+ * <p><b>与 renderMessages 的关系(Task 14 已收敛)</b>:服务端 interleave 后,迭代 1 的
+ * 工具条目排在其 ASSISTANT 文本行之前(真实时间序);app.js renderMessages 按 USER 行
+ * 开气泡脚手架,TOOL_CALL 条目缓冲三段 flush(迭代分段 / 轮次边界 / 列表末)归位进
+ * 对应 AI 气泡内 —— 过渡期"工具条浮气泡上方"的形态已消除,回放顺序与 live 流一致
+ * (回归锁 HistoryReplayBrowserIT,R25 MERGE GATE);消息条目相对顺序(USER 恒在其
+ * ASSISTANT 之前)不变,分组按 USER 行切分(§5.6/§5.10)语义成立。
  */
 public final class ChatHistoryAssembler {
 

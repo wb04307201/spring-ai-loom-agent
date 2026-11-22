@@ -143,7 +143,7 @@
 **协议依据(核实)**:CC SDK `response` 字段 = "用户 dismiss 问卷卡片、改打一段不属于任何具体问题的自由回复",模型收 "The user responded: …" 而非逐题答案;CC #33511 证实 "Chat about this" 点击即产生 tool_result(其 bug 是错带 `is_error:true` 把讨论意图覆盖成拒绝);changelog 6514 证实自由文本答案须用**中性措辞**(旧版叫模型"继续"即使用户要求先等待/解释)。⇒ 正确形态:**点击即返回非错误 dismiss 信号,工具立即解锁,卡片退出,输入回自由聊天**;用户后续文本是普通 steering,不是卡片答案。
 
 - **answer 端点扩展**:`POST /ask/{qid}/answer` body 增加 `mode` 字段:`ANSWER`(缺省,现状不变)/ `DISMISS`。`DISMISS` **不承载用户文本**(点击即触发,无输入),`CompletableFuture.complete` 一个 dismiss 哨兵(类比 `CANCELLED_SENTINEL` 但语义不同),`DefaultAskUserTool` 识别后返回**非错误**中性文本,形如:`[用户想先聊聊] 用户选择暂不回答以上问题,想先自由讨论。请等待用户接下来的补充消息(将在下一轮送达),不要自行猜测答案或强行推进原问题。` 措辞进 `AskUserGuidanceContractTest` 同款契约锁(断言:非 is_error、含"等待用户补充"、不含"用户未作答"/"继续"指令)。
-- **卡片 UI**:选项列表后恒有"其他(自定义答案)"(已有 `allowCustomInput`,= CC Other,文本作为答案值)+ 新增按钮 **"💬 聊聊这个"**。点击 → 立即 POST mode=DISMISS → 卡片 freeze 为第五种终态 **"💬 转入对话"**(摘要行折叠)→ 输入框回 **RUNNING**(非 CHAT 保活态),placeholder"说说你的想法,回车补充(下一轮生效)"。**无"返回选项"**(卡片已终态,不可逆;用户若反悔可在自由文本里说明,模型下一轮可重新 askUser)。
+- **卡片 UI**:选项列表后恒有"其他(自定义答案)"(已有 `allowCustomInput`,= CC Other,文本作为答案值)+ 新增按钮 **"💬 聊聊这个"**。点击 → 立即 POST mode=DISMISS → 卡片 freeze 为第五种终态 **"💬 转入对话"**(摘要行折叠)→ 输入框回 **RUNNING**(非 CHAT 保活态),**placeholder 复用 RUNNING 态统一文案"AI 运行中 · 输入补充,回车在下一轮生效"(实施裁定 R29:dismiss→RUNNING 经 `_setComposerMode` 单口收敛,不另开 dismiss 专属 placeholder —— 旧文案"说说你的想法,回车补充(下一轮生效)"废弃,详见 §5.5 三态机)**。**无"返回选项"**(卡片已终态,不可逆;用户若反悔可在自由文本里说明,模型下一轮可重新 askUser)。
 - **无保活、无 deadline 重置**:dismiss 即 complete future + `askUserRegistry.remove`,300s 计时对该问题终结。不存在"CHAT 打字期间超时 404"场景(A9 由构造消除)。
 - **多卡 pending**:输入框保持锁直到全部落定;提示条显示"N 个问题待回答";"聊聊这个"作用于最早一张,dismiss 后若仍有 pending 则继续 ASK_PENDING,全落定才回 RUNNING。
 - **历史渲染**:`tool-call-renderer.js` 只读卡片增加"转入对话"徽章;dismiss 的 result 是固定短文本(无用户原话),**天然不触发 2048 截断**(原 B6 豁免需求消除);用户后续自由文本作为 steering USER 行独立渲染(§5.6),不在卡片内。
@@ -391,6 +391,73 @@ Spike 代码即抛弃,结论写回本文档 §5 对应小节后再排实施计�
 | F3 | 存量 BrowserIT 开始/结束信号 | ChatSmoke/HttpTool 开始信号改判 | §5.5 |
 | F4 | 默认 test 不跑 *IT | IT 门仍需显式 -Dtest + 清三目录 | §6 |
 | F5 | 截图基线 | composer/气泡/流水改版 → 本机重建 | §6 |
+
+### 7.5.1 T16 核销(2026-11-22,逐项处置 task + 验证结果)
+
+处置 task 缩写:T1-T15 = 实施计划 task( commits `6a794285..43d52404`),T16 = 本文档基线/文档收尾。除注明外全部 **done(绿)**;验证结果列给出实际锁测试名。
+
+| 项 | 处置 task | 核销证据 | 状态 |
+|---|---|---|---|
+| A1 | T11(+T15 契约锁) | SteeringInputBrowserIT 11 例;ChatSmoke/HttpToolBrowserIT 开始信号改判(stop-btn 可见+isStreaming,R2 授权)结束信号兼容 | done |
+| A2 | T11 | SteeringInputBrowserIT isStreaming 8 消费点守卫用例(RUNNING 态 createNew/switchTo/startRename 仍被守卫) | done |
+| A3 | T11 | IndexInteractionsBrowserIT 不回归 + SteeringInputBrowserIT P1 锁(工具栏/侧栏运行中恒锁)+ a11y token 零漂移(A11yTokenDriftContractTest) | done |
+| A4 | T12 | EventBubbleBrowserIT 5 例(拆分时序单调/DOM 插位/累加器复位,4 变异红) | done |
+| A5 | T6+T12 | ReasoningPerIterationTest 10 例 + ChatReasoningHistoryTest 9 例继续绿 + EventBubbleBrowserIT 思考分段用例 | done |
+| A6 | T12/T14 | chip/askUser 卡归属气泡内嵌机制不动,跨迭代归属同气泡(EventBubbleBrowserIT 断言 chips 归属;HistoryReplayBrowserIT 回放 chip 归位) | done |
+| A7 | T11/T12 | scrollToBottom isAtBottom 守卫 + 浮动按钮不回归(存量用例 + 新气泡后 console error 全空) | done |
+| A8 | T7+T11 | stop 语义 = closeAndRemaining + NOT_INJECTED 终帧 + 灰态"未发送(已停止)"(SteeringInjectionTest/DisconnectDisposeIT + SteeringInputBrowserIT stop 标记用例) | done |
+| A9 | T11 | 灰态气泡 queued→ack 转正→stop 标记全链(SteeringInputBrowserIT ①-⑨) | done |
+| A10 | T11 | `+`/✎ setAttachmentLocked 运行中锁 + steer 纯文本不带 fileIds;FeatureGate/CanvasBoardBrowserIT 不回归 | done |
+| A11 | T11 | 技能 picker 运行中锁,onSendSuccess 流结束触发不变(SteeringInputBrowserIT gate 集) | done |
+| A12 | T11 | maybeAutoRename 仍由 turn-initial 触发;SteeringInputBrowserIT 插话不改会话名用例 | done |
+| A13 | 无改动 | convStatePanel 流结束 refresh 经 enableSend 汇聚点保留(T12 断言;存量 IT) | done |
+| A14 | T10+T14 | ChatHistoryAssembler 服务端 interleave + renderMessages USER 行分组三段 flush(HistoryReplayBrowserIT 6 例,R25 MERGE GATE 闭合) | done |
+| A15 | T11/T12/T14 | steering 文本同 esc 管线,origin 复制 innerHTML→textContent(T14 XSS 修复 + MarkdownSanitizeBrowserIT + 各 IT XSS 断言) | done |
+| A16 | 无改动 | md 导出按 DOM 序,多气泡天然兼容(T15 活体 E2E 手工冒烟过) | done |
+| B1 | T13 | 第五终态"💬 转入对话"freeze(AskUserDismissBrowserIT 6 例) | done |
+| B2 | T8 | mode=DISMISS + AskUserRegistry CAS(AskUserDismissTest 13 例,含 DISMISS/选项/超时四竞态) | done |
+| B3 | T8 | 300s 超时/cancelAll/断连释放不动(存量 + DISMISS 竞态单测) | done |
+| B4 | T8 | 非错误中性文本逐字锁 + pauseClock/resumeClock(D-3)(AskUserGuidanceContractTest 6 例 + 4 变异) | done |
+| B5 | T13+T16 | tool-call-renderer 只读卡"转入对话"徽章(AskUserDismissBrowserIT 用例⑥);T16 收紧行首锚定 /^…/(ToolCallRendererContractTest 13 例) | done |
+| B6 | 消除 | dismiss result 固定短文本天然不触 2048 截断 | done |
+| B7 | 不变 | 子任务/定时 schema 级排除 askUser(存量回归绿,T4-T5 链路上同样成立) | done |
+| B8 | T13 | 多卡 pending 锁到全部落定 + 提示条计数(AskUserDismissBrowserIT 多卡用例) | done |
+| C1 | T5-T7 | LoomAgenticLoopAdvisor 子类覆写,inbox 空退化 super(NoSteeringFrameSequenceContractTest 端到端 + NoOp 11 例 + 8 变异,T15) | done |
+| C2 | T4 | memory order 不变式 +300 下游关系保持(Issue1ChatMemoryAdvisorRegressionTest 不变式化,R1 授权 + 变异 order→+300 双红) | done |
+| C3 | T5 | S1 子类抑制 auto-register 端到端(StubChatModel+真 DefaultChatClient 恰 1 ToolAdvisor;LoomAgenticLoopAdvisorNoOpTest) | done |
+| C4 | T6 | SSE lambda 局部状态迁 StreamRunContext 共享 + 按迭代 flush(ReasoningPerIterationTest) | done |
+| C5 | T6 | reasoning 一行/外层迭代;单迭代行为不变(ChatReasoningHistoryTest 9 + ReasoningPerIterationTest 10) | done |
+| C6 | T6 | usage 逐轮重入口径不变、无双计(UsageNoDoubleCountTest 3 例 + S3 真链锁) | done |
+| C7 | 无改动 | lambda 逐帧 record 全零守卫路径不动 | done |
+| C8 | T3+T7 | Entry 持 inbox;register 返回 Entry(R10);断连三路径 dispose(DisconnectDisposeIT + SseEmitterRegistryIdentityTest 8 例) | done |
+| C9 | T7 | emitter onTimeout/onCompletion/onError 补 dispose + terminateInboxAndFlush(R11 可见终态;DisconnectDisposeIT) | done |
+| C10 | 无改动 | ToolContext 跨迭代不变,存量工具日志 IT 绿 | done |
+| C11 | 无改动 | LoggingToolCallback/JsonLenient 不动,JsonLenientTest 存量绿 | done |
+| C12 | T7 | 迭代失败 → 错误帧 + 收口 + 残留可见(SteeringInjectionTest 收口路径) | done |
+| C13 | T7 | chat.timeout-seconds 不变,loop.run-timeout-seconds 新键(ChatProviderTimeoutWiringTest 绿 + LoopPropertyBindingTest) | done |
+| C14 | T4-T6 | D-1 选 A:memory 写归 LoomMemoryAdvisor(turn-initial USER)+ loop advisor(逐迭代 ASSISTANT/steering USER),无重复行(R14 双写锁) | done |
+| C15 | T9 | loom_chat_steering V1.0 段 + ensureSchema 幂等 + emoji CLOB(LoomChatSteeringRepositoryTest 5 例真库 round-trip) | done |
+| C16 | T4 | 替换 bean + Issue1 锁演进为不变式(R1;变异 order 下游⇒红) | done |
+| C17 | T10+T14 | 历史端点 additive ts + 服务端 interleave;Task 10/14 同 release(R25 MERGE GATE 已闭合);T16 更新 ChatHistoryAssembler javadoc 过渡态描述为已收敛 | done |
+| D1 | T10 | B2 豁免修复倒序(ConversationFlowSteeringTimelineTest 8 例 + 变异 INNER/降级红) | done |
+| D2 | T10(数据面)+**T16(徽章渲染)** | steering=true 附标志(T10);conversation.js 渲染 .flow-steering-badge「用户插话」+ console.css token(本次 R32-G1);ConsoleAdminBrowserIT#steeringUserRowRendersBadgeInFlow | done |
+| D3 | 无改动 | SCHEDULE_FIRE/SUBTASK 配对不动,ConversationFlowScheduleFiresTest 等存量绿 | done |
+| D4 | 无改动 | 月度 token 口径不变(每模型轮一行,S3 验证);stats/user 页存量 IT 绿 | done |
+| D5 | 无改动 | callCount count(*) 语义不变 | done |
+| D6 | **deferred** | steeringCount 未进 computeStats —— §8 builder 裁量"是否新增"裁定为不加(徽章信息已在 USER 事件 data 上,统计卡再加一列与"每插话一行审计"重复;需要时从 loom_chat_steering 直接 count 即可) | deferred |
+| D7 | 无改动 | 重置密码/角色授权/市场零波及(存量 IT 绿) | done |
+| D8 | T16 | 截图基线本机重建(2026-11-22 干净库重建 10/10,含 index/admin-conversation/admin-console;rst_% 清表已补 resetVolatileTables,T15 Concern1) | done |
+| E1 | T5 | 逐请求挂载,子任务 advisor 列表不含 loop(SubTaskLoopExclusionTest 3 例) | done |
+| E2 | 无改动 | schedule 触发子任务同 E1(存量 schedule IT 绿) | done |
+| E3 | 无改动 | 子任务超时/max-concurrent 不动(存量绿) | done |
+| E4 | 无改动 | loop advisor 非 @ToolGroup 不进能力面;steer 端点经 AuthenticationFilter + 归属校验 403(RbacToolsBrowserIT 绿) | done |
+| E5 | 无改动 | MCP/http 工具不动(*Http* IT 绿;HttpToolBrowserIT 外网用例存在环境性瞬红,jsonplaceholder 不可达,T15 甄别非回归) | done |
+| E6 | 无改动 | 知识空间/文件/画板运行中锁保留,恒可见按钮不联动门控(FeatureGateBrowserIT 绿) | done |
+| F1 | T16 执行 | `mvn install -pl spring-ai-loom-agent,spring-ai-loom-agent-spring-boot-autoconfigure` 后跑 IT,无旧 jar 假绿 | done |
+| F2 | T9 | V1.0 新段 ⇒ 既有库清库重跑(项目既定升级策略,T16 回归全程清库) | done |
+| F3 | T11 | ChatSmoke/HttpTool 开始信号改判(R2 授权) | done |
+| F4 | T16 执行 | IT 门显式 -Dtest='*IT' + 清 target/{test-ds,test-users,e2e-files} | done |
+| F5 | T16 | 基线重建(index composer badge/admin-conversation 徽章链改版),10 页 0.0000% | done |
 
 ## 8. Builder 裁量项(无需回问用户)
 
