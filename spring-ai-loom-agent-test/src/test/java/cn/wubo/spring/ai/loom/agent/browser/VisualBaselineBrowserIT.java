@@ -86,6 +86,13 @@ class VisualBaselineBrowserIT extends BrowserTestBase {
      * 渲染非空态,与干净库基线像素不符(2026-09-11 全量 gate 实测 diff 3.16% / 2.45%)。
      * 基线编码的是干净库形态,故截图前直连 H2(AUTO_SERVER=TRUE 允许第二连接)把易变表
      * 清空,恢复干净库渲染;本类字母序最后,清空不影响后续 IT。
+     *
+     * <p><b>Task 16 / T15 Concern1:</b>额外删除 {@code rst_%} 测试用户 ——
+     * {@code AdminResetPasswordTest} 每次跑都 INSERT {@code rst_<uuid8>} 用户且无自清理
+     * (前一轮 {@code mvn test} 全量阶段会把这些行留在 file-based H2 里),admin-console
+     * 页用户表按序渲染这些行 → 全量序下 diff 1.4379% 超阈值(干净库单跑 0.0000%)。
+     * {@code user_role.username} 对 {@code user_info.username} 有 ON DELETE CASCADE FK,
+     * 级联自动清角色关联行;ESCAPE '\' 防下划线通配误伤(当前库无 rst 开头真实用户,纯防御)。
      */
     @BeforeAll
     static void resetVolatileTables() throws Exception {
@@ -101,6 +108,8 @@ class VisualBaselineBrowserIT extends BrowserTestBase {
                     "SPRING_AI_CHAT_MEMORY", "user_conversation"}) {
                 s.executeUpdate("DELETE FROM " + t);
             }
+            s.executeUpdate(
+                    "DELETE FROM user_info WHERE username LIKE 'rst\\_%' ESCAPE '\\'");
         }
     }
 
