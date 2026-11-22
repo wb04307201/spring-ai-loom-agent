@@ -211,6 +211,7 @@ ASK_PENDING: (有 pending askUser 卡片)
 ### 5.8 安全与隔离
 
 - steer 端点走 AuthenticationFilter + 会话归属校验(镜像 stop);inbox 按 `(username, conversationId)` 严格隔离,跨用户/跨会话不可见(与 subtask 隔离同款哲学)。
+- **⚠ R33 补齐(2026-11-22 final review 安全修)**:`DELETE spring/ai/loom/conversation/{id}` 原无条件跑 `cleanupConversationResources`(killAllByConversation + steering 审计 deleteByConversation 均**只按 conversation_id 匹配**)后再 username-scoped 软删 ⇒ 持他人 conv UUID 即可跨用户杀子任务 + 删审计行(R23 扩大既有缺口)。现归属校验(`userConversation.exists`,镜像 GET/steer 的 BUG-12a)前置,跨用户 403 结构化错误体。回归锁 `ConversationDeleteOwnershipIT`(真库:403 + 受害者资源存活 + owner 级联照常 + 软删后重复删 403)+ `ConversationRouterTest` 两例(守卫先于 cleanup 的零交互断言)。
 - steering 文本与 askUser 自定义答案文本均为用户可控输入:前端渲染经 `esc()`/textContent(现有惯例),后端进 prompt 前不执行任何解析;steering 8KB 上限,自定义答案沿用现有约束。
 - 不新增任何工具可见性面(loop advisor 不是工具,不进 RBAC;steering 是所有登录用户的对话能力,与 universal 工具同级)。
 - **inbox 深度上限**(新增):per-run 排队上限 20 条,超限 steer 端点返回 429 + 前端 toast"补充消息过多,请等待 AI 处理"。防 spam 撑爆内存/上下文。
@@ -254,8 +255,10 @@ CREATE TABLE loom_chat_steering (
 - **reasoning 配对**:每迭代一条 ASSISTANT 行 + 每迭代一条 reasoning 行(§5.4 flush),±10s 就近配对自然成立(无 steering 单迭代 run 仍一行,`ChatReasoningHistoryTest` 9 测试绿)。
 - **TOOL_CALL 归位(#3)**:历史端点给 Message 条目附 DB timestamp(additive 字段,仿 `ChatReasoningHistory` JDBC 取 ts)+ 服务端按 ts 把 `ToolCallHistory.inject` 的 TOOL_CALL interleave 进正确位置(不再 addAll 末尾)⇒ `renderMessages` 顺序渲染即归位到正确气泡。**取代旧"Message 形状不变"裁定**(additive 向后兼容,旧前端忽略新字段不破坏)。
 - **回放气泡分组**:memory 行序天然 = [USER, ASSISTANT…, USER(steering), ASSISTANT…] ⇒ `renderMessages` 按 USER 行切分即正确分组(原 §5.6 规则在 D-1 选 A 下**成立**,此前证伪是因合并 ASSISTANT 行,现已逐迭代拆)。
+- **⚠ inner-injection 回放分组与 live 的视觉差异(R36,已知局限,非缺陷)**:内层 drain 注入时 steering USER 行**先于**该迭代的单条 ASSISTANT 行落库(sequence 决定),故回放按 USER 行切分时,该迭代注入前与注入后的全部 assistant 文本被归并进**注入之后**的同一个气泡;而 live 在 steerAck 处做了气泡拆分(G4)。**DashScope/Qwen 上不可见**——其 tool round 只产出 tool_calls、content 为空(仓内实证过的 reality),iteration 文本仅出现在无 tool_call 的收口轮,恰在注入之后,分组结果与 live 视觉一致;**对"emit-content-with-tool_calls" 的 provider(如 Anthropic 原生 thinking/text 块与 tool_use 同轮并出)会显现**回放气泡吞并早期文本与 live 拆分不一致。这是 D-1 选 A 的 **per-iteration 持久化粒度的固有结果**(ASSISTANT 行按外层迭代聚合,无迭代内子边界),要消除须引入逐模型轮持久化——超出特性范围。裁定:**接受现状,不修**,回归/文档记录。
 - **Issue1 回归锁演进**:`Issue1ChatMemoryAdvisorRegressionTest` 断言改为"memory advisor order < ToolCallingAdvisor.DEFAULT_ORDER + 实现 MemoryAdvisor 接口 + conversationHistoryEnabled 不被下游检测关闭",不再断言精确类名 `MessageChatMemoryAdvisor`。变异:把 LoomMemoryAdvisor order 改到 +300 下游 ⇒ 红。
 - **S2 改验**:LoomMemoryAdvisor 逐迭代/逐注入写入无重复行、无遗漏;next-turn prompt 顺序与 live 一致;无 steering 单迭代 run 的 memory 行布局与改造前完全相同(A1)。
+- **⚠ 工具调用上限 breach:可达性与降级定性(R35,2026-11-22 final review 订正,推翻 Task 7 ⑨ 的"dormant"判定)**:Task 7 曾判 returnDirect/ToolCallLimitExceededException breach 路径"仓内无使用,dormant"——**证伪**:Spring AI 2.0.2 `DefaultToolCallingManager` 默认携带**激活**上限(单工具 40 次 / 整轮 150 次 / `onLimitExceeded=THROW`),长 agentic run 真实可触达。触限时 2.0.2 `ToolCallingAdvisor.handleToolCallRecursion` 捕获异常后**直接返回 breach 单帧,不经过** `doFinalizeLoop(Stream)` ⇒ loop advisor 的 `finalizeIteration` 与外层续跑整体跳过。**降级安全**:`perIterationMode` 未置位 → `LoomMemoryAdvisor.after()` 兜底聚合单写 ASSISTANT(首迭代触限时文本不丢、无双写;续跑后迭代触限时前序迭代行已逐迭代落库,仅末轮 breach 文本不落,而该文本 live 已送达前端 —— 可接受);reasoning 缓冲与 inbox 残留未被收口消费,恰好落在 SseController onComplete 既有兜底通道(`flushReasoning + terminateInbox`)的处置面内,残留照发 NOT_INJECTED 终帧(R11/A2),流正常 complete 无 error 截断。回归锁:`ToolCallLimitBreachStreamTest`(2 例:常量哨兵 + 真实 2.0.2 流式循环触限降级形态)。
 
 ## 6. 回归门与变异自证
 

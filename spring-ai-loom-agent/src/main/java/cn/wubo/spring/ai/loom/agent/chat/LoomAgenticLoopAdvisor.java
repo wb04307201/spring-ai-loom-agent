@@ -529,6 +529,21 @@ public class LoomAgenticLoopAdvisor extends ToolCallingAdvisor {
     // 流式路径收口时入参 finalEmissions flux 常为空(末轮自带 usage 不补发),文本从
     // doAfterStream 缓存的末轮聚合响应读取;其 context 带同一 StreamRunContext 引用
     // (R14:终端 ChatModel*Advisor 以 Map.copyOf(request.context()) 透传到响应 context)。
+    //
+    // ⚠ R35(2026-11-22 final review 订正,推翻 Task 7 旧"dormant"定性):本钩子在
+    // **流式**工具调用上限 breach 路径**不会被调用** —— Spring AI 2.0.2
+    // DefaultToolCallingManager 默认上限是**激活**的(单工具 40 次 / 整轮 150 次 /
+    // onLimitExceeded=THROW,非"dormant 无使用"),长 agentic run 触限时
+    // ToolCallingAdvisor.handleToolCallRecursion(stream)捕获 ToolCallLimitExceededException
+    // 后直接返回 breach 单帧,**不经过本钩子** ⇒ 本迭代的 finalizeIteration 与外层续跑
+    // 整体跳过。注:call 路径 breach 是 `break` 出 do-while 后**照常进入 doFinalizeLoop**
+    // (收口写/续跑正常),不对称仅存在于 stream 路径。
+    // 降级安全(回归锁 ToolCallLimitBreachStreamTest):首外层迭代即触限时 perIterationMode
+    // 未置位 → LoomMemoryAdvisor.after() 兜底聚合单写 ASSISTANT 文本(工具轮本身带
+    // tool_calls,由 JdbcChatMemoryRepository 过滤,与 A1 行布局一致);续跑后的迭代触限时
+    // 前序迭代行已逐迭代落库,仅末轮 breach 文本不落(该文本 live 已流给前端,可接受降级)。
+    // reasoning 由 SseController onComplete 兜底 flush;inbox 残留由 onComplete
+    // terminateInbox 发 NOT_INJECTED 终帧(R11/A2)—— 流正常 complete,无 error 截断。
     ChatClientResponse lastRound = lastRoundAggregated.getAndSet(null);
     StreamRunContext ctx = runContextOf(lastRound);
     if (ctx == null) {
