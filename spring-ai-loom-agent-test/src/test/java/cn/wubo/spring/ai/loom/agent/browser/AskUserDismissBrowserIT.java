@@ -525,6 +525,8 @@ class AskUserDismissBrowserIT extends BrowserTestBase {
             assertThat(conv).isNotBlank();
 
             // 历史 GET mock:条目形状 = ToolCallHistory.inject 的真实产出
+            // 第三条 = Task 16/T13 minor① 陷阱卡:自定义**答案文本恰含 dismiss 哨兵字面**,
+            // dismissed 判定若不锚定行首会把这行误渲染成「转入对话」(徽章互斥 → 已答丢失)。
             String history = "[\n"
                     + " {\"messageType\":\"USER\",\"text\":\"帮我订午餐\"},\n"
                     + " {\"messageType\":\"ASSISTANT\",\"text\":\"先确认你的口味\"},\n"
@@ -539,7 +541,13 @@ class AskUserDismissBrowserIT extends BrowserTestBase {
                     + "  \"arguments\":{\"question\":\"喝什么?\",\"header\":\"饮品\","
                     + "   \"optionsJson\":\"[{\\\"label\\\":\\\"美式\\\"},{\\\"label\\\":\\\"拿铁\\\"}]\","
                     + "   \"multiSelect\":false},\n"
-                    + "  \"result\":\"[用户已回答] 拿铁\"}\n"
+                    + "  \"result\":\"[用户已回答] 拿铁\"},\n"
+                    + " {\"messageType\":\"TOOL_CALL\",\"toolName\":\"askUser\",\"toolCallId\":\"tc-trap\","
+                    + "  \"isError\":false,\"durationMs\":13000,\"truncated\":false,\n"
+                    + "  \"arguments\":{\"question\":\"备注?\",\"header\":\"陷阱\","
+                    + "   \"optionsJson\":\"[{\\\"label\\\":\\\"美式\\\"},{\\\"label\\\":\\\"拿铁\\\"}]\","
+                    + "   \"multiSelect\":false,\"allowCustomInput\":true},\n"
+                    + "  \"result\":\"[用户已回答] 他说[用户想先聊聊]\"}\n"
                     + "]";
             page.route(baseUrl + "/spring/ai/loom/conversation/" + conv, route ->
                     route.fulfill(new Route.FulfillOptions()
@@ -548,7 +556,7 @@ class AskUserDismissBrowserIT extends BrowserTestBase {
 
             page.evaluate("(id) => window._loomAgent.conversation.switchTo(id)", conv);
             page.waitForFunction(
-                    "() => document.querySelectorAll('.tool-call-inline .askuser-card').length === 2",
+                    "() => document.querySelectorAll('.tool-call-inline .askuser-card').length === 3",
                     null, WF_10S);
 
             Boolean dismissBadge = (Boolean) page.evaluate(
@@ -558,14 +566,29 @@ class AskUserDismissBrowserIT extends BrowserTestBase {
                             + " && !c.textContent.includes('未作答'); }");
             assertThat(dismissBadge).as("B5:dismiss 历史卡片显示转入对话徽章且不误标未作答").isTrue();
 
+            // T16/T13 minor① 核心断言:全列「转入对话」徽章恰 1 个(锚定失效时陷阱卡会被
+            // 误判 dismissed 出现第 2 个),且陷阱卡正确走已答路径显示答案原文。
+            assertThat(page.locator(".tool-call-inline .askuser-card .askuser-state-chat").count())
+                    .as("自定义答案含哨兵字面不得被误判转入对话(徽章恰 1)")
+                    .isEqualTo(1);
+            Boolean trapOk = (Boolean) page.evaluate(
+                    "() => { const c=[...document.querySelectorAll('.tool-call-inline .askuser-card')]"
+                            + "   .find(x=>x.dataset.toolCallId==='tc-trap');"
+                            + " if (!c) return false;"
+                            + " const ok=c.querySelector('.askuser-state-ok');"
+                            + " return !!ok && ok.textContent.includes('已答 ✓')"
+                            + "   && c.querySelector('.askuser-summary-text') !== null"
+                            + "   && c.querySelector('.askuser-summary-text').textContent.trim()==='他说[用户想先聊聊]'; }");
+            assertThat(trapOk).as("陷阱卡 result=[用户已回答] …[用户想先聊聊] 必须按已答渲染且答案原样").isTrue();
+
             // 只读:历史卡片绝无交互按钮(聊这个/提交)
             assertThat(page.locator(".tool-call-inline .ask-chat-btn").count())
                     .as("历史只读卡片不含「聊聊这个」按钮").isZero();
 
-            // A1:已答条目徽章/选中高亮逐字节不变
+            // A1:已答条目徽章/选中高亮逐字节不变(按 id 精确定位,不随卡片数量漂移)
             Boolean answeredOk = (Boolean) page.evaluate(
-                    "() => { const cards=[...document.querySelectorAll('.tool-call-inline .askuser-card')];"
-                            + " const c=cards.find(x=>!x.querySelector('.askuser-state-chat'));"
+                    "() => { const c=[...document.querySelectorAll('.tool-call-inline .askuser-card')]"
+                            + "   .find(x=>x.dataset.toolCallId==='tc-answer');"
                             + " return c.querySelector('.askuser-state-ok').textContent.includes('已答 ✓')"
                             + " && c.querySelector('.askuser-opt-chosen') !== null; }");
             assertThat(answeredOk).as("ANSWER 历史卡片不受第五终态影响").isTrue();

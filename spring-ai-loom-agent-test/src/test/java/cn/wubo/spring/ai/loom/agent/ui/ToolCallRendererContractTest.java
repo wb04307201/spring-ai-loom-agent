@@ -121,9 +121,10 @@ class ToolCallRendererContractTest {
     void dismissedTerminalBadge() throws IOException {
         String src = rendererSource();
         // Task 8(D-2) 契约:dismiss 的 tool result = spec §5.3 固定短文本前缀
+        // Task 16(T13 minor①)收紧:必须**行首锚定** —— 用户自定义答案恰含该字面时不误判
         assertThat(src)
-                .as("必须按 [用户想先聊聊] 前缀识别 DISMISS result(与后端 DefaultAskUserTool 文本耦合)")
-                .contains("\\[用户想先聊聊\\]");
+                .as("必须按 [用户想先聊聊] 行首锚定前缀识别 DISMISS result(与后端 DefaultAskUserTool 文本耦合)")
+                .contains("/^\\[用户想先聊聊\\]/");
         assertThat(src)
                 .as("dismissed 必须优先于 answer 判定(answered 取 null),否则徽章错显已答/答案比对错乱")
                 .contains("dismissed ? null : /\\[用户已回答\\]");

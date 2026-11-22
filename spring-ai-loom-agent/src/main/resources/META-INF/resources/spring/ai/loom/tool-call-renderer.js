@@ -73,7 +73,9 @@
     const result = stripOuterQuotes(String(entry.result || ""));
     // Task 13（D-2/B5）：第五终态"转入对话" —— DISMISS 的 tool result 是 Task 8 spec §5.3
     // 固定短文本（无用户原话，天然不触发 2048 截断），按前缀识别；与"已答/未作答"互斥。
-    const dismissed = /\[用户想先聊聊\]/.test(result);
+    // Task 16（T13 minor①）：锚定 ^ —— 用户自定义答案恰含该字面（如"[用户已回答] 他说
+    // [用户想先聊聊]"）时不误判 dismissed（result 前缀语义 = 后端固定文案恒在开头）。
+    const dismissed = /^\[用户想先聊聊\]/.test(result);
     // result 形如 "[用户已回答] 面条" —— 抽出答案部分用于高亮。
     // 注意：loom_tool_call_log.result_text 可能带外层 JSON 引号（"[用户已回答] x"），
     // 不剥离会导致答案比对失败、选中项不高亮（实测踩过）。
