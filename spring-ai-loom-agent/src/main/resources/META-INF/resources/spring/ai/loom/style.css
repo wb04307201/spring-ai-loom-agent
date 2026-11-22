@@ -465,6 +465,40 @@ body {
   border: 1px solid var(--border-color);
 }
 
+/* ===== Task 12: agentic-loop 迭代分段(spec 2026-11-21 steering,G4) =====
+   iteration 帧(纯续跑)在<b>同一 AI 气泡内</b>画轻量分隔线开新分段;只有用户插话
+   才拆新气泡。分隔线/分段容器全部复用既有 a11y token,无新增颜色。 */
+.iteration-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 16px 8px;
+}
+
+.iteration-divider::before,
+.iteration-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.iteration-divider-label {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
+
+/* 迭代分段的回答容器:与 .bot-content 同款但去掉顶部外边距(上方已有分隔线定位) */
+.iteration-segment {
+  margin-top: 0 !important;
+}
+
 /* User attachment strip — shown above the user message text so users can
    visually confirm what they sent (image thumbnails or doc-icon chips). */
 .user-attachments {

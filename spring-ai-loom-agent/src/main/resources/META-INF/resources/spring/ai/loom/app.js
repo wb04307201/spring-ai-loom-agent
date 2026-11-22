@@ -1379,6 +1379,64 @@ const ui = {
     // （而非新建独立气泡），见 renderMessages 的 TOOL_CALL 分支。
     this._lastBotBubble = item.querySelector(".bubble");
     this.scrollToBottom();
+    // Task 12(G4): 返回节点供 steering 拆分在「转正用户气泡之后」精确插位
+    return item;
+  },
+
+  /**
+   * Task 12(G4):纯迭代续跑的<b>同气泡分段</b> —— iteration 帧(index>0)到达时,在当前
+   * 接收输出的气泡内插入「分隔线 + 本迭代思考容器 + 新回答分段」。分隔线/思考/分段都插在
+   * .bubble-actions 之前(操作栏恒在气泡底部)。<b>不开新气泡</b>(G4:只有用户插话拆气泡)。
+   *
+   * @param anchorEl 当前写作目标元素(初始 bot-content / 上一分段 / askUser 重定向的容器)
+   * @param index    迭代序号(0-based;调用方已保证 >0)
+   * @returns {{contentEl: HTMLElement, thinkingContainer: HTMLElement, thinkingBodyEl: HTMLElement}|null}
+   *   新分段的三个挂载点;anchor 已脱离文档或找不到气泡时返回 null(调用方降级,不抛)
+   */
+  startIterationSegment(anchorEl, index) {
+    if (!anchorEl || !anchorEl.isConnected) return null;
+    const bubble = anchorEl.closest(".bubble");
+    if (!bubble) return null;
+    const sid = (anchorEl.id || "seg") + "-it-" + index;
+    const actions = bubble.querySelector(".bubble-actions");
+    const divider = document.createElement("div");
+    divider.className = "iteration-divider";
+    divider.setAttribute("role", "separator");
+    divider.setAttribute("aria-label", "第 " + (Number(index) + 1) + " 轮迭代");
+    divider.innerHTML =
+      `<span class="iteration-divider-label">第 ${Number(index) + 1} 轮</span>`;
+    const thinkingTpl = document.createElement("div");
+    // 思考分段 markup 与 renderBotMessage 模板同构(toggleThinking 按 id 契约工作)
+    thinkingTpl.innerHTML = `
+ <div class="thinking-container" id="thinking-${sid}" style="display: none;">
+ <div class="thinking-header" onclick="ui.toggleThinking('${sid}')">
+ <span class="thinking-title">思考过程</span>
+ <span class="thinking-arrow" id="arrow-${sid}">▼</span>
+ </div>
+ <div class="thinking-content" id="thinking-content-${sid}">
+ <div class="thinking-body" id="thinking-body-${sid}"></div>
+ </div>
+ </div>`;
+    const thinkingContainer = thinkingTpl.firstElementChild;
+    const contentEl = document.createElement("div");
+    contentEl.id = "iterseg-" + sid;
+    contentEl.className = "bot-content iteration-segment";
+    contentEl.style.margin = "16px";
+    if (actions) {
+      bubble.insertBefore(divider, actions);
+      bubble.insertBefore(thinkingContainer, actions);
+      bubble.insertBefore(contentEl, actions);
+    } else {
+      bubble.appendChild(divider);
+      bubble.appendChild(thinkingContainer);
+      bubble.appendChild(contentEl);
+    }
+    this.scrollToBottom();
+    return {
+      contentEl,
+      thinkingContainer,
+      thinkingBodyEl: document.getElementById("thinking-body-" + sid),
+    };
   },
 
   renderMessages(messages) {
@@ -2139,7 +2197,12 @@ const askUserCards = (() => {
       const bubbleEl = item.querySelector(".bubble");
       const slot = document.createElement("div");
       slot.className = "askuser-slot";
-      const botContent = bubbleEl.querySelector(".bot-content");
+      // Task 12: 气泡内可能存在多个 .bot-content(迭代分段)—— 取最后一个(当前写作分段),
+      // 卡片回答续写接在最新分段尾部;无分段时 last === 唯一基准容器,行为与旧版一致。
+      const botContents = bubbleEl.querySelectorAll(".bot-content");
+      const botContent = botContents.length
+        ? botContents[botContents.length - 1]
+        : null;
       bubbleEl.insertBefore(slot, botContent);
       ui._currentAnswerEl = botContent;
       ui._currentOriginEl = bubbleEl.querySelector('[id^="origin-"]');
@@ -2451,18 +2514,26 @@ const steering = {
     if (!state.isStreaming) this.onStreamEnd();
   },
 
-  /** SSE steerAck 帧(Task 2/7):INJECTED(含 legacy 缺省)转正;NOT_INJECTED 未发送终态。 */
+  /**
+   * SSE steerAck 帧(Task 2/7):INJECTED(含 legacy 缺省)转正;NOT_INJECTED 未发送终态。
+   * Task 12(G4):返回<b>转正的气泡节点</b>(仅 INJECTED 路径)—— chat.send 帧处理器据此
+   * 做事件驱动气泡拆分(封口旧 AI 气泡 + 在转正气泡后插新气泡);NOT_INJECTED / 找不到
+   * 气泡返回 null(不拆分)。
+   */
   onAck(ack) {
-    if (!ack || !ack.messageId || !ui.mainContent) return;
+    if (!ack || !ack.messageId || !ui.mainContent) return null;
     const el = ui.mainContent.querySelector(
       `.chat-item-queued[data-message-id="${CSS.escape(ack.messageId)}"]`,
     );
-    if (!el) return; // 气泡已随页面切换销毁 / 已被流结束兜底处理 —— 幂等跳过
+    if (!el) return null; // 气泡已随页面切换销毁 / 已被流结束兜底处理 —— 幂等跳过
+    // 幂等:重复 ack(异常时序)不再转正、不再触发拆分
+    if (el.dataset.steerState === "injected") return null;
     if (ack.status === "NOT_INJECTED") {
       ui._markUnsent(el, "未发送(已停止)");
-    } else {
-      ui._promoteQueued(el); // INJECTED / legacy 无 status 默认值
+      return null;
     }
+    ui._promoteQueued(el); // INJECTED / legacy 无 status 默认值
+    return el;
   },
 
   /**
@@ -2609,12 +2680,89 @@ const chat = {
     const id = Date.now();
     ui.renderBotMessage(id);
 
-    const answerEl = document.getElementById(id);
-    const originEl = document.getElementById("origin-" + id);
-    const thinkingEl = document.getElementById("thinking-body-" + id);
-
+    // Task 12(G4)事件驱动渲染目标 —— 本次流式回答的"当前写入气泡/分段"状态。
+    // 帧处理器不再硬绑初始气泡:cur* 可变,由 steerAck INJECTED 拆分(splitBubbleForSteering)
+    // 与 iteration 帧(ui.startIterationSegment)共同驱动;askUser 卡片重定向(ui._current*)
+    // 仍按既有优先级生效(只改 _current*,不改 curBubbleId 归属的气泡级 origin/操作栏)。
+    //  - answerText : 当前"写作分段"累加文本(iteration 分段时复位)
+    //  - bubbleOriginText : 当前"气泡"完整原始文本(split 时复位,跨分段累加)
+    //    —— origin-{bubbleId} 复制/下载载荷恒为整气泡文本(G4:分段是气泡内部事)
+    //  - reasonText : 当前"思考分段"累加文本(iteration/split 均复位;思考按迭代独立折叠)
+    let curBubbleId = id;
+    let curAnswerEl = document.getElementById(id);
+    let curOriginEl = document.getElementById("origin-" + id);
+    let curThinkingContainer = document.getElementById("thinking-" + id);
+    let curThinkingEl = document.getElementById("thinking-body-" + id);
     let answerText = "";
+    let bubbleOriginText = "";
     let reasonText = "";
+    let splitSeq = 0;
+
+    /**
+     * Task 12(G4):steerAck INJECTED → 事件驱动拆分。旧 AI 气泡封口(操作栏落地),
+     * 紧接"刚转正的用户插话气泡"之后新建 AI 气泡并切换写入目标 —— 时间线恒为
+     * 旧 AI → 用户插话 → 新 AI。askUser 重定向(_current*)一并清除:插话前卡片
+     * 留在旧气泡(已冻结),插话后新卡片/工具 chip 归属新气泡。
+     * @param promotedEl 刚转正的灰态气泡节点(steering.onAck 返回);为空则退回 append 末尾
+     */
+    const splitBubbleForSteering = (promotedEl) => {
+      // 1) 封口旧气泡:操作栏落地(此后旧气泡只读)
+      const oldActions =
+        ui._currentActionsEl || document.getElementById("actions-" + curBubbleId);
+      if (oldActions) oldActions.style.display = "";
+      // 2) 新气泡(字符串 id 避免与 Date.now() 初生气泡同毫秒撞 id)
+      const newId = "steer-" + Date.now() + "-" + ++splitSeq;
+      const item = ui.renderBotMessage(newId);
+      // 精确插位:转正气泡之后。多插话排队时保证时间线单调(后拆的气泡紧跟其插话)。
+      // promotedEl 缺席(竞态:气泡已随视图切换销毁)时保持 renderBotMessage 的 append 末尾。
+      if (promotedEl && promotedEl.parentNode && item) {
+        promotedEl.after(item);
+      }
+      curBubbleId = newId;
+      curAnswerEl = document.getElementById(newId);
+      curOriginEl = document.getElementById("origin-" + newId);
+      curThinkingContainer = document.getElementById("thinking-" + newId);
+      curThinkingEl = document.getElementById("thinking-body-" + newId);
+      answerText = "";
+      bubbleOriginText = "";
+      reasonText = "";
+      // 3) 重定向写入目标到新气泡(askUser/历史侧的 _current* 语义一并复位)
+      ui._currentAnswerEl = curAnswerEl;
+      ui._currentOriginEl = curOriginEl;
+      ui._currentActionsEl = document.getElementById("actions-" + newId);
+      ui._currentBubbleId = newId;
+      ui._currentAskUserBubble = null;
+      ui.scrollToBottom();
+    };
+
+    /**
+     * Task 12(G4):iteration 帧(index>0,后端仅续跑时发)→ 同一气泡内分段,不开新气泡。
+     * 插入轻量分隔线 + 新思考折叠容器 + 新回答分段;回答累加器复位(分段独立渲染),
+     * 气泡级复制载荷跨分段继续累加;思考累加器复位(每迭代独立,与后端按轮 flush 对齐)。
+     * 空气泡跳过规则:刚被 steerAck 拆分出的新气泡尚未产出任何文本时,拆分本身已承担
+     * 迭代边界(续跑注入 ack 先发、iteration 帧紧随其后),再加分段会在气泡顶部留下
+     * 无意义的分隔线 —— 直接并入当前分段。
+     */
+    const handleIterationFrame = (index) => {
+      if (!answerText && !bubbleOriginText && !reasonText) return;
+      const anchor = ui._currentAnswerEl || curAnswerEl;
+      const seg = ui.startIterationSegment(anchor, index);
+      if (!seg) return; // anchor 已游离(异常时序):本迭代文本并入当前分段,不抛错
+      curAnswerEl = seg.contentEl;
+      curThinkingContainer = seg.thinkingContainer;
+      curThinkingEl = seg.thinkingBodyEl;
+      answerText = "";
+      reasonText = "";
+      // 分段是气泡内部之事:_current* 重定向(askUser 容器)若正指向本气泡,切换到新分段
+      if (
+        ui._currentAnswerEl &&
+        ui._currentAnswerEl.closest &&
+        ui._currentAnswerEl.closest(".chat-item-left") ===
+          seg.contentEl.closest(".chat-item-left")
+      ) {
+        ui._currentAnswerEl = seg.contentEl;
+      }
+    };
 
     const record = {
       message: text,
@@ -2657,33 +2805,44 @@ const chat = {
           }
           // Task 11: steering 插话确认帧 —— 灰态气泡转正(INJECTED)/ 未发送终态(NOT_INJECTED)。
           // legacy 1-arg 帧无 status 字段,默认 INJECTED(Task 2 SteerAck 兼容构造器契约)。
+          // Task 12(G4):INJECTED = 插话已进模型输入 → 之后的 AI 输出属于新气泡,
+          // 事件驱动拆分必须在内容写入之前处理(同帧携带 steerAck+content 时内容进新气泡)。
           if (data.steerAck) {
-            steering.onAck(data.steerAck);
+            const promotedEl = steering.onAck(data.steerAck);
+            if (promotedEl) splitBubbleForSteering(promotedEl);
+          }
+          // Task 12(G4):迭代边界帧 —— 后端仅在外层续跑(beginIteration idx>0)发送;
+          // 同气泡内分段(不开新气泡)。空气泡刚拆出时跳过(拆分本身已承担边界,避免冗余分隔线)。
+          if (data.iteration && data.iteration.index > 0) {
+            handleIterationFrame(data.iteration.index);
           }
           // reasoning content
           if (data.reasoningContent) {
-            const thinkingContainer = document.getElementById("thinking-" + id);
-            if (thinkingContainer) thinkingContainer.style.display = "";
+            if (curThinkingContainer) curThinkingContainer.style.display = "";
             reasonText += data.reasoningContent;
-            if (thinkingEl) thinkingEl.innerHTML = renderMarkdown(reasonText);
+            if (curThinkingEl)
+              curThinkingEl.innerHTML = renderMarkdown(reasonText);
           }
           // answer content
           if (data.content) {
             answerText += data.content;
-            const targetEl = ui._currentAnswerEl || answerEl;
-            const targetOrigin = ui._currentOriginEl || originEl;
+            bubbleOriginText += data.content;
+            const targetEl = ui._currentAnswerEl || curAnswerEl;
+            const targetOrigin = ui._currentOriginEl || curOriginEl;
             if (targetEl) targetEl.innerHTML = renderMarkdown(answerText);
             // origin-* is the "copy raw / download" payload; it is read
             // via textContent downstream, so write raw text rather than
             // parsing it as HTML. Keeps `<img onerror>` etc. inert.
-            if (targetOrigin) targetOrigin.textContent = answerText;
+            // Task 12: bubble 级全文(跨迭代分段累加,拆分气泡时复位)。
+            if (targetOrigin) targetOrigin.textContent = bubbleOriginText;
           }
           ui.scrollToBottom();
         },
         () => {
           askUserCards.cancelAllActive("已结束");
           // complete
-          const actionsEl = ui._currentActionsEl || document.getElementById("actions-" + id);
+          const actionsEl =
+            ui._currentActionsEl || document.getElementById("actions-" + curBubbleId);
           if (actionsEl) actionsEl.style.display = "";
           ui._currentAskUserBubble = null;
           ui._currentAnswerEl = null;
@@ -2702,15 +2861,18 @@ const chat = {
         (error) => {
           askUserCards.cancelAllActive("已取消");
           // error
-          const actionsEl = ui._currentActionsEl || document.getElementById("actions-" + id);
+          const actionsEl =
+            ui._currentActionsEl || document.getElementById("actions-" + curBubbleId);
           if (actionsEl) actionsEl.style.display = "";
+          // Task 12: 错误文本落进"当前"气泡分段(拆分/分段后不能写回初始气泡)
+          const errTarget = ui._currentAnswerEl || curAnswerEl;
           ui._currentAskUserBubble = null;
           ui._currentAnswerEl = null;
           ui._currentOriginEl = null;
           ui._currentActionsEl = null;
           ui._currentBubbleId = null;
-          if (answerEl)
-            answerEl.innerHTML +=
+          if (errTarget)
+            errTarget.innerHTML +=
               '<br/><span style="color:var(--error-color)">发送失败：' +
               escapeHtml(error.message || "未知错误") +
               "</span>";
@@ -2722,8 +2884,9 @@ const chat = {
     } catch (error) {
       // AbortError = user-initiated stop, not a failure.
       if (!(error && error.name === "AbortError")) {
-        if (answerEl)
-          answerEl.innerHTML +=
+        const errTarget = ui._currentAnswerEl || curAnswerEl;
+        if (errTarget)
+          errTarget.innerHTML +=
             '<br/><span style="color:var(--error-color)">发送失败：' +
             escapeHtml(error.message || "未知错误") +
             "</span>";
