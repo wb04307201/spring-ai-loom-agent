@@ -20,7 +20,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *
  * <p><b>SSE 完成信号核实结论</b>(读 app.js send()/enableSend()/disableSend()/setStopButtonVisible()):
  * <ul>
- *   <li>流开始:disableSend() → #send-btn disabled + textContent="发送中..." + #stop-btn display:inline-block;</li>
+ *   <li>流开始(Task 11 契约演进,spec §5.5 裁定 R2):RUNNING 态输入区不再锁定
+ *       (G1 steering 插话特性本意)—— #send-btn 恒 enabled、文案恒"发送消息",开始信号
+ *       改判 #stop-btn 可见 &amp;&amp; window._loomAgent.state.isStreaming === true;</li>
  *   <li>流结束:ON_COMPLETE 与 error 回调都调 enableSend() + setStopButtonVisible(false)
  *       → #send-btn 恢复 enabled + textContent="发送消息" + #stop-btn display:none。</li>
  * </ul>
@@ -48,12 +50,13 @@ class ChatSmokeBrowserIT extends BrowserTestBase {
             page.fill("#textarea", "现在几点了?请调用时间工具回答,一句话即可。");
             page.click("#send-btn");
 
-            // ① 流开始信号:#send-btn 禁用 + #stop-btn 可见(disableSend(),真实 LLM 流
-            //    通常 30-90s,不会在轮询前就结束;30s 内连"开始"都没观察到 = 前端链路断)
+            // ① 流开始信号(Task 11 契约演进):RUNNING 态不再禁用 send-btn(G1 解锁输入),
+            //    改判 #stop-btn 可见 && state.isStreaming(真实 LLM 流通常 30-90s,
+            //    不会在轮询前就结束;30s 内连"开始"都没观察到 = 前端链路断)
             page.waitForFunction(
-                    "() => { const s = document.getElementById('send-btn');"
-                            + " const t = document.getElementById('stop-btn');"
-                            + " return s && s.disabled && t && t.style.display !== 'none'; }",
+                    "() => { const t = document.getElementById('stop-btn');"
+                            + " return t && t.style.display !== 'none'"
+                            + " && window._loomAgent && window._loomAgent.state.isStreaming === true; }",
                     null,
                     new Page.WaitForFunctionOptions().setTimeout(30_000).setPollingInterval(500));
 

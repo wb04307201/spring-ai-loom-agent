@@ -118,6 +118,10 @@ const state = {
   features: { knowledge: true }, // 功能开关(features 端点);默认 true,init 探测后覆写
   selectedSkill: null, // {name, description} | null，用户通过 / 命令精准选中的 Skill
   isStreaming: false,
+  // spec 2026-11-21 agentic-loop-steering Task 11: 输入区三态机 ∈ {IDLE, RUNNING, ASK_PENDING}。
+  // isStreaming 语义不变(= 有活跃流,8 消费点守卫仍生效);inputMode 只管输入区解锁状态。
+  // ASK_PENDING 接线在 Task 13(askUser 卡片 pending 时锁输入 + 提示条)。
+  inputMode: "IDLE",
   controller: null, // AbortController for SSE
   mcps: [],
   skills: [],
@@ -825,6 +829,29 @@ const api = {
     );
     return r.ok ? r.json() : null;
   },
+  /**
+   * steering 插话(Task 11):POST /stream/{convId}/steer,body {message}。
+   * 返回 {status, body} —— 调用方按 **HTTP status** 分支(400 body 无 code,403/429 有)。
+   * 契约:200 {queued:true,messageId} / 200 {queued:false}(无活跃 run 或正在收口,G2)/
+   * 400 空文本或超 8KB / 429 inbox 满(深度上限 20)/ 403 非会话归属。
+   */
+  async steer(convId, message) {
+    const r = await apiFetch(
+      `/spring/ai/loom/stream/${encodeURIComponent(convId)}/steer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({ message }),
+      },
+    );
+    let body = {};
+    try {
+      body = await r.json();
+    } catch (_) {
+      /* 非 JSON 响应(网关错误页等)→ 空对象,status 仍在 */
+    }
+    return { status: r.status, body };
+  },
   async streamChat(record, onChunk, onComplete, onError, signal) {
     const resp = await apiFetch(API.stream, {
       method: "POST",
@@ -1472,27 +1499,171 @@ const ui = {
   },
 
   enableSend() {
-    const ta = document.getElementById("textarea");
-    const btn = document.getElementById("send-btn");
-    ta.disabled = false;
-    btn.disabled = false;
-    btn.textContent = "发送消息";
     state.isStreaming = false;
+    ui._setComposerMode("IDLE");
     ui.setToolbarLocked(false);
+    ui.setAttachmentLocked(false);
     ui.setStopButtonVisible(false);
+    // R20 终帧竞态兜底 + #6 回退纪律(统一走 steering.onStreamEnd:等 ack 灰态→可见终态,
+    // queued:false 回退队列→本地流结束后补发;stop 意图优先则抑制补发并标"未发送(已停止)")。
+    steering.onStreamEnd();
     convStatePanel.refresh(); // refresh after every stream completion
   },
 
   disableSend() {
+    // Task 11 G1: RUNNING 解锁输入区(回车=steering 插话),不再锁 textarea/按钮 ——
+    // 但 isStreaming/工具栏/附件锁/侧栏锁全部保留(N3/N4,8 消费点守卫语义不变)。
+    // 旧文案"发送中..."取消:spec §5.5 裁定按钮文案恒为"发送消息"(结束信号兼容),
+    // 运行中提示改由旁挂 #steering-badge 承担。textarea 清空由 chat.send() 自己负责
+    // (回退补发的 overrideText 路径不碰 textarea,保住用户草稿)。
+    ui._setComposerMode("RUNNING");
+    state.isStreaming = true;
+    steering.onStreamStart();
+    ui.setToolbarLocked(true);
+    ui.setAttachmentLocked(true); // N3: + 附件 / ✎ 画板运行中保持锁定(steer 只收纯文本)
+    ui.setStopButtonVisible(true);
+  },
+
+  /**
+   * 输入区三态机(spec 2026-11-21 Task 11)。state.isStreaming 语义不变(= 有活跃流),
+   * inputMode 只管输入区:IDLE 普通发送 / RUNNING 回车=steering / ASK_PENDING(Task 13)锁输入+提示条。
+   */
+  _IDLE_PLACEHOLDER: null,
+  _setComposerMode(mode) {
+    state.inputMode = mode;
     const ta = document.getElementById("textarea");
     const btn = document.getElementById("send-btn");
-    ta.value = "";
-    ta.disabled = true;
-    btn.disabled = true;
-    btn.textContent = "发送中...";
-    state.isStreaming = true;
-    ui.setToolbarLocked(true);
-    ui.setStopButtonVisible(true);
+    if (!this._IDLE_PLACEHOLDER && ta) this._IDLE_PLACEHOLDER = ta.placeholder;
+    if (mode === "RUNNING") {
+      if (ta) {
+        ta.disabled = false;
+        ta.placeholder = "AI 运行中 · 输入补充,回车在下一轮生效";
+        ta.focus();
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "发送消息";
+      }
+      const badge = ui._ensureSteeringBadge();
+      if (badge) badge.style.display = "inline-block";
+      return;
+    }
+    if (mode === "ASK_PENDING") {
+      // Task 13 接线:锁 textarea(placeholder 同步提示)+ 旁挂提示条。本 task 不产出该态,
+      // 锁定语义先行落地,保证 Task 13 只加提示条不改结构(spec §5.5 状态机定义)。
+      if (ta) {
+        ta.disabled = true;
+        ta.placeholder = "回答上方卡片,或点「聊聊这个」自由讨论";
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "发送消息";
+      }
+      const pendingBadge = document.getElementById("steering-badge");
+      if (pendingBadge) pendingBadge.style.display = "none";
+      return;
+    }
+    if (ta) {
+      ta.disabled = false;
+      ta.placeholder = this._IDLE_PLACEHOLDER || "";
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "发送消息";
+    }
+    const badge = document.getElementById("steering-badge");
+    if (badge) badge.style.display = "none";
+  },
+
+  /** RUNNING 态旁挂 badge(spec §5.5 裁定:不改按钮文案,提示走 badge)。 */
+  _ensureSteeringBadge() {
+    let b = document.getElementById("steering-badge");
+    if (b) return b;
+    const area = document.querySelector(".button-area");
+    if (!area) return null;
+    b = document.createElement("span");
+    b.id = "steering-badge";
+    b.className = "steering-badge";
+    b.textContent = "运行中 · 回车补充下一轮";
+    area.insertBefore(b, area.firstChild);
+    return b;
+  },
+
+  /** N3: + 附件 / ✎ 画板 运行中保持锁定(steer 只收纯文本,mid-run 附件变更 N4 之外)。 */
+  setAttachmentLocked(locked) {
+    for (const id of ["image-add-btn", "canvas-add-btn"]) {
+      const btn = document.getElementById(id);
+      if (!btn) continue;
+      btn.disabled = locked;
+      if (locked) {
+        btn.setAttribute("aria-disabled", "true");
+        btn.title = "请等待 AI 回复完成";
+      } else {
+        btn.removeAttribute("aria-disabled");
+        btn.title = id === "image-add-btn" ? "上传图片/文档" : "画板绘图";
+      }
+    }
+  },
+
+  /** 灰态排队气泡:kind='queued'(已入服务端 inbox,等 steerAck)/ 'fallback'(queued:false/403,本地 complete 后补发)。 */
+  renderQueuedUser(messageId, text, kind) {
+    const item = document.createElement("div");
+    item.className = "chat-item chat-item-right chat-item-queued";
+    item.dataset.steerState = kind;
+    if (messageId) item.dataset.messageId = messageId;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    // Review Focus 1:插话文本用户可控 —— 只走 textContent,永不 innerHTML / renderMarkdown(XSS inert)
+    const body = document.createElement("div");
+    body.className = "queued-body";
+    body.style.margin = "16px";
+    body.textContent = text;
+    const note = document.createElement("div");
+    note.className = "queued-note";
+    note.textContent =
+      kind === "queued" ? "排队中 · 将在下一轮注入" : "将在本轮结束后作为新消息发送";
+    bubble.append(body, note);
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.innerHTML = `<img src="${userImage}" alt="用户"/>`;
+    item.append(bubble, avatar);
+    this.mainContent.appendChild(item);
+    this.scrollToBottom();
+    return item;
+  },
+
+  /** R20:流结束兜底 —— 仍在等 ack 的灰态一律转"未发送"可见终态(A2)。 */
+  _resolveQueuedAwaits(noteText) {
+    if (!this.mainContent) return;
+    for (const el of this.mainContent.querySelectorAll(
+      '.chat-item-queued[data-steer-state="queued"]',
+    )) {
+      ui._markUnsent(el, noteText);
+    }
+  },
+
+  /** steerAck INJECTED → 灰态转正:去灰 class + 去排队标注(视觉回归普通用户气泡)。 */
+  _promoteQueued(el) {
+    el.classList.remove("chat-item-queued");
+    el.dataset.steerState = "injected";
+    const note = el.querySelector(".queued-note");
+    if (note) note.remove();
+  },
+
+  /** 可见终态:未发送(stop/护栏/断连收口/回退被抑制)。textContent,绝不 innerHTML。 */
+  _markUnsent(el, noteText) {
+    if (el.dataset.steerState === "unsent") return;
+    el.classList.remove("chat-item-queued");
+    el.classList.add("chat-item-unsent");
+    el.dataset.steerState = "unsent";
+    let note = el.querySelector(".queued-note");
+    if (!note) {
+      note = document.createElement("div");
+      note.className = "queued-note";
+      const bubble = el.querySelector(".bubble");
+      if (bubble) bubble.appendChild(note);
+    }
+    note.textContent = noteText || "未发送";
   },
 
   setStopButtonVisible(visible) {
@@ -2198,12 +2369,161 @@ const subTaskChips = (() => {
 })();
 
 // ===================== §7 Chat Engine =====================
-const chat = {
-  async send() {
+/**
+ * steering 前端状态机(spec 2026-11-21 Task 11)。
+ *
+ * 职责:RUNNING 态插话发送(api.steer)、灰态排队气泡生命周期(queued → steerAck 转正 /
+ * NOT_INJECTED 未发送 / queued:false·403 本地回退)、#6 回退纪律(补发必须等本地流
+ * complete,不抢 register;stop 意图优先 → 抑制回退标未发送)。
+ */
+const steering = {
+  /** 本地回退队列:元素 {bubble, text} —— steer 返 queued:false/403 时入队。 */
+  _fallback: [],
+  /** stop 意图优先标志:stopStream 置位 → 本流结束时抑制回退补发并标未发送。 */
+  _stopSuppressedFallback: false,
+
+  /** RUNNING 态回车入口(由 chat.send 分派进来)。 */
+  async sendSteering(text) {
+    const convId = state.conversationId;
     const ta = document.getElementById("textarea");
-    const text = ta.value.trim();
+    // 条件清空:await 期间用户可能继续输入(输入区解锁),只清本次插话对应的文本,
+    // 新草稿留在框内;被拒路径(400/429/网络)完全不碰 textarea(文本从未被清)。
+    const consume = () => {
+      if (ta.value.trim() === text) ta.value = "";
+    };
+    if (!convId) {
+      consume();
+      this._queueFallback(text);
+      return;
+    }
+    const res = await api.steer(convId, text);
+    const status = res.status;
+    const body = res.body || {};
+    if (status === 200 && body.queued === true && body.messageId) {
+      // 服务端已入 inbox → 灰态排队气泡(data-message-id 与 ack 帧一一对应)
+      consume();
+      ui.renderQueuedUser(body.messageId, text, "queued");
+      // R20 竞态兜底:steer 响应晚于本地流完成(ack 帧不可能再送达/已随流处理完)
+      // → 立即走 onStreamEnd 把等 ack 灰态转可见终态,不留无主灰态。
+      if (!state.isStreaming) this.onStreamEnd();
+      return;
+    }
+    if (status === 200 || status === 403) {
+      // queued:false(无活跃 run/收口,G2)与 403(R20 新会话 TOCTOU:registry 已注册
+      // 但 user_conversation 行未落)同路径:本地回退气泡 + 等 complete 补发(#6)。
+      consume();
+      this._queueFallback(text);
+      return;
+    }
+    if (status === 429) {
+      // inbox 深度上限(20):toast 提示 —— 文本从未离开输入框,不蒸发、不排队
+      showToast(body.error || "补充消息过多,请等待 AI 处理", "error");
+      return;
+    }
+    if (status === 400) {
+      // 空文本/超 8KB(400 body 无 code,按 HTTP status 分支):文本留在输入框
+      showToast(body.error || "插话发送失败", "error");
+      return;
+    }
+    // 其他(HTTP 5xx/599 网络):文本留在输入框,用户可自行重试;不静默吞(A2)
+    showToast("插话发送失败：HTTP " + status, "error");
+  },
+
+  /** queued:false/403 回退:灰态气泡(data-steer-state=fallback)+ 本地队列,等 complete。 */
+  _queueFallback(text) {
+    const bubble = ui.renderQueuedUser(null, text, "fallback");
+    this._fallback.push({ bubble, text });
+    // 竞态:回退登记时本地流已结束(complete 事件已过,不会再有下一次 complete)
+    // → 立即补发(此刻无活跃 run,不违反 #6 的 register 竞态约束)。
+    if (!state.isStreaming) this.onStreamEnd();
+  },
+
+  /** SSE steerAck 帧(Task 2/7):INJECTED(含 legacy 缺省)转正;NOT_INJECTED 未发送终态。 */
+  onAck(ack) {
+    if (!ack || !ack.messageId || !ui.mainContent) return;
+    const el = ui.mainContent.querySelector(
+      `.chat-item-queued[data-message-id="${CSS.escape(ack.messageId)}"]`,
+    );
+    if (!el) return; // 气泡已随页面切换销毁 / 已被流结束兜底处理 —— 幂等跳过
+    if (ack.status === "NOT_INJECTED") {
+      ui._markUnsent(el, "未发送(已停止)");
+    } else {
+      ui._promoteQueued(el); // INJECTED / legacy 无 status 默认值
+    }
+  },
+
+  /**
+   * 本地流结束回调(enableSend 内调用;error/abort/stop 路径同样汇聚于此)。两件事:
+   * 1) R20 终帧竞态兜底 —— 等 ack 的灰态绝不会再有 steerAck(NOT_INJECTED 帧可能
+   *    被 stop 抢先完成 emitter 降级为仅日志),一律转可见终态(A2 绝不静默蒸发);
+   * 2) #6 回退纪律 —— queued:false/403 的回退只在流真正结束后补发(不抢 register);
+   *    stop 意图优先 —— 用户已点停止则不补发,回退气泡标"未发送(已停止)"。
+   */
+  onStreamEnd() {
+    const stopped = this._stopSuppressedFallback === true;
+    ui._resolveQueuedAwaits(stopped ? "未发送(已停止)" : "未发送(流已结束)");
+    if (stopped) {
+      for (const f of this._fallback) {
+        ui._markUnsent(f.bubble, "未发送(已停止)");
+      }
+      this._fallback = [];
+      // 标志粘滞到下一次 disableSend(onStreamStart 清)—— 在途 steer 响应晚于
+      // complete 到达时,补发路径仍须见到 stop 意图(#6 stop 意图优先)。
+      return;
+    }
+    if (this._fallback.length === 0) return;
+    // 附件仍在上传:普通发送会被 send() 的上传守卫拦 → 本轮不补发,灰态气泡保持可见,
+    // 等下一次 complete 再试(A2)。
+    if (state.pendingImages.some((img) => !img.fileId)) return;
+    const first = this._fallback.shift();
+    // 补发第一条:回退气泡由其后的普通用户气泡取代(remove),走 chat.send(text) 直接
+    // 携带文本(不碰 textarea —— 保住用户在运行期间的草稿;旧实现回填 textarea 会覆盖)。
+    // 其余(罕见:回退期间又插话多条)留在队列,下一条流 complete 时继续补发。
+    first.bubble.remove();
+    // setTimeout 0:延迟到当前 onComplete/onError 回调同步段之后再补发 —— 外层回调
+    // enableSend 之后还会 setStopButtonVisible(false)/loadList 收尾,若同步补发,
+    // 新流 disableSend 刚显示的 stop 按钮会被旧回调后续语句再次隐藏(新流无法停止)。
+    setTimeout(() => {
+      // 此刻若又处于流中/上传中(极端竞态):气泡重新挂回队首保持可见,等下一次 complete。
+      if (state.isStreaming || state.pendingImages.some((img) => !img.fileId)) {
+        if (ui.mainContent && !first.bubble.isConnected) ui.mainContent.appendChild(first.bubble);
+        this._fallback.unshift(first);
+        return;
+      }
+      chat.send(first.text);
+    }, 0);
+  },
+
+  /** stopStream 调用:抑制回退补发(stop 意图优先),剩余在队回退气泡由 enableSend 标未发送。 */
+  suppressFallbackOnStop() {
+    this._stopSuppressedFallback = true;
+  },
+
+  /** disableSend(新流开始)调用:防御式复位 stop 抑制标志(正常路径已在 onStreamEnd 消费)。 */
+  onStreamStart() {
+    this._stopSuppressedFallback = false;
+  },
+};
+
+const chat = {
+  /**
+   * overrideText(仅 steering 回退补发用):文本不进 textarea,保住用户期间的草稿。
+   * Task 11: state.isStreaming(RUNNING)下文本输入 = steering 插话,不走普通发送。
+   */
+  async send(overrideText) {
+    const ta = document.getElementById("textarea");
+    const text = overrideText != null ? String(overrideText) : ta.value.trim();
     if (!text && !state.isStreaming) {
       showToast("请输入消息内容", "error");
+      return;
+    }
+
+    // Task 11: RUNNING 态空文本 no-op(不弹旧错误),非空文本走 steering 插话,
+    // 绝不走普通发送(否则二次注册流)。附件守卫只在 IDLE 普通发送路径生效
+    // (N3:steer 只收纯文本,mid-run 附件变更不在第一期范围)。
+    if (state.isStreaming) {
+      if (!text) return;
+      await steering.sendSteering(text);
       return;
     }
 
@@ -2220,6 +2540,10 @@ const chat = {
       await conversation.createNew();
       if (!state.conversationId) return;
     }
+
+    // 旧 disableSend() 负责清空 textarea;Task 11 起 disableSend 不再动文本(RUNNING
+    // 解锁输入,清空是"消费"动作归 send 路径)。回退补发(overrideText)不碰 textarea。
+    if (overrideText == null) ta.value = "";
 
     ui.renderUserMessage(text, state.pendingImages.slice());
     ui.disableSend();
@@ -2272,6 +2596,11 @@ const chat = {
           // #1 AskUser:提问卡片事件帧(按字段分派,普通内容帧不受影响)
           if (data.askUser) {
             askUserCards.render(data.askUser);
+          }
+          // Task 11: steering 插话确认帧 —— 灰态气泡转正(INJECTED)/ 未发送终态(NOT_INJECTED)。
+          // legacy 1-arg 帧无 status 字段,默认 INJECTED(Task 2 SteerAck 兼容构造器契约)。
+          if (data.steerAck) {
+            steering.onAck(data.steerAck);
           }
           // reasoning content
           if (data.reasoningContent) {
@@ -2351,6 +2680,9 @@ const chat = {
   /** 主动停止 AI 流：调 /stream/{convId}/stop */
   async stopStream() {
     if (!state.isStreaming || !state.conversationId) return;
+    // Task 11 #6: stop 意图优先 —— 在途 queued:false 回退不再补发,abort 触发
+    // onComplete→enableSend→steering.onStreamEnd 统一把所有灰态标"未发送(已停止)"(A2)。
+    steering.suppressFallbackOnStop();
     const convId = state.conversationId;
     const btn = document.getElementById("stop-btn");
     if (btn) {
@@ -7040,6 +7372,7 @@ window._loomAgent = {
   imageUpload,
   auth,
   chat,
+  steering,
   conversation,
   ui,
   fileMgr,

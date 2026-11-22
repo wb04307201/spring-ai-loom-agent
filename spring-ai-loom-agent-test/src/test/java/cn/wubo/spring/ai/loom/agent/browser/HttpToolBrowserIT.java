@@ -146,11 +146,13 @@ class HttpToolBrowserIT extends BrowserTestBase {
     private void sendAndAwaitStream(Page page, String message) {
         page.fill("#textarea", message);
         page.click("#send-btn");
-        // ① 流开始:send 禁用 + stop 可见(页面初始态与"流结束"态相同,必须分两步)
+        // ① 流开始(Task 11 契约演进,spec §5.5 裁定 R2):RUNNING 态输入区不再禁用
+        //    send-btn(G1 steering 插话特性本意),开始信号改判 stop-btn 可见 && isStreaming。
+        //    页面初始态与"流结束"态相同,必须分两步等。
         page.waitForFunction(
-            "() => { const s=document.getElementById('send-btn');"
-                + " const t=document.getElementById('stop-btn');"
-                + " return s && s.disabled && t && t.style.display !== 'none'; }", null,
+            "() => { const t=document.getElementById('stop-btn');"
+                + " return t && t.style.display !== 'none'"
+                + " && window._loomAgent && window._loomAgent.state.isStreaming === true; }", null,
             new Page.WaitForFunctionOptions().setTimeout(30_000).setPollingInterval(500));
         // ② 流结束
         page.waitForFunction(

@@ -416,6 +416,55 @@ body {
   border-top-right-radius: 4px;
 }
 
+/* ===== steering 灰态排队气泡 + 运行中 badge(Task 11, spec 2026-11-21 §5.5) =====
+   灰态 = 插话已接受(服务端 inbox 或本地回退排队),尚未注入本轮模型上下文;
+   steerAck INJECTED 转正 = 移除灰 class 回归普通用户气泡;
+   未发送(终态)= 更弱 + 标注(A2 绝不静默蒸发)。
+   色值全部复用 F-2 后 a11y token(--text-secondary #475569 / --text-muted #64748b 等)。 */
+.chat-item-queued .bubble {
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: none;
+  opacity: 0.75;
+}
+
+.chat-item-queued .queued-note {
+  margin: -8px 16px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* steerAck NOT_INJECTED / stop 抑制 / 流结束兜底:可见终态,文本仍留气泡内 */
+.chat-item-unsent .bubble {
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-color);
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+.chat-item-unsent .queued-note {
+  margin: -8px 16px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.steering-badge {
+  display: none;
+  align-self: center;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: var(--secondary-color);
+  border: 1px solid var(--border-color);
+}
+
 /* User attachment strip — shown above the user message text so users can
    visually confirm what they sent (image thumbnails or doc-icon chips). */
 .user-attachments {
