@@ -1815,6 +1815,8 @@ const conversation = {
     }
     state.conversationId = created.conversationId || created.id;
     state.conversationTitle = defaultTitle;
+    // R28: 异会话残余回退项先标未发送终态(此刻旧气泡还挂在 DOM),再清视图
+    steering.onConversationSwitch();
     ui.clearChat();
     imageUpload.clear();
     await this.loadList();
@@ -1930,6 +1932,9 @@ const conversation = {
     selectedSkillTag.onConversationSwitch();
 
     state.conversationId = id;
+    // R28: 会话已切走 —— 异会话残余回退项就地标未发送终态(旧气泡此刻仍挂 DOM,
+    // renderMessages 清视图前)+ toast 可见;同会话项(切回场景)保留待补发。
+    steering.onConversationSwitch();
     try {
       subtaskPanel.setConvId(id);
     } catch (_) {}
@@ -2377,7 +2382,12 @@ const subTaskChips = (() => {
  * complete,不抢 register;stop 意图优先 → 抑制回退标未发送)。
  */
 const steering = {
-  /** 本地回退队列:元素 {bubble, text} —— steer 返 queued:false/403 时入队。 */
+  /**
+   * 本地回退队列:元素 {bubble, text, convId} —— steer 返 queued:false/403 时入队。
+   * convId 为入队时 state.conversationId 快照(R28) —— 补发只投递同会话项,
+   * 防止"一次 run 多条回退,残余项在用户切换会话后被投进另一会话"
+   * (违 per-conversation 隔离 + A2 可见终态)。
+   */
   _fallback: [],
   /** stop 意图优先标志:stopStream 置位 → 本流结束时抑制回退补发并标未发送。 */
   _stopSuppressedFallback: false,
@@ -2393,7 +2403,7 @@ const steering = {
     };
     if (!convId) {
       consume();
-      this._queueFallback(text);
+      this._queueFallback(convId, text);
       return;
     }
     const res = await api.steer(convId, text);
@@ -2412,7 +2422,7 @@ const steering = {
       // queued:false(无活跃 run/收口,G2)与 403(R20 新会话 TOCTOU:registry 已注册
       // 但 user_conversation 行未落)同路径:本地回退气泡 + 等 complete 补发(#6)。
       consume();
-      this._queueFallback(text);
+      this._queueFallback(convId, text);
       return;
     }
     if (status === 429) {
@@ -2429,10 +2439,13 @@ const steering = {
     showToast("插话发送失败：HTTP " + status, "error");
   },
 
-  /** queued:false/403 回退:灰态气泡(data-steer-state=fallback)+ 本地队列,等 complete。 */
-  _queueFallback(text) {
+  /**
+   * queued:false/403 回退:灰态气泡(data-steer-state=fallback)+ 本地队列,等 complete。
+   * R28:入队时快照 convId —— 补发只投递同会话项。
+   */
+  _queueFallback(convId, text) {
     const bubble = ui.renderQueuedUser(null, text, "fallback");
-    this._fallback.push({ bubble, text });
+    this._fallback.push({ bubble, text, convId });
     // 竞态:回退登记时本地流已结束(complete 事件已过,不会再有下一次 complete)
     // → 立即补发(此刻无活跃 run,不违反 #6 的 register 竞态约束)。
     if (!state.isStreaming) this.onStreamEnd();
@@ -2475,23 +2488,68 @@ const steering = {
     // 附件仍在上传:普通发送会被 send() 的上传守卫拦 → 本轮不补发,灰态气泡保持可见,
     // 等下一次 complete 再试(A2)。
     if (state.pendingImages.some((img) => !img.fileId)) return;
+    // R28 会话隔离:只补发与当前会话匹配的首项。异会话残余(切换时未被标终态的漏网项,
+    // 或入队瞬间会话已切走)→ 就地标未发送终态丢弃,绝不投递到别的会话。
+    while (
+      this._fallback.length > 0 &&
+      this._fallback[0].convId != null &&
+      this._fallback[0].convId !== state.conversationId
+    ) {
+      const stale = this._fallback.shift();
+      if (stale.bubble.isConnected) {
+        ui._markUnsent(stale.bubble, "未发送(已切换会话)");
+      }
+    }
+    if (this._fallback.length === 0) return;
     const first = this._fallback.shift();
     // 补发第一条:回退气泡由其后的普通用户气泡取代(remove),走 chat.send(text) 直接
     // 携带文本(不碰 textarea —— 保住用户在运行期间的草稿;旧实现回填 textarea 会覆盖)。
     // 其余(罕见:回退期间又插话多条)留在队列,下一条流 complete 时继续补发。
-    first.bubble.remove();
     // setTimeout 0:延迟到当前 onComplete/onError 回调同步段之后再补发 —— 外层回调
     // enableSend 之后还会 setStopButtonVisible(false)/loadList 收尾,若同步补发,
     // 新流 disableSend 刚显示的 stop 按钮会被旧回调后续语句再次隐藏(新流无法停止)。
+    // 气泡保持挂载直到真正补发前一瞬才 remove(重试/切换路径下文本始终可见,A2)。
     setTimeout(() => {
-      // 此刻若又处于流中/上传中(极端竞态):气泡重新挂回队首保持可见,等下一次 complete。
+      // 此刻若又处于流中/上传中(极端竞态):回插队首,气泡仍可见,等下一次 complete。
       if (state.isStreaming || state.pendingImages.some((img) => !img.fileId)) {
-        if (ui.mainContent && !first.bubble.isConnected) ui.mainContent.appendChild(first.bubble);
         this._fallback.unshift(first);
         return;
       }
+      // R28: 0ms 窗口内发生会话切换 —— 补发绝不能投递到新会话;就地标未发送终态后丢弃。
+      if (first.convId != null && first.convId !== state.conversationId) {
+        if (first.bubble.isConnected) {
+          ui._markUnsent(first.bubble, "未发送(已切换会话)");
+        }
+        return;
+      }
+      first.bubble.remove();
       chat.send(first.text);
     }, 0);
+  },
+
+  /**
+   * R28 会话切换钩子(switchTo/createNew 在 state.conversationId 变更后、clearChat/
+   * renderMessages 抹除气泡之前调用):异会话残余回退项就地标未发送终态并清出队列
+   * (气泡随后随视图切换消失,终态已可见 + toast 提示,不静默蒸发);同会话项保留待补发。
+   */
+  onConversationSwitch() {
+    if (this._fallback.length === 0) return;
+    const keep = [];
+    let marked = 0;
+    for (const f of this._fallback) {
+      if (f.convId === state.conversationId || f.convId == null) {
+        keep.push(f);
+        continue;
+      }
+      if (f.bubble.isConnected) {
+        ui._markUnsent(f.bubble, "未发送(已切换会话)");
+      }
+      marked++;
+    }
+    this._fallback = keep;
+    if (marked > 0) {
+      showToast(`已切换会话,${marked} 条排队补充未发送`, "warning");
+    }
   },
 
   /** stopStream 调用:抑制回退补发(stop 意图优先),剩余在队回退气泡由 enableSend 标未发送。 */

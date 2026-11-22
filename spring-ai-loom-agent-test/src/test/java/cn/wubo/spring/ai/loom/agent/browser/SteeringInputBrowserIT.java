@@ -43,7 +43,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * (灰态气泡 textContent 转义,Review Focus 1);⑤ isStreaming_guards_still_block_switch
  * (A2:isStreaming 语义不变,8 消费点守卫仍生效);⑥ stop_marks_gray_unsent(A2 可见终态 +
  * stop 抑制回退);⑦ forbidden 403 → 按 queued:false 回退(R20 TOCTOU);429 深度上限 →
- * toast + 文本回输入框。
+ * toast + 文本回输入框;⑨ 真实 LLM run 中真实 steer(A2 终态不蒸发);⑩⑪ R28 回退队列会话绑定
+ * (残余项跨会话不投递:附件闸门滞留 + 切换标 unsent / 在途响应晚于切换落原会话)。
  */
 @DisplayName("Task 11 前端输入三态机:steering 发送 + 灰态排队气泡 + 回退纪律")
 class SteeringInputBrowserIT extends BrowserTestBase {
@@ -116,6 +117,13 @@ class SteeringInputBrowserIT extends BrowserTestBase {
         page.route("**/stop", route -> route.fulfill(new Route.FulfillOptions()
                 .setStatus(200).setContentType("application/json; charset=UTF-8")
                 .setBody("{\"stopped\":true}")));
+    }
+
+    /** 扣住 steer 请求(不 fulfill):模拟"在途 steer 响应晚于会话切换到达"竞态窗口。 */
+    private static BlockingQueue<Route> holdSteers(Page page) {
+        BlockingQueue<Route> q = new LinkedBlockingQueue<>();
+        page.route("**/steer", q::add);
+        return q;
     }
 
     /** 用预编排 SSE 帧收尾一个被扣住的流;帧 JSON 原样进 data: 行(与后端 ChatResponseRecord 形态一致)。 */
@@ -550,6 +558,163 @@ class SteeringInputBrowserIT extends BrowserTestBase {
             // 网络层日志(HTTP 状态噪音,非 JS 异常),按前缀过滤而非放宽断言(同 ChatSmoke 约定)。
             assertThat(consoleErrorsOf(page))
                     .as("除 429 网络状态日志外无 JS console error")
+                    .noneMatch(e -> !e.startsWith("Failed to load resource"));
+        }
+    }
+
+    // ==================== ⑩ R28 回退队列会话绑定:残余项绝不跨会话投递 ====================
+
+    @Test
+    @DisplayName("run 内两条 queued:false 回退:附件闸门滞留队列 → 切换会话标 unsent 清出;残余项不发到新会话")
+    void fallback_never_delivered_across_conversations() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            BlockingQueue<Route> streams = holdStreams(page);
+            SteerScript script = new SteerScript();
+            script.body = "{\"queued\":false}";
+            List<String> steerReqs = steerBodies(page, script);
+
+            // 两个会话:先建 B 再建 A(最后建的为当前会话 A);从侧栏取 B 的 id
+            newConversation(page);
+            newConversation(page);
+            String convA = convId(page);
+            String convB = (String) page.evaluate(
+                    "(a) => [...document.querySelectorAll('#sidebarList .sidebar-item')]"
+                            + ".map(i => i.dataset.conversationId).find(id => id && id !== a)", convA);
+            assertThat(convB).as("需要第二个会话作为切换目标").isNotNull();
+
+            page.fill("#textarea", "第一条消息");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+
+            // 两条 queued:false 回退 → 两个 fallback 灰态气泡,均绑定会话 A
+            page.fill("#textarea", "补充一");
+            page.press("#textarea", "Enter");
+            page.fill("#textarea", "补充二");
+            page.press("#textarea", "Enter");
+            page.waitForFunction(
+                    "() => document.querySelectorAll('.chat-item-queued[data-steer-state=\"fallback\"]').length === 2",
+                    null, WF_5S);
+            assertThat(steerReqs).hasSize(2);
+
+            // 附件上传在途(模拟):onStreamEnd 的附件闸门会滞留补发 → 队列残余进入"IDLE 可见窗口"
+            page.evaluate("() => window._loomAgent.state.pendingImages.push({fileName:'hold.png'})");
+            fulfillSse(run1, "{\"content\":\"好的\"}");
+            waitIdle(page, WF_10S);
+            page.waitForTimeout(300); // 泵送:确认闸门挡下后没有任何补发 /stream
+            assertThat(streams.size()).as("附件闸门:流结束也不补发,两条留在队列(灰态可见)").isZero();
+            assertThat(page.locator(".chat-item-queued[data-steer-state=\"fallback\"]").count())
+                    .isEqualTo(2);
+            page.evaluate("() => { window._loomAgent.state.pendingImages.length = 0; }");
+
+            // 切换会话 A → B:异会话残余就地标 unsent 终态 + 清出队列 + toast 可见
+            page.evaluate("(id) => window._loomAgent.conversation.switchTo(id)", convB);
+            page.waitForFunction(
+                    "() => !window._loomAgent.state.isStreaming && window._loomAgent.steering._fallback.length === 0",
+                    null, WF_10S);
+            assertThat((String) page.evaluate("() => document.getElementById('toast-notification').textContent"))
+                    .as("切换 toast:残余项有可见终态,不静默蒸发(A2)")
+                    .contains("已切换会话").contains("未发送");
+
+            // 负断言:会话 B 自己发一轮并结束 → 补发的只有 B 的正文,队列残余项绝不入 B
+            page.fill("#textarea", "B会话消息");
+            page.click("#send-btn");
+            Route runB = awaitRoute(streams, page, 5_000);
+            assertThat(runB).isNotNull();
+            assertThat(runB.request().postData())
+                    .as("B 的 /stream 只带 B 自己的正文").contains("B会话消息")
+                    .doesNotContain("补充一").doesNotContain("补充二");
+            fulfillSse(runB, "{\"content\":\"B 回复\"}");
+            waitIdle(page, WF_10S);
+            Route extra = awaitRoute(streams, page, 1_000);
+            assertThat(extra).as("B 流结束后不得有任何跨会话补发").isNull();
+            assertThat((String) page.evaluate("() => document.getElementById('mainContent').innerText"))
+                    .doesNotContain("补充一").doesNotContain("补充二");
+            assertThat(page.locator(".chat-item-queued").count()).isZero();
+
+            // 清理:回到 A 断言历史里也没有把残余项发出去(服务端 A 只收到第一条)
+            assertThat(steerReqs).hasSize(2);
+            assertThat(consoleErrorsOf(page))
+                    .as("无 JS console error")
+                    .noneMatch(e -> !e.startsWith("Failed to load resource"));
+        }
+    }
+
+    // ==================== ⑪ R28 竞态:在途 steer 响应晚于会话切换到达 ====================
+
+    @Test
+    @DisplayName("steer 响应在切换会话后才落地(queued:false)→ 回退项绑定原会话,就地标 unsent,绝不补发到新会话")
+    void lateSteerResponse_afterSwitch_isNotDeliveredToNewConversation() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            BlockingQueue<Route> streams = holdStreams(page);
+            BlockingQueue<Route> steers = holdSteers(page); // steer 响应扣住,手动迟到投递
+
+            // 两个会话,A=当前(run 所在),B=切换目标
+            newConversation(page);
+            newConversation(page);
+            String convA = convId(page);
+            String convB = (String) page.evaluate(
+                    "(a) => [...document.querySelectorAll('#sidebarList .sidebar-item')]"
+                            + ".map(i => i.dataset.conversationId).find(id => id && id !== a)", convA);
+            assertThat(convB).isNotNull();
+
+            page.fill("#textarea", "第一条");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+
+            // 插话:steer 请求发出但响应被扣住(在途)
+            page.fill("#textarea", "迟到插话");
+            page.press("#textarea", "Enter");
+            Route steerReq = awaitRoute(steers, page, 5_000);
+            assertThat(steerReq).as("steer 请求已发出(响应未回)").isNotNull();
+            assertThat(steerReq.request().postData()).contains("迟到插话");
+
+            // 本地流结束(此刻回退队列还是空的 —— 响应仍扣住)→ IDLE,侧栏解锁
+            fulfillSse(run1, "{\"content\":\"好的\"}");
+            waitIdle(page, WF_10S);
+
+            // 用户切换到 B
+            page.evaluate("(id) => window._loomAgent.conversation.switchTo(id)", convB);
+            page.waitForFunction(
+                    "(id) => window._loomAgent.state.conversationId === id", convB, WF_10S);
+
+            // 迟到的 steer 响应落地:queued:false → 入队项绑定的是**原会话 A**
+            steerReq.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"queued\":false}"));
+
+            // A2 可见终态 + R28 会话绑定:onStreamEnd 立即 flush 时识别异会话项 → 就地标 unsent;
+            // 关键负断言:绝不 chat.send 到 B(不产生新 /stream)
+            page.waitForFunction(
+                    "() => document.querySelectorAll('.chat-item-unsent').length === 1"
+                            + " && window._loomAgent.steering._fallback.length === 0",
+                    null, WF_10S);
+            assertThat((String) page.evaluate(
+                    "() => document.querySelector('.chat-item-unsent .queued-body').textContent"))
+                    .isEqualTo("迟到插话");
+            assertThat((String) page.evaluate(
+                    "() => document.querySelector('.chat-item-unsent .queued-note').textContent"))
+                    .contains("未发送");
+            Route extra = awaitRoute(streams, page, 1_000);
+            assertThat(extra).as("迟到回退绝不补发到切换后的会话 B").isNull();
+
+            // 再在 B 正常发一轮并结束:队列已空,不会有第二条"迟到插话"混进来
+            page.fill("#textarea", "B会话消息");
+            page.click("#send-btn");
+            Route runB = awaitRoute(streams, page, 5_000);
+            assertThat(runB).isNotNull();
+            assertThat(runB.request().postData())
+                    .as("B 的 /stream 只带 B 自己的正文").contains("B会话消息").doesNotContain("迟到插话");
+            fulfillSse(runB, "{\"content\":\"B 回复\"}");
+            waitIdle(page, WF_10S);
+            assertThat(awaitRoute(streams, page, 1_000)).as("B 流结束亦无跨会话补发").isNull();
+            assertThat(page.locator(".chat-item-queued").count()).isZero();
+
+            assertThat(consoleErrorsOf(page))
+                    .as("无 JS console error")
                     .noneMatch(e -> !e.startsWith("Failed to load resource"));
         }
     }
