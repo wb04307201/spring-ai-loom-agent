@@ -863,6 +863,20 @@ table.user-table {
   border-left: 3px solid #64748b;
   padding-left: 5px;
 }
+/* Task 16 / R32-G1(矩阵 D2)：steering USER 行的「用户插话」徽章。
+   复用流水页既有 token（主色 #4f46e5 达 WCAG AA，同 style.css .steering-badge 语义），
+   与 .flow-type 徽章同尺寸体系但不占用类型色。 */
+.flow-steering-badge {
+  display: inline-block;
+  margin: 0 0 4px 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+}
 .flow-event-ASSISTANT {
   border-left: 3px solid #3b82f6;
   padding-left: 5px;

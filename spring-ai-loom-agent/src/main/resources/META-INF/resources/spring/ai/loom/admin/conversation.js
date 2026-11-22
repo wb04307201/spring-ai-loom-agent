@@ -370,11 +370,23 @@
           "</details>";
         break;
       }
-      case "USER":
+      case "USER": {
         icon = "👤";
+        // Task 16 / R32-G1(矩阵 D2):「用户插话」徽章 —— steering 注入的 USER 行由
+        // 后端 B2 豁免分支附 data.steering=true(ConversationFlowService,保留真实
+        // 注入时刻 ts);turn-initial 行无此键。徽章是视觉区分,文案为静态中文文本,
+        // 不引入新的转义面。
+        const steeringBadge =
+          d.steering === true
+            ? '<span class="flow-steering-badge" title="AI 运行中用户插话,此时刻即注入模型上下文的时刻">用户插话</span>'
+            : "";
         body =
-          '<div class="flow-content">' + escapeHtml(d.content || "") + "</div>";
+          steeringBadge +
+          '<div class="flow-content">' +
+          escapeHtml(d.content || "") +
+          "</div>";
         break;
+      }
       case "ASSISTANT": {
         icon = "🤖";
         let thinking = "";

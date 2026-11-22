@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Route;
 import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.WaitForSelectorState;
 import org.junit.jupiter.api.AfterEach;
@@ -192,6 +193,70 @@ class ConsoleAdminBrowserIT extends BrowserTestBase {
                     new Page.WaitForSelectorOptions().setTimeout(15000));
             assertThat(consoleErrorsOf(convPage)).as("conversation.html 无 console error").isEmpty();
             convPage.close();
+        }
+    }
+
+    /**
+     * Task 16 / R32-G1(矩阵 D2):admin 流水页「用户插话」徽章。
+     *
+     * <p>数据面(ConversationFlowService B2 豁免分支给 steering USER 行附
+     * {@code data.steering=true})已由 ConversationFlowSteeringTimelineTest 锁死;
+     * 本用例锁渲染面 —— /flow 响应经 route mock 注入两行 USER(一行 steering),
+     * 断言只有豁免行渲染 .flow-steering-badge(文案「用户插话」),turn-initial 行
+     * 无徽章,且页面零 console error。route mock 形态 = AskUserDismissBrowserIT
+     * 历史回放用例先例。
+     */
+    @Test
+    @DisplayName("流水 USER 行 data.steering=true → 渲染「用户插话」徽章;turn-initial 行无徽章")
+    void steeringUserRowRendersBadgeInFlow() {
+        String flowJson = """
+                {
+                  "meta": {"conversationId": "steer-probe", "title": "插话徽章冒烟",
+                           "createdAt": "2026-11-22T10:00:00Z", "updatedAt": "2026-11-22T10:05:00Z",
+                           "username": null},
+                  "stats": {"callCount": 2, "totalTokens": 100, "toolCallCount": 0,
+                            "subtaskCount": 0, "scheduleCount": 0, "errorCount": 0},
+                  "events": [
+                    {"type": "USER", "ts": "2026-11-22T10:00:00Z", "data": {"content": "初始问题"}},
+                    {"type": "ASSISTANT", "ts": "2026-11-22T10:01:00Z",
+                     "data": {"content": "第一轮回复"}},
+                    {"type": "USER", "ts": "2026-11-22T10:02:00Z",
+                     "data": {"content": "补充：请改用中文", "steering": true}},
+                    {"type": "ASSISTANT", "ts": "2026-11-22T10:05:00Z",
+                     "data": {"content": "第二轮回复"}}
+                  ],
+                  "page": 0, "size": 500, "total": 4, "hasMore": false
+                }
+                """;
+        try (BrowserContext ctx = adminContext()) {
+            Page page = newPage(ctx);
+            page.route("**/admin/conversations/steer-probe/flow*",
+                    route -> route.fulfill(new Route.FulfillOptions()
+                            .setStatus(200)
+                            .setContentType("application/json; charset=UTF-8")
+                            .setBody(flowJson)));
+            // 不带 username 参数 → loadNav 跳过,只需 mock /flow 一个端点
+            page.navigate(baseUrl + UI + "admin/conversation.html?id=steer-probe");
+            page.waitForSelector(".flow-event-USER",
+                    new Page.WaitForSelectorOptions().setTimeout(15000));
+
+            // 徽章恰 1 个(两条 USER 里只有 steering 豁免行),文案固定,静态文本无转义面
+            assertThat(page.locator(".flow-steering-badge").count()).isEqualTo(1);
+            assertThat(page.locator(".flow-steering-badge").first().innerText())
+                    .isEqualTo("用户插话");
+            // 徽章挂在插话行(含"补充"文本)的 USER 事件内,而非 turn-initial 行
+            assertThat(page.evaluate(
+                    "() => { const b=document.querySelector('.flow-steering-badge');"
+                            + " const ev=b.closest('.flow-event-USER');"
+                            + " return ev.textContent.includes('补充：请改用中文'); }"))
+                    .isEqualTo(true);
+            assertThat(page.evaluate(
+                    "() => [...document.querySelectorAll('.flow-event-USER')]"
+                            + "   .filter(ev=>!ev.querySelector('.flow-steering-badge'))"
+                            + "   .every(ev=>ev.textContent.includes('初始问题'));"))
+                    .as("turn-initial USER 行不得带徽章").isEqualTo(true);
+            assertThat(consoleErrorsOf(page)).as("流水页徽章渲染零 console error").isEmpty();
+            page.close();
         }
     }
 }
