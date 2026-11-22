@@ -217,6 +217,12 @@ public class SubTaskRegistry {
      * caller's ownership of the conversation has already been validated by
      * the router / controller, and conversationId uniquely identifies the
      * scoping user within the active map (one row per sub-task).
+     *
+     * <p><b>⚠ 安全前提（R33，2026-11-22）</b>：上面"ownership already validated"
+     * 是<b>前置条件</b>而非本方法自身保证 —— 它按 conversationId 全局匹配 active 表，
+     * 调用方未先校验归属时即成跨用户杀任务面。DELETE /conversation/{id} 路由现于
+     * cleanup 之前强制 {@code userConversation.exists} 守卫（回归锁
+     * ConversationDeleteOwnershipIT）；新增调用点必须先做归属校验。
      */
     public int killAllByConversation(String conversationId) {
         if (conversationId == null) return 0;

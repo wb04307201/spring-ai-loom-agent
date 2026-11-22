@@ -5,6 +5,7 @@ import cn.wubo.spring.ai.loom.agent.model.ConversationRecord;
 import cn.wubo.spring.ai.loom.agent.user.IUserConversation;
 import cn.wubo.spring.ai.loom.agent.user.UserContextHolder;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
 import org.springframework.beans.factory.ObjectProvider;
@@ -87,6 +88,27 @@ class ConversationRouterTest {
         ObjectProvider<T> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
         return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> ObjectProvider<T> providerOf(T value) {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(value);
+        return provider;
+    }
+
+    /** R33 用例专用:steering 审计仓储以 mock 注入(第 6 个 provider 参数)。 */
+    private static RouterFunction<ServerResponse> routerWithSteeringRepo(IUserConversation conversations,
+                                                                         cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringRepo) {
+        LoomAgentConfiguration.WebConfiguration configuration = new LoomAgentConfiguration.WebConfiguration();
+        return configuration.loomAgentConversationRouter(
+                mock(JdbcChatMemoryRepository.class),
+                conversations,
+                passThroughReasoningHistory(),
+                emptyToolCallLogRepository(),
+                mock(org.springframework.jdbc.core.JdbcTemplate.class),
+                emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(),
+                providerOf(steeringRepo));
     }
 
     private static MockHttpServletRequest buildServletRequest(String method, String path, String query) {
@@ -213,6 +235,52 @@ class ConversationRouterTest {
         assertThat(response.statusCode().value()).isEqualTo(200);
         verify(memory).findByConversationId("tmp-alice-id");
         verify(reasoningHistory).attachThinking(eq("tmp-alice-id"), any());
+    }
+
+    // ==================== R33:DELETE 归属守卫(跨用户 403,先于 cleanup) ====================
+
+    @Test
+    @DisplayName("R33:跨用户 DELETE → 403,cleanup 仓储与 deleteById 零交互(杀子任务/删审计在守卫之后)")
+    void deleteReturnsForbiddenWhenConversationIsNotOwned() throws Exception {
+        IUserConversation conversations = mock(IUserConversation.class);
+        when(conversations.exists(any())).thenReturn(false);
+        cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringRepo =
+                mock(cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository.class);
+        RouterFunction<ServerResponse> router = routerWithSteeringRepo(conversations, steeringRepo);
+        UserContextHolder.setCurrentUser("alice");
+
+        ServerResponse response = route(router, "DELETE", "/spring/ai/loom/conversation/tmp-bob-id", "");
+
+        assertThat(response.statusCode().value()).as("跨用户删除必须 403(镜像 rename 结构化形状)").isEqualTo(403);
+        Object entity = readBody(response);
+        assertThat(entity).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) entity;
+        assertThat(body).containsEntry("error", "forbidden").containsEntry("code", 403);
+        // 守卫必须最先跑:audit 仓储 deleteByConversation / killAllByConversation 等绝不能被触达,
+        // 软删 deleteById 同样不得执行(否则跨用户会话映射被删)。
+        verify(steeringRepo, never()).deleteByConversation(any());
+        verify(conversations, never()).deleteById(any());
+        verify(conversations).exists(argThat(record ->
+                "alice".equals(record.username()) && "tmp-bob-id".equals(record.conversationId())));
+    }
+
+    @Test
+    @DisplayName("R33:owner DELETE 照常 —— 守卫通过后级联清理执行(steering deleteByConversation + 软删)")
+    void deleteRunsCascadeCleanupWhenOwned() throws Exception {
+        IUserConversation conversations = mock(IUserConversation.class);
+        when(conversations.exists(any())).thenReturn(true);
+        cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository steeringRepo =
+                mock(cn.wubo.spring.ai.loom.agent.tool.ILoomChatSteeringRepository.class);
+        when(steeringRepo.deleteByConversation("tmp-alice-id")).thenReturn(2);
+        RouterFunction<ServerResponse> router = routerWithSteeringRepo(conversations, steeringRepo);
+        UserContextHolder.setCurrentUser("alice");
+
+        ServerResponse response = route(router, "DELETE", "/spring/ai/loom/conversation/tmp-alice-id", "");
+
+        assertThat(response.statusCode().value()).isEqualTo(200);
+        verify(steeringRepo).deleteByConversation("tmp-alice-id");
+        verify(conversations).deleteById("tmp-alice-id");
     }
 
     @Test

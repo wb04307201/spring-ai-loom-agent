@@ -2770,6 +2770,20 @@ public class LoomAgentConfiguration {
             builder.DELETE("spring/ai/loom/conversation/{conversationId}", request -> {
                 String conversationId = request.pathVariable("conversationId");
                 String username = UserContextHolder.getCurrentUser();
+                // R33 归属校验(镜像 GET/steer 的 BUG-12a 所有权检查):cleanupConversationResources 里
+                // registry.killAllByConversation + loomChatSteeringRepository.deleteByConversation
+                // 只按 conversation_id 匹配(审计表无 username 复核、内存 registry 同理)⇒ 不先校验归属,
+                // 任何登录用户知道他人 conv UUID 即可杀其子任务 + 删其 steering 审计行(跨用户破坏,
+                // R23 扩大了本缺口)。userConversation.deleteById 虽 username-scoped,亦须在守卫之后。
+                boolean owned = userConversation.exists(new cn.wubo.spring.ai.loom.agent.model.UserConversationRecord(
+                        username, conversationId));
+                if (!owned) {
+                    log.warn("拒绝跨用户删除对话: caller={}, conv={}", username, conversationId);
+                    // 结构化 403(与 PATCH rename 同形状,前端可区分跨用户拒绝与网络故障;
+                    // GET 用 403+空列表是因成功形状即列表,DELETE 成功形状是 true,不适用同形降级)
+                    return ServerResponse.status(HttpStatus.FORBIDDEN).body(
+                            java.util.Map.of("error", "forbidden", "code", 403));
+                }
                 // 先停子任务 + 取消定时任务 + 删除持久化行，再软删会话映射
                 int[] cleaned = cleanupConversationResources(conversationId, username,
                         subTaskRegistry.getIfAvailable(),

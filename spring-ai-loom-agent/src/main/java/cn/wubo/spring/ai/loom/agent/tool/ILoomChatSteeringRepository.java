@@ -49,6 +49,11 @@ public interface ILoomChatSteeringRepository {
      * 不留悬挂行（与 {@code loom_schedule_execution.deleteByUserAndConversation}
      * 的级联先例一致；本表归属仅 conversation_id 即可唯一定位，无需 username 复核）。
      *
+     * <p><b>⚠ 安全前提（R33，2026-11-22）</b>：“无需 username 复核”成立的条件是调用方
+     * （删除路由）已先行完成归属校验 —— conversation_id 唯一定位<b>行归属</b>，不校验
+     * <b>调用者权限</b>。路由守卫缺失时本方法即成跨用户破坏面（任何登录用户持他人
+     * conv UUID 可删其审计行）。新增调用点必须先过 {@code userConversation.exists}。
+     *
      * @param convId 会话 ID；null/空白 → 0（no-op，与 findByConversationId 同守卫）
      * @return 实际删除的行数
      */

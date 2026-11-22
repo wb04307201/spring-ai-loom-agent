@@ -2727,10 +2727,22 @@ const steering = {
   /**
    * queued:false/403 回退:灰态气泡(data-steer-state=fallback)+ 本地队列,等 complete。
    * R28:入队时快照 convId —— 补发只投递同会话项。
+   *
+   * <p>R34(会话快照绑定):入队项一律绑会话 —— 调用方未带 convId(sendSteering 的
+   * `!convId` 防御分支)时,取**入队时刻**的 state.conversationId 快照补绑;若此刻仍无
+   * 会话可绑(真 null —— RUNNING 正常恒有会话,纯防御边界),就地标可见"未发送"终态
+   * (A2 不静默蒸发),**绝不**入"会话无关"队列项:该形态的残余项会跨会话切换存活
+   * (切换守卫对 null 放行保留),在下一条流 complete 被补发进彼时的当前会话,
+   * 违 per-conversation 隔离。
    */
   _queueFallback(convId, text) {
+    const bound = convId || state.conversationId;
+    if (!bound) {
+      ui._markUnsent(ui.renderQueuedUser(null, text, "fallback"), "未发送(无会话)");
+      return;
+    }
     const bubble = ui.renderQueuedUser(null, text, "fallback");
-    this._fallback.push({ bubble, text, convId });
+    this._fallback.push({ bubble, text, convId: bound });
     // 竞态:回退登记时本地流已结束(complete 事件已过,不会再有下一次 complete)
     // → 立即补发(此刻无活跃 run,不违反 #6 的 register 竞态约束)。
     if (!state.isStreaming) this.onStreamEnd();

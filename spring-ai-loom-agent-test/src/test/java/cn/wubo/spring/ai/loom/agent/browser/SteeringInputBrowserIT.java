@@ -44,7 +44,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * (A2:isStreaming 语义不变,8 消费点守卫仍生效);⑥ stop_marks_gray_unsent(A2 可见终态 +
  * stop 抑制回退);⑦ forbidden 403 → 按 queued:false 回退(R20 TOCTOU);429 深度上限 →
  * toast + 文本回输入框;⑨ 真实 LLM run 中真实 steer(A2 终态不蒸发);⑩⑪ R28 回退队列会话绑定
- * (残余项跨会话不投递:附件闸门滞留 + 切换标 unsent / 在途响应晚于切换落原会话)。
+ * (残余项跨会话不投递:附件闸门滞留 + 切换标 unsent / 在途响应晚于切换落原会话);
+ * ⑫ R34 _queueFallback null-convId 防御分支同样绑入队时刻快照(真 null 无会话可绑 → 就地标
+ * 未发送不入队 —— 会话无关残余项旧形态会跨切换存活)。
  */
 @DisplayName("Task 11 前端输入三态机:steering 发送 + 灰态排队气泡 + 回退纪律")
 class SteeringInputBrowserIT extends BrowserTestBase {
@@ -712,6 +714,94 @@ class SteeringInputBrowserIT extends BrowserTestBase {
             waitIdle(page, WF_10S);
             assertThat(awaitRoute(streams, page, 1_000)).as("B 流结束亦无跨会话补发").isNull();
             assertThat(page.locator(".chat-item-queued").count()).isZero();
+
+            assertThat(consoleErrorsOf(page))
+                    .as("无 JS console error")
+                    .noneMatch(e -> !e.startsWith("Failed to load resource"));
+        }
+    }
+
+    // ==================== ⑫ R34:null-convId 回退项的会话快照绑定 ====================
+
+    @Test
+    @DisplayName("R34:_queueFallback 收到 null convId → 入队时刻快照当前会话(补发/切换守卫与常规项同构);真无会话可绑 → 就地标未发送不排队")
+    void nullConvIdFallback_isBoundAtEnqueueTime() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            BlockingQueue<Route> streams = holdStreams(page);
+
+            // 两个会话,A=当前,B=切换目标
+            newConversation(page);
+            newConversation(page);
+            String convA = convId(page);
+            String convB = (String) page.evaluate(
+                    "(a) => [...document.querySelectorAll('#sidebarList .sidebar-item')]"
+                            + ".map(i => i.dataset.conversationId).find(id => id && id !== a)", convA);
+            assertThat(convB).as("需要第二个会话作为切换目标").isNotNull();
+
+            page.fill("#textarea", "第一条");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+
+            // 防御分支直调(convId 参数 null —— RUNNING 正常不可达,sendSteering 的 !convId 路径等价入口)
+            page.evaluate("() => window._loomAgent.steering._queueFallback(null, '快照边界插话')");
+
+            // R34 核心断言:入队项**绑会话**(快照 = 入队时刻 state.conversationId),
+            // 而不是会话无关(convId null → 切换守卫放行 → 残余项跨会话投递的旧缺陷形态)。
+            assertThat((String) page.evaluate(
+                    "() => window._loomAgent.steering._fallback[0].convId"))
+                    .as("R34:null-convId 回退项必须绑定入队时刻的当前会话").isEqualTo(convA);
+            assertThat(page.locator(".chat-item-queued[data-steer-state=\"fallback\"]").count())
+                    .as("回退灰态气泡照常可见(A2)")
+                    .isEqualTo(1);
+
+            // 附件闸门滞留补发(同⑩)→ 残余进入 IDLE 可见窗口 → 切换会话
+            page.evaluate("() => window._loomAgent.state.pendingImages.push({fileName:'hold.png'})");
+            fulfillSse(run1, "{\"content\":\"好的\"}");
+            waitIdle(page, WF_10S);
+            assertThat(streams.size()).as("闸门挡下,未补发").isZero();
+            page.evaluate("() => { window._loomAgent.state.pendingImages.length = 0; }");
+
+            page.evaluate("(id) => window._loomAgent.conversation.switchTo(id)", convB);
+            page.waitForFunction(
+                    "() => !window._loomAgent.state.isStreaming && window._loomAgent.steering._fallback.length === 0",
+                    null, WF_10S);
+            assertThat((String) page.evaluate("() => document.getElementById('toast-notification').textContent"))
+                    .as("R34:快照绑定后切换守卫按异会话项处置(标未发送清出,不再放行保留)")
+                    .contains("已切换会话").contains("未发送");
+
+            // 负断言:B 会话自己一轮,残余项绝不混入
+            page.fill("#textarea", "B会话消息");
+            page.click("#send-btn");
+            Route runB = awaitRoute(streams, page, 5_000);
+            assertThat(runB).isNotNull();
+            assertThat(runB.request().postData())
+                    .as("B 的 /stream 只带 B 自己的正文").contains("B会话消息")
+                    .doesNotContain("快照边界插话");
+            fulfillSse(runB, "{\"content\":\"B 回复\"}");
+            waitIdle(page, WF_10S);
+            assertThat(awaitRoute(streams, page, 1_000)).as("B 流结束亦无跨会话补发").isNull();
+
+            // 真无会话可绑(纯防御边界):就地标未发送可见终态,不入队。
+            // isStreaming 临时置 true 排除 _queueFallback 尾部 onStreamEnd 的立即补发干扰。
+            Object r = page.evaluate(
+                    "() => { const s = window._loomAgent.state; const savedConv = s.conversationId;"
+                            + " const savedStream = s.isStreaming; s.isStreaming = true; s.conversationId = null;"
+                            + " window._loomAgent.steering._queueFallback(null, '真无会话边界');"
+                            + " const n = window._loomAgent.steering._fallback.length;"
+                            + " const el = [...document.querySelectorAll('.chat-item-unsent')]"
+                            + "   .find(x => x.querySelector('.queued-body') &&"
+                            + "            x.querySelector('.queued-body').textContent === '真无会话边界');"
+                            + " const note = el ? el.querySelector('.queued-note').textContent : null;"
+                            + " s.conversationId = savedConv; s.isStreaming = savedStream;"
+                            + " return {n: n, note: note}; }");
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> res = (java.util.Map<String, Object>) r;
+            assertThat(res.get("n")).as("真 null 快照 → 不入会话无关队列").isEqualTo(0);
+            assertThat((String) res.get("note"))
+                    .as("A2:文本有可见终态,不静默蒸发")
+                    .isNotNull().contains("未发送");
 
             assertThat(consoleErrorsOf(page))
                     .as("无 JS console error")

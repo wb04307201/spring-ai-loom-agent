@@ -193,6 +193,8 @@ DELETE /spring/ai/loom/conversation/{conversationId}
 
 **Response**: `true` (boolean)
 
+**Ownership guard (R33)**: the route validates the conversation belongs to the current user before any cleanup. Cross-user delete returns **403** with `{"error":"forbidden","code":403}` — otherwise the sub-task kill cascade and steering-audit cleanup (which match on `conversation_id` alone) would let any authenticated caller destroy another user's run.
+
 ---
 
 ## 3. Streaming Chat

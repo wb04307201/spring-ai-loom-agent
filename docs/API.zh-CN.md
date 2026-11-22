@@ -163,6 +163,8 @@ DELETE /spring/ai/loom/conversation/{conversationId}
 
 **响应**: `true` (boolean)
 
+**归属守卫(R33)**:路由在任何清理动作之前先校验会话属于当前用户。跨用户删除返回 **403** + `{"error":"forbidden","code":403}` —— 否则子任务 kill 级联与 steering 审计清理(仅按 `conversation_id` 匹配)会让任何登录用户破坏他人 run。
+
 ---
 
 ## 3. 流式对话
