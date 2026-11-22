@@ -117,6 +117,22 @@ class ToolCallRendererContractTest {
     }
 
     @Test
+    @DisplayName("Task 13 第五终态:DISMISS result 前缀识别 → 「💬 转入对话」徽章,且 answer 互斥清空")
+    void dismissedTerminalBadge() throws IOException {
+        String src = rendererSource();
+        // Task 8(D-2) 契约:dismiss 的 tool result = spec §5.3 固定短文本前缀
+        assertThat(src)
+                .as("必须按 [用户想先聊聊] 前缀识别 DISMISS result(与后端 DefaultAskUserTool 文本耦合)")
+                .contains("\\[用户想先聊聊\\]");
+        assertThat(src)
+                .as("dismissed 必须优先于 answer 判定(answered 取 null),否则徽章错显已答/答案比对错乱")
+                .contains("dismissed ? null : /\\[用户已回答\\]");
+        assertThat(src)
+                .as("第五终态徽章文案")
+                .contains("💬 转入对话");
+    }
+
+    @Test
     @DisplayName("spinner 旋转只在运行中 —— 结束后不得继续转")
     void spinnerAnimationOnlyWhileRunning() throws IOException {
         String css = source("/META-INF/resources/spring/ai/loom/style.css");

@@ -4086,6 +4086,28 @@ textarea::placeholder {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .askuser-summary-arrow { flex: none; font-size: 12px; }
+/* ===== Task 13(D-2/G3):「聊聊这个」即时 dismiss + ASK_PENDING 提示条 ===== */
+.askuser-actions { display: flex; align-items: center; gap: 10px; }
+.ask-chat-btn {
+  background: var(--bg-secondary, #f8fafc); color: var(--text-secondary, #475569);
+  border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;
+  padding: 7px 14px; font-size: 13px; cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.ask-chat-btn:hover:not(:disabled) { border-color: var(--primary-color, #4f46e5); color: var(--primary-color, #4f46e5); }
+.ask-chat-btn:disabled { opacity: .5; cursor: not-allowed; }
+/* 第五终态徽章(实时 freeze + tool-call-renderer 历史只读共用) */
+.askuser-state-chat { color: var(--primary-color, #4f46e5); font-weight: 600; }
+/* composer 上方提示条:仅 ASK_PENDING 可见(js 控制 display) */
+.ask-hint-bar {
+  display: none; align-items: center; gap: 6px; margin: 0 0 8px; padding: 6px 14px;
+  width: fit-content; max-width: 100%; box-sizing: border-box;
+  border: 1px solid var(--border-color, #e2e8f0); border-radius: 999px;
+  background: var(--bg-secondary, #f8fafc); color: var(--text-secondary, #475569);
+  font-size: 12px; cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.ask-hint-bar:hover { border-color: var(--primary-color, #4f46e5); color: var(--primary-color, #4f46e5); }
 
 /* ===================== Canvas Board（画板绘图模态框） ===================== */
 .canvas-modal-content {

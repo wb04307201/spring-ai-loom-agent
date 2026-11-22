@@ -1592,6 +1592,12 @@ const ui = {
     const ta = document.getElementById("textarea");
     const btn = document.getElementById("send-btn");
     if (!this._IDLE_PLACEHOLDER && ta) this._IDLE_PLACEHOLDER = ta.placeholder;
+    // Task 13(D-2):ASK_PENDING 提示条只在等待回答时可见;离开该态(含 RUNNING 的
+    // dismiss 收敛、IDLE 的流结束)一律隐藏。文案/计数由 askUserCards.refreshHintBar 维护。
+    if (mode !== "ASK_PENDING") {
+      const hb = document.getElementById("ask-hint-bar");
+      if (hb) hb.style.display = "none";
+    }
     if (mode === "RUNNING") {
       if (ta) {
         ta.disabled = false;
@@ -1607,8 +1613,8 @@ const ui = {
       return;
     }
     if (mode === "ASK_PENDING") {
-      // Task 13 接线:锁 textarea(placeholder 同步提示)+ 旁挂提示条。本 task 不产出该态,
-      // 锁定语义先行落地,保证 Task 13 只加提示条不改结构(spec §5.5 状态机定义)。
+      // Task 13 接线:askUser 卡片 pending 时锁 textarea + 提示条(ask-hint-bar)。
+      // 写入方唯一 = askUserCards.syncPendingState(pending>0 时),经本收敛点单口落地(R27)。
       if (ta) {
         ta.disabled = true;
         ta.placeholder = "回答上方卡片,或点「聊聊这个」自由讨论";
@@ -2054,7 +2060,7 @@ const conversation = {
  * 卡片仅活于当前流:提交/超时/取消后就地定格;刷新页面不重建(历史里只有文本)。
  */
 const askUserCards = (() => {
-  const active = new Map(); // questionId -> { el, timer, submitBtn, countdownEl, summaryEl }
+  const active = new Map(); // questionId -> { el, timer, submitBtn, countdownEl, summaryEl, chatBtn, remaining, dismissing }
 
   function fmtRemaining(sec) {
     const m = Math.floor(sec / 60);
@@ -2062,19 +2068,123 @@ const askUserCards = (() => {
     return `${m}:${String(s).padStart(2, "0")}`;
   }
 
+  /** 当前 pending 卡片数(测试/调试 seam;0 = 可离开 ASK_PENDING)。 */
+  function pendingCount() {
+    return active.size;
+  }
+
+  // ===== Task 13(D-2/G3):ASK_PENDING 收敛 + 「聊聊这个」dismiss + 提示条 =====
+
+  /**
+   * inputMode 单一收敛点(R27):pending>0 → ASK_PENDING;全落定 → 有流回 RUNNING / 无流回 IDLE。
+   * 只经 ui._setComposerMode(全仓唯一输入区状态写口),绝不旁路改 textarea/按钮 ——
+   * enableSend/disableSend 的流生命周期与其互不冲突(它们各自负责 isStreaming/工具栏/stop)。
+   */
+  function syncPendingState() {
+    if (active.size > 0) {
+      ui._setComposerMode("ASK_PENDING");
+    } else {
+      ui._setComposerMode(state.isStreaming ? "RUNNING" : "IDLE");
+    }
+    refreshHintBar();
+  }
+
+  /** ASK_PENDING 提示条(composer 上方,点击滚动到最早 pending 卡片)。懒建。 */
+  function hintBar() {
+    let b = document.getElementById("ask-hint-bar");
+    if (b) return b;
+    const area = document.querySelector(".input-area");
+    const ta = document.getElementById("textarea");
+    if (!area || !ta) return null;
+    b = document.createElement("button");
+    b.id = "ask-hint-bar";
+    b.className = "ask-hint-bar";
+    b.type = "button";
+    b.title = "点击定位到提问卡片";
+    b.addEventListener("click", () => {
+      // JS Map 保插入序 → 第一个 key = 最早 pending 卡片(spec §5.3:定位/计数以最早为准)
+      const first = active.keys().next().value;
+      if (first == null) return;
+      const c = active.get(first);
+      if (c && c.el && c.el.isConnected) {
+        c.el.scrollIntoView({ behavior: "auto", block: "center" });
+      }
+    });
+    area.insertBefore(b, ta);
+    return b;
+  }
+
+  /** 提示条文案:"AI 正在等你回答 · [N 个问题待回答 ·] 剩余 m:ss · ↓定位"(倒计时复用最早卡片 timer)。 */
+  function refreshHintBar() {
+    const b = hintBar();
+    if (!b) return;
+    if (active.size === 0 || state.inputMode !== "ASK_PENDING") {
+      b.style.display = "none";
+      return;
+    }
+    const first = active.values().next().value;
+    const parts = ["AI 正在等你回答"];
+    if (active.size > 1) parts.push(`${active.size} 个问题待回答`);
+    parts.push(`剩余 ${fmtRemaining(Math.max(first ? first.remaining | 0 : 0, 0))}`);
+    parts.push("↓定位");
+    b.textContent = parts.join(" · ");
+    b.style.display = "flex";
+  }
+
+  /**
+   * 「💬 聊聊这个」= D-2 即时 dismiss:POST answer {mode:"DISMISS"}(Task 8 契约,无需 answer 文本)。
+   * 200 → 第五终态"💬 转入对话"(摘要折叠,不可逆,无返回选项;零保活零 deadline 触碰);
+   * 404 → CAS 竞态(超时/停止/选项抢先)→ 静默转"已失效",不重复 freeze、不弹失败 toast;
+   * 其余(400/5xx/网络)→ 按钮恢复可重试(同 ANSWER 的 restorePending 语义)。
+   * 在飞防抖:dismissing 标志 + 按钮 disabled 双保险,双击只发一次 POST。
+   */
+  async function dismiss(qid) {
+    const card = active.get(qid);
+    if (!card || card.dismissing) return;
+    card.dismissing = true;
+    if (card.chatBtn) card.chatBtn.disabled = true;
+    try {
+      const r = await fetch(
+        `/spring/ai/loom/ask/${encodeURIComponent(qid)}/answer`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json; charset=UTF-8" },
+          body: JSON.stringify({ mode: "DISMISS" }),
+        },
+      );
+      if (r.ok) {
+        freeze(qid, "💬 转入对话", false);
+      } else if (r.status === 404) {
+        // 服务端已先行落定(超时/取消/选项先到)—— 静默定格,幂等无 toast(Review Focus 4)
+        freeze(qid, "已失效(超时或已取消)", false);
+      } else {
+        card.dismissing = false;
+        if (card.chatBtn) card.chatBtn.disabled = false;
+        showToast(`转入对话失败(HTTP ${r.status}),请重试`, "error");
+      }
+    } catch (e) {
+      card.dismissing = false;
+      if (card.chatBtn) card.chatBtn.disabled = false;
+      showToast("转入对话失败:" + (e.message || "网络错误") + ",请重试", "error");
+    }
+  }
+
   // §1 终态折叠:freeze 后卡片隐藏,显示一行摘要(点击 toggle 展开回看)。
   // answerText 仅"已答"路径传(提交成功时的答案);其余终态传 null。
   // restorePending(可重试失败)不调用本函数 —— 卡片保持可交互(spec D8)。
+  // Task 13(D-2):第五终态 "💬 转入对话"(dismiss 成功),摘要折叠不可逆、无返回选项。
   function freeze(qid, stateText, ok, answerText) {
     const card = active.get(qid);
     if (!card) return;
+    const hadPending = active.size > 0;
     clearInterval(card.timer);
     active.delete(qid);
     card.el.classList.add("askuser-frozen");
     card.el.querySelectorAll("input,button").forEach((n) => (n.disabled = true));
     // 终态隐藏提交按钮:否则按钮会永远停在"提交中..."(submit 在 fetch 前设的
     // 在飞标签,freeze 只 disable 不复位)—— 看起来像卡死。终态语义由徽章表达
-    // (已答 ✓ / 已超时 / 已取消 / 已失效),四种终态共用本函数,无单一合适按钮文案。
+    // (已答 ✓ / 已超时 / 已取消 / 已失效 / 💬 转入对话),五种终态共用本函数,无单一合适按钮文案。
     if (card.submitBtn) card.submitBtn.style.display = "none";
     const badge = card.el.querySelector(".askuser-state");
     if (badge) {
@@ -2087,20 +2197,26 @@ const askUserCards = (() => {
     if (summary) {
       const qEl = card.el.querySelector(".askuser-question");
       const question = qEl ? qEl.textContent : "";
-      const icon = ok ? "✓" : stateText === "已超时" ? "⏳" : "✗";
+      const isChat = stateText === "💬 转入对话";
+      const icon = ok ? "✓" : isChat ? "💬" : stateText === "已超时" ? "⏳" : "✗";
       const tail = ok
         ? answerText || ""
-        : stateText === "已超时"
-          ? "已超时，未作答"
-          : stateText === "已失效(超时或已取消)"
-            ? "已失效"
-            : stateText;
+        : isChat
+          ? "转入自由讨论"
+          : stateText === "已超时"
+            ? "已超时，未作答"
+            : stateText === "已失效(超时或已取消)"
+              ? "已失效"
+              : stateText;
       const textEl = summary.querySelector(".askuser-summary-text");
       if (textEl) textEl.textContent = `${icon} ${question} → ${tail}`;
       summary.classList.toggle("askuser-summary-ok", !!ok);
       card.el.style.display = "none";
       summary.style.display = "flex";
     }
+    // Task 13:本卡落定后同步输入态(末卡 → 解锁回 RUNNING/IDLE)+ 提示条。
+    // hadPending 恒真(freeze 入口已保证 card 在 active 中),保留判空语义防旁路调用。
+    if (hadPending) syncPendingState();
   }
 
   async function submit(qid, ev) {
@@ -2246,7 +2362,11 @@ const askUserCards = (() => {
           <div class="askuser-question">${escapeHtml(ev.question)}</div>
           ${ev.background ? `<div class="askuser-background">${escapeHtml(ev.background)}</div>` : ""}
           <div class="askuser-options">${optionsHtml}${customHtml}</div>
-          <button class="askuser-submit">提交答案</button>
+          <div class="askuser-actions">
+            <button class="askuser-submit">提交答案</button>
+            <button class="ask-chat-btn" type="button"
+                    title="不回答以上问题,转入自由讨论">💬 聊聊这个</button>
+          </div>
         </div>`;
     slot.appendChild(wrap);
     ui.scrollToBottom();
@@ -2260,8 +2380,11 @@ const askUserCards = (() => {
       summaryEl.querySelector(".askuser-summary-arrow").textContent = cardHidden ? "▾" : "▸";
     });
     const submitBtn = el.querySelector(".askuser-submit");
+    const chatBtn = el.querySelector(".ask-chat-btn");
     const countdownEl = el.querySelector(".askuser-countdown-num");
     submitBtn.addEventListener("click", () => submit(qid, ev));
+    // Task 13(D-2):「聊聊这个」即时 dismiss(恒有,选项/自定义之后)
+    if (chatBtn) chatBtn.addEventListener("click", () => dismiss(qid));
     // 单选时点选项文字也可提交(减少一次点击);多选保留显式提交
     if (!ev.multiSelect) {
       el.querySelectorAll(".askuser-opt-input").forEach((n) =>
@@ -2283,14 +2406,20 @@ const askUserCards = (() => {
     countdownEl.textContent = fmtRemaining(remaining);
     const timer = setInterval(() => {
       remaining -= 1;
+      cardRef.remaining = remaining;
       if (remaining <= 0) {
         freeze(qid, "已超时", false);
         return;
       }
       countdownEl.textContent = fmtRemaining(remaining);
+      // 提示条倒计时复用最早卡片的 timer(本卡是最早时同步刷新)
+      if (active.keys().next().value === qid) refreshHintBar();
     }, 1000);
 
-    active.set(qid, { el, timer, submitBtn, countdownEl, summaryEl });
+    const cardRef = { el, timer, submitBtn, countdownEl, summaryEl, chatBtn, remaining, dismissing: false };
+    active.set(qid, cardRef);
+    // Task 13:新卡 pending → ASK_PENDING 锁输入 + 提示条(spec §5.3 D′)
+    syncPendingState();
   }
 
   /** 流结束(complete/error/stop)时把仍在等待的卡片定格。 */
@@ -2300,7 +2429,7 @@ const askUserCards = (() => {
     }
   }
 
-  return { render, cancelAllActive };
+  return { render, cancelAllActive, pendingCount };
 })();
 
 // ===================== §1c SubTask chip (spec § 4.3 #1) =====================
@@ -7594,6 +7723,7 @@ window._loomAgent = {
   auth,
   chat,
   steering,
+  askUserCards, // Task 13 测试缝:onFrame 同一 render 入口 + pendingCount(浏览器 IT 注入卡片事件帧)
   conversation,
   ui,
   fileMgr,

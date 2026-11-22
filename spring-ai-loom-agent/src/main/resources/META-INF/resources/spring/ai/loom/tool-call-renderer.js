@@ -71,10 +71,13 @@
     const args = entry.arguments || {};
     const options = parseOptions(args);
     const result = stripOuterQuotes(String(entry.result || ""));
+    // Task 13（D-2/B5）：第五终态"转入对话" —— DISMISS 的 tool result 是 Task 8 spec §5.3
+    // 固定短文本（无用户原话，天然不触发 2048 截断），按前缀识别；与"已答/未作答"互斥。
+    const dismissed = /\[用户想先聊聊\]/.test(result);
     // result 形如 "[用户已回答] 面条" —— 抽出答案部分用于高亮。
     // 注意：loom_tool_call_log.result_text 可能带外层 JSON 引号（"[用户已回答] x"），
     // 不剥离会导致答案比对失败、选中项不高亮（实测踩过）。
-    const answered = /\[用户已回答\]\s*(.*)/.exec(result);
+    const answered = dismissed ? null : /\[用户已回答\]\s*(.*)/.exec(result);
     const answer = answered ? answered[1].trim().replace(/^["']|["']$/g, "") : null;
 
     const optionsHtml = options
@@ -91,9 +94,11 @@
       })
       .join("");
 
-    const stateBadge = answer
-      ? `<span class="askuser-state askuser-state-ok">已答 ✓</span>`
-      : `<span class="askuser-state">未作答</span>`;
+    const stateBadge = dismissed
+      ? `<span class="askuser-state askuser-state-chat">💬 转入对话</span>`
+      : answer
+        ? `<span class="askuser-state askuser-state-ok">已答 ✓</span>`
+        : `<span class="askuser-state">未作答</span>`;
 
     return `
       <div class="askuser-card askuser-frozen" data-tool-call-id="${esc(entry.toolCallId)}">
