@@ -30,7 +30,7 @@ spring:
       timeout: 600s
       chat:
         options:
-          model: qwen3.8-max
+          model: qwen4-max
           # ⚠️ OpenAI ChatCompletions 规范字段是 max_completion_tokens（Spring AI 键名
           # max-completion-tokens）；用户原写的 max_output_tokens 是 DashScope 原生/Anthropic
           # 风格键，OpenAiChatOptions 无此字段会被静默忽略 → 不生效。

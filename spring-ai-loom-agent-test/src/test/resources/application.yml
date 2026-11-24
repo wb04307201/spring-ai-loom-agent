@@ -12,7 +12,7 @@ spring:
       base-url: http://123.56.128.32:3000/v1
       chat:
         options:
-          model: qwen3.8-max
+          model: qwen4-max
           max-completion-tokens: 983616
           # Spring AI 2.0.1 的 yml 绑定面没有 stream-usage setter（旧键被静默忽略），
           # 必须用 stream-options.include-usage 让末帧带 token 用量。
