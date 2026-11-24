@@ -2954,7 +2954,12 @@ const steering = {
       return;
     }
     if (st === "unsent") {
-      // 纯本地:各终态路径的队列引用早已清空,仅 DOM 移除
+      // 本地队列引用早已清空,但服务端 inbox 未必 —— 断连/流结束无 ack 的 R20 兜底路径
+      // 不 post stop,服务端可能仍活并注入该消息。尽力而为发一次幂等 DELETE 阻止注入,
+      // 结果一律忽略(可能 no_active_run/not_in_queue),DOM 移除不等待网络(final-fix Issue 2)。
+      if (el.dataset.messageId && el.dataset.convId) {
+        api.retractSteer(el.dataset.convId, el.dataset.messageId).catch(() => {});
+      }
       el.remove();
       return;
     }

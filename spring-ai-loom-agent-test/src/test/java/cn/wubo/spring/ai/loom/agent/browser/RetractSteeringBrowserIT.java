@@ -454,10 +454,10 @@ class RetractSteeringBrowserIT extends BrowserTestBase {
         }
     }
 
-    // ==================== Task 4 ⑨ unsent 终态清理:纯 DOM 移除 ====================
+    // ==================== Task 4 ⑨ unsent 终态清理:DOM 移除 + best-effort DELETE ====================
 
     @Test
-    @DisplayName("stop 后「未发送(已停止)」气泡点 ✕ → DOM 移除,零端点调用(unsent 队列引用早已清空)")
+    @DisplayName("stop 后「未发送(已停止)」气泡点 ✕ → DOM 移除 + 至多一次幂等 best-effort DELETE(结果忽略)")
     void unsent_retract_removes_dom() {
         try (BrowserContext ctx = adminContext()) {
             Page page = openChatReady(ctx);
@@ -488,8 +488,83 @@ class RetractSteeringBrowserIT extends BrowserTestBase {
             page.click("[data-message-id=\"m-1\"] .queued-retract-btn");
             page.waitForFunction(
                     "() => document.querySelector('[data-message-id=\"m-1\"]') === null", null, WF_5S);
-            assertThat(deleteUrls).as("unsent 清理纯本地,零 DELETE 调用").isEmpty();
+            // Final-fix(Issue 2):unsent 分支发 best-effort 幂等 DELETE(断连窗服务端 inbox 可能仍活);
+            // stop 路径服务端已收口,该调用返 no_active_run 无害,结果一律忽略,DOM 移除不等待。
+            assertThat(deleteUrls).as("至多一次 best-effort DELETE(幂等,结果忽略)").hasSizeLessThanOrEqualTo(1);
             waitIdle(page);
+            assertThat(consoleErrorsOf(page)).isEmpty();
+        }
+    }
+
+    // ==================== Final-fix Issue 1:撤回响应晚于 INJECTED ack 的竞态锁 ====================
+
+    @Test
+    @DisplayName("DELETE 响应被扣住期间 INJECTED ack 先到 → 转正;迟到 retracted:true 绝不破坏已注入终态(spec §6.3 竞态)")
+    void retract_race_ack_promotes_before_delete_response() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            BlockingQueue<Route> deletes = new LinkedBlockingQueue<>();
+            page.route("**/steer/*", route -> {
+                if ("DELETE".equals(route.request().method())) {
+                    deletes.add(route);
+                } else {
+                    route.fallback();
+                }
+            });
+            Route run1 = startRunWithQueuedSteer(page, "竞态插话不可误删");
+
+            page.click(".chat-item-queued[data-message-id=\"m-1\"] .queued-retract-btn");
+            Route del = awaitRoute(deletes, page, 5_000);
+            assertThat(del).as("DELETE 已发出并被扣住(响应未回)").isNotNull();
+
+            // ack 抢先到达 → 转正(injected);✕ 随 note 移除
+            fulfillSse(run1,
+                    "{\"content\":\"收到补充\"}",
+                    "{\"steerAck\":{\"messageId\":\"m-1\",\"status\":\"INJECTED\"}}");
+            waitIdle(page);
+            assertThat(page.evaluate("() => { const el=document.querySelector('[data-message-id=\"m-1\"]');"
+                    + " return el && el.dataset.steerState === 'injected'; }"))
+                    .as("ack 先到 → 已转正").isEqualTo(true);
+
+            // 最危险形态:迟到的 DELETE 响应竟返 retracted:true —— 前端必须复查状态,
+            // 绝不把已注入气泡当 queued 移除(G3:已注入不可撤回)
+            del.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"retracted\":true}"));
+            page.waitForTimeout(400); // 泵送:让迟到响应的处理执行完
+            assertThat(page.evaluate("() => { const el=document.querySelector('[data-message-id=\"m-1\"]');"
+                    + " return el && el.dataset.steerState === 'injected'"
+                    + " && el.querySelector('.queued-body').textContent === '竞态插话不可误删'; }"))
+                    .as("迟到 retracted:true 不得移除/破坏已注入终态(状态复查守卫)").isEqualTo(true);
+            assertThat(consoleErrorsOf(page)).isEmpty();
+        }
+    }
+
+    // ==================== Final-fix Issue 2:断连窗 unsent 的 best-effort DELETE ====================
+
+    @Test
+    @DisplayName("流结束无 ack → R20 兜底标 unsent(服务端可能仍活);点 ✕ → DOM 移除 + 朝快照 conv 发一次幂等 DELETE")
+    void unsent_retract_fires_best_effort_delete() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            List<String> deleteUrls = retractScript(page, 200, "{\"retracted\":false,\"reason\":\"no_active_run\"}");
+            Route run1 = startRunWithQueuedSteer(page, "断连窗插话");
+            String conv = convId(page);
+
+            // 流结束但无 steerAck(R20 竞态/断连形态)→ 汇聚点标 unsent;messageId/convId 快照存活
+            fulfillSse(run1, "{\"content\":\"好的\"}");
+            waitIdle(page);
+            assertThat(page.evaluate("() => { const el=document.querySelector('[data-message-id=\"m-1\"]');"
+                    + " return el && el.dataset.steerState === 'unsent'"
+                    + " && el.dataset.messageId === 'm-1' && el.dataset.convId !== ''; }"))
+                    .as("unsent 终态保留 messageId/convId(best-effort DELETE 的前提)").isEqualTo(true);
+
+            page.click("[data-message-id=\"m-1\"] .queued-retract-btn");
+            page.waitForFunction(
+                    "() => document.querySelector('[data-message-id=\"m-1\"]') === null", null, WF_5S);
+            assertThat(deleteUrls).as("断连窗 unsent 清理必须尽力阻止服务端注入(一次幂等 DELETE)").hasSize(1);
+            assertThat(deleteUrls.get(0))
+                    .as("DELETE 朝气泡快照 conv + messageId").contains("/stream/" + conv + "/steer/m-1");
             assertThat(consoleErrorsOf(page)).isEmpty();
         }
     }
