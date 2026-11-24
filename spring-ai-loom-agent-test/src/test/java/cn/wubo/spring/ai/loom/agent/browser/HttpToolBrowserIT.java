@@ -336,13 +336,18 @@ class HttpToolBrowserIT extends BrowserTestBase {
                     + "/flow?username=" + USER + "&page=0&size=500");
                 // ⚠️ 不能断言整段 flow 不含 "invokeEndpoint" —— prompt 里就写了它,
                 // USER 事件的文本会被匹配到 ⇒ 永远失败。必须只统计**工具事件**。
-                int toolEvents = countOccurrences(flow, "\"type\":\"TOOL_");
-                assertThat(toolEvents)
-                    .as("未授 tool_http ⇒ 工具压根不该注入给模型 ⇒ 不该有任何 TOOL_CALL/TOOL_RESULT"
-                        + "。实测 stats.toolCallCount=%s", extractToolCallCount(flow))
-                    .isZero();
-                assertThat(extractToolCallCount(flow))
-                    .as("后端统计的 toolCallCount 也应为 0")
+                // RBAC 断言(provider 无关):未授 tool_http ⇒ http 工具绝不注入 ⇒ 零 http 工具调用。
+                // 不能断言"零 TOOL_CALL" —— 模型可能调 universal 工具(getSkill/listAllowedDirectories
+                // 等,对所有用户可见)试探缺失的 invokeEndpoint;MiniMax 比 Qwen 更 agentic 会这么做。
+                // 只匹配工具事件的 "name":"<httpTool>"(USER/ASSISTANT 文本是 text/content 字段,不命中)。
+                int httpToolEvents = 0;
+                for (String t : new String[]{
+                        "invokeEndpoint", "httpBatch", "listEndpoints", "getEndpoint", "getRequestHistory"}) {
+                    httpToolEvents += countOccurrences(flow, "\"name\":\"" + t + "\"");
+                }
+                assertThat(httpToolEvents)
+                    .as("未授 tool_http ⇒ http 工具绝不注入给模型 ⇒ 零 http 工具调用"
+                        + "(universal 工具调用不计;实测 stats.toolCallCount=%s)", extractToolCallCount(flow))
                     .isZero();
             }
         }
