@@ -17,12 +17,12 @@ spring:
         repository:
           jdbc:
             initialize-schema: always
-    # 2026-11-07: 私人 new-api 中转（转发阿里百炼 Qwen）。Spring AI OpenAI starter 走
-    # /chat/completions 端点（参考百炼「OpenAI 兼容-Chat Completions」文档，非 Responses API）。
+    # 2026-11-24: 切回 MiniMax（OpenAI 兼容端点，参考 platform.minimax.cn/docs/api-reference/text-chat-openai）。
+    # 切换方式:注释/解注释下方两个块（MiniMax 生效块 vs new-api 备份块），与 test yml 同步操作。
+    # 历史:2026-11-07 曾因 MiniMax 余额耗尽切到私人 new-api 中转（转发阿里百炼 Qwen）。
     openai:
-      api-key: ${NEW_API_KEY}
-      # 中转站会追加 /chat/completions；实测流式 + reasoning_content + 末帧 usage 正常
-      base-url: http://123.56.128.32:3000/v1
+      api-key: ${MINIMAX_API_KEY}
+      base-url: https://api.minimaxi.com/v1
       # 2026-11-09: Spring AI 2.0.2 已修 per-request timeout 覆盖陷阱(#6837:未设时
       # OpenAiChatOptions.timeout 为 null=继承 client 配置,autoconfig 注入 resolved
       # timeout)。本显式键 = client 级 callTimeout 唯一配置入口,库侧 BFPP
@@ -30,19 +30,34 @@ spring:
       timeout: 600s
       chat:
         options:
-          model: qwen4-max
+          model: MiniMax-M3.1-Flash
           # ⚠️ OpenAI ChatCompletions 规范字段是 max_completion_tokens（Spring AI 键名
-          # max-completion-tokens）；用户原写的 max_output_tokens 是 DashScope 原生/Anthropic
-          # 风格键，OpenAiChatOptions 无此字段会被静默忽略 → 不生效。
-          max-completion-tokens: 983616
+          # max-completion-tokens）；max_output_tokens 是 DashScope 原生/Anthropic 风格键,
+          # OpenAiChatOptions 无此字段会被静默忽略 → 不生效。
+          max-completion-tokens: 131072
           # OpenAI 标准：让最后一帧带 token 用量 → loom_chat_usage 落库（ChatUsageRecordingAdvisor）。
           # Spring AI 2.0.1 的 Options 无 stream-usage setter，必须用 stream-options.include-usage。
           stream-options:
             include-usage: true
-          # enable_thinking 不是 OpenAiChatOptions 字段（直接写会被静默忽略），
-          # 必须经 extra-body 原样透传给中转站/百炼。实测中转站接受该顶层参数。
+          # MiniMax thinking 开关不是 OpenAiChatOptions 字段（直接写会被静默忽略），
+          # 经 extra-body 原样透传:adaptive 自适应思考 + reasoning_split 分离思考内容。
           extra-body:
-            enable_thinking: true
+            thinking:
+              type: adaptive
+            reasoning_split: true
+      # ===== new-api 中装备份（切回时:注释上方 MiniMax 的 api-key/base-url/chat,解注释本块）=====
+      # api-key: ${NEW_API_KEY}
+      # # 中转站会追加 /chat/completions；实测流式 + reasoning_content + 末帧 usage 正常
+      # base-url: http://123.56.128.32:3000/v1
+      # chat:
+      #   options:
+      #     model: qwen4-max
+      #     max-completion-tokens: 983616
+      #     stream-options:
+      #       include-usage: true
+      #     # enable_thinking 不是 OpenAiChatOptions 字段,经 extra-body 透传到请求体顶层。
+      #     extra-body:
+      #       enable_thinking: true
     # 中转站模型列表无任何 embedding 模型（只有 chat 模型）→ 显式关闭 embedding，
     # 让 RAG 向量链优雅降级（VectorStore 不建、知识上传 503、前端隐藏📚知识空间），
     # 而不是用默认 text-embedding-ada-002 打到中转站 404。

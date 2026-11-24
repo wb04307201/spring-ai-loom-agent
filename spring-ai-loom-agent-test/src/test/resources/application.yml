@@ -3,24 +3,36 @@ spring:
     url: jdbc:h2:file:./target/test-ds/db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
   ai:
     openai:
-      # 2026-11-07: 从 MiniMax 切到私人 new-api 中转（转发阿里百炼 Qwen），与 main yml 同源。
-      # 起因:MiniMax 账户余额耗尽 —— 真实 LLM 的 IT（HttpToolBrowserIT 等）收到
-      # 402 insufficient balance → LLM 回复为空 → 工具调用断言长期红。
-      # 实测中转站:/chat/completions 流式、reasoning_content、tool_calls 增量帧、
-      # 末帧 usage(stream_options.include_usage) 全正常。
-      api-key: ${NEW_API_KEY}
-      base-url: http://123.56.128.32:3000/v1
+      # 2026-11-24: 切回 MiniMax（与 main yml 同步;参考 platform.minimax.cn/docs/api-reference/text-chat-openai）。
+      # 切换方式:注释/解注释下方两个块。历史:2026-11-07 曾因 MiniMax 余额耗尽切到
+      # 私人 new-api 中转（转发阿里百炼 Qwen）;实测中转站流式/reasoning_content/usage 全正常。
+      api-key: ${MINIMAX_API_KEY}
+      base-url: https://api.minimaxi.com/v1
       chat:
         options:
-          model: qwen4-max
-          max-completion-tokens: 983616
+          model: MiniMax-M3.1-Flash
+          max-completion-tokens: 131072
           # Spring AI 2.0.1 的 yml 绑定面没有 stream-usage setter（旧键被静默忽略），
           # 必须用 stream-options.include-usage 让末帧带 token 用量。
           stream-options:
             include-usage: true
-          # qwen 的 thinking 开关不是 OpenAiChatOptions 字段，经 extra-body 透传到请求体顶层。
+          # MiniMax thinking 开关经 extra-body 透传:adaptive 自适应 + reasoning_split 分离思考。
           extra-body:
-            enable_thinking: true
+            thinking:
+              type: adaptive
+            reasoning_split: true
+      # ===== new-api 中装备份（切回时:注释上方 MiniMax 的 api-key/base-url/chat,解注释本块）=====
+      # api-key: ${NEW_API_KEY}
+      # base-url: http://123.56.128.32:3000/v1
+      # chat:
+      #   options:
+      #     model: qwen4-max
+      #     max-completion-tokens: 983616
+      #     stream-options:
+      #       include-usage: true
+      #     # qwen 的 thinking 开关不是 OpenAiChatOptions 字段，经 extra-body 透传到请求体顶层。
+      #     extra-body:
+      #       enable_thinking: true
     loom:
       agent:
         http:
