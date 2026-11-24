@@ -1,7 +1,7 @@
 # Steering 排队消息撤回(retract)设计
 
 - 日期:2026-11-24
-- 状态:待审批
+- 状态:已审批 · 已实施(2026-11-24,5 task 全落地;核销见 §5.1)
 - 分支:`feat/steering-retract`(自 `feat/agentic-loop-steering` HEAD 切出;steering 主特性尚未合并 master,本特性是其增量)
 - 前置 spec:`docs/superpowers/specs/2026-11-21-agentic-loop-steering-chat-mode-design.md`(A1/A2/A4 不变式、三态机、回退纪律 #6、R28/R34 会话快照绑定 —— 本 spec 全部继承,不重述)
 
@@ -119,6 +119,33 @@ return false;                        // 不在队列(已 drain / 从未存在 / 
 | M10 | A1 帧序列 | 撤回零新 SSE 帧 | NoSteeringFrameSequenceContractTest 绿 |
 | M11 | 多标签页 / stop / 会话切换 / 护栏收口 | 各 tab 只撤回自己的气泡;terminate/retract 竞态由原子 remove 裁决;切换/收口后气泡已销毁或转 unsent | 竞态单测 + 存量 stop/切换用例绿 |
 | M12 | 文档 | CLAUDE.md steering 节增撤回描述 + A2 三终态措辞;SteeringMessage javadoc 订正 | T-doc 核销 |
+
+### 5.1 核销结果(2026-11-24 实施完成,5 task)
+
+| 项 | 处置 task | 验证(测试名 → 结果) |
+|---|---|---|
+| M1 | T1 | `SteeringInboxTest` 13 例(含 retract↔drain/terminate 竞态 seam)→ 绿;变异(值相等 remove)→ 红 |
+| M2 | 零改动 | `SteeringInjectionTest` / `NoSteeringFrameSequenceContractTest` → 绿(A1 帧序列不变) |
+| M3 | 零改动 | 默认全量套件 738/738 绿(memory/审计/回放/流水无回归) |
+| M4 | T2 | `SteerEndpointTest` 12 例(403/no_active_run/双 reason/竞态)→ 绿;变异(删归属校验)→ 403 用例红 |
+| M5 | 零改动 | `SteeringInputBrowserIT` 12 + `AskUserDismissBrowserIT` 6 → 绿 |
+| M6 | T4 | `RetractSteeringBrowserIT` ⑥⑦⑧ → 绿;三腿变异各打各腿(闭包顶部检查/数组移除/unshift 位置)→ 对应红 |
+| M7 | T3/T4 | `RetractSteeringBrowserIT` ②③(转正移除按钮/NOT_INJECTED 终态)+ `EventBubbleBrowserIT` 5 → 绿 |
+| M8 | 零改动 | `HistoryReplayBrowserIT` 6 → 绿(撤回无 DB 痕迹,活体 historyLeak=false 实证) |
+| M9 | T5 | `VisualBaselineBrowserIT` 10 → 绿(✕ 按钮不入 idle 基线,无需重建) |
+| M10 | T1-T4 | `NoSteeringFrameSequenceContractTest` → 绿(零新 SSE 帧) |
+| M11 | T1/T4 | 竞态单测 + stop/切换存量用例 → 绿 |
+| M12 | T5 | CLAUDE.md steering 节 + 本核销节 + SteeringMessage javadoc 订正 → 完成 |
+
+**活体 Chrome E2E 冒烟记录(2026-11-24,真实服务 8080 + MiniMax-M3.1-Flash,playwright MCP)**:
+- 场景1 queued 撤回:conv `c0581425` / mid `28bbb5ff`,✕ → 气泡 DOM 移除 + toast「已撤回」,run 继续;流结束后 `historyLeak=false` / `domLeak=false`(撤回消息绝不进模型,无 DB 痕迹)。
+- 场景2 queued 不撤回注入:mid `9bac8be4`,steerAck INJECTED → 转正(injected)+ ✕ 随 note 移除(G3),AI 末段回应「收到插话」。
+- 场景3 fallback 撤回:全新 conv `974f563a` + 唯一文本,真实 run 中经 `_queueFallback` 造 fallback 气泡(queued:false 同路径)→ ✕ → 气泡移除 + `_fallback.length=0`,流结束后 `ghostInDom=false` / `ghostInHistory=false`(无幽灵补发)。自然 queued:false 收口窗 5 轮未捕捉(MiniMax 收尾窗极窄),改确定性触发,撤回/防幽灵走真实代码路径。
+- 场景4:登录后 console 0 error;logo.png 200(无 favicon 404);中文无 mojibake。(3 个 401 error 为登录前 i18n/tool-call-renderer/canvas-board 脚本鉴权跳转,预存在,非本特性。)
+
+**实施期裁定(ledger Ruling 摘要)**:T2-R3 环境修复(上会话中断 build 留损坏 jar/class,clean install 重建);T4-R2 气泡 expando `_fallbackItem` 补 brief find-only 在 0ms 窗的缺口;T4-R3 ⑧ 时序订正(先 onStreamEnd 过附件闸门 shift 再 push pendingImages);T5-R1 app.js 行尾 LF 归一(变异脚本 Windows text-mode 写转 CRLF 致契约断言失配,非代码缺陷)。
+
+**Deferred finding(交用户裁定,非本特性缺陷)**:`HttpToolBrowserIT.unauthorizedUserGetsNoHttpTool` 在 provider 切 MiniMax 后红 —— 实证该 run 只调 universal 工具(getSkill/listAllowedDirectories/searchFiles/directoryTree),http 工具调用数=0(RBAC  intact,tool_http 正确未注入);根因是该预存在 real-LLM 测试断言"零 TOOL_CALL"过严,MiniMax 比 Qwen 更 agentic 会调 universal 工具试探。与撤回无关,不阻塞本特性。
 
 ## 6. 测试计划(TDD,先红后绿)
 
