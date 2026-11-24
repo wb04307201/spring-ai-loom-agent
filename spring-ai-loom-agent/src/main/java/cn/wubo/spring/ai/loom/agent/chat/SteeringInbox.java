@@ -19,13 +19,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       层据此做可见处置(如提示用户),之后 offer 全部拒绝。</li>
  * </ul>
  *
- * <p><b>A2 不变式</b>：一条消息只能落入两种终态之一 —— 返回 true ⇒ 必被 {@code drain}/
- * {@code closeAndRemaining} 读走(可见处置),或返回 false ⇒ 被拒(调用方走拒绝通道)。
- * 不存在"返回 true 但消息既不消费也不可见"的第三态(= 对契约说谎)。<b>offer 入队后
- * 复查 closing</b> 闭合收口窗口：若入队竞上了收口(已过首检、收口 drain 也没读到它),
- * 原子撤单返回 false。撤单用<b>身份比较</b>的 Node 包装(而非 record 值相等的
+ * <p><b>A2 不变式</b>(2026-11-24 retract 扩展,终态枚举 = 已注入 / 未注入(NOT_INJECTED) /
+ * 用户撤回)：一条消息只能落入两种处置之一 —— 返回 true ⇒ 必被 {@code drain}/
+ * {@code closeAndRemaining} 读走(可见处置)<b>或</b>在注入前被 {@link #retract} 原子移除
+ * (用户主动撤回,HTTP 响应 {@code retracted:true} 本身即可见处置)；或返回 false ⇒ 被拒
+ * (调用方走拒绝通道)。不存在"返回 true 但消息既不消费也不可见"的第三态(= 对契约说谎)。
+ * <b>offer 入队后复查 closing</b> 闭合收口窗口：若入队竞上了收口(已过首检、收口 drain
+ * 也没读到它),原子撤单返回 false。撤单用<b>身份比较</b>的 Node 包装(而非 record 值相等的
  * {@code queue.remove(msg)})：重复 messageId+text 值相同的两条在途消息,值相等 remove
- * 会撤错孪生节点、把另一条变成孤儿 —— 与缺陷同形态,必须按引用精确移除。
+ * 会撤错孪生节点、把另一条变成孤儿 —— 与缺陷同形态,必须按引用精确移除。撤回复用同一
+ * 身份 remove,复查 remove 失败因此有<b>两个原因</b> —— 被 drain 取走(读侧可见)<b>或</b>
+ * 被用户撤回({@link #retract} 已原子移除,响应可见),两者均为合法终态处置,A2 不变式不破。
  *
  * <p>线程安全靠 {@link ConcurrentLinkedQueue} + CAS(depth 只做准入控制,
  * 与队列 size 不做强一致 —— offer 先抢 depth 再入队,drain 逐条 poll 逐条释放,
@@ -39,7 +43,7 @@ public class SteeringInbox {
     /**
      * 一条 steering 消息。
      *
-     * @param messageId 前端生成的消息 ID,用于 ack 回显与去重审计
+     * @param messageId 服务端 UUID 生成(SseController.steer 端点),用于 ack 回显与去重审计
      * @param text      用户追加输入正文
      */
     public record SteeringMessage(String messageId, String text) {
@@ -93,8 +97,9 @@ public class SteeringInbox {
         queue.add(node);
         // 入队后复查 closing/terminated(A2 第三态修复)：过了首检后被抢占、期间收口(置 closing 并
         // drain 完,读侧终止)的在途 offer,恢复后绝不能"返回 true + 消息蒸发"。
-        // remove 失败 ⇔ 节点已被 drain 取走(消息已可见处置)→ 保持 true;
-        // remove 成功 ⇔ 没人读过 → 原子撤单,回滚 depth 预约并返回 false(拒绝即可见通道)。
+        // remove 失败 ⇔ 节点已被 drain 取走(消息已可见处置)或已被用户撤回 retract
+        // 原子移除(HTTP 响应即可见处置)—— 两因两果均合法,保持 true;
+        // remove 成功 ⇔ 没人读过也没人撤过 → 原子撤单,回滚 depth 预约并返回 false(拒绝即可见通道)。
         // 复查含 terminated:stop/断连的永久终止与迭代收口同样闭合窗口;reopen 与 terminate
         // 竞态时 terminated 单调恒真,offer 要么首检被拒要么复查撤单,不会落进已终止的队列。
         if ((closing.get() || terminated.get()) && queue.remove(node)) {
@@ -117,6 +122,35 @@ public class SteeringInbox {
             depth.decrementAndGet();
         }
         return drained;
+    }
+
+    /**
+     * 逐消息原子撤回(2026-11-24 retract spec G1/G3)—— 撤回仍在队列中、尚未注入模型的
+     * 排队消息;<b>已被 drain 取走(已注入)的消息撤不回</b>,由本方法的 remove 失败兜底。
+     *
+     * <p><b>线性化点</b>是 {@code queue.remove(node)}(身份比较的 Node 移除,与
+     * {@link #offer} 入队后复查撤单同源模式):{@link ConcurrentLinkedQueue} 保证每个节点
+     * 恰被移除一次 —— {@link #drain} 的 poll 与撤回的 remove 互斥,<b>只有一个赢,赢家拥有
+     * 处置权</b>。撤回赢 ⇒ 消息绝不进模型,depth 名额由此处释放;drain/terminate 赢 ⇒
+     * remove 失败返回 false(消息走"已注入 / NOT_INJECTED"既有可见终态,前端不得预判,
+     * 交给 steerAck 裁决)。扫描用弱一致迭代器,深度上限 {@link #MAX_DEPTH}=20,无需索引。
+     *
+     * @param messageId 服务端 UUID(与 {@link SteeringMessage#messageId()} 匹配)
+     * @return true = 原子移除成功,消息绝不进模型(调用方给前端可见确认);
+     *         false = 不在队列,或已被 drain/terminate 取走
+     */
+    public boolean retract(String messageId) {
+        for (Node node : queue) {              // 弱一致迭代,深度 ≤20 无需索引
+            if (node.message.messageId().equals(messageId)) {
+                beforeRetractRemove(node.message); // 测试 seam(生产 no-op)：定格"定位节点→remove"竞态窗口
+                if (queue.remove(node)) {      // 线性化点：与 drain 的 poll 互斥
+                    depth.decrementAndGet();   // 每节点恰好减一次(poll XOR remove)
+                    return true;
+                }
+                return false;                  // 已被 drain/terminate 取走
+            }
+        }
+        return false;
     }
 
     /**
@@ -222,6 +256,19 @@ public class SteeringInbox {
      * @param msg 即将入队但尚未入队的那条消息
      */
     void beforeEnqueue(SteeringMessage msg) {
+        // no-op
+    }
+
+    /**
+     * 测试 seam —— 生产恒 no-op(空方法体,JIT 内联后零开销)。
+     *
+     * <p>供回归测试用同包匿名子类覆写,把线程<b>确定性定格在"已定位匹配节点 → queue.remove"
+     * 之间</b>(retract↔drain/terminate 的真实竞态窗口,纳秒级,纯靠概率性抢占实测不可复现),
+     * 与 {@link #beforeEnqueue} 同一哲学。生产路径无任何子类,不受影响。
+     *
+     * @param msg 已定位、即将被移除的那条消息
+     */
+    void beforeRetractRemove(SteeringMessage msg) {
         // no-op
     }
 }

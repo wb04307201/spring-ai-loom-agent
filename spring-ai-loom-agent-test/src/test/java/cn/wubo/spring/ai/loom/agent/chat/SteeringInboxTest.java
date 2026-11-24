@@ -235,6 +235,103 @@ class SteeringInboxTest {
                 .as("trial %d: 收口后深度归零,无滞留预约/残留", trial).isZero();
     }
 
+    // ===== retract —— 用户主动撤回排队消息(2026-11-24 steering-retract spec §3/§6) =====
+
+    @Test
+    void retract_removes_queued_and_releases_depth() {
+        SteeringInbox inbox = new SteeringInbox();
+        assertThat(inbox.offer("m-1", "第一条")).isTrue();
+        assertThat(inbox.offer("m-2", "第二条")).isTrue();
+        assertThat(inbox.retract("m-1")).isTrue();
+        assertThat(inbox.depth()).isEqualTo(1);
+        assertThat(inbox.drain()).extracting(SteeringInbox.SteeringMessage::messageId)
+                .containsExactly("m-2"); // FIFO 残余不受影响
+    }
+
+    @Test
+    void retract_unknown_id_returns_false() {
+        SteeringInbox empty = new SteeringInbox();
+        assertThat(empty.retract("nope")).isFalse();
+        assertThat(empty.depth()).isZero();
+
+        SteeringInbox inbox = new SteeringInbox();
+        assertThat(inbox.offer("m-1", "a")).isTrue();
+        assertThat(inbox.offer("m-2", "b")).isTrue();
+        assertThat(inbox.retract("m-99")).isFalse();
+        assertThat(inbox.depth()).as("撤回未命中不得释放名额").isEqualTo(2);
+        assertThat(inbox.drain()).extracting(SteeringInbox.SteeringMessage::messageId)
+                .as("队列内容不受未命中撤回影响").containsExactly("m-1", "m-2");
+    }
+
+    @Test
+    void retract_after_drain_returns_false() {
+        SteeringInbox inbox = new SteeringInbox();
+        assertThat(inbox.offer("m-1", "a")).isTrue();
+        assertThat(inbox.drain()).hasSize(1);
+        assertThat(inbox.retract("m-1"))
+                .as("已被 drain 读走(G3:注入后不可撤回)→ false").isFalse();
+        assertThat(inbox.depth()).isZero();
+    }
+
+    @Test
+    void retract_loses_race_to_drain() {
+        // 竞态定格(spec §6.1,仿 beforeEnqueue seam):retract 定位节点后、queue.remove 前,
+        // drain 的 poll 抢先 —— ConcurrentLinkedQueue 保证每节点恰被移除一次,只有一个赢。
+        // holder 数组把线程确定性定格在窗口内(纳秒级概率抢占实测不可复现,同
+        // inflight_offer_not_stranded_after_close 的裁定)。
+        final SteeringInbox[] holder = new SteeringInbox[1];
+        AtomicReference<List<SteeringInbox.SteeringMessage>> drainedRef = new AtomicReference<>();
+        SteeringInbox inbox = new SteeringInbox() {
+            @Override
+            void beforeRetractRemove(SteeringInbox.SteeringMessage msg) {
+                drainedRef.set(holder[0].drain()); // 同步重入:poll 先取走本节点
+            }
+        };
+        holder[0] = inbox;
+        assertThat(inbox.offer("m-1", "第一条")).isTrue();
+
+        assertThat(inbox.retract("m-1"))
+                .as("drain 赢 poll ⇒ remove 失败 ⇒ 撤回被拒(消息已被读走,前端交给 ack 裁决)")
+                .isFalse();
+        assertThat(drainedRef.get()).extracting(SteeringInbox.SteeringMessage::messageId)
+                .as("A2:消息被 drain 读走(已注入 = 可见处置),绝不静默吞").containsExactly("m-1");
+        assertThat(inbox.depth()).as("深度由 poll 释放(poll XOR remove 恰一次)").isZero();
+        assertThat(inbox.drain()).isEmpty();
+    }
+
+    @Test
+    void retract_loses_race_to_terminate() {
+        // 同上 seam,hook 内改调 terminateAndRemaining(stop/断连路径)→ terminate 赢,
+        // 残留出现在 terminate 返回值中(NOT_INJECTED 终帧可见处置),撤回返 false。
+        final SteeringInbox[] holder = new SteeringInbox[1];
+        AtomicReference<List<SteeringInbox.SteeringMessage>> remainingRef = new AtomicReference<>();
+        SteeringInbox inbox = new SteeringInbox() {
+            @Override
+            void beforeRetractRemove(SteeringInbox.SteeringMessage msg) {
+                remainingRef.set(holder[0].terminateAndRemaining());
+            }
+        };
+        holder[0] = inbox;
+        assertThat(inbox.offer("m-1", "第一条")).isTrue();
+
+        assertThat(inbox.retract("m-1"))
+                .as("terminate 赢 ⇒ remove 失败 ⇒ 撤回被拒").isFalse();
+        assertThat(remainingRef.get()).extracting(SteeringInbox.SteeringMessage::messageId)
+                .as("A2:残留在 terminate 返回值中(路由层据此 emit NOT_INJECTED 终帧)").containsExactly("m-1");
+        assertThat(inbox.depth()).isZero();
+        assertThat(inbox.isTerminated()).isTrue();
+    }
+
+    @Test
+    void retract_wins_race_then_drain_empty() {
+        // 反向定格(无 seam 即确定性):撤回的 remove 先赢 ⇒ 消息绝不再进模型。
+        SteeringInbox inbox = new SteeringInbox();
+        assertThat(inbox.offer("m-1", "第一条")).isTrue();
+        assertThat(inbox.retract("m-1")).isTrue();
+        assertThat(inbox.drain()).as("撤回赢,消息绝不进模型").isEmpty();
+        assertThat(inbox.depth()).isZero();
+    }
+
     private static void awaitQuietly(CountDownLatch latch) {
         try {
             latch.await();
