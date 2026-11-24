@@ -852,6 +852,28 @@ const api = {
     }
     return { status: r.status, body };
   },
+  /**
+   * steering 撤回(spec 2026-11-24 retract G1):DELETE /stream/{convId}/steer/{messageId}。
+   * 返回 {status, body}(镜像 api.steer)。契约:200 {retracted:true} /
+   * 200 {retracted:false, reason:"no_active_run"|"not_in_queue"} / 403 非会话归属。
+   * convId 由调用方传**气泡渲染时刻快照**(R20 晚响应防跨会话,与 R28/R34 同哲学)。
+   */
+  async retractSteer(convId, messageId) {
+    const r = await apiFetch(
+      `/spring/ai/loom/stream/${encodeURIComponent(convId)}/steer/${encodeURIComponent(messageId)}`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+      },
+    );
+    let body = {};
+    try {
+      body = await r.json();
+    } catch (_) {
+      /* 非 JSON 响应(网关错误页等)→ 空对象,status 仍在 */
+    }
+    return { status: r.status, body };
+  },
   async streamChat(record, onChunk, onComplete, onError, signal) {
     const resp = await apiFetch(API.stream, {
       method: "POST",
@@ -1762,11 +1784,13 @@ const ui = {
     }
   },
 
-  /** 灰态排队气泡:kind='queued'(已入服务端 inbox,等 steerAck)/ 'fallback'(queued:false/403,本地 complete 后补发)。 */
-  renderQueuedUser(messageId, text, kind) {
+  /** 灰态排队气泡:kind='queued'(已入服务端 inbox,等 steerAck)/ 'fallback'(queued:false/403,本地 complete 后补发)。
+   * convId = 渲染时刻会话快照(spec 2026-11-24 retract,R20 晚响应:撤回 DELETE 朝快照发不朝 live)。 */
+  renderQueuedUser(messageId, text, kind, convId) {
     const item = document.createElement("div");
     item.className = "chat-item chat-item-right chat-item-queued";
     item.dataset.steerState = kind;
+    item.dataset.convId = convId || "";
     if (messageId) item.dataset.messageId = messageId;
     const bubble = document.createElement("div");
     bubble.className = "bubble";
@@ -1779,7 +1803,15 @@ const ui = {
     note.className = "queued-note";
     note.textContent =
       kind === "queued" ? "排队中 · 将在下一轮注入" : "将在本轮结束后作为新消息发送";
-    bubble.append(body, note);
+    // ✕ 撤回按钮(spec 2026-11-24 retract):body/note 的兄弟节点,不进任何 textContent 复制载荷;
+    // 点击按 steerState 三分支分派(queued 端点裁决 / fallback·unsent 本地清理)。
+    const retractBtn = document.createElement("button");
+    retractBtn.type = "button";
+    retractBtn.className = "queued-retract-btn";
+    retractBtn.textContent = "✕";
+    retractBtn.title = "撤回";
+    retractBtn.addEventListener("click", () => steering.retractBubble(item));
+    bubble.append(body, note, retractBtn);
     const avatar = document.createElement("div");
     avatar.className = "avatar";
     avatar.innerHTML = `<img src="${userImage}" alt="用户"/>`;
@@ -1805,6 +1837,9 @@ const ui = {
     el.dataset.steerState = "injected";
     const note = el.querySelector(".queued-note");
     if (note) note.remove();
+    // G3(spec 2026-11-24 retract):已注入不可撤回 —— ✕ 按钮随 note 一起移除
+    const btn = el.querySelector(".queued-retract-btn");
+    if (btn) btn.remove();
   },
 
   /** 可见终态:未发送(stop/护栏/断连收口/回退被抑制)。textContent,绝不 innerHTML。 */
@@ -2697,7 +2732,7 @@ const steering = {
     if (status === 200 && body.queued === true && body.messageId) {
       // 服务端已入 inbox → 灰态排队气泡(data-message-id 与 ack 帧一一对应)
       consume();
-      ui.renderQueuedUser(body.messageId, text, "queued");
+      ui.renderQueuedUser(body.messageId, text, "queued", convId);
       // R20 竞态兜底:steer 响应晚于本地流完成(ack 帧不可能再送达/已随流处理完)
       // → 立即走 onStreamEnd 把等 ack 灰态转可见终态,不留无主灰态。
       if (!state.isStreaming) this.onStreamEnd();
@@ -2738,10 +2773,10 @@ const steering = {
   _queueFallback(convId, text) {
     const bound = convId || state.conversationId;
     if (!bound) {
-      ui._markUnsent(ui.renderQueuedUser(null, text, "fallback"), "未发送(无会话)");
+      ui._markUnsent(ui.renderQueuedUser(null, text, "fallback", bound), "未发送(无会话)");
       return;
     }
-    const bubble = ui.renderQueuedUser(null, text, "fallback");
+    const bubble = ui.renderQueuedUser(null, text, "fallback", bound);
     this._fallback.push({ bubble, text, convId: bound });
     // 竞态:回退登记时本地流已结束(complete 事件已过,不会再有下一次 complete)
     // → 立即补发(此刻无活跃 run,不违反 #6 的 register 竞态约束)。
@@ -2860,6 +2895,50 @@ const steering = {
   /** stopStream 调用:抑制回退补发(stop 意图优先),剩余在队回退气泡由 enableSend 标未发送。 */
   suppressFallbackOnStop() {
     this._stopSuppressedFallback = true;
+  },
+
+  /**
+   * ✕ 撤回点击分派(spec 2026-11-24 retract §4.2):按气泡 steerState 三分支。
+   * 核心原则:前端灰态只是提示,服务端原子移除结果才是权威 —— queued 分支不预判状态,
+   * 失败后由 ack/汇聚点裁决终态;injected 无按钮(G3),状态已迁移时按新分支走或忽略。
+   */
+  async retractBubble(el) {
+    if (!el || !el.isConnected) return;
+    const st = el.dataset.steerState;
+    if (st === "queued") {
+      let res;
+      try {
+        // convId 取气泡渲染时刻快照(R20 晚响应:live state 可能已切走,与 R28/R34 同哲学)
+        res = await api.retractSteer(
+          el.dataset.convId || state.conversationId,
+          el.dataset.messageId,
+        );
+      } catch (_) {
+        // 网络错误:气泡保留,可重试(端点幂等)
+        showToast("未能撤回,消息可能已注入", "error");
+        return;
+      }
+      // await 期间 ack/stop 可能已把气泡迁移到终态 → 按新状态重新分派(不覆盖终态)
+      if (!el.isConnected) return;
+      if (el.dataset.steerState !== "queued") {
+        this.retractBubble(el);
+        return;
+      }
+      if (res.status === 200 && res.body && res.body.retracted === true) {
+        el.remove();
+        showToast("已撤回");
+      } else {
+        // retracted:false(任意 reason)/403/5xx:保留气泡不预判 —— INJECTED ack 转正 /
+        // NOT_INJECTED ack 标未发送 / 流结束汇聚点兜底,绝不静默蒸发(A2)
+        showToast("未能撤回,消息可能已注入", "error");
+      }
+      return;
+    }
+    if (st === "fallback" || st === "unsent") {
+      // TODO(Task 4):fallback 双腿本地清理(retracted 标志 + 数组移除)/ unsent DOM 移除
+      return;
+    }
+    // injected:G3 不可撤回(按钮已随转正移除,此分支纯防御)
   },
 
   /** disableSend(新流开始)调用:防御式复位 stop 抑制标志(正常路径已在 onStreamEnd 消费)。 */

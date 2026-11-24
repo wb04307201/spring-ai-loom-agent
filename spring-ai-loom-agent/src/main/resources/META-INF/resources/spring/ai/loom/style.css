@@ -436,6 +436,30 @@ body {
   color: var(--text-muted);
 }
 
+/* ✕ 撤回按钮(spec 2026-11-24 retract §4.3):气泡右上角小按钮,body/note 兄弟节点,
+   不改气泡布局骨架(.bubble 已 position:relative);色值复用 a11y token,禁废弃色。 */
+.queued-retract-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.queued-retract-btn:hover {
+  background: var(--secondary-color);
+  color: var(--text-secondary);
+}
+
 /* steerAck NOT_INJECTED / stop 抑制 / 流结束兜底:可见终态,文本仍留气泡内 */
 .chat-item-unsent .bubble {
   background: var(--bg-primary);
