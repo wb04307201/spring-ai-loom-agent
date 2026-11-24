@@ -309,4 +309,188 @@ class RetractSteeringBrowserIT extends BrowserTestBase {
             assertThat(consoleErrorsOf(page)).isEmpty();
         }
     }
+
+    // ==================== Task 4 ⑥ 幽灵补发:闭包标志腿(0ms 窗) ====================
+
+    @Test
+    @DisplayName("fallback 项已 shift 进 setTimeout 闭包后点 ✕ → 闭包顶部 retracted 检查丢弃,绝不幽灵补发(打闭包标志腿)")
+    void fallback_retract_no_ghost_send() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            List<String> deleteUrls = retractScript(page, 200, "{\"retracted\":true}");
+            BlockingQueue<Route> streams = holdStreams(page);
+            page.route("**/steer", route -> route.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"queued\":false}")));
+            newConversation(page);
+
+            page.fill("#textarea", "第一条消息");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+            page.fill("#textarea", "闭包窗口撤回我");
+            page.press("#textarea", "Enter");
+            page.waitForSelector(".chat-item-queued[data-steer-state=\"fallback\"] .queued-retract-btn",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+
+            // 同一 evaluate 任务内:onStreamEnd 把项 shift 进 setTimeout(0) 闭包 → 同步点 ✕。
+            // 宏任务边界保证闭包在 evaluate 返回后才执行 ⇒ 确定性定格 0ms 竞态窗(Review Focus 2)。
+            // Ruling T4-R1:held-fetch 形态下 abort 无法 reject 挂起的 fetch(响应头未到,signal
+            // 不生效)⇒ fulfill 一段 SSE 驱动真实 onComplete → enableSend 汇聚点;幽灵补发断言语义不变。
+            page.evaluate("() => { const s = window._loomAgent.steering;"
+                    + " s.onStreamEnd();"
+                    + " document.querySelector('.chat-item-queued[data-steer-state=\"fallback\"] .queued-retract-btn').click(); }");
+            page.waitForFunction(
+                    "() => document.querySelector('.chat-item-queued[data-steer-state=\"fallback\"]') === null",
+                    null, WF_5S);
+            page.waitForTimeout(300); // 泵送:让持有已撤回项的 setTimeout(0) 闭包先执行完
+            // 幽灵补发直接锚 = holdStreams 队列本身:handler 在请求到达时即入队(不依赖 fulfill),
+            // 此刻流仍 RUNNING(run1 未放行),队列里出现第二条 /stream 即幽灵补发。
+            // (waitForResponse 不可用:held-fetch 无响应头,事件永不触发 —— M1 实测假绿。)
+            // held-fetch 形态下 abort 无法 reject 挂起的 fetch(响应头未到)⇒ fulfill 一段 SSE
+            // 让流走真实 onComplete → enableSend → onStreamEnd 汇聚点。
+            fulfillSse(run1, "{\"content\":\"好的\"}");
+            page.waitForTimeout(400); // 泵送:complete → onStreamEnd → 闭包#2 全部执行完
+            // 幽灵补发直接锚 = holdStreams 队列:变异形态下闭包#1 把已撤回项 unshift 回数组,
+            // complete 后闭包#2 将其 chat.send —— 第二条 /stream 入队即幽灵(M1 实测定格)。
+            assertThat(streams.size()).as("已撤回项绝不幽灵补发(chat.send 计数 0)").isZero();
+            waitIdle(page);
+            assertThat(awaitRoute(streams, page, 1_000)).as("流结束后亦无补发").isNull();
+            assertThat((Boolean) page.evaluate(
+                    "() => !document.getElementById('mainContent').innerText.includes('闭包窗口撤回我')"))
+                    .as("撤回文本不留任何 DOM 痕迹").isTrue();
+            assertThat(deleteUrls).as("fallback 撤回纯本地,不调 DELETE 端点").isEmpty();
+            assertThat(consoleErrorsOf(page)).isEmpty();
+        }
+    }
+
+    // ==================== Task 4 ⑦ 死项滞留:数组移除腿 ====================
+
+    @Test
+    @DisplayName("fallback ✕(未触发 complete)→ _fallback 数组即刻不含该项;stop 路径不对已撤回气泡产生状态写(打数组移除腿)")
+    void fallback_retract_no_dead_item() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            List<String> deleteUrls = retractScript(page, 200, "{\"retracted\":true}");
+            BlockingQueue<Route> streams = holdStreams(page);
+            page.route("**/steer", route -> route.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"queued\":false}")));
+            page.route("**/stop", route -> route.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"stopped\":true}")));
+            newConversation(page);
+
+            page.fill("#textarea", "第一条消息");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+            page.fill("#textarea", "数组移除验证");
+            page.press("#textarea", "Enter");
+            page.waitForSelector(".chat-item-queued[data-steer-state=\"fallback\"] .queued-retract-btn",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+
+            page.click(".chat-item-queued[data-steer-state=\"fallback\"] .queued-retract-btn");
+            page.waitForFunction(
+                    "() => window._loomAgent.steering._fallback.length === 0"
+                            + " && document.querySelector('.chat-item-queued') === null",
+                    null, WF_5S);
+            assertThat(deleteUrls).as("fallback 撤回纯本地").isEmpty();
+
+            // stop 路径:队列已空 ⇒ 遍历不得触及已撤回气泡(无 detached 节点状态写)
+            page.click("#stop-btn");
+            waitIdle(page);
+            assertThat(page.locator(".chat-item-unsent").count())
+                    .as("stop 不对已撤回项产生任何 unsent 状态写").isZero();
+            assertThat((Boolean) page.evaluate(
+                    "() => !document.getElementById('mainContent').innerText.includes('数组移除验证')"))
+                    .isTrue();
+            assertThat(consoleErrorsOf(page)).isEmpty();
+        }
+    }
+
+    // ==================== Task 4 ⑧ unshift 重试支路:检查点必须先于回插 ====================
+
+    @Test
+    @DisplayName("fallback ✕ 时恰有 pendingImages 未落 → 闭包不得把已撤回项 unshift 回数组(检查点在顶部,先于 unshift)")
+    void retracted_not_unshifted() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            BlockingQueue<Route> streams = holdStreams(page);
+            page.route("**/steer", route -> route.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"queued\":false}")));
+            newConversation(page);
+
+            page.fill("#textarea", "第一条消息");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+            page.fill("#textarea", "unshift边界撤回");
+            page.press("#textarea", "Enter");
+            page.waitForSelector(".chat-item-queued[data-steer-state=\"fallback\"] .queued-retract-btn",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+
+            // 同一 evaluate 内严格时序(Ruling T4-R3):先 onStreamEnd(此刻附件空 → 过闸门 shift
+            // 进闭包)→ 再 push 未落附件(闭包将走 unshift 支路)→ 同步点 ✕。
+            // 附件若先 push,onStreamEnd 在闸门前置 return,项从未进闭包,本例打不到 unshift 腿。
+            page.evaluate("() => { const L = window._loomAgent;"
+                    + " L.steering.onStreamEnd();"
+                    + " L.state.pendingImages.push({fileName:'hold.png'});"
+                    + " document.querySelector('.chat-item-queued[data-steer-state=\"fallback\"] .queued-retract-btn').click(); }");
+            page.waitForFunction(
+                    "() => document.querySelector('.chat-item-queued[data-steer-state=\"fallback\"]') === null",
+                    null, WF_5S);
+            page.waitForTimeout(300); // 泵送:让 setTimeout(0) 闭包执行完毕
+            assertThat(page.evaluate("() => window._loomAgent.steering._fallback.length"))
+                    .as("已撤回项不得被 unshift 回数组(检查点先于 unshift 支路)").isEqualTo(0);
+
+            // 闸门放行 + 流结束:队列空,无任何补发
+            page.evaluate("() => { window._loomAgent.state.pendingImages.length = 0; }");
+            fulfillSse(run1, "{\"content\":\"好的\"}");
+            waitIdle(page);
+            assertThat(awaitRoute(streams, page, 1_000)).as("无幽灵补发").isNull();
+            assertThat(consoleErrorsOf(page)).isEmpty();
+        }
+    }
+
+    // ==================== Task 4 ⑨ unsent 终态清理:纯 DOM 移除 ====================
+
+    @Test
+    @DisplayName("stop 后「未发送(已停止)」气泡点 ✕ → DOM 移除,零端点调用(unsent 队列引用早已清空)")
+    void unsent_retract_removes_dom() {
+        try (BrowserContext ctx = adminContext()) {
+            Page page = openChatReady(ctx);
+            List<String> deleteUrls = retractScript(page, 200, "{\"retracted\":true}");
+            BlockingQueue<Route> streams = holdStreams(page);
+            steerQueued(page);
+            page.route("**/stop", route -> route.fulfill(new Route.FulfillOptions()
+                    .setStatus(200).setContentType("application/json; charset=UTF-8")
+                    .setBody("{\"stopped\":true}")));
+            newConversation(page);
+
+            page.fill("#textarea", "第一条消息");
+            page.click("#send-btn");
+            Route run1 = awaitRoute(streams, page, 5_000);
+            assertThat(run1).isNotNull();
+            page.fill("#textarea", "停止后清理我");
+            page.press("#textarea", "Enter");
+            page.waitForSelector(".chat-item-queued[data-message-id=\"m-1\"]",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
+
+            page.click("#stop-btn");
+            page.waitForFunction(
+                    "() => { const el=document.querySelector('[data-message-id=\"m-1\"]');"
+                            + " return el && el.dataset.steerState === 'unsent'; }", null, WF_10S);
+            assertThat(page.locator("[data-message-id=\"m-1\"] .queued-retract-btn").count())
+                    .as("unsent 终态保留 ✕ 按钮(可清理)").isEqualTo(1);
+
+            page.click("[data-message-id=\"m-1\"] .queued-retract-btn");
+            page.waitForFunction(
+                    "() => document.querySelector('[data-message-id=\"m-1\"]') === null", null, WF_5S);
+            assertThat(deleteUrls).as("unsent 清理纯本地,零 DELETE 调用").isEmpty();
+            waitIdle(page);
+            assertThat(consoleErrorsOf(page)).isEmpty();
+        }
+    }
 }

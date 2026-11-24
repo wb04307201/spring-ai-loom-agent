@@ -2777,7 +2777,11 @@ const steering = {
       return;
     }
     const bubble = ui.renderQueuedUser(null, text, "fallback", bound);
-    this._fallback.push({ bubble, text, convId: bound });
+    const entry = { bubble, text, convId: bound };
+    // 0ms 窗承重(spec 2026-11-24 retract §4.2):项被 onStreamEnd shift 进 setTimeout 闭包后
+    // 已不在数组 —— ✕ 点击经气泡上的同一引用置 retracted 标志,闭包顶部检查看到即丢弃。
+    bubble._fallbackItem = entry;
+    this._fallback.push(entry);
     // 竞态:回退登记时本地流已结束(complete 事件已过,不会再有下一次 complete)
     // → 立即补发(此刻无活跃 run,不违反 #6 的 register 竞态约束)。
     if (!state.isStreaming) this.onStreamEnd();
@@ -2850,6 +2854,7 @@ const steering = {
     // 新流 disableSend 刚显示的 stop 按钮会被旧回调后续语句再次隐藏(新流无法停止)。
     // 气泡保持挂载直到真正补发前一瞬才 remove(重试/切换路径下文本始终可见,A2)。
     setTimeout(() => {
+      if (first.retracted) return;
       // 此刻若又处于流中/上传中(极端竞态):回插队首,气泡仍可见,等下一次 complete。
       if (state.isStreaming || state.pendingImages.some((img) => !img.fileId)) {
         this._fallback.unshift(first);
@@ -2934,8 +2939,23 @@ const steering = {
       }
       return;
     }
-    if (st === "fallback" || st === "unsent") {
-      // TODO(Task 4):fallback 双腿本地清理(retracted 标志 + 数组移除)/ unsent DOM 移除
+    if (st === "fallback") {
+      // 纯本地双腿(spec §4.2,两腿承重不同不可互替):
+      // ① 闭包标志(防幽灵发送):onStreamEnd 的 setTimeout 闭包已持同一引用,顶部检查看此标志;
+      //    项已 shift 出数组时经气泡 expando 到达同一对象(0ms 窗,brief 伪码 find-only 缺口);
+      // ② 数组移除(防死项复活):stop/切换遍历不再把已撤回项当存活项处置。
+      const f = el._fallbackItem || this._fallback.find((x) => x.bubble === el);
+      if (f) {
+        f.retracted = true;
+        const i = this._fallback.indexOf(f);
+        if (i >= 0) this._fallback.splice(i, 1);
+      }
+      el.remove();
+      return;
+    }
+    if (st === "unsent") {
+      // 纯本地:各终态路径的队列引用早已清空,仅 DOM 移除
+      el.remove();
       return;
     }
     // injected:G3 不可撤回(按钮已随转正移除,此分支纯防御)
