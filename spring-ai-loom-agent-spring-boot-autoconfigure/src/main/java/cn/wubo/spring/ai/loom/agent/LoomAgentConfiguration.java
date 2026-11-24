@@ -988,6 +988,46 @@ public class LoomAgentConfiguration {
             }
 
             /**
+             * steering 排队消息撤回端点(Task 2,spec 2026-11-24 G1/G3):
+             * {@code DELETE /spring/ai/loom/stream/{conversationId}/steer/{messageId}}。
+             *
+             * <p>守卫:归属校验逐字镜像 {@code steer}(R33 归属先于一切,跨用户 403)。
+             * reason 契约由本端点预检派生(registry 保持纯布尔委托):
+             * {@code {retracted:true}} = 原子移除成功,消息绝不进模型;
+             * {@code {retracted:false, reason:"no_active_run"}} = 无活跃流或 inbox 已永久终止
+             * (stop/断连/登出);{@code {retracted:false, reason:"not_in_queue"}} = 未知 id 或
+             * 已被 drain 注入/收口(线性化点在 inbox,与 drain 的 poll 互斥,恰一方赢 —— 撤回
+             * 输即走既有可见终态,前端据此还原灰态气泡)。closing 但未 terminated 不占
+             * no_active_run 分支:收口时队列已被 drain 清空,自然落 not_in_queue。
+             */
+            @DeleteMapping(value = "/spring/ai/loom/stream/{conversationId}/steer/{messageId}")
+            public ResponseEntity<java.util.Map<String, Object>> retractSteer(
+                    @PathVariable("conversationId") String conversationId,
+                    @PathVariable("messageId") String messageId) {
+                String username = UserContextHolder.getCurrentUser();
+                // 归属校验:会话必须属于当前用户(逐字镜像 steer,R33 先于一切)
+                boolean owned = username != null && userConversation.exists(
+                        new cn.wubo.spring.ai.loom.agent.model.UserConversationRecord(username, conversationId));
+                if (!owned) {
+                    log.warn("拒绝跨用户 steering 撤回: caller={}, conv={}", username, conversationId);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(java.util.Map.of("error", "forbidden", "code", 403));
+                }
+                cn.wubo.spring.ai.loom.agent.stream.SseEmitterRegistry.Entry entry =
+                        emitterRegistry.get(username, conversationId);
+                if (entry == null || entry.inbox().isTerminated()) {
+                    // 无活跃 run / 已永久终止(stop)→ 无可撤回对象
+                    return ResponseEntity.ok(java.util.Map.of("retracted", false, "reason", "no_active_run"));
+                }
+                boolean retracted = emitterRegistry.retract(username, conversationId, messageId);
+                if (retracted) {
+                    return ResponseEntity.ok(java.util.Map.of("retracted", true));
+                }
+                // 不在队列:未知 id / 已被 drain 注入 / terminate↔retract 竞态 drain 赢
+                return ResponseEntity.ok(java.util.Map.of("retracted", false, "reason", "not_in_queue"));
+            }
+
+            /**
              * 调试用：当前用户的活跃流
              */
             @GetMapping("/spring/ai/loom/stream/active")

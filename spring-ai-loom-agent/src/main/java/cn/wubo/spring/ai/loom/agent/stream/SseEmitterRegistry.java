@@ -149,6 +149,22 @@ public class SseEmitterRegistry {
     }
 
     /**
+     * 撤回仍在队列中的 steering 排队消息(2026-11-24 retract spec G1)—— 委托活跃流
+     * Entry 的 {@link SteeringInbox#retract},镜像 {@link #steer} 的查表结构。
+     *
+     * <p>线性化点在 inbox 内(身份 remove 与 drain 的 poll 互斥,恰一方赢):true ⇔
+     * 消息绝不进模型;false ⇔ 无活跃流 / 未知 id / 已被 drain 取走或 terminate 收口
+     * (走既有可见终态)。失败 reason 的区分由路由层预检派生,registry 保持纯布尔委托。
+     *
+     * @return true=原子移除成功(撤回即可见处置,A2);false=不在队列或已被读走
+     */
+    public boolean retract(String username, String conversationId, String messageId) {
+        Entry e = get(username, conversationId);
+        if (e == null) return false;
+        return e.inbox().retract(messageId);
+    }
+
+    /**
      * 用户登出时停掉该用户全部活跃流
      */
     public int cleanup(String username) {

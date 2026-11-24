@@ -133,4 +133,71 @@ class SteerEndpointTest {
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         assertThat(resp.getBody().get("queued")).isEqualTo(false);
     }
+
+    // ==================== Task 2(spec 2026-11-24 retract):DELETE steer/{messageId} ====================
+
+    private ResponseEntity<Map<String, Object>> retract(String conversationId, String messageId) {
+        return controller.retractSteer(conversationId, messageId);
+    }
+
+    @Test
+    @DisplayName("retract:排队中消息撤回 → {retracted:true},绝不进模型(depth 归零)")
+    void retract_queued_message_returns_true() {
+        SseEmitterRegistry.Entry entry = registerRun();
+        String messageId = (String) steer("补充一下").getBody().get("messageId");
+        ResponseEntity<Map<String, Object>> resp = retract(CONV, messageId);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getBody().get("retracted")).isEqualTo(true);
+        assertThat(resp.getBody()).doesNotContainKey("reason");
+        assertThat(entry.inbox().depth()).isZero();
+        // 撤回的消息必须永不被 drain 读走(G1:撤回成功 ⇒ 绝不进模型)
+        assertThat(entry.inbox().drain()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("retract:无活跃 run → {retracted:false, reason:\"no_active_run\"}")
+    void retract_no_active_run_reason() {
+        ResponseEntity<Map<String, Object>> resp = retract(CONV, "msg-anything");
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getBody().get("retracted")).isEqualTo(false);
+        assertThat(resp.getBody().get("reason")).isEqualTo("no_active_run");
+    }
+
+    @Test
+    @DisplayName("retract:run 已永久终止(stop)→ {retracted:false, reason:\"no_active_run\"}")
+    void retract_terminated_run_reason() {
+        SseEmitterRegistry.Entry entry = registerRun();
+        String messageId = (String) steer("补充一下").getBody().get("messageId");
+        registry.terminateInbox(entry);
+        ResponseEntity<Map<String, Object>> resp = retract(CONV, messageId);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getBody().get("retracted")).isEqualTo(false);
+        assertThat(resp.getBody().get("reason")).isEqualTo("no_active_run");
+    }
+
+    @Test
+    @DisplayName("retract:messageId 不在队列(未知/已被 drain)→ {retracted:false, reason:\"not_in_queue\"}")
+    void retract_unknown_message_not_in_queue() {
+        SseEmitterRegistry.Entry entry = registerRun();
+        String queued = (String) steer("补充一下").getBody().get("messageId");
+        // 未知 id
+        ResponseEntity<Map<String, Object>> resp = retract(CONV, "msg-not-exist");
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getBody().get("retracted")).isEqualTo(false);
+        assertThat(resp.getBody().get("reason")).isEqualTo("not_in_queue");
+        // 已被 drain 取走(已注入)的同一条也走此 reason —— remove 与 poll 互斥,drain 赢
+        entry.inbox().drain();
+        assertThat(retract(CONV, queued).getBody().get("reason")).isEqualTo("not_in_queue");
+        assertThat(entry.inbox().depth()).isZero();
+    }
+
+    @Test
+    @DisplayName("retract:跨用户(会话不属于 caller)→ 403(R33 归属先于一切)")
+    void retract_cross_user_403() {
+        when(userConversation.exists(any())).thenReturn(false);
+        registerRun();
+        ResponseEntity<Map<String, Object>> resp = retract(CONV, "msg-any");
+        assertThat(resp.getStatusCode().value()).isEqualTo(403);
+        assertThat(resp.getBody()).containsEntry("error", "forbidden").containsEntry("code", 403);
+    }
 }
